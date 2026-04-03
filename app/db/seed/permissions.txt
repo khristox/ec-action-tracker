@@ -1,0 +1,41 @@
+# Permissions Configuration File
+# Format: code|name|resource|action|is_system
+
+# User permissions
+user:create|Create User|user|create|true
+user:read|Read User|user|read|true
+user:update|Update User|user|update|true
+user:delete|Delete User|user|delete|true
+
+# Structure permissions
+structure:create|Create Structure|structure|create|true
+structure:read|Read Structure|structure|read|true
+structure:update|Update Structure|structure|update|true
+structure:delete|Delete Structure|structure|delete|true
+
+# Tenant permissions
+tenant:create|Create Tenant|tenant|create|true
+tenant:read|Read Tenant|tenant|read|true
+tenant:update|Update Tenant|tenant|update|true
+tenant:delete|Delete Tenant|tenant|delete|true
+
+# Lease permissions
+lease:create|Create Lease|lease|create|true
+lease:read|Read Lease|lease|read|true
+lease:update|Update Lease|lease|update|true
+lease:terminate|Terminate Lease|lease|terminate|true
+
+# Payment permissions
+payment:create|Create Payment|payment|create|true
+payment:read|Read Payment|payment|read|true
+payment:update|Update Payment|payment|update|true
+payment:process|Process Payment|payment|process|true
+
+# Report permissions
+report:view|View Reports|report|view|true
+report:export|Export Reports|report|export|true
+report:financial|View Financial Reports|report|financial|true
+dashboard:view|View Dashboard|dashboard|view|true
+role:assign|Assign Role|role|assign|true
+profile:read|Read Profile|profile|read|true
+profile:update|Update Profile|profile|update|true

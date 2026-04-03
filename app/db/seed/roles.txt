@@ -1,0 +1,37 @@
+# Roles Configuration File for RMS - Action Tracker Focus
+# Format: code|name|description|permissions
+# Permissions are comma-separated, use * for all permissions
+# 
+# Permission Structure: resource:action
+# Resources: meeting, minutes, action, participant, participant_list, document, dashboard, report, profile, settings
+# Actions: create, read, update, delete, assign, complete, comment, upload, download, export, list, view, progress_update, my_tasks, overview
+
+# ==================== SYSTEM ROLES ====================
+admin|Admin|System Administrator|*
+
+super_admin|Super Admin|Super Administrator with full system access|*
+
+# ==================== MEETING MANAGEMENT ROLES ====================
+meeting_creator|Meeting Creator|Can create and manage meetings|meeting:create,meeting:read,meeting:update,meeting:delete,meeting:list,minutes:create,minutes:read,minutes:update,minutes:delete,participant:create,participant:read,participant:update,participant:delete,participant_list:create,participant_list:read,participant_list:update,participant_list:delete,participant_list:use,document:upload,document:read,document:delete,dashboard:view
+
+meeting_participant|Meeting Participant|Can view meetings they are invited to|meeting:read,meeting:list,minutes:read,document:read
+
+# ==================== ACTION TRACKING ROLES ====================
+action_assigner|Action Assigner|Can assign and manage actions|action:create,action:read,action:update,action:assign,action:delete,action:list,action:comment,action:overview,dashboard:view,report:view
+
+action_owner|Action Owner|User assigned to complete actions|action:read,action:update,action:complete,action:comment,action:progress_update,action:list,action:my_tasks
+
+action_viewer|Action Viewer|Can view action status and progress|action:read,action:list,action:overview,dashboard:view
+
+# ==================== PARTICIPANT MANAGEMENT ROLES ====================
+participant_manager|Participant Manager|Can manage participants and participant lists|participant:create,participant:read,participant:update,participant:delete,participant_list:create,participant_list:read,participant_list:update,participant_list:delete,participant_list:use
+
+# ==================== DOCUMENT MANAGEMENT ROLES ====================
+document_manager|Document Manager|Can manage meeting documents|document:upload,document:read,document:update,document:delete,document:download
+
+# ==================== REPORTING ROLES ====================
+report_viewer|Report Viewer|Can view and export reports|report:view,report:export,dashboard:view
+
+# ==================== BASIC USER ROLES ====================
+user|User|Regular User|profile:read,profile:update,meeting:read,meeting:list,minutes:read,action:read,action:list,document:read
+

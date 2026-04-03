@@ -1,0 +1,38 @@
+# Users and Roles Configuration File for Action Tracker (Electoral Commission)
+# Format: username|email|password|first_name|last_name|is_verified|is_active|roles
+# Roles are comma-separated
+# Lines starting with # are ignored
+
+# ==================== SYSTEM ADMINISTRATORS ====================
+admin|admin@ecactiontracker.com|Admin123!|System|Admin|true|true|admin
+superadmin|superadmin@ecactiontracker.com|Super123!|Super|Admin|true|true|super_admin
+
+# ==================== MEETING MANAGEMENT USERS ====================
+meeting_creator|meeting.creator@ecactiontracker.com|Meeting123!|Meeting|Creator|true|true|meeting_creator
+meeting_participant|meeting.participant@ecactiontracker.com|Participant123!|Meeting|Participant|true|true|meeting_participant
+
+# ==================== ACTION TRACKING USERS ====================
+action_assigner|action.assigner@ecactiontracker.com|Action123!|Action|Assigner|true|true|action_assigner
+action_owner1|action.owner1@ecactiontracker.com|Owner123!|John|Commissioner|true|true|action_owner
+action_owner2|action.owner2@ecactiontracker.com|Owner456!|Jane|Secretary|true|true|action_owner
+action_viewer|action.viewer@ecactiontracker.com|Viewer123!|Action|Viewer|true|true|action_viewer
+
+# ==================== PARTICIPANT MANAGEMENT USERS ====================
+participant_manager|participant.manager@ecactiontracker.com|Participant123!|Participant|Manager|true|true|participant_manager
+
+# ==================== DOCUMENT MANAGEMENT USERS ====================
+document_manager|document.manager@ecactiontracker.com|Document123!|Document|Manager|true|true|document_manager
+
+# ==================== REPORTING USERS ====================
+report_viewer|report.viewer@ecactiontracker.com|Report123!|Report|Viewer|true|true|report_viewer
+
+# ==================== BASIC USERS ====================
+user|user@ecactiontracker.com|User123!|Regular|User|true|true|user
+
+# ==================== DEMO / TEST USERS ====================
+demo_admin|demo.admin@ecactiontracker.com|Demo123!|Demo|Admin|true|true|admin,meeting_creator,action_assigner
+demo_user|demo.user@ecactiontracker.com|Demo123!|Demo|User|true|true|user,meeting_participant,action_viewer
+
+# ==================== DEVELOPMENT USERS ====================
+dev_user|dev@ecactiontracker.com|Dev123!|Development|User|true|true|admin,super_admin
+test_user|test@ecactiontracker.com|Test123!|Test|User|true|true|user,action_owner,meeting_participant

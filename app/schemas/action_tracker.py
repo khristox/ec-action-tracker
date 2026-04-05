@@ -169,6 +169,10 @@ class MeetingUpdate(ORMBase):
         None, description="Meeting status slug e.g. pending/started/ended/closed/cancelled"
     )
     is_active: Optional[bool] = None
+    
+    status_comment: Optional[str] = Field(None, description="Comment explaining the status change")
+    status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
+
 
 
 # ==================== Meeting Responses ====================
@@ -228,6 +232,9 @@ class MeetingResponse(MeetingBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_active: bool
+
+    status_comment: Optional[str] = None
+    status_date: Optional[datetime] = None
 
     # Flattened from the ORM relationship
     status_name: Optional[str] = None

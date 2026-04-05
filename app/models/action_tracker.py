@@ -135,6 +135,36 @@ class MeetingParticipant(Base):
     meeting = relationship("Meeting", back_populates="participants")
 
 
+class MeetingStatusHistory(Base):
+    """
+    Tracks the lifecycle of a meeting.
+    Captures Status changes, Comments, and the date of the status change.
+    """
+    __tablename__ = "meeting_status_history"
+    __table_args__ = (
+        Index('ix_msh_meeting_id', 'meeting_id'),
+        Index('ix_msh_status_id', 'status_id'),
+        Index('ix_msh_status_date', 'status_date'),
+    )
+
+    id = Column(CustomUUID, primary_key=True, default=uuid4)
+    meeting_id = Column(CustomUUID, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False)
+    
+    # Reference to the Attribute table for the status (same as meeting.status_id)
+    status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
+    
+    # Captures the "Comment" and "statusDate" as requested
+    comment = Column(Text, nullable=True)
+    status_date = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Who performed the status update
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+    # Relationships
+    meeting = relationship("Meeting", back_populates="status_history")
+    status = relationship("Attribute", foreign_keys=[status_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+
 class MeetingMinutes(Base):
     """Depends on Meeting and User"""
     __tablename__ = "meeting_minutes"
@@ -295,3 +325,5 @@ Meeting.documents = relationship("MeetingDocument", back_populates="meeting", ca
 MeetingMinutes.actions = relationship("MeetingAction", back_populates="minutes", cascade="all, delete-orphan")
 MeetingAction.status_history = relationship("ActionStatusHistory", back_populates="action", cascade="all, delete-orphan")
 MeetingAction.comments = relationship("ActionComment", back_populates="action", cascade="all, delete-orphan")
+
+Meeting.status_history = relationship("MeetingStatusHistory", back_populates="meeting", cascade="all, delete-orphan")

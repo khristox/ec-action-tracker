@@ -7,7 +7,8 @@ from datetime import datetime
 from app.crud.base import CRUDBase
 from app.models.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
-    Participant, ParticipantList, ActionStatusHistory, ActionComment, MeetingDocument
+    Participant, ParticipantList, ActionStatusHistory, ActionComment, 
+    MeetingDocument, MeetingStatusHistory
 )
 from app.schemas.action_tracker import (
     MeetingCreate, MeetingUpdate, MeetingMinutesCreate, MeetingMinutesUpdate,
@@ -108,7 +109,17 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
         meeting_data = obj_in.model_dump(exclude={'participant_list_id', 'custom_participants'})
         meeting = Meeting(**meeting_data, created_by_id=created_by_id)
         db.add(meeting)
-        await db.flush()
+        await db.flush() # Flush to get the meeting.id
+        
+        # Log initial status in history
+        if meeting.status_id:
+            initial_status = MeetingStatusHistory(
+                meeting_id=meeting.id,
+                status_id=meeting.status_id,
+                comment="Meeting created",
+                updated_by_id=created_by_id
+            )
+            db.add(initial_status)
         
         # Add participants from template list
         if obj_in.participant_list_id:
@@ -143,6 +154,29 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
         await db.commit()
         await db.refresh(meeting)
         return meeting
+
+    async def update_status(
+        self, db: AsyncSession, *, meeting_id: UUID, status_id: UUID, comment: str = None, updated_by_id: UUID
+    ) -> Meeting:
+        """Explicitly update meeting status and log to history"""
+        meeting = await self.get(db, meeting_id)
+        if not meeting:
+            raise ValueError("Meeting not found")
+        
+        if meeting.status_id != status_id:
+            meeting.status_id = status_id
+            
+            history = MeetingStatusHistory(
+                meeting_id=meeting_id,
+                status_id=status_id,
+                comment=comment,
+                updated_by_id=updated_by_id
+            )
+            db.add(history)
+            
+            await db.commit()
+            await db.refresh(meeting)
+        return meeting
     
     async def get_upcoming_meetings(
         self, db: AsyncSession, limit: int = 10
@@ -171,7 +205,22 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
             .order_by(Meeting.meeting_date.desc())
         )
         return result.scalars().all()
-    
+
+    async def get_meeting_with_details(
+        self, db: AsyncSession, meeting_id: UUID
+    ) -> Optional[Meeting]:
+        result = await db.execute(
+            select(Meeting)
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions),
+                selectinload(Meeting.documents),
+                selectinload(Meeting.status_history).selectinload(MeetingStatusHistory.status)
+            )
+            .where(Meeting.id == meeting_id)
+        )
+        return result.scalar_one_or_none()
+
     async def add_minutes(
         self, db: AsyncSession, meeting_id: UUID, minutes_in: MeetingMinutesCreate, recorded_by_id: UUID
     ) -> MeetingMinutes:
@@ -184,26 +233,6 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
         await db.commit()
         await db.refresh(minutes)
         return minutes
-
-# app/crud/action_tracker.py
-
-    # app/crud/action_tracker.py - Update get_meeting_with_details
-
-    async def get_meeting_with_details(
-        self, db: AsyncSession, meeting_id: UUID
-    ) -> Optional[Meeting]:
-        result = await db.execute(
-            select(Meeting)
-            .options(
-                selectinload(Meeting.participants),
-                selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions),
-                selectinload(Meeting.documents)
-            )
-            .where(Meeting.id == meeting_id)
-        )
-        return result.scalar_one_or_none()
-
-    
 
 
 # ==================== Meeting Minutes CRUD ====================
@@ -273,9 +302,8 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         
         # Auto-update overall status based on progress
         if progress_update.progress_percentage == 100:
-            # Find completed status ID (you may need to fetch this)
             action.completed_at = datetime.now()
-        elif progress_update.progress_percentage > 0 and action.overall_progress_percentage == 0:
+        elif progress_update.progress_percentage > 0 and (action.overall_progress_percentage or 0) == 0:
             action.start_date = datetime.now()
         
         await db.commit()
@@ -379,7 +407,7 @@ class CRUDDashboard:
         total_actions_result = await db.execute(select(func.count()).select_from(MeetingAction))
         total_actions = total_actions_result.scalar() or 0
         
-        # Pending actions (not completed and not cancelled)
+        # Pending actions
         pending_result = await db.execute(
             select(func.count()).select_from(MeetingAction)
             .where(MeetingAction.completed_at.is_(None))
@@ -407,9 +435,6 @@ class CRUDDashboard:
         total_participants_result = await db.execute(select(func.count()).select_from(Participant))
         total_participants = total_participants_result.scalar() or 0
         
-        # Meetings by status (using status_id - you may need to join with attribute_values)
-        # For now, just return counts
-        
         return {
             "total_meetings": total_meetings,
             "upcoming_meetings": upcoming_meetings,
@@ -434,7 +459,6 @@ dashboard = CRUDDashboard()
 
 
 # ==================== EXPORTS ====================
-# Explicitly define what gets exported when importing from this module
 __all__ = [
     "participant",
     "participant_list", 
@@ -443,7 +467,6 @@ __all__ = [
     "meeting_action",
     "meeting_document",
     "dashboard",
-    # Also export the classes if needed elsewhere
     "CRUDParticipant",
     "CRUDParticipantList",
     "CRUDMeeting",

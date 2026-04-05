@@ -1,7 +1,9 @@
 # app/api/v1/endpoints/action_tracker.py
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, func, select, or_, desc
+from sqlalchemy import and_, func, inspect, select, or_, desc
 from sqlalchemy.orm import selectinload
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -27,6 +29,7 @@ from app.schemas.action_tracker import (
     ActionStatusHistoryResponse, MeetingSummary, ActionSummary, MyTaskResponse
 )
 from app.models.general.dynamic_attribute import Attribute, AttributeValue
+from app.schemas.entity_attribute import MeetingStatusUpdate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -675,106 +678,126 @@ def _build_meeting_response(meeting_obj: Meeting) -> MeetingResponse:
 
 # ==================== MEETING UPDATE ENDPOINT (WAS MISSING) ====================
 
+
+# Setup a basic logger
+logger = logging.getLogger("uvicorn.error")
+
 @router.put("/meetings/{meeting_id}", response_model=MeetingResponse)
 async def update_meeting(
     meeting_id: UUID,
-    meeting_in: MeetingUpdate,
+    meeting_in: MeetingUpdate, 
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
+    # 1. Fetch existing meeting
     db_obj = await meeting.get(db, meeting_id)
     if not db_obj:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+        raise HTTPException(status_code=404, detail="Meeting not found")
 
+    old_status_id = db_obj.status_id
     update_data = meeting_in.model_dump(exclude_unset=True)
 
-    if 'status' in update_data:
-        status_value = update_data.pop('status')
-        
-        # Use the dynamic status function instead of direct query
-        status_info = await get_status_by_short_name(db, status_value)
-        
-        print(f"Debug: Looking for status '{status_value}': {status_info}")
-        
-        if not status_info:
-            valid_statuses = await get_valid_status_short_names(db)
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status: '{status_value}'. Must be one of: {', '.join(valid_statuses)}"
-            )
-        
-        update_data['status_id'] = UUID(status_info["id"])
+    # ---------------------------------------------------------
+    # DEBUG BLOCK: Confirming values from React
+    # ---------------------------------------------------------
+    print("\n" + "="*50)
+    print("DEBUG: RECEIVED UPDATE REQUEST")
+    print(f"Meeting ID: {meeting_id}")
+    print(f"Full Payload: {update_data}")
+    print(f"Status Comment: {update_data.get('status_comment')}")
+    print(f"Status Date: {update_data.get('status_date')}")
+    print("="*50 + "\n")
+    # ---------------------------------------------------------
+
+    # 2. Extract History Metadata
+    new_status_id = update_data.get("status_id")
+    
+    # Capture comment and date, then remove from dict
+    status_comment = update_data.pop("status_comment", "Updated via meeting edit")
+    raw_status_date = update_data.pop("status_date", None)
+
+    # Convert raw date
+    if isinstance(raw_status_date, str):
+        try:
+            status_date = datetime.fromisoformat(raw_status_date.replace('Z', ''))
+        except ValueError:
+            logger.warning(f"Invalid date format received: {raw_status_date}")
+            status_date = datetime.now()
+    else:
+        status_date = raw_status_date or datetime.now()
+
+    # 3. Update Meeting Object (Direct Columns Only)
+    mapper = inspect(db_obj.__class__)
+    valid_columns = {c.key for c in mapper.attrs if not hasattr(c, 'direction')}
 
     for field, value in update_data.items():
-        if hasattr(db_obj, field):
+        if field in valid_columns:
             setattr(db_obj, field, value)
 
-    db_obj.updated_at = datetime.now()
-    await db.commit()
-
-    # Re-fetch with ALL relationships including status
-    query = (
-        select(Meeting)
-        .where(Meeting.id == meeting_id)
-        .options(
-            selectinload(Meeting.status),
-            selectinload(Meeting.participants),
-            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions),
-            selectinload(Meeting.documents),
+    # 4. Save to History Table
+    if new_status_id and str(new_status_id) != str(old_status_id):
+        from app.models.action_tracker import MeetingStatusHistory
+        
+        print(f"LOG: Creating history entry with comment: '{status_comment}' and date: {status_date}")
+        
+        history_entry = MeetingStatusHistory(
+            id=uuid.uuid4(),
+            meeting_id=meeting_id,
+            status_id=new_status_id,
+            comment=status_comment,
+            status_date=status_date,
+            updated_by_id=current_user.id
         )
-    )
-    result = await db.execute(query)
-    updated = result.scalar_one_or_none()
+        db.add(history_entry)
 
+    db_obj.updated_at = datetime.now()
+    
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Database error during update: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    # 5. Return full details
+    updated = await meeting.get_meeting_with_details(db, meeting_id)
     return build_meeting_response(updated)
+
+
+
+
 
 @router.patch("/meetings/{meeting_id}/status", response_model=MeetingResponse)
 async def update_meeting_status(
     meeting_id: UUID,
-    status_value: str = Query(..., alias="status", description="New status short_name (e.g., PENDING, STARTED, AWAITING, CLOSED, CANCELLED)"),
+    status_value: str = Query(..., alias="status"),
+    comment: Optional[str] = Query(None, description="Reason for status change"),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    # Get the status by short_name
+    """Specific endpoint for status toggles (e.g. 'Start Meeting', 'Cancel')"""
     status_info = await get_status_by_short_name(db, status_value)
-    
     if not status_info:
-        # Get all valid statuses for error message
         valid_statuses = await get_valid_status_short_names(db)
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid status: '{status_value}'. Must be one of: {', '.join(valid_statuses)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid status. Use: {', '.join(valid_statuses)}")
     
-    # Fetch the meeting
-    db_obj = await meeting.get(db, meeting_id)
-    if not db_obj:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail=f"Meeting {meeting_id} not found"
-        )
-    
-    # Update the status_id
-    db_obj.status_id = UUID(status_info["id"])
-    db_obj.updated_at = datetime.now()
-    await db.commit()
-    
-    # Re-fetch with all relationships eager-loaded
-    query = (
-        select(Meeting)
-        .where(Meeting.id == meeting_id)
-        .options(
-            selectinload(Meeting.status),
-            selectinload(Meeting.participants),
-            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions),
-            selectinload(Meeting.documents),
-        )
-    )
-    result = await db.execute(query)
-    updated = result.scalar_one_or_none()
-    
-    return build_meeting_response(updated)
+    new_status_id = UUID(status_info["id"])
 
+    # 🟢 IMPROVEMENT: Use the improved CRUD method that saves to the table automatically
+    try:
+        updated_meeting = await meeting.update_status(
+            db, 
+            meeting_id=meeting_id, 
+            status_id=new_status_id, 
+            comment=comment or f"Status changed to {status_value}",
+            updated_by_id=current_user.id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    
+    # Re-fetch with details
+    result = await meeting.get_meeting_with_details(db, meeting_id)
+    return build_meeting_response(result)
 
 # Remove the duplicate update_meeting_status_put or keep it but make sure it works
 @router.put("/meetings/{meeting_id}/status", response_model=MeetingResponse)

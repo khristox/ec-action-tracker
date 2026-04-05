@@ -74,8 +74,13 @@ class AttributeGroup(Base):
         Index("idx_attribute_groups_display_order", "display_order"),
     )
     
-    def __repr__(self) -> str:
-        return f"<AttributeGroup {self.code}: {self.name}>"
+    def __repr__(self):
+            # Use __dict__.get to avoid triggering a lazy load/refresh
+            state = getattr(self, '_sa_instance_state', None)
+            if state and state.detached:
+                return f"<Attribute (Detached) id={self.__dict__.get('id')}>"
+            
+            return f"<Attribute id={self.id} code={self.code}>"
 
 
 class Attribute(Base):
@@ -170,8 +175,22 @@ class Attribute(Base):
         except (ValueError, TypeError):
             return value_str
     
-    def __repr__(self) -> str:
-        return f"<Attribute {self.code}: {self.name}>"
+    # dynamic_attribute.py, line ~180
+
+    def __repr__(self):
+        try:
+            # Use PASSIVE_NO_FETCH to avoid triggering a DB load
+            from sqlalchemy.orm.base import PASSIVE_NO_FETCH
+            from sqlalchemy import inspect as sa_inspect
+            
+            state = sa_inspect(self)
+            if state.detached or state.expired:
+                return f"<{self.__class__.__name__} (detached)>"
+            
+            id_value = object.__getattribute__(self, 'id')
+            return f"<{self.__class__.__name__} id={id_value}>"
+        except Exception:
+            return f"<{self.__class__.__name__} (unavailable)>"
 
 
 class AttributeValue(Base):

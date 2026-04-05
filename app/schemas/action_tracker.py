@@ -1,11 +1,18 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from typing import Optional, List, Any
 from uuid import UUID
 from datetime import datetime
 
+
+# ==================== Shared Config ====================
+
+class ORMBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
 # ==================== Participant Schemas ====================
 
-class ParticipantBase(BaseModel):
+class ParticipantBase(ORMBase):
     name: str = Field(..., min_length=1, max_length=255)
     email: Optional[str] = Field(None, max_length=255)
     telephone: Optional[str] = Field(None, max_length=50)
@@ -16,7 +23,7 @@ class ParticipantBase(BaseModel):
 class ParticipantCreate(ParticipantBase):
     pass
 
-class ParticipantUpdate(BaseModel):
+class ParticipantUpdate(ORMBase):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     email: Optional[str] = None
     telephone: Optional[str] = None
@@ -28,13 +35,11 @@ class ParticipantResponse(ParticipantBase):
     id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Participant List Schemas ====================
 
-class ParticipantListBase(BaseModel):
+class ParticipantListBase(ORMBase):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     is_global: bool = False
@@ -42,7 +47,7 @@ class ParticipantListBase(BaseModel):
 class ParticipantListCreate(ParticipantListBase):
     participant_ids: List[UUID] = Field(default_factory=list)
 
-class ParticipantListUpdate(BaseModel):
+class ParticipantListUpdate(ORMBase):
     name: Optional[str] = None
     description: Optional[str] = None
     is_global: Optional[bool] = None
@@ -55,13 +60,11 @@ class ParticipantListResponse(ParticipantListBase):
     updated_at: Optional[datetime] = None
     participants: List[ParticipantResponse] = Field(default_factory=list)
     participant_count: int = 0
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Meeting Participant Schemas ====================
 
-class MeetingParticipantBase(BaseModel):
+class MeetingParticipantBase(ORMBase):
     name: str = Field(..., min_length=1, max_length=255)
     email: Optional[str] = None
     telephone: Optional[str] = None
@@ -76,13 +79,32 @@ class MeetingParticipantResponse(MeetingParticipantBase):
     id: UUID
     meeting_id: UUID
     created_at: datetime
+
+
+# ==================== Attribute Response Schema ====================
+
+class AttributeResponse(ORMBase):
+    """Schema for Attribute objects returned in responses"""
+    id: UUID
+    code: Optional[str] = None
+    name: Optional[str] = None
+    short_name: Optional[str] = None
+    description: Optional[str] = None
+    extra_metadata: Optional[dict] = None
     
-    class Config:
-        from_attributes = True
+    # Optional fields for UI
+    color: Optional[str] = None
+    sort_order: Optional[int] = None
+
 
 # ==================== Meeting Schemas ====================
 
-class MeetingBase(BaseModel):
+class MeetingBase(ORMBase):
+    """
+    Input-only base. Does NOT include `status` as a field because responses
+    receive an ORM Attribute object there, not a string. Subclasses that are
+    purely for input (Create/Update) add `status: Optional[str]` themselves.
+    """
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
     location_id: Optional[UUID] = None
@@ -95,19 +117,41 @@ class MeetingBase(BaseModel):
     facilitator: Optional[str] = Field(None, max_length=255)
     chairperson_name: Optional[str] = Field(None, max_length=255)
     status_id: Optional[UUID] = None
-    
-    @field_validator('end_time')
+
+    @field_validator('end_time', mode='before')
     @classmethod
-    def validate_end_time(cls, v, info):
-        if v and info.data.get('start_time') and v <= info.data['start_time']:
-            raise ValueError('End time must be after start time')
+    def validate_end_time(cls, v: Any, info: Any) -> Any:
+        # Parse string to datetime if needed
+        if isinstance(v, str):
+            try:
+                # Handle ISO format with or without Z
+                v = datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except ValueError:
+                raise ValueError('Invalid datetime format for end_time')
+        
+        # Get start_time from the data (may be parsed or still string)
+        start_time = info.data.get('start_time')
+        if start_time and v:
+            # Parse start_time if it's still a string
+            if isinstance(start_time, str):
+                try:
+                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                except ValueError:
+                    raise ValueError('Invalid datetime format for start_time')
+            # Now compare datetime objects
+            if v <= start_time:
+                raise ValueError('End time must be after start time')
         return v
 
+
 class MeetingCreate(MeetingBase):
+    # status as a plain string makes sense only on input
+    status: Optional[str] = None
     participant_list_id: Optional[UUID] = None
     custom_participants: List[MeetingParticipantCreate] = Field(default_factory=list)
 
-class MeetingUpdate(BaseModel):
+
+class MeetingUpdate(ORMBase):
     title: Optional[str] = None
     description: Optional[str] = None
     location_id: Optional[UUID] = None
@@ -120,14 +164,17 @@ class MeetingUpdate(BaseModel):
     facilitator: Optional[str] = None
     chairperson_name: Optional[str] = None
     status_id: Optional[UUID] = None
+    # Plain string shorthand accepted on input; resolve to status_id in the route
+    status: Optional[str] = Field(
+        None, description="Meeting status slug e.g. pending/started/ended/closed/cancelled"
+    )
     is_active: Optional[bool] = None
 
-# ==================== NEW: Simplified Meeting Response for Lists ====================
 
-# In app/schemas/action_tracker.py - add this
+# ==================== Meeting Responses ====================
 
-class MeetingCreateResponse(BaseModel):
-    """Simplified response for meeting creation - NO relationships"""
+class MeetingCreateResponse(ORMBase):
+    """Flat response returned after POST /meetings — no nested relationships."""
     id: UUID
     title: str
     description: Optional[str] = None
@@ -143,14 +190,9 @@ class MeetingCreateResponse(BaseModel):
     created_at: datetime
     is_active: bool
     message: str = "Meeting created successfully"
-    
-    class Config:
-        from_attributes = True
-        
-# app/schemas/action_tracker.py
 
-class MeetingListResponse(BaseModel):
-    """Simplified meeting response for list views - NO relationships"""
+
+class MeetingListResponse(ORMBase):
     id: UUID
     title: str
     description: Optional[str] = None
@@ -164,59 +206,80 @@ class MeetingListResponse(BaseModel):
     facilitator: Optional[str] = None
     chairperson_name: Optional[str] = None
     status_id: Optional[UUID] = None
+    status: Optional[AttributeResponse] = None  # ← add this
     created_by_id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_active: bool
-    status_name: Optional[str] = None
     location_name: Optional[str] = None
     participants_count: int = 0
     minutes_count: int = 0
     actions_count: int = 0
     documents_count: int = 0
-    
-    class Config:
-        from_attributes = True    
-# ==================== Full Meeting Response for Detail View ====================
+
 
 class MeetingResponse(MeetingBase):
-    """Full meeting response for detail view (includes participants)"""
+    """
+    Full detail response. `status` is the ORM Attribute relationship
+    represented as an AttributeResponse object.
+    """
     id: UUID
     created_by_id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_active: bool
+
+    # Flattened from the ORM relationship
     status_name: Optional[str] = None
     location_name: Optional[str] = None
+    status: Optional[AttributeResponse] = None  # This is now Optional[AttributeResponse]
+
     participants: List[MeetingParticipantResponse] = Field(default_factory=list)
     minutes: List['MeetingMinutesResponse'] = Field(default_factory=list)
     documents: List['MeetingDocumentResponse'] = Field(default_factory=list)
-    
-    # Computed fields
-    participants_count: int = Field(default=0)
-    minutes_count: int = Field(default=0)
-    actions_count: int = Field(default=0)
-    documents_count: int = Field(default=0)
-    
-    class Config:
-        from_attributes = True
-    
+
+    @field_validator('status', mode='before')
+    @classmethod
+    def coerce_status(cls, v: Any) -> Any:
+        """
+        Convert ORM Attribute object to AttributeResponse dict.
+        If it's already a dict or None, pass through.
+        """
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return v
+        # ORM object - extract the data we need
+        try:
+            return {
+                'id': getattr(v, 'id', None),
+                'code': getattr(v, 'code', None),
+                'name': getattr(v, 'name', None),
+                'short_name': getattr(v, 'short_name', None),
+                'description': getattr(v, 'description', None),
+                'extra_metadata': getattr(v, 'extra_metadata', None),
+            }
+        except Exception:
+            return None
+
     @model_validator(mode='after')
-    def compute_counts(self) -> 'MeetingResponse':
-        """Compute counts from loaded relationships"""
-        self.participants_count = len(self.participants) if self.participants else 0
-        self.minutes_count = len(self.minutes) if self.minutes else 0
-        self.documents_count = len(self.documents) if self.documents else 0
-        
-        # Count actions from minutes
-        if self.minutes:
-            self.actions_count = sum(len(m.actions) for m in self.minutes if hasattr(m, 'actions'))
-        
+    def sync_status_name(self) -> 'MeetingResponse':
+        """Keep status_name in sync with status for convenience."""
+        if self.status and not self.status_name:
+            self.status_name = self.status.name
         return self
+
+
+class MeetingPaginationResponse(ORMBase):
+    items: List[MeetingListResponse]
+    total: int
+    page: int
+    size: int
+
 
 # ==================== Meeting Minutes Schemas ====================
 
-class MeetingMinutesBase(BaseModel):
+class MeetingMinutesBase(ORMBase):
     topic: str = Field(..., min_length=1, max_length=500)
     discussion: Optional[str] = None
     decisions: Optional[str] = None
@@ -224,7 +287,7 @@ class MeetingMinutesBase(BaseModel):
 class MeetingMinutesCreate(MeetingMinutesBase):
     pass
 
-class MeetingMinutesUpdate(BaseModel):
+class MeetingMinutesUpdate(ORMBase):
     topic: Optional[str] = None
     discussion: Optional[str] = None
     decisions: Optional[str] = None
@@ -238,13 +301,11 @@ class MeetingMinutesResponse(MeetingMinutesBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     actions: List['MeetingActionResponse'] = Field(default_factory=list)
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Meeting Action Schemas ====================
 
-class MeetingActionBase(BaseModel):
+class MeetingActionBase(ORMBase):
     description: str = Field(..., min_length=1)
     assigned_to_id: Optional[UUID] = None
     assigned_to_name: Optional[str] = Field(None, max_length=255)
@@ -256,7 +317,7 @@ class MeetingActionBase(BaseModel):
 class MeetingActionCreate(MeetingActionBase):
     pass
 
-class MeetingActionUpdate(BaseModel):
+class MeetingActionUpdate(ORMBase):
     description: Optional[str] = None
     assigned_to_id: Optional[UUID] = None
     assigned_to_name: Optional[str] = None
@@ -281,13 +342,11 @@ class MeetingActionResponse(MeetingActionBase):
     actual_hours: Optional[float] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Action Status History Schemas ====================
 
-class ActionStatusHistoryBase(BaseModel):
+class ActionStatusHistoryBase(ORMBase):
     individual_status_id: UUID
     progress_percentage: int = Field(0, ge=0, le=100)
     remarks: Optional[str] = None
@@ -302,29 +361,19 @@ class ActionStatusHistoryResponse(ActionStatusHistoryBase):
     updated_by_name: Optional[str] = None
     individual_status_name: Optional[str] = None
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Action Progress Update Schema ====================
 
-class ActionProgressUpdate(BaseModel):
-    """User submits their progress update"""
-    progress_percentage: int = Field(..., ge=0, le=100, description="Self-assessed progress")
-    individual_status_id: UUID = Field(..., description="User's status")
-    remarks: str = Field(..., min_length=1, description="What was accomplished")
-    
-    @model_validator(mode='after')
-    def validate_progress_and_status(self):
-        if self.progress_percentage == 100:
-            pass
-        elif self.progress_percentage > 0 and self.progress_percentage < 100:
-            pass
-        return self
+class ActionProgressUpdate(ORMBase):
+    progress_percentage: int = Field(..., ge=0, le=100)
+    individual_status_id: UUID
+    remarks: str = Field(..., min_length=1)
+
 
 # ==================== Action Comment Schemas ====================
 
-class ActionCommentBase(BaseModel):
+class ActionCommentBase(ORMBase):
     comment: str = Field(..., min_length=1)
     attachment_url: Optional[str] = None
 
@@ -337,21 +386,19 @@ class ActionCommentResponse(ActionCommentBase):
     created_by_id: UUID
     created_by_name: Optional[str] = None
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Meeting Document Schemas ====================
 
-class MeetingDocumentBase(BaseModel):
+class MeetingDocumentBase(ORMBase):
     file_name: str = Field(..., max_length=500)
-    document_type_id: UUID = Field(..., description="Document type from attribute values")
+    document_type_id: UUID = Field(..., description="Document type attribute value UUID")
     description: Optional[str] = None
 
 class MeetingDocumentCreate(MeetingDocumentBase):
     pass
 
-class MeetingDocumentUpdate(BaseModel):
+class MeetingDocumentUpdate(ORMBase):
     document_type_id: Optional[UUID] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
@@ -368,13 +415,11 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     uploaded_by_name: Optional[str] = None
     uploaded_at: datetime
     is_active: bool
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Dashboard Summary Schemas ====================
 
-class MeetingSummary(BaseModel):
+class MeetingSummary(ORMBase):
     total_meetings: int
     meetings_by_status: dict = Field(default_factory=dict)
     upcoming_meetings: int
@@ -382,7 +427,7 @@ class MeetingSummary(BaseModel):
     pending_actions: int
     overdue_actions: int
 
-class ActionSummary(BaseModel):
+class ActionSummary(ORMBase):
     total_actions: int
     completed_actions: int
     in_progress_actions: int
@@ -390,15 +435,16 @@ class ActionSummary(BaseModel):
     overdue_actions: int
     blocked_actions: int
     completion_rate: float = 0.0
-    
+
     @model_validator(mode='after')
-    def calculate_rate(self):
+    def calculate_rate(self) -> 'ActionSummary':
         if self.total_actions > 0:
-            self.completion_rate = round((self.completed_actions / self.total_actions) * 100, 2)
+            self.completion_rate = round(
+                (self.completed_actions / self.total_actions) * 100, 2
+            )
         return self
 
-class MyTaskResponse(BaseModel):
-    """Tasks assigned to current user"""
+class MyTaskResponse(ORMBase):
     id: UUID
     description: str
     meeting_title: str
@@ -408,10 +454,8 @@ class MyTaskResponse(BaseModel):
     overall_status_name: Optional[str] = None
     priority: int
     is_overdue: bool = False
-    
-    class Config:
-        from_attributes = True
 
-# Update forward references
+
+# Resolve forward references
 MeetingMinutesResponse.model_rebuild()
 MeetingResponse.model_rebuild()

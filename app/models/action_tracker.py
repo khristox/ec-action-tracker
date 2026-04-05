@@ -70,7 +70,7 @@ class ParticipantList(Base):
 
 
 class Meeting(Base):
-    """Depends on Location, User, AttributeValue"""
+    """Depends on Location, User, Attribute"""
     __tablename__ = "meetings"
     __table_args__ = (
         Index('ix_meetings_title', 'title'),
@@ -95,8 +95,10 @@ class Meeting(Base):
     facilitator = Column(String(255), nullable=True)
     chairperson_name = Column(String(255), nullable=True)
     
-    # Foreign key to attribute_values table
-    status_id = Column(CustomUUID, ForeignKey('attribute_values.id', ondelete='SET NULL'), nullable=True)
+    # Foreign key to attributes table
+    status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
+    
+
     
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -106,7 +108,8 @@ class Meeting(Base):
     # Relationships
     location = relationship("Location")
     created_by = relationship("User", foreign_keys=[created_by_id])
-    status = relationship("AttributeValue", foreign_keys=[status_id])
+
+    status = relationship("Attribute", foreign_keys=[status_id])  # Add this line
 
 
 class MeetingParticipant(Base):
@@ -157,7 +160,7 @@ class MeetingMinutes(Base):
 
 
 class MeetingAction(Base):
-    """Depends on MeetingMinutes, User, AttributeValue"""
+    """Depends on MeetingMinutes, User, Attribute"""
     __tablename__ = "meeting_actions"
     __table_args__ = (
         Index('ix_ma_minute_id', 'minute_id'),
@@ -181,8 +184,8 @@ class MeetingAction(Base):
     start_date = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
-    # Foreign key to attribute_values table
-    overall_status_id = Column(CustomUUID, ForeignKey('attribute_values.id', ondelete='SET NULL'), nullable=True)
+    # FIXED: Foreign key to attributes table (not attributes)
+    overall_status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     overall_progress_percentage = Column(Integer, default=0)
     
     priority = Column(Integer, default=2)
@@ -199,11 +202,11 @@ class MeetingAction(Base):
     minutes = relationship("MeetingMinutes", back_populates="actions")
     assigned_to = relationship("User", foreign_keys=[assigned_to_id])
     assigned_by = relationship("User", foreign_keys=[assigned_by_id])
-    overall_status = relationship("AttributeValue", foreign_keys=[overall_status_id])
+    overall_status = relationship("Attribute", foreign_keys=[overall_status_id])  # FIXED: Attribute not AttributeValue
 
 
 class ActionStatusHistory(Base):
-    """Depends on MeetingAction, User, AttributeValue"""
+    """Depends on MeetingAction, User, Attribute"""
     __tablename__ = "action_status_history"
     __table_args__ = (
         Index('ix_ash_action_id', 'action_id'),
@@ -215,18 +218,17 @@ class ActionStatusHistory(Base):
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     action_id = Column(CustomUUID, ForeignKey('meeting_actions.id', ondelete='CASCADE'), nullable=False)
     
-    # FIXED: Foreign key to attribute_values, not attributes
-    individual_status_id = Column(CustomUUID, ForeignKey('attribute_values.id', ondelete='SET NULL'), nullable=True)
+    # FIXED: Foreign key to attributes table (not attributes)
+    individual_status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     progress_percentage = Column(Integer, default=0)
     remarks = Column(Text, nullable=True)
     
-    # FIXED: nullable=True to match SET NULL constraint
     updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     action = relationship("MeetingAction", back_populates="status_history")
     updated_by = relationship("User", foreign_keys=[updated_by_id])
-    individual_status = relationship("AttributeValue", foreign_keys=[individual_status_id])
+    individual_status = relationship("Attribute", foreign_keys=[individual_status_id])  # FIXED: Attribute not AttributeValue
 
 
 class ActionComment(Base):
@@ -244,7 +246,6 @@ class ActionComment(Base):
     comment = Column(Text, nullable=False)
     attachment_url = Column(String(1000), nullable=True)
     
-    # FIXED: nullable=True to match SET NULL constraint
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -253,7 +254,7 @@ class ActionComment(Base):
 
 
 class MeetingDocument(Base):
-    """Depends on Meeting, User, AttributeValue"""
+    """Depends on Meeting, User, Attribute"""
     __tablename__ = "meeting_documents"
     __table_args__ = (
         Index('ix_md_meeting_id', 'meeting_id'),
@@ -270,13 +271,12 @@ class MeetingDocument(Base):
     file_size = Column(Integer, nullable=True)
     mime_type = Column(String(100), nullable=True)
     
-    # Foreign key to attribute_values table
-    document_type_id = Column(CustomUUID, ForeignKey('attribute_values.id', ondelete='SET NULL'), nullable=True)
+    # FIXED: Foreign key to attributes table (not attributes)
+    document_type_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     
     description = Column(Text, nullable=True)
     version = Column(Integer, default=1)
     
-    # nullable=True to match SET NULL constraint
     uploaded_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True)
@@ -285,7 +285,7 @@ class MeetingDocument(Base):
     # Relationships
     meeting = relationship("Meeting", back_populates="documents")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
-    document_type = relationship("AttributeValue", foreign_keys=[document_type_id])
+    document_type = relationship("Attribute", foreign_keys=[document_type_id])  # FIXED: Attribute not AttributeValue
 
 
 # Add back_populates relationships that couldn't be defined earlier

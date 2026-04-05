@@ -29,19 +29,38 @@ import {
   ListItemAvatar,
   Avatar,
   Divider,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
   Delete as DeleteIcon,
   PersonAdd as PersonAddIcon,
   GroupAdd as GroupAddIcon,
   Close as CloseIcon,
+  Person as PersonIcon,
+  Cancel as CancelIcon,
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import api from '../../../services/api';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
+
+const modules = {
+  toolbar: [
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    ['link', 'clean'],
+  ],
+};
+
+const formats = [
+  'header', 'bold', 'italic', 'underline', 'strike',
+  'list', 'bullet', 'link',
+];
 
 const CreateMeeting = () => {
   const navigate = useNavigate();
@@ -62,7 +81,8 @@ const CreateMeeting = () => {
     location_text: '',
     agenda: '',
     facilitator: '',
-    chairperson_name: '',
+    gps_latitude: '',
+    gps_longitude: '',
   });
   
   // Participant related
@@ -77,6 +97,7 @@ const CreateMeeting = () => {
     telephone: '',
     title: '',
     organization: '',
+    is_chairperson: false,
   });
 
   // Fetch data on mount
@@ -119,6 +140,10 @@ const CreateMeeting = () => {
     setFormData({ ...formData, end_time: time });
   };
 
+  const handleAgendaChange = (value) => {
+    setFormData({ ...formData, agenda: value });
+  };
+
   const handleUseParticipantList = () => {
     if (selectedParticipantList) {
       const list = participantLists.find(l => l.id === selectedParticipantList);
@@ -149,7 +174,6 @@ const CreateMeeting = () => {
       return;
     }
 
-    // Check if participant already exists
     const exists = customParticipants.some(p => p.name === newParticipant.name);
     if (exists) {
       setSnackbar({ open: true, message: 'Participant already added', severity: 'warning' });
@@ -157,13 +181,37 @@ const CreateMeeting = () => {
     }
 
     setCustomParticipants([...customParticipants, { ...newParticipant, id: Date.now() }]);
-    setNewParticipant({ name: '', email: '', telephone: '', title: '', organization: '' });
+    setNewParticipant({ 
+      name: '', 
+      email: '', 
+      telephone: '', 
+      title: '', 
+      organization: '',
+      is_chairperson: false 
+    });
     setShowAddParticipantDialog(false);
     setSnackbar({ open: true, message: 'Participant added successfully', severity: 'success' });
   };
 
   const handleRemoveCustomParticipant = (index) => {
     setCustomParticipants(customParticipants.filter((_, i) => i !== index));
+  };
+
+  const handleSetChairperson = (index) => {
+    const updatedParticipants = customParticipants.map((p, i) => ({
+      ...p,
+      is_chairperson: i === index
+    }));
+    setCustomParticipants(updatedParticipants);
+    
+    const chairperson = updatedParticipants[index];
+    if (chairperson.is_chairperson) {
+      setSnackbar({
+        open: true,
+        message: `${chairperson.name} is now the Chairperson`,
+        severity: 'info'
+      });
+    }
   };
 
   const validateStep = () => {
@@ -192,116 +240,129 @@ const CreateMeeting = () => {
   };
 
   const handleBack = () => {
-    setActiveStep(activeStep - 1);
+    if (activeStep === 0) {
+      // On first step, back button navigates to meetings list
+      navigate('/meetings');
+    } else {
+      setActiveStep(activeStep - 1);
+    }
   };
 
- const handleSubmit = async () => {
-  setApiLoading(true);
-  setError(null);
-  
-  try {
-    // Combine date and time properly
-    const meetingDate = formData.meeting_date;
-    if (!meetingDate) {
-      throw new Error("Meeting date is required");
-    }
-    if (!formData.start_time) {
-      throw new Error("Start time is required");
-    }
+  const handleCancel = () => {
+    navigate('/meetings');
+  };
+
+  const handleSubmit = async () => {
+    setApiLoading(true);
+    setError(null);
     
-    // Create start datetime using the selected date and time
-    const startDateTime = new Date(meetingDate);
-    startDateTime.setHours(
-      formData.start_time.getHours(),
-      formData.start_time.getMinutes(),
-      0, 0
-    );
-    
-    // Create end datetime if provided
-    let endDateTime = null;
-    if (formData.end_time) {
-      endDateTime = new Date(meetingDate);
-      endDateTime.setHours(
-        formData.end_time.getHours(),
-        formData.end_time.getMinutes(),
+    try {
+      const meetingDate = formData.meeting_date;
+      if (!meetingDate) {
+        throw new Error("Meeting date is required");
+      }
+      if (!formData.start_time) {
+        throw new Error("Start time is required");
+      }
+      
+      const startDateTime = new Date(meetingDate);
+      startDateTime.setHours(
+        formData.start_time.getHours(),
+        formData.start_time.getMinutes(),
         0, 0
       );
       
-      // Validate end time is after start time
-      if (endDateTime <= startDateTime) {
-        setSnackbar({
-          open: true,
-          message: "End time must be after start time",
-          severity: "warning"
-        });
-        setApiLoading(false);
-        return;
+      let endDateTime = null;
+      if (formData.end_time) {
+        endDateTime = new Date(meetingDate);
+        endDateTime.setHours(
+          formData.end_time.getHours(),
+          formData.end_time.getMinutes(),
+          0, 0
+        );
+        
+        if (endDateTime <= startDateTime) {
+          setSnackbar({
+            open: true,
+            message: "End time must be after start time",
+            severity: "warning"
+          });
+          setApiLoading(false);
+          return;
+        }
       }
-    }
-    
-    const meetingPayload = {
-      title: formData.title,
-      description: formData.description || null,
-      meeting_date: startDateTime.toISOString(),  // Use startDateTime as the meeting datetime
-      start_time: startDateTime.toISOString(),
-      end_time: endDateTime ? endDateTime.toISOString() : null,
-      location_text: formData.location_text || null,
-      agenda: formData.agenda || null,
-      facilitator: formData.facilitator || null,
-      chairperson_name: formData.chairperson_name || null,
-      custom_participants: customParticipants.map(p => ({
-        name: p.name,
-        email: p.email || null,
-        telephone: p.telephone || null,
-        title: p.title || null,
-        organization: p.organization || null,
-        is_chairperson: p.is_chairperson || false,
-      })),
-    };
-    
-    console.log("Sending to API:", meetingPayload);
-    
-    const response = await api.post("/action-tracker/meetings", meetingPayload);
-    console.log("API Response:", response.data);
-    
-    setSuccess(true);
-    setSnackbar({
-      open: true,
-      message: `Meeting "${response.data.title}" created successfully!`,
-      severity: "success",
-    });
-    
-    setTimeout(() => {
-      navigate(`/meetings/${response.data.id}`);
-    }, 2000);
-  } catch (error) {
-    console.error("Error creating meeting:", error);
-    
-    // Extract validation errors from 422 response
-    let errorMessage = "Failed to create meeting. ";
-    if (error.response?.status === 422) {
-      const details = error.response.data?.error?.details || error.response.data?.detail;
-      if (Array.isArray(details)) {
-        errorMessage += details.map(d => d.message || d.msg).join(", ");
-      } else if (typeof details === "string") {
-        errorMessage = details;
+      
+      // Build GPS coordinates string
+      let gpsCoordinates = null;
+      if (formData.gps_latitude && formData.gps_longitude) {
+        gpsCoordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
+      }
+      
+      const chairperson = customParticipants.find(p => p.is_chairperson);
+      
+      const meetingPayload = {
+        title: formData.title,
+        description: formData.description || null,
+        meeting_date: startDateTime.toISOString(),
+        start_time: startDateTime.toISOString(),
+        end_time: endDateTime ? endDateTime.toISOString() : null,
+        location_text: formData.location_text || null,
+        gps_coordinates: gpsCoordinates,
+        agenda: formData.agenda || null,
+        facilitator: formData.facilitator || null,
+        chairperson_name: chairperson?.name || null,
+        custom_participants: customParticipants.map(p => ({
+          name: p.name,
+          email: p.email || null,
+          telephone: p.telephone || null,
+          title: p.title || null,
+          organization: p.organization || null,
+          is_chairperson: p.is_chairperson || false,
+        })),
+      };
+      
+      console.log("Sending to API:", meetingPayload);
+      
+      const response = await api.post("/action-tracker/meetings", meetingPayload);
+      console.log("API Response:", response.data);
+      
+      setSuccess(true);
+      setSnackbar({
+        open: true,
+        message: `Meeting "${response.data.title}" created successfully!`,
+        severity: "success",
+      });
+      
+      setTimeout(() => {
+        navigate(`/meetings/${response.data.id}`);
+      }, 2000);
+    } catch (error) {
+      console.error("Error creating meeting:", error);
+      
+      let errorMessage = "Failed to create meeting. ";
+      if (error.response?.status === 422) {
+        const details = error.response.data?.error?.details || error.response.data?.detail;
+        if (Array.isArray(details)) {
+          errorMessage += details.map(d => d.message || d.msg).join(", ");
+        } else if (typeof details === "string") {
+          errorMessage = details;
+        } else {
+          errorMessage += JSON.stringify(details);
+        }
       } else {
-        errorMessage += JSON.stringify(details);
+        errorMessage += error.response?.data?.message || error.message;
       }
-    } else {
-      errorMessage += error.response?.data?.message || error.message;
+      
+      setError(errorMessage);
+      setSnackbar({
+        open: true,
+        message: errorMessage,
+        severity: "error",
+      });
+    } finally {
+      setApiLoading(false);
     }
-    
-    setError(errorMessage);
-    setSnackbar({
-      open: true,
-      message: errorMessage,
-      severity: "error",
-    });
-  } finally {
-    setApiLoading(false);
-  }
-};
+  };
 
   const isStepValid = () => {
     if (activeStep === 0) {
@@ -314,10 +375,11 @@ const CreateMeeting = () => {
     setSnackbar({ ...snackbar, open: false });
   };
 
+  const chairpersonName = customParticipants.find(p => p.is_chairperson)?.name || 'Not selected';
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: '900px', mx: 'auto' }}>
-        {/* Snackbar for notifications */}
         <Snackbar
           open={snackbar.open}
           autoHideDuration={6000}
@@ -329,40 +391,37 @@ const CreateMeeting = () => {
           </Alert>
         </Snackbar>
 
-        {/* Back button */}
-        <Button 
-          startIcon={<ArrowBackIcon />} 
-          onClick={() => navigate('/meetings')} 
-          sx={{ mb: 3 }}
-          disabled={apiLoading}
-        >
-          Back to Meetings
-        </Button>
-
-        {/* Main form */}
-        <Paper sx={{ p: 4, borderRadius: 3 }}>
-          <Typography variant="h4" fontWeight={800} color="primary" gutterBottom>
-            Create New Meeting
-          </Typography>
+        <Paper sx={{ p: 4, borderRadius: 3, position: 'relative' }}>
+          {/* Header with Cancel button */}
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h4" fontWeight={800} color="primary">
+              Create New Meeting
+            </Typography>
+            <Button
+              variant="outlined"
+              startIcon={<CancelIcon />}
+              onClick={handleCancel}
+              disabled={apiLoading}
+            >
+              Cancel
+            </Button>
+          </Box>
           <Typography variant="body1" color="text.secondary" mb={4}>
             Fill in the details to schedule a new meeting
           </Typography>
 
-          {/* Error Alert */}
           {error && (
             <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
               {error}
             </Alert>
           )}
 
-          {/* Success Alert */}
           {success && (
             <Alert severity="success" sx={{ mb: 3 }}>
               Meeting created successfully! Redirecting...
             </Alert>
           )}
 
-          {/* Loading overlay during API call */}
           {apiLoading && (
             <Box sx={{ 
               position: 'absolute', 
@@ -399,8 +458,7 @@ const CreateMeeting = () => {
                   value={formData.title}
                   onChange={handleChange}
                   disabled={apiLoading}
-                  error={!formData.title && formData.title !== ''}
-                  helperText={!formData.title && formData.title !== '' ? 'Title is required' : ''}
+                  placeholder="e.g., Quarterly Planning Session"
                 />
               </Grid>
               <Grid item xs={12}>
@@ -413,6 +471,7 @@ const CreateMeeting = () => {
                   value={formData.description}
                   onChange={handleChange}
                   disabled={apiLoading}
+                  placeholder="Brief overview of the meeting purpose"
                 />
               </Grid>
               <Grid item xs={12} md={6}>
@@ -453,37 +512,42 @@ const CreateMeeting = () => {
                   placeholder="Conference Room A, Virtual Meeting, etc."
                 />
               </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="GPS Latitude"
+                  name="gps_latitude"
+                  type="number"
+                  value={formData.gps_latitude}
+                  onChange={handleChange}
+                  disabled={apiLoading}
+                  placeholder="e.g., 0.3136"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="GPS Longitude"
+                  name="gps_longitude"
+                  type="number"
+                  value={formData.gps_longitude}
+                  onChange={handleChange}
+                  disabled={apiLoading}
+                  placeholder="e.g., 32.5811"
+                />
+              </Grid>
               <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Agenda"
-                  name="agenda"
-                  multiline
-                  rows={4}
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                  Agenda
+                </Typography>
+                <ReactQuill
+                  theme="snow"
                   value={formData.agenda}
-                  onChange={handleChange}
-                  disabled={apiLoading}
-                  placeholder="1. Welcome and introductions\n2. Review of previous minutes\n3. Main agenda items\n4. Any other business"
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Facilitator"
-                  name="facilitator"
-                  value={formData.facilitator}
-                  onChange={handleChange}
-                  disabled={apiLoading}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Chairperson"
-                  name="chairperson_name"
-                  value={formData.chairperson_name}
-                  onChange={handleChange}
-                  disabled={apiLoading}
+                  onChange={handleAgendaChange}
+                  modules={modules}
+                  formats={formats}
+                  style={{ height: '200px', marginBottom: '50px' }}
+                  readOnly={apiLoading}
                 />
               </Grid>
             </Grid>
@@ -576,12 +640,48 @@ const CreateMeeting = () => {
                             }
                             secondary={`${participant.email || ''} ${participant.telephone || ''}`}
                           />
+                          {!participant.is_chairperson && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<PersonIcon />}
+                              onClick={() => handleSetChairperson(index)}
+                              sx={{ mr: 1 }}
+                              disabled={apiLoading}
+                            >
+                              Make Chairperson
+                            </Button>
+                          )}
                         </ListItem>
                         <Divider variant="inset" component="li" />
                       </React.Fragment>
                     ))}
                   </List>
                 )}
+                
+                {customParticipants.length > 0 && (
+                  <Box mt={2} p={2} bgcolor="#e3f2fd" borderRadius={1}>
+                    <Typography variant="body2" fontWeight="bold">
+                      Current Chairperson: {chairpersonName}
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* Facilitator Field */}
+              <Paper sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  Facilitator
+                </Typography>
+                <TextField
+                  fullWidth
+                  label="Facilitator Name"
+                  name="facilitator"
+                  value={formData.facilitator}
+                  onChange={handleChange}
+                  disabled={apiLoading}
+                  helperText="Person who will facilitate the meeting"
+                />
               </Paper>
             </Box>
           )}
@@ -608,21 +708,33 @@ const CreateMeeting = () => {
                 <Typography variant="subtitle1" fontWeight="bold" mt={2}>Location:</Typography>
                 <Typography variant="body2" gutterBottom>{formData.location_text || 'Not specified'}</Typography>
                 
-                {formData.agenda && (
+                {(formData.gps_latitude || formData.gps_longitude) && (
                   <>
-                    <Typography variant="subtitle1" fontWeight="bold" mt={2}>Agenda:</Typography>
-                    <Typography variant="body2" whiteSpace="pre-wrap">{formData.agenda}</Typography>
+                    <Typography variant="subtitle1" fontWeight="bold" mt={2}>GPS Coordinates:</Typography>
+                    <Typography variant="body2" gutterBottom>
+                      {formData.gps_latitude && `Lat: ${formData.gps_latitude}`}
+                      {formData.gps_latitude && formData.gps_longitude && ', '}
+                      {formData.gps_longitude && `Lng: ${formData.gps_longitude}`}
+                    </Typography>
                   </>
                 )}
                 
-                {(formData.facilitator || formData.chairperson_name) && (
+                {formData.agenda && (
                   <>
-                    <Typography variant="subtitle1" fontWeight="bold" mt={2}>Meeting Leaders:</Typography>
-                    <Typography variant="body2">
-                      {formData.facilitator && `Facilitator: ${formData.facilitator}`}
-                      {formData.facilitator && formData.chairperson_name && ' • '}
-                      {formData.chairperson_name && `Chairperson: ${formData.chairperson_name}`}
-                    </Typography>
+                    <Typography variant="subtitle1" fontWeight="bold" mt={2}>Agenda:</Typography>
+                    <Box sx={{ mt: 1, '& p': { margin: 0 } }}>
+                      <div dangerouslySetInnerHTML={{ __html: formData.agenda }} />
+                    </Box>
+                  </>
+                )}
+                
+                <Typography variant="subtitle1" fontWeight="bold" mt={2}>Chairperson:</Typography>
+                <Typography variant="body2" gutterBottom>{chairpersonName}</Typography>
+                
+                {formData.facilitator && (
+                  <>
+                    <Typography variant="subtitle1" fontWeight="bold" mt={2}>Facilitator:</Typography>
+                    <Typography variant="body2" gutterBottom>{formData.facilitator}</Typography>
                   </>
                 )}
                 
@@ -632,7 +744,9 @@ const CreateMeeting = () => {
                   <Box component="ul" sx={{ mt: 1, pl: 2 }}>
                     {customParticipants.slice(0, 5).map((p, i) => (
                       <li key={i}>
-                        <Typography variant="caption">{p.name}</Typography>
+                        <Typography variant="caption">
+                          {p.name} {p.is_chairperson && '(Chairperson)'}
+                        </Typography>
                       </li>
                     ))}
                     {customParticipants.length > 5 && (
@@ -647,10 +761,10 @@ const CreateMeeting = () => {
           {/* Navigation Buttons */}
           <Box display="flex" justifyContent="space-between" mt={4}>
             <Button 
-              disabled={activeStep === 0 || apiLoading} 
               onClick={handleBack}
+              disabled={apiLoading}
             >
-              Back
+              {activeStep === 0 ? 'Cancel & Exit' : 'Back'}
             </Button>
             {activeStep === 2 ? (
               <Button 
@@ -725,6 +839,17 @@ const CreateMeeting = () => {
                   label="Organization"
                   value={newParticipant.organization}
                   onChange={(e) => setNewParticipant({ ...newParticipant, organization: e.target.value })}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={newParticipant.is_chairperson}
+                      onChange={(e) => setNewParticipant({ ...newParticipant, is_chairperson: e.target.checked })}
+                    />
+                  }
+                  label="Set as Chairperson"
                 />
               </Grid>
             </Grid>

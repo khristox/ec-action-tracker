@@ -126,60 +126,53 @@ else
     GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r '.id')
     
     if [ -z "$GROUP_ID" ] || [ "$GROUP_ID" == "null" ]; then
-        print_error "Failed to create Action Tracker group"
-        exit 1
+        print_error "Failed to create Action Tracker group, continuing..."
+        GROUP_ID="UNKNOWN"
+    else
+        print_success "Action Tracker group created (ID: $GROUP_ID)"
     fi
-    print_success "Action Tracker group created (ID: $GROUP_ID)"
 fi
 
 # ==================== ATTRIBUTE DATA ====================
-# IMPORTANT: Codes MUST start with uppercase letter and contain only uppercase letters, numbers, and underscores
-# Format: code:name:short_name:sort_order:color:icon:description
 ATTRIBUTES=(
-    # Meeting Status Values
     "MEETING_STATUS_PENDING:Meeting Status - Pending:PENDING:1:#FFC107:schedule:Meeting scheduled but not started"
     "MEETING_STATUS_STARTED:Meeting Status - Started:STARTED:2:#2196F3:play_circle:Meeting in progress"
     "MEETING_STATUS_ENDED:Meeting Status - Ended:ENDED:3:#9E9E9E:stop_circle:Meeting ended"
     "MEETING_STATUS_AWAITING_ACTION:Meeting Status - Awaiting Action:AWAITING:4:#FF9800:pending_actions:Meeting completed, awaiting action items"
     "MEETING_STATUS_CLOSED:Meeting Status - Closed:CLOSED:5:#4CAF50:check_circle:Meeting fully completed and closed"
     "MEETING_STATUS_CANCELLED:Meeting Status - Cancelled:CANCELLED:6:#F44336:cancel:Meeting cancelled"
-    
-    # Action Status (Overall)
+
     "ACTION_STATUS_PENDING:Action Status - Pending:PENDING:10:#FFC107:pending:Action not yet started"
     "ACTION_STATUS_IN_PROGRESS:Action Status - In Progress:IN_PROGRESS:11:#2196F3:play_arrow:Action being worked on"
     "ACTION_STATUS_COMPLETED:Action Status - Completed:COMPLETED:12:#4CAF50:check_circle:Action completed"
     "ACTION_STATUS_OVERDUE:Action Status - Overdue:OVERDUE:13:#F44336:warning:Action past due date"
     "ACTION_STATUS_BLOCKED:Action Status - Blocked:BLOCKED:14:#9C27B0:block:Action blocked by dependency"
     "ACTION_STATUS_CANCELLED:Action Status - Cancelled:CANCELLED:15:#757575:cancel:Action cancelled"
-    
-    # Individual Status (User Self-Reporting)
+
     "INDIVIDUAL_NOT_STARTED:Individual Status - Not Started:NOT_STARTED:20:#9E9E9E:fiber_new:Haven't started yet"
     "INDIVIDUAL_IN_PROGRESS:Individual Status - In Progress:IN_PROGRESS:21:#2196F3:play_arrow:Actively working on it"
     "INDIVIDUAL_BLOCKED:Individual Status - Blocked:BLOCKED:22:#F44336:block:Stuck, need assistance"
     "INDIVIDUAL_REVIEW:Individual Status - Ready for Review:REVIEW:23:#FF9800:rate_review:Completed, awaiting review"
     "INDIVIDUAL_COMPLETED:Individual Status - Completed:COMPLETED:24:#4CAF50:check_circle:Fully completed"
-    
-    # Document Types
+
     "DOC_TYPE_AGENDA:Document Type - Agenda:AGENDA:30:#2196F3:menu_book:Meeting agenda document"
     "DOC_TYPE_PRESENTATION:Document Type - Presentation:PRESENTATION:31:#9C27B0:slideshow:Presentation slides"
     "DOC_TYPE_REPORT:Document Type - Report:REPORT:32:#FF9800:assessment:Meeting report"
     "DOC_TYPE_MINUTES:Document Type - Minutes:MINUTES:33:#4CAF50:description:Meeting minutes"
     "DOC_TYPE_ATTACHMENT:Document Type - Attachment:ATTACHMENT:34:#607D8B:attach_file:General attachment"
     "DOC_TYPE_REFERENCE:Document Type - Reference:REFERENCE:35:#795548:reference:Reference material"
-    
-    # Action Priorities
+
     "PRIORITY_LOW:Priority - Low:LOW:40:#4CAF50:low_priority:Low priority - can be done when time permits"
     "PRIORITY_MEDIUM:Priority - Medium:MEDIUM:41:#FFC107:medium_priority:Medium priority - standard timeline"
     "PRIORITY_HIGH:Priority - High:HIGH:42:#FF9800:high_priority:High priority - needs attention soon"
     "PRIORITY_URGENT:Priority - Urgent:URGENT:43:#F44336:urgent:Urgent - immediate attention required"
-    
-    # Participant List Visibility
+
     "VISIBILITY_PUBLIC:Visibility - Public:PUBLIC:50:#4CAF50:public:Visible to all users"
     "VISIBILITY_PRIVATE:Visibility - Private:PRIVATE:51:#9E9E9E:lock:Visible only to creator"
     "VISIBILITY_TEAM_ONLY:Visibility - Team Only:TEAM_ONLY:52:#2196F3:group:Visible only to team members"
 )
 
-# ==================== CREATE ATTRIBUTES ====================
+# ==================== CREATE ATTRIBUTES WITH RETRY ====================
 print_info "Creating Action Tracker attributes..."
 echo ""
 
@@ -187,13 +180,13 @@ SUCCESS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
 TOTAL=${#ATTRIBUTES[@]}
+RETRIES=3
 
 for attribute in "${ATTRIBUTES[@]}"; do
     IFS=':' read -r code name short_name sort_order color icon description <<< "$attribute"
     
     print_info "Processing: ${name} (${code})..."
     
-    # Check if attribute already exists
     EXISTING=$(curl -s -X GET "${API_URL}/attributes/?group_code=ACTION_TRACKER&code=${code}" \
         -H "Authorization: Bearer $ADMIN_TOKEN")
     
@@ -202,8 +195,7 @@ for attribute in "${ATTRIBUTES[@]}"; do
         ((SKIP_COUNT++))
         continue
     fi
-    
-    # Create attribute - using proper uppercase codes
+
     ATTRIBUTE_JSON=$(cat <<EOF
 {
     "group_code": "ACTION_TRACKER",
@@ -220,30 +212,38 @@ for attribute in "${ATTRIBUTES[@]}"; do
 }
 EOF
 )
-    
-    RESPONSE=$(curl -s -X POST "${API_URL}/attributes/" \
-        -H "Authorization: Bearer $ADMIN_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "$ATTRIBUTE_JSON")
-    
-    if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
-        ATTRIBUTE_ID=$(echo "$RESPONSE" | jq -r '.id')
-        print_success "  ✅ Created: ${name} (${code}) - ${description}"
-        ((SUCCESS_COUNT++))
-    else
-        ERROR=$(echo "$RESPONSE" | jq -r '.error.message // .detail // "Unknown error"')
-        print_error "  ❌ Failed: ${ERROR}"
+
+    success=false
+    for attempt in $(seq 1 $RETRIES); do
+        RESPONSE=$(curl -s -X POST "${API_URL}/attributes/" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$ATTRIBUTE_JSON")
+        
+        if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
+            ATTRIBUTE_ID=$(echo "$RESPONSE" | jq -r '.id')
+            print_success "  ✅ Created: ${name} (${code}) - ${description}"
+            ((SUCCESS_COUNT++))
+            success=true
+            break
+        else
+            ERROR=$(echo "$RESPONSE" | jq -r '.error.message // .detail // "Unknown error"')
+            print_warning "  ⚠️ Attempt $attempt failed: ${ERROR}"
+            sleep 0.5
+        fi
+    done
+
+    if [ "$success" = false ]; then
+        print_error "  ❌ Failed after $RETRIES attempts: ${name} (${code})"
         ((FAIL_COUNT++))
     fi
-    
-    # Small delay to avoid rate limiting
+
     sleep 0.2
 done
 
 # ==================== VERIFICATION ====================
 echo ""
 print_info "Verifying Action Tracker group..."
-
 sleep 2
 
 VERIFY_RESPONSE=$(curl -s -X GET "${API_URL}/attribute-groups/ACTION_TRACKER/attributes" \
@@ -257,30 +257,12 @@ if echo "$VERIFY_RESPONSE" | jq -e '.items' > /dev/null 2>&1; then
         
         echo ""
         echo -e "${BLUE}📋 Attributes by Category:${NC}"
-        
         echo ""
-        echo -e "${YELLOW}Meeting Status:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | select(.code | startswith("MEETING_STATUS")) | "  • \(.name) - \(.extra_metadata.description)"'
-        
-        echo ""
-        echo -e "${YELLOW}Action Status:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | select(.code | startswith("ACTION_STATUS")) | "  • \(.name) - \(.extra_metadata.description)"'
-        
-        echo ""
-        echo -e "${YELLOW}Individual Status:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | select(.code | startswith("INDIVIDUAL")) | "  • \(.name) - \(.extra_metadata.description)"'
-        
-        echo ""
-        echo -e "${YELLOW}Document Types:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | select(.code | startswith("DOC_TYPE")) | "  • \(.name) - \(.extra_metadata.description)"'
-        
-        echo ""
-        echo -e "${YELLOW}Priorities:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | select(.code | startswith("PRIORITY")) | "  • \(.name) - \(.extra_metadata.description)"'
-        
-        echo ""
-        echo -e "${YELLOW}Visibility:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | select(.code | startswith("VISIBILITY")) | "  • \(.name) - \(.extra_metadata.description)"'
+        for category in "MEETING_STATUS" "ACTION_STATUS" "INDIVIDUAL" "DOC_TYPE" "PRIORITY" "VISIBILITY"; do
+            echo -e "${YELLOW}${category//_/ }:${NC}"
+            echo "$VERIFY_RESPONSE" | jq -r ".items[] | select(.code | startswith(\"$category\")) | \"  • \(.name) - \(.extra_metadata.description)\""
+            echo ""
+        done
     else
         print_warning "No attributes found"
     fi
@@ -299,14 +281,6 @@ echo "  • Total attributes: ${TOTAL}"
 echo "  • Successfully created: ${SUCCESS_COUNT}"
 echo "  • Already existed: ${SKIP_COUNT}"
 [ $FAIL_COUNT -gt 0 ] && echo "  • Failed: ${FAIL_COUNT}"
-echo ""
-echo -e "${CYAN}📋 Attribute Categories:${NC}"
-echo "  • Meeting Status: 6 attributes"
-echo "  • Action Status (Overall): 6 attributes"
-echo "  • Individual Status (Self-Reporting): 5 attributes"
-echo "  • Document Types: 6 attributes"
-echo "  • Priorities: 4 attributes"
-echo "  • Visibility: 3 attributes"
 echo ""
 echo -e "${CYAN}🧪 Test commands:${NC}"
 echo ""

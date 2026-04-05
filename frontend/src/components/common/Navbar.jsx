@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -15,114 +15,118 @@ import {
   useTheme,
   Divider,
   ListItemIcon,
-  CircularProgress, // Added for loading state
+  CircularProgress,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
   Notifications,
   Person,
-  Settings,
   Logout,
-  Dashboard,
+  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
-
 import { logout, selectIsLoading } from '../../store/slices/authSlice';
 
-const Navbar = ({ open, handleDrawerToggle, drawerWidth, isMobile }) => {
+const Navbar = ({ handleDrawerToggle, isMobile }) => {
   const theme = useTheme();
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  
+  const location = useLocation();
+
   const [anchorElUser, setAnchorElUser] = useState(null);
-  const [anchorElNotif, setAnchorElNotif] = useState(null);
-  
   const { user } = useSelector((state) => state.auth);
-  const isLoading = useSelector(selectIsLoading); // Use the unified loading state
+  const isLoading = useSelector(selectIsLoading);
 
-  const handleOpenUserMenu = (event) => setAnchorElUser(event.currentTarget);
-  const handleCloseUserMenu = () => setAnchorElUser(null);
-  const handleOpenNotifMenu = (event) => setAnchorElNotif(event.currentTarget);
-  const handleCloseNotifMenu = () => setAnchorElNotif(null);
+  const pathSegments = location.pathname.split('/').filter(Boolean);
+  const showBackButton = pathSegments.length > 1 && location.pathname !== '/dashboard';
 
-  /**
-   * Improved Logout Handler
-   * 1. Closes menu immediately for better UX.
-   * 2. Executes thunk and waits for completion.
-   * 3. Redirects to login using { replace: true } to clear history stack.
-   */
   const handleLogout = async () => {
-    handleCloseUserMenu();
+    setAnchorElUser(null);
     try {
-      // .unwrap() allows us to wait for the action to finish
       await dispatch(logout()).unwrap();
-    } catch (error) {
-      console.error("Logout failed, but proceeding to login page", error);
-    } finally {
-      // Always redirect to login, ensuring user isn't stuck on a private route
       navigate('/login', { replace: true });
+    } catch (error) {
+      console.error("Logout failed", error);
     }
-  };
-
-  // Helper for generic navigation
-  const handleNav = (path) => {
-    handleCloseUserMenu();
-    navigate(path);
   };
 
   return (
     <AppBar
       position="fixed"
+      elevation={0}
       sx={{
+        height: 48,
         zIndex: theme.zIndex.drawer + 1,
-        width: { sm: `calc(100% - ${open && !isMobile ? drawerWidth : 0}px)` },
-        ml: { sm: `${open && !isMobile ? drawerWidth : 0}px` },
-        transition: theme.transitions.create(['width', 'margin'], {
-          easing: theme.transitions.easing.sharp,
-          duration: theme.transitions.duration.leavingScreen,
-        }),
+        bgcolor: 'primary.main',
+        borderBottom: '1px solid rgba(255,255,255,0.12)',
       }}
     >
-      <Toolbar>
-        {(isMobile || !open) && (
-          <IconButton color="inherit" edge="start" onClick={handleDrawerToggle} sx={{ mr: 2 }}>
-            <MenuIcon />
+      <Toolbar 
+        variant="dense" 
+        sx={{ 
+          minHeight: 48, 
+          justifyContent: 'space-between',
+          px: { xs: 1, sm: 2 }   // Reduced padding on mobile
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <IconButton
+            color="inherit"
+            edge="start"
+            onClick={showBackButton ? () => navigate(-1) : handleDrawerToggle}
+            sx={{ mr: 1 }}
+            size="small"
+          >
+            {showBackButton ? (
+              <ArrowBackIcon fontSize="small" />
+            ) : (
+              <MenuIcon fontSize="small" />
+            )}
           </IconButton>
-        )}
-        
-        <Typography
-          variant="h6"
-          noWrap
-          component="div"
-          onClick={() => navigate('/dashboard')}
-          sx={{
-            flexGrow: 1,
-            fontSize: { xs: '1rem', sm: '1.25rem' },
-            cursor: 'pointer',
-            '&:hover': { opacity: 0.8 },
-          }}
-        >
-          Action Tracker
-        </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <IconButton color="inherit" onClick={handleOpenNotifMenu}>
+
+          <Typography
+            variant="subtitle1"
+            noWrap
+            onClick={() => navigate('/dashboard')}
+            sx={{ 
+              fontWeight: 800, 
+              cursor: 'pointer', 
+              letterSpacing: '-0.5px',
+              fontSize: { xs: '0.9rem', sm: '1.05rem' }, // Smaller on mobile
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {isMobile ? 'Tracker' : 'Action Tracker'}
+          </Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0, sm: 0.5 } }}>
+          <IconButton color="inherit" size="small">
             <Badge badgeContent={3} color="error">
-              <Notifications />
+              <Notifications fontSize="small" />
             </Badge>
           </IconButton>
-          
-          <Tooltip title="Account settings">
-            <IconButton onClick={handleOpenUserMenu} sx={{ p: 0 }} disabled={isLoading}>
-              {/* Show loading spinner if auth is busy */}
+
+          <Tooltip title="Account">
+            <IconButton 
+              onClick={(e) => setAnchorElUser(e.currentTarget)} 
+              sx={{ ml: 0, p: 0.5 }}
+              size="small"
+            >
               {isLoading ? (
-                <CircularProgress size={24} color="inherit" />
+                <CircularProgress size={20} color="inherit" />
               ) : (
                 <Avatar 
-                  alt={user?.full_name || user?.username || 'User'} 
-                  src={user?.avatar_url}
-                  sx={{ width: 32, height: 32, border: `1px solid ${theme.palette.divider}` }}
+                  sx={{ 
+                    width: { xs: 26, sm: 28 }, 
+                    height: { xs: 26, sm: 28 }, 
+                    bgcolor: 'white', 
+                    color: 'primary.main', 
+                    fontSize: '0.7rem', 
+                    fontWeight: 700 
+                  }}
                 >
-                  {user?.full_name?.[0] || user?.username?.[0] || 'U'}
+                  {user?.full_name?.[0] || user?.username?.[0] || 'A'}
                 </Avatar>
               )}
             </IconButton>
@@ -130,60 +134,40 @@ const Navbar = ({ open, handleDrawerToggle, drawerWidth, isMobile }) => {
         </Box>
       </Toolbar>
 
-      {/* User Menu */}
+      {/* User Menu - same as before */}
       <Menu
         anchorEl={anchorElUser}
         open={Boolean(anchorElUser)}
-        onClose={handleCloseUserMenu}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        PaperProps={{ sx: { width: 220, mt: 1.5 } }}
+        onClose={() => setAnchorElUser(null)}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+        PaperProps={{ 
+          elevation: 4, 
+          sx: { width: 200, mt: 1, borderRadius: 2 } 
+        }}
       >
-        <Box sx={{ px: 2, py: 1.5 }}>
-          <Typography variant="subtitle1" fontWeight="bold" noWrap>
-            {user?.full_name || user?.username || 'User'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" noWrap sx={{ fontSize: '0.75rem' }}>
-            {user?.email}
-          </Typography>
-        </Box>
-        <Divider />
-        
-        <MenuItem onClick={() => handleNav('/dashboard')}>
-          <ListItemIcon><Dashboard fontSize="small" /></ListItemIcon>
-          Dashboard
-        </MenuItem>
-        
-        <MenuItem onClick={() => handleNav('/settings/profile')}>
-          <ListItemIcon><Person fontSize="small" /></ListItemIcon>
+        <MenuItem onClick={() => { 
+          setAnchorElUser(null); 
+          navigate('/settings/profile'); 
+        }}>
+          <ListItemIcon><Person fontSize="small" /></ListItemIcon> 
           Profile
         </MenuItem>
         
-        <MenuItem onClick={() => handleNav('/settings')}>
-          <ListItemIcon><Settings fontSize="small" /></ListItemIcon>
-          Settings
-        </MenuItem>
-        
         <Divider />
         
-        {/* Improved Logout Item */}
         <MenuItem 
           onClick={handleLogout} 
-          sx={{ 
-            color: 'error.main',
-            '&:hover': { backgroundColor: 'error.light', color: 'white' } 
-          }}
+          sx={{ color: 'error.main' }}
         >
           <ListItemIcon>
-            <Logout fontSize="small" color="inherit" />
-          </ListItemIcon>
-          {isLoading ? 'Logging out...' : 'Logout'}
+            <Logout fontSize="small" color="error" />
+          </ListItemIcon> 
+          Logout
         </MenuItem>
       </Menu>
-
-      {/* Notifications Menu remains same... */}
     </AppBar>
   );
 };
 
-export default Navbar;  
+export default Navbar;

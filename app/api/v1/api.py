@@ -15,7 +15,7 @@ try:
     from app.api.v1.endpoints.attribute_groups import router as attribute_groups_router
     from app.api.v1.endpoints.attributes import router as attributes_router
     from app.api.v1.endpoints.address.locations import router as locations_router
-    from app.api.v1.endpoints.menus import router as menus_router_all
+    from app.api.v1.endpoints.menus import router as menus_router
     from app.api.v1.endpoints.action_tracker import router as action_tracker_router
     
     logger.info("✅ All routers imported successfully")
@@ -40,7 +40,7 @@ api_router.include_router(attributes_router, prefix="/attributes", tags=["attrib
 
 # Locations & Menus
 api_router.include_router(locations_router, prefix="/locations", tags=["locations"])
-api_router.include_router(menus_router_all, prefix="/menus", tags=["menus"])
+api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 
 # Action Tracker
 api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker"])

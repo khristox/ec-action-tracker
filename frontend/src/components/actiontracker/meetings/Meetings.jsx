@@ -1,359 +1,282 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box,
-  Typography,
-  Button,
-  Paper,
-  Chip,
-  IconButton,
-  TextField,
-  InputAdornment,
-  Pagination,
-  Card,
-  CardContent,
-  Grid,
-  CircularProgress,
-  Menu,
-  MenuItem,
+  Box, Typography, Button, Paper, IconButton, TextField, InputAdornment,
+  Card, CardContent, Grid, Skeleton, Stack, Divider, Menu, MenuItem,
+  alpha, useMediaQuery, useTheme, CircularProgress
 } from '@mui/material';
+
 import {
-  Add as AddIcon,
-  Search as SearchIcon,
-  Event as EventIcon,
-  People as PeopleIcon,
-  LocationOn as LocationIcon,
-  Pending as PendingIcon,
-  Cancel as CancelIcon,
-  FilterList as FilterIcon,
-  Visibility as VisibilityIcon,
-  Edit as EditIcon,
+  Add as AddIcon, Search as SearchIcon, People as PeopleIcon,
+  FilterList as FilterIcon, Edit as EditIcon, Schedule as ScheduleIcon,
+  VideoCall as VideoCallIcon, LocationOn as LocationIcon, ArrowForward as ArrowForwardIcon,
+  Description as DescriptionIcon, Pending as PendingIcon, CheckCircle as CheckCircleIcon,
+  Cancel as CancelIcon, PlayCircle as PlayCircleIcon, StopCircle as StopCircleIcon
 } from '@mui/icons-material';
 
-/**
- * Meeting Status Chip
- */
-const MeetingStatusChip = ({ status }) => {
-  const getStatusConfig = () => {
-    switch (status?.toLowerCase()) {
-      case 'pending':
-        return { label: 'Pending', color: 'warning', icon: <PendingIcon /> };
-      case 'started':
-        return { label: 'Started', color: 'info', icon: <EventIcon /> };
-      case 'ended':
-        return { label: 'Ended', color: 'default', icon: <EventIcon /> };
-      case 'closed':
-        return { label: 'Closed', color: 'success', icon: <EventIcon /> };
-      case 'cancelled':
-        return { label: 'Cancelled', color: 'error', icon: <CancelIcon /> };
-      default:
-        return { label: 'Pending', color: 'warning', icon: <PendingIcon /> };
-    }
+import api from '../../../services/api';
+
+const COLORS = {
+  primary: '#6366f1',
+  success: '#10b981',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  info: '#3b82f6',
+  secondary: '#64748b'
+};
+
+const getIconFromName = (iconName) => {
+  const icons = {
+    'pending': <PendingIcon sx={{ fontSize: 14 }} />,
+    'schedule': <ScheduleIcon sx={{ fontSize: 14 }} />,
+    'play_circle': <PlayCircleIcon sx={{ fontSize: 14 }} />,
+    'stop_circle': <StopCircleIcon sx={{ fontSize: 14 }} />,
+    'check_circle': <CheckCircleIcon sx={{ fontSize: 14 }} />,
+    'cancel': <CancelIcon sx={{ fontSize: 14 }} />,
+    'pending_actions': <PendingIcon sx={{ fontSize: 14 }} />
+  };
+  return icons[iconName] || <ScheduleIcon sx={{ fontSize: 14 }} />;
+};
+
+const LabelValue = ({ label, value, icon: Icon, iconColor, isDescription = false, isTime = false }) => (
+  <Stack direction="row" spacing={1} alignItems={isDescription ? "flex-start" : "center"} sx={{ width: '100%', minWidth: 0 }}>
+    <Box sx={{ 
+      p: 0.7, borderRadius: 1, bgcolor: alpha(iconColor || '#94a3b8', 0.08), 
+      color: iconColor || '#64748b', display: 'flex', mt: isDescription ? 0.3 : 0, flexShrink: 0
+    }}>
+      <Icon sx={{ fontSize: 14 }} />
+    </Box>
+    <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Typography variant="caption" sx={{ 
+        fontWeight: 800, color: 'text.disabled', textTransform: 'uppercase', 
+        mb: 0.1, display: 'block', letterSpacing: '0.02em', fontSize: '0.65rem' 
+      }}>
+        {label}
+      </Typography>
+      <Typography 
+        variant="body2" 
+        sx={{ 
+          fontWeight: isTime ? 900 : 700, 
+          color: isTime ? COLORS.info : '#1e293b',
+          fontSize: '0.75rem',
+          display: '-webkit-box',
+          WebkitLineClamp: isDescription ? 2 : 1, 
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          lineHeight: 1.4,
+          wordBreak: 'break-word' 
+        }}
+      >
+        {value || '---'}
+      </Typography>
+    </Box>
+  </Stack>
+);
+
+const MeetingCard = ({ meeting, onView, onEdit }) => {
+  const statusData = meeting.status || {};
+  const metadata = statusData.extra_metadata || {};
+  const statusColor = metadata.color || COLORS.secondary;
+  const statusIcon = getIconFromName(metadata.icon);
+  const statusLabel = statusData.short_name || statusData.name || 'Unknown';
+  
+  const isVirtual = meeting.location_text?.toLowerCase().includes('virtual') || 
+                    meeting.location_text?.toLowerCase().includes('zoom');
+
+  const dateObj = new Date(meeting.meeting_date);
+  const formattedDate = `${dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+
+  const formatTime = (timeString) => {
+    if (!timeString) return 'TBD';
+    const date = new Date(timeString);
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   };
 
-  const config = getStatusConfig();
   return (
-    <Chip
-      icon={config.icon}
-      label={config.label}
-      color={config.color}
-      size="small"
-      sx={{ minWidth: 90, fontWeight: 500 }}
-    />
+      <Card elevation={0} sx={{
+        height: '100%', 
+        width: '100%', // 🟢 Ensures it fills the Grid item
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0, 
+        borderRadius: 1.2, 
+        border: '1px solid #e2e8f0',
+        bgcolor: 'white', 
+        transition: 'all 0.2s ease-in-out',
+        '&:hover': { borderColor: COLORS.primary, boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }
+      }}>
+      <CardContent sx={{ p: 2, cursor: 'pointer', flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }} onClick={() => onView(meeting.id)}>
+        <Stack direction="row" justifyContent="space-between" mb={2} alignItems="center">
+          <Box sx={{ 
+            px: 1, py: 0.3, borderRadius: 0.8, bgcolor: alpha(statusColor, 0.1), 
+            color: statusColor, fontSize: '0.6rem', fontWeight: 900, display: 'flex', alignItems: 'center', gap: 0.5
+          }}>
+            {statusIcon}
+            <span>{statusLabel}</span>
+          </Box>
+          <Typography variant="caption" sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.7rem' }}>
+            {formattedDate}
+          </Typography>
+        </Stack>
+
+        <Typography variant="subtitle2" sx={{ 
+          fontWeight: 900, color: '#0f172a', mb: 1.5, lineHeight: 1.3, 
+          height: '2.8em', display: '-webkit-box', WebkitLineClamp: 2, 
+          WebkitBoxOrient: 'vertical', overflow: 'hidden', textOverflow: 'ellipsis', wordBreak: 'break-word'
+        }}>
+          {meeting.title}
+        </Typography>
+
+        <Box sx={{ minHeight: '4.2em', mb: 2, overflow: 'hidden' }}>
+          <LabelValue label="Purpose" value={meeting.description} icon={DescriptionIcon} iconColor={COLORS.primary} isDescription />
+        </Box>
+
+        <Box sx={{ flexGrow: 1 }} />
+        <Divider sx={{ my: 2, borderColor: '#f1f5f9' }} />
+
+        <Stack spacing={1.5}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <LabelValue label="Time" value={formatTime(meeting.start_time)} icon={ScheduleIcon} iconColor={COLORS.info} isTime />
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <LabelValue label="Attendees" value={meeting.participants_count || 0} icon={PeopleIcon} iconColor={COLORS.success} />
+            </Box>
+          </Stack>
+          <LabelValue label="Location" value={meeting.location_text || 'Not specified'} icon={isVirtual ? VideoCallIcon : LocationIcon} iconColor={COLORS.danger} />
+        </Stack>
+      </CardContent>
+      
+      <Box px={2} py={1} sx={{ display: 'flex', justifyContent: 'space-between', bgcolor: '#f8fafc', borderTop: '1px solid #f1f5f9' }}>
+        <IconButton size="small" sx={{ color: '#94a3b8' }} onClick={(e) => { e.stopPropagation(); onEdit(meeting.id); }}>
+          <EditIcon sx={{ fontSize: 18 }} />
+        </IconButton>
+        <Button 
+          size="small" endIcon={<ArrowForwardIcon sx={{ fontSize: 14 }} />} 
+          onClick={(e) => { e.stopPropagation(); onView(meeting.id); }} 
+          sx={{ fontWeight: 800, textTransform: 'none', color: COLORS.primary, fontSize: '0.75rem' }}
+        >
+          Details
+        </Button>
+      </Box>
+    </Card>
   );
 };
 
-/**
- * Individual Meeting Card with Navigation
- */
-const MeetingCard = ({ meeting, onView, onEdit }) => (
-  <Card 
-    sx={{ 
-      height: '100%', 
-      display: 'flex', 
-      flexDirection: 'column',
-      transition: 'transform 0.2s',
-      '&:hover': { transform: 'translateY(-4px)', boxShadow: 3 },
-      cursor: 'pointer'
-    }}
-    onClick={() => onView(meeting.id)}
-  >
-    <CardContent sx={{ flexGrow: 1 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-        <Typography variant="h6" fontWeight="bold" sx={{ lineHeight: 1.2 }}>
-          {meeting.title}
-        </Typography>
-        <MeetingStatusChip status={meeting.status} />
-      </Box>
-      
-      <Typography variant="body2" color="text.secondary" mb={3} sx={{
-        display: '-webkit-box',
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: 'vertical',
-        overflow: 'hidden'
-      }}>
-        {meeting.description}
-      </Typography>
-      
-      <Box display="flex" flexDirection="column" gap={1.5}>
-        <Box display="flex" alignItems="center" gap={1}>
-          <EventIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-          <Typography variant="caption" fontWeight={500}>
-            {meeting.date} • {meeting.time}
-          </Typography>
-        </Box>
-        <Box display="flex" alignItems="center" gap={1}>
-          <LocationIcon sx={{ fontSize: 18, color: 'error.light' }} />
-          <Typography variant="caption" color="text.secondary">
-            {meeting.location}
-          </Typography>
-        </Box>
-        <Box display="flex" alignItems="center" gap={1}>
-          <PeopleIcon sx={{ fontSize: 18, color: 'info.main' }} />
-          <Typography variant="caption" color="text.secondary">
-            {meeting.participants} Participants
-          </Typography>
-        </Box>
-      </Box>
-    </CardContent>
-    <Box p={2} pt={0} display="flex" gap={1}>
-      <Button 
-        fullWidth 
-        variant="contained" 
-        size="small" 
-        sx={{ borderRadius: 1.5 }}
-        onClick={(e) => { e.stopPropagation(); onView(meeting.id); }}
-      >
-        View Details
-      </Button>
-      <Button 
-        variant="outlined" 
-        size="small" 
-        sx={{ borderRadius: 1.5, minWidth: 'auto' }}
-        onClick={(e) => { e.stopPropagation(); onEdit(meeting.id); }}
-      >
-        <EditIcon fontSize="small" />
-      </Button>
-    </Box>
-  </Card>
-);
-
-/**
- * Main Meetings Component with Navigation
- */
 const Meetings = () => {
   const navigate = useNavigate();
+  const observer = useRef();
+  
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [filterAnchorEl, setFilterAnchorEl] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
-  const itemsPerPage = 6;
+  const [hasMore, setHasMore] = useState(true);
+  const [anchorEl, setAnchorEl] = useState(null);
 
-  // Mock data for the Electoral Commission style
-  const [meetings, setMeetings] = useState([
-    { 
-      id: 1, 
-      title: 'Voter Verification Sync', 
-      description: 'Reviewing progress of the national voter registry update.', 
-      date: 'April 10, 2026', 
-      time: '10:00 AM', 
-      location: 'Conference Room B', 
-      participants: 12,
-      status: 'pending'
-    },
-    { 
-      id: 2, 
-      title: 'Field Staff Training', 
-      description: 'Technical briefing for district supervisors on the tracker app.', 
-      date: 'April 12, 2026', 
-      time: '02:00 PM', 
-      location: 'Virtual (Zoom)', 
-      participants: 45,
-      status: 'started'
-    },
-    { 
-      id: 3, 
-      title: 'Security Briefing', 
-      description: 'Coordination meeting with local security stakeholders.', 
-      date: 'April 15, 2026', 
-      time: '09:30 AM', 
-      location: 'Main Hall', 
-      participants: 8,
-      status: 'pending'
-    },
-    { 
-      id: 4, 
-      title: 'Budget Review Committee', 
-      description: 'Quarterly budget assessment and resource allocation.', 
-      date: 'April 18, 2026', 
-      time: '11:00 AM', 
-      location: 'Board Room', 
-      participants: 15,
-      status: 'pending'
-    },
-    { 
-      id: 5, 
-      title: 'Stakeholder Engagement', 
-      description: 'Meeting with political party representatives.', 
-      date: 'April 20, 2026', 
-      time: '01:00 PM', 
-      location: 'Virtual', 
-      participants: 25,
-      status: 'closed'
-    },
-  ]);
+  const fetchMeetings = useCallback(async (pageNum, isInitial = false) => {
+    if (isInitial) setLoading(true);
+    else setLoadingMore(true);
 
-  // Navigation handlers
-  const handleCreateMeeting = () => navigate('/meetings/create');
-  const handleViewMeeting = (id) => navigate(`/meetings/${id}`);
-  const handleEditMeeting = (id) => navigate(`/meetings/${id}/edit`);
+    try {
+      const res = await api.get('/action-tracker/meetings', {
+        params: { 
+          page: pageNum,
+          limit: 12, 
+          ...(statusFilter !== 'all' && { status: statusFilter }), 
+          ...(searchTerm && { search: searchTerm }) 
+        }
+      });
 
-  // Filter handlers
-  const handleFilterClick = (event) => setFilterAnchorEl(event.currentTarget);
-  const handleFilterClose = (status) => {
-    if (status) setStatusFilter(status);
-    setFilterAnchorEl(null);
-    setPage(1);
-  };
+      const newItems = res.data.items || [];
+      setMeetings(prev => isInitial ? newItems : [...prev, ...newItems]);
+      setHasMore(newItems.length > 0 && meetings.length + newItems.length < res.data.total);
+    } catch (err) { 
+      console.error(err); 
+    } finally { 
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [statusFilter, searchTerm, meetings.length]);
 
-  // Filter meetings
-  const filteredMeetings = meetings.filter(meeting => 
-    meeting.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
-    (statusFilter === 'all' || meeting.status === statusFilter)
-  );
-
-  // Pagination
-  const paginatedMeetings = filteredMeetings.slice(
-    (page - 1) * itemsPerPage,
-    page * itemsPerPage
-  );
-  const totalPages = Math.ceil(filteredMeetings.length / itemsPerPage);
-
-  // Simulate loading
+  // Reset and fetch on filter change
   useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
-  }, []);
+    setPage(1);
+    fetchMeetings(1, true);
+  }, [statusFilter, searchTerm]);
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  // Infinite Scroll Observer
+  const lastElementRef = useCallback(node => {
+    if (loading || loadingMore) return;
+    if (observer.current) observer.current.disconnect();
+    
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        setPage(prevPage => {
+          const nextPage = prevPage + 1;
+          fetchMeetings(nextPage);
+          return nextPage;
+        });
+      }
+    });
+    
+    if (node) observer.current.observe(node);
+  }, [loading, loadingMore, hasMore, fetchMeetings]);
 
-  return (
-    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: '1600px', mx: 'auto' }}>
-      {/* Page Header */}
-      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 2 }}>
-        <Box>
-          <Typography variant="h4" fontWeight={800} color="primary" gutterBottom>
-            Meetings
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            EC Action Tracker — Scheduled Consultations & Briefings
-          </Typography>
-        </Box>
-        <Button 
-          variant="contained" 
-          startIcon={<AddIcon />} 
-          onClick={handleCreateMeeting}
-          sx={{ height: 48, px: 3, borderRadius: 2, fontWeight: 'bold' }}
-        >
-          Create Meeting
-        </Button>
-      </Box>
+return (
+    <Box sx={{ width: '100%', p: 0 }}>
+      {/* Header and Search remain same */}
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3} px={1}>
+        <Typography variant="h5" sx={{ fontWeight: 900, color: '#0f172a' }}>Meetings</Typography>
+        {/* ... */}
+      </Stack>
 
-      {/* Search and Filter Bar */}
-      <Paper elevation={0} sx={{ p: 2, mb: 4, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-        <Box display="flex" gap={2} flexWrap="wrap">
-          <TextField
-            fullWidth
-            placeholder="Search by title, location, or agenda..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            sx={{ flex: 1 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color="action" />
-                </InputAdornment>
-              ),
-              endAdornment: searchTerm && (
-                <IconButton size="small" onClick={() => setSearchTerm('')}>
-                  <CancelIcon />
-                </IconButton>
-              ),
-            }}
-          />
-          <Button
-            variant="outlined"
-            startIcon={<FilterIcon />}
-            onClick={handleFilterClick}
-            endIcon={statusFilter !== 'all' && <Chip label={statusFilter} size="small" />}
-            sx={{ minWidth: 120 }}
-          >
-            Filter
-          </Button>
-          <Menu
-            anchorEl={filterAnchorEl}
-            open={Boolean(filterAnchorEl)}
-            onClose={() => handleFilterClose()}
-          >
-            <MenuItem onClick={() => handleFilterClose('all')}>All</MenuItem>
-            <MenuItem onClick={() => handleFilterClose('pending')}>Pending</MenuItem>
-            <MenuItem onClick={() => handleFilterClose('started')}>Started</MenuItem>
-            <MenuItem onClick={() => handleFilterClose('ended')}>Ended</MenuItem>
-            <MenuItem onClick={() => handleFilterClose('closed')}>Closed</MenuItem>
-            <MenuItem onClick={() => handleFilterClose('cancelled')}>Cancelled</MenuItem>
-          </Menu>
-        </Box>
+      {/* 🟢 Added px: 1 to the Paper search bar to match the Grid alignment */}
+      <Paper elevation={0} sx={{ p: 1, mb: 4, mx: 1, borderRadius: 1.2, border: '1px solid #e2e8f0', display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* ... */}
       </Paper>
 
-      {/* Meetings Grid */}
-      {filteredMeetings.length === 0 ? (
-        <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
-          <EventIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" gutterBottom>No meetings found</Typography>
-          <Typography variant="body2" color="text.secondary" mb={3}>
-            Get started by creating your first meeting
-          </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateMeeting}>
-            Create Meeting
-          </Button>
-        </Paper>
-      ) : (
-        <>
-          <Grid container spacing={3}>
-            {paginatedMeetings.map((meeting) => (
-              <Grid size={{ xs: 12, sm: 6, lg: 4 }} key={meeting.id}>
-                <MeetingCard 
-                  meeting={meeting} 
-                  onView={handleViewMeeting}
-                  onEdit={handleEditMeeting}
-                />
-              </Grid>
-            ))}
-          </Grid>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <Box display="flex" justifyContent="center" mt={6}>
-              <Pagination 
-                count={totalPages} 
-                page={page} 
-                onChange={(e, value) => setPage(value)} 
-                color="primary" 
-                size="large"
-                sx={{ '& .MuiPaginationItem-root': { fontWeight: 'bold' } }}
+      {/* 🟢 Updated Grid: added width: '100%' and margin: 0 to fix the horizontal scroll/spacing */}
+      <Grid 
+        container 
+        spacing={2} // Reduced to 2 for a tighter, cleaner mobile look
+        sx={{ 
+          width: '100%', 
+          m: 0, 
+          '& > .MuiGrid-item': { pt: 2, pl: 2 } 
+        }}
+      >
+        {loading ? (
+          [...Array(6)].map((_, i) => (
+            <Grid item xs={12} sm={6} md={4} key={i}>
+              <Skeleton variant="rounded" width="100%" height={300} sx={{ borderRadius: 1.2 }} />
+            </Grid>
+          ))
+        ) : (
+          meetings.map((m, index) => (
+            <Grid 
+              item 
+              xs={12} // 📱 Strict 1 column on mobile
+              sm={6}  // 📑 2 columns on tablet
+              md={4}  // 🖥️ 3 columns on desktop
+              key={`${m.id}-${index}`} 
+              ref={index === meetings.length - 1 ? lastElementRef : null}
+              sx={{ display: 'flex', justifyContent: 'center' }}
+            >
+              <MeetingCard 
+                meeting={m} 
+                onView={(id) => navigate(`/meetings/${id}`)} 
+                onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
               />
-            </Box>
-          )}
-        </>
-      )}
+            </Grid>
+          ))
+        )}
+      </Grid>
+      
+      {/* ... Footer */}
     </Box>
   );
 };

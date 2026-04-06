@@ -41,8 +41,8 @@ app_state = AppState()
 
 def get_frontend_path() -> Optional[Path]:
     candidates = [
-        Path(__file__).parent.parent.parent / "frontend" / "rms" / "dist",
-        Path.cwd() / "frontend" / "rms" / "dist",
+        Path(__file__).parent.parent.parent / "frontend" / "dist",
+        Path.cwd() / "frontend" / "dist",
         Path("/home/chris/Chr/Apps/ECATMIS/frontend/dist"),
     ]
     frontend_path_env = os.getenv("FRONTEND_DIST_PATH")

@@ -33,8 +33,13 @@ class ParticipantUpdate(ORMBase):
 
 class ParticipantResponse(ParticipantBase):
     id: UUID
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
+    is_active: bool = True
 
 
 # ==================== Participant List Schemas ====================
@@ -55,9 +60,13 @@ class ParticipantListUpdate(ORMBase):
 
 class ParticipantListResponse(ParticipantListBase):
     id: UUID
-    created_by_id: UUID
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
+    is_active: bool = True
     participants: List[ParticipantResponse] = Field(default_factory=list)
     participant_count: int = 0
 
@@ -71,14 +80,30 @@ class MeetingParticipantBase(ORMBase):
     title: Optional[str] = None
     organization: Optional[str] = None
     is_chairperson: bool = False
+    attendance_status: Optional[str] = Field("pending", description="attended, missed, pending, excused")
 
 class MeetingParticipantCreate(MeetingParticipantBase):
     pass
 
+class MeetingParticipantUpdate(ORMBase):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    telephone: Optional[str] = None
+    title: Optional[str] = None
+    organization: Optional[str] = None
+    is_chairperson: Optional[bool] = None
+    attendance_status: Optional[str] = None
+
 class MeetingParticipantResponse(MeetingParticipantBase):
     id: UUID
     meeting_id: UUID
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    is_active: bool = True
 
 
 # ==================== Attribute Response Schema ====================
@@ -174,7 +199,6 @@ class MeetingUpdate(ORMBase):
     status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
 
 
-
 # ==================== Meeting Responses ====================
 
 class MeetingCreateResponse(ORMBase):
@@ -191,8 +215,12 @@ class MeetingCreateResponse(ORMBase):
     chairperson_name: Optional[str] = None
     status_id: Optional[UUID] = None
     created_by_id: UUID
+    created_by_name: Optional[str] = None
     created_at: datetime
-    is_active: bool
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    is_active: bool = True
     message: str = "Meeting created successfully"
 
 
@@ -210,11 +238,14 @@ class MeetingListResponse(ORMBase):
     facilitator: Optional[str] = None
     chairperson_name: Optional[str] = None
     status_id: Optional[UUID] = None
-    status: Optional[AttributeResponse] = None  # ← add this
+    status: Optional[AttributeResponse] = None
     created_by_id: UUID
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
-    is_active: bool
+    is_active: bool = True
     location_name: Optional[str] = None
     participants_count: int = 0
     minutes_count: int = 0
@@ -229,9 +260,12 @@ class MeetingResponse(MeetingBase):
     """
     id: UUID
     created_by_id: UUID
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
-    is_active: bool
+    is_active: bool = True
 
     status_comment: Optional[str] = None
     status_date: Optional[datetime] = None
@@ -239,7 +273,7 @@ class MeetingResponse(MeetingBase):
     # Flattened from the ORM relationship
     status_name: Optional[str] = None
     location_name: Optional[str] = None
-    status: Optional[AttributeResponse] = None  # This is now Optional[AttributeResponse]
+    status: Optional[AttributeResponse] = None
 
     participants: List[MeetingParticipantResponse] = Field(default_factory=list)
     minutes: List['MeetingMinutesResponse'] = Field(default_factory=list)
@@ -305,8 +339,13 @@ class MeetingMinutesResponse(MeetingMinutesBase):
     timestamp: datetime
     recorded_by_id: Optional[UUID] = None
     recorded_by_name: Optional[str] = None
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
+    is_active: bool = True
     actions: List['MeetingActionResponse'] = Field(default_factory=list)
 
 
@@ -322,7 +361,9 @@ class MeetingActionBase(ORMBase):
     remarks: Optional[str] = None
 
 class MeetingActionCreate(MeetingActionBase):
-    pass
+    """Schema for creating an action"""
+    assigned_to_id: Optional[UUID] = None
+    assigned_to_name: Optional[str] = Field(None, max_length=255)  # Add this explicitly
 
 class MeetingActionUpdate(ORMBase):
     description: Optional[str] = None
@@ -347,8 +388,13 @@ class MeetingActionResponse(MeetingActionBase):
     overall_status_name: Optional[str] = None
     overall_progress_percentage: int = 0
     actual_hours: Optional[float] = None
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
+    is_active: bool = True
 
 
 # ==================== Action Status History Schemas ====================
@@ -364,10 +410,14 @@ class ActionStatusHistoryCreate(ActionStatusHistoryBase):
 class ActionStatusHistoryResponse(ActionStatusHistoryBase):
     id: UUID
     action_id: UUID
-    updated_by_id: UUID
-    updated_by_name: Optional[str] = None
-    individual_status_name: Optional[str] = None
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    individual_status_name: Optional[str] = None
+    is_active: bool = True
 
 
 # ==================== Action Progress Update Schema ====================
@@ -387,12 +437,21 @@ class ActionCommentBase(ORMBase):
 class ActionCommentCreate(ActionCommentBase):
     pass
 
+class ActionCommentUpdate(ORMBase):
+    comment: Optional[str] = None
+    attachment_url: Optional[str] = None
+    is_active: Optional[bool] = None
+
 class ActionCommentResponse(ActionCommentBase):
     id: UUID
     action_id: UUID
-    created_by_id: UUID
+    created_by_id: Optional[UUID] = None
     created_by_name: Optional[str] = None
     created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    is_active: bool = True
 
 
 # ==================== Meeting Document Schemas ====================
@@ -418,10 +477,37 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     mime_type: Optional[str] = None
     version: int = 1
     document_type_name: Optional[str] = None
-    uploaded_by_id: UUID
+    uploaded_by_id: Optional[UUID] = None
     uploaded_by_name: Optional[str] = None
     uploaded_at: datetime
-    is_active: bool
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    is_active: bool = True
+
+
+# ==================== Meeting Status History Schemas ====================
+
+class MeetingStatusHistoryResponse(ORMBase):
+    """Response schema for meeting status history"""
+    id: UUID
+    meeting_id: UUID
+    status_id: Optional[UUID] = None
+    status_name: Optional[str] = None
+    status_code: Optional[str] = None
+    status_shortname: Optional[str] = None
+    comment: Optional[str] = None
+    status_date: datetime
+    created_by_id: Optional[UUID] = None
+    created_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_by_id: Optional[UUID] = None
+    updated_by_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    is_active: bool = True
 
 
 # ==================== Dashboard Summary Schemas ====================
@@ -463,6 +549,8 @@ class MyTaskResponse(ORMBase):
     is_overdue: bool = False
 
 
-# Resolve forward references
+# ==================== Resolve Forward References ====================
+
 MeetingMinutesResponse.model_rebuild()
 MeetingResponse.model_rebuild()
+MeetingStatusHistoryResponse.model_rebuild()

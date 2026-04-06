@@ -1,0 +1,285 @@
+import React, { useState } from 'react';
+import { 
+  Card, CardContent, Typography, Box, Button, 
+  Stack, Chip, Divider, IconButton, Tooltip,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Collapse, LinearProgress, Alert
+} from '@mui/material';
+import { 
+  Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, 
+  Person as PersonIcon, Schedule as ScheduleIcon 
+} from '@mui/icons-material';
+import api from '../../../../services/api';
+
+const MinutesAndActions = ({ minutes, meetingId, onUpdate }) => {
+  const [openDialog, setOpenDialog] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [formData, setFormData] = useState({ topic: '', discussion: '', decisions: '' });
+  const [expandedDiscussions, setExpandedDiscussions] = useState({});
+  const [expandedDecisions, setExpandedDecisions] = useState({});
+
+  const toggleDiscussion = (id) => {
+    setExpandedDiscussions(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleDecisions = (id) => {
+    setExpandedDecisions(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleOpen = (item = null) => {
+    if (item) {
+      setEditingItem(item);
+      setFormData({ 
+        topic: item.topic, 
+        discussion: item.discussion || '', 
+        decisions: item.decisions || '' 
+      });
+    } else {
+      setEditingItem(null);
+      setFormData({ topic: '', discussion: '', decisions: '' });
+    }
+    setOpenDialog(true);
+  };
+
+  const handleSave = async () => {
+    if (!formData.topic.trim()) {
+      setError("Topic is required");
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = {
+        topic: formData.topic.trim(),
+        discussion: formData.discussion || '',
+        decisions: formData.decisions || ''
+      };
+      
+      if (editingItem) {
+        await api.put(`/action-tracker/minutes/${editingItem.id}`, payload);
+      } else {
+        await api.post(`/action-tracker/meetings/${meetingId}/minutes`, payload);
+      }
+      onUpdate();
+      setOpenDialog(false);
+      setFormData({ topic: '', discussion: '', decisions: '' });
+    } catch (err) {
+      console.error("Save failed", err);
+      const errorMessage = err.response?.data?.detail || err.message || "Failed to save minutes. Please try again.";
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete these minutes? This will also delete all associated actions.")) return;
+    setLoading(true);
+    try {
+      await api.delete(`/action-tracker/minutes/${id}`);
+      onUpdate();
+    } catch (err) { 
+      console.error(err);
+      setError("Failed to delete minutes");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Box display="flex" justifyContent="flex-end" mb={2}>
+        <Button 
+          variant="contained" 
+          startIcon={<AddIcon />} 
+          onClick={() => handleOpen()}
+          disabled={loading}
+        >
+          Add Minutes
+        </Button>
+      </Box>
+
+      {minutes?.length === 0 ? (
+        <Alert severity="info">No minutes recorded for this meeting yet. Click "Add Minutes" to get started.</Alert>
+      ) : (
+        minutes?.map((m) => {
+          const isDiscussionExpanded = expandedDiscussions[m.id] || false;
+          const isDecisionsExpanded = expandedDecisions[m.id] || false;
+          const hasDiscussion = m.discussion && m.discussion.trim() !== '';
+          const hasDecisions = m.decisions && m.decisions.trim() !== '';
+
+          return (
+            <Card key={m.id} variant="outlined" sx={{ mb: 3, borderRadius: 2, boxShadow: 1 }}>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+                  <Typography variant="h6" color="primary" fontWeight={600}>
+                    {m.topic}
+                  </Typography>
+                  <Stack direction="row" spacing={1}>
+                    <Tooltip title="Edit">
+                      <IconButton size="small" onClick={() => handleOpen(m)} disabled={loading}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete">
+                      <IconButton size="small" color="error" onClick={() => handleDelete(m.id)} disabled={loading}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                </Box>
+
+                <Divider sx={{ my: 1.5 }} />
+
+                <Stack direction="row" spacing={1} flexWrap="wrap" mb={2}>
+                  <Chip 
+                    icon={<PersonIcon />} 
+                    label={`Recorded by: ${m.recorded_by_name || m.created_by_name || 'System'}`} 
+                    size="small" 
+                    variant="outlined"
+                  />
+                  <Chip 
+                    icon={<ScheduleIcon />} 
+                    label={`Created: ${new Date(m.created_at).toLocaleString()}`} 
+                    size="small" 
+                    variant="outlined"
+                  />
+                  {m.updated_at && m.updated_at !== m.created_at && (
+                    <Chip 
+                      label={`Updated: ${new Date(m.updated_at).toLocaleString()}`} 
+                      size="small" 
+                      variant="outlined"
+                      color="secondary"
+                    />
+                  )}
+                </Stack>
+
+                {/* Discussion Section */}
+                {hasDiscussion && (
+                  <>
+                    <Typography 
+                      variant="subtitle2" 
+                      onClick={() => toggleDiscussion(m.id)} 
+                      sx={{ 
+                        cursor: 'pointer', 
+                        color: 'primary.main', 
+                        mt: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        '&:hover': { textDecoration: 'underline' }
+                      }}
+                    >
+                      {isDiscussionExpanded ? '▼' : '▶'} Discussion
+                    </Typography>
+                    <Collapse in={isDiscussionExpanded}>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ mt: 1, pl: 2, whiteSpace: 'pre-wrap' }}
+                      >
+                        {m.discussion}
+                      </Typography>
+                    </Collapse>
+                  </>
+                )}
+
+                {/* Decisions Section */}
+                {hasDecisions && (
+                  <>
+                    <Typography 
+                      variant="subtitle2" 
+                      onClick={() => toggleDecisions(m.id)} 
+                      sx={{ 
+                        cursor: 'pointer', 
+                        color: 'success.main', 
+                        mt: 2,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        '&:hover': { textDecoration: 'underline' }
+                      }}
+                    >
+                      {isDecisionsExpanded ? '▼' : '▶'} Decisions
+                    </Typography>
+                    <Collapse in={isDecisionsExpanded}>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ mt: 1, pl: 2, whiteSpace: 'pre-wrap' }}
+                      >
+                        {m.decisions}
+                      </Typography>
+                    </Collapse>
+                  </>
+                )}
+
+                {/* Show message if no content */}
+                {!hasDiscussion && !hasDecisions && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
+                    No discussion or decisions recorded.
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })
+      )}
+
+      {/* Add/Edit Dialog */}
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} fullWidth maxWidth="md">
+        <DialogTitle>{editingItem ? 'Edit Minutes' : 'Add Minutes'}</DialogTitle>
+        {loading && <LinearProgress />}
+        <DialogContent>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2, mt: 1 }} onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField 
+              label="Topic" 
+              fullWidth 
+              required
+              value={formData.topic} 
+              onChange={(e) => setFormData({...formData, topic: e.target.value})} 
+              error={!formData.topic && error}
+              helperText={!formData.topic && error ? "Topic is required" : ""}
+            />
+            <TextField
+              fullWidth
+              label="Discussion"
+              multiline
+              rows={6}
+              value={formData.discussion}
+              onChange={(e) => setFormData({...formData, discussion: e.target.value})}
+              placeholder="Enter discussion points..."
+            />
+            <TextField
+              fullWidth
+              label="Decisions Made"
+              multiline
+              rows={4}
+              value={formData.decisions}
+              onChange={(e) => setFormData({...formData, decisions: e.target.value})}
+              placeholder="Enter decisions made..."
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setOpenDialog(false)} disabled={loading}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSave} 
+            disabled={loading || !formData.topic.trim()}
+          >
+            {editingItem ? 'Update' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+export default MinutesAndActions;

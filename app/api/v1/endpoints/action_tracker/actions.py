@@ -6,13 +6,14 @@ from datetime import datetime
 
 from app.api import deps
 from app.models.user import User
-from app.crud.action_tracker import meeting_action, meeting_minutes, meeting
+from app.crud.action_tracker import meeting_action, meeting_minutes
 from app.schemas.action_tracker import (
     MeetingActionCreate, MeetingActionUpdate, MeetingActionResponse,
-    ActionProgressUpdate, MeetingMinutesCreate, MeetingMinutesUpdate, 
-    MeetingMinutesResponse, MyTaskResponse
+    ActionProgressUpdate, ActionCommentCreate, ActionCommentResponse,
+    ActionStatusHistoryResponse, MyTaskResponse
 )
 
+# This is CRITICAL - you need to define the router
 router = APIRouter()
 
 # ==================== STATIC ROUTES ====================
@@ -23,24 +24,13 @@ async def get_my_tasks(
 ):
     """Get actions assigned to current user"""
     actions = await meeting_action.get_actions_assigned_to_user(db, current_user.id)
-    
     result = []
     for action in actions:
-        # Get meeting info through minutes -> meeting
-        meeting_title = ""
-        meeting_date = datetime.now()
-        
-        # Load minutes relationship if needed
-        minutes = await meeting_minutes.get(db, action.minute_id)
-        if minutes and minutes.meeting:
-            meeting_title = minutes.meeting.title
-            meeting_date = minutes.meeting.meeting_date
-        
         result.append(MyTaskResponse(
             id=action.id,
             description=action.description,
-            meeting_title=meeting_title,
-            meeting_date=meeting_date,
+            meeting_title=action.minutes.meeting.title if action.minutes and action.minutes.meeting else "",
+            meeting_date=action.minutes.meeting.meeting_date if action.minutes and action.minutes.meeting else datetime.now(),
             due_date=action.due_date,
             overall_progress_percentage=action.overall_progress_percentage,
             overall_status_name=action.overall_status_name,
@@ -60,6 +50,8 @@ async def get_actions(
     """Get all actions with pagination"""
     return await meeting_action.get_multi(db, skip=skip, limit=limit)
 
+# ==================== CREATE ACTION FROM MINUTES ====================
+# Note: This endpoint will be available at /actions/minutes/{minute_id}/actions
 @router.post("/minutes/{minute_id}/actions", response_model=MeetingActionResponse, status_code=status.HTTP_201_CREATED)
 async def create_action(
     minute_id: UUID,
@@ -74,7 +66,7 @@ async def create_action(
     return await meeting_action.create_action(db, minute_id, action_in, current_user.id)
 
 # ==================== DYNAMIC ROUTES ====================
-@router.get("/actions/{action_id}", response_model=MeetingActionResponse)
+@router.get("/{action_id}", response_model=MeetingActionResponse)
 async def get_action(
     action_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -86,7 +78,7 @@ async def get_action(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
     return result
 
-@router.put("/actions/{action_id}", response_model=MeetingActionResponse)
+@router.put("/{action_id}", response_model=MeetingActionResponse)
 async def update_action(
     action_id: UUID,
     action_in: MeetingActionUpdate,
@@ -94,12 +86,12 @@ async def update_action(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Update action item"""
-    result = await meeting_action.update(db, action_id, action_in)
+    result = await meeting_action.get(db, action_id)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
-    return result
+    return await meeting_action.update(db, action_id, action_in)
 
-@router.post("/actions/{action_id}/progress", response_model=MeetingActionResponse)
+@router.post("/{action_id}/progress", response_model=MeetingActionResponse)
 async def update_action_progress(
     action_id: UUID,
     progress_update: ActionProgressUpdate,
@@ -110,8 +102,6 @@ async def update_action_progress(
     action_obj = await meeting_action.get(db, action_id)
     if not action_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
-    
-    # Check permissions
     if action_obj.assigned_to_id and action_obj.assigned_to_id != current_user.id:
         is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
         if not is_admin:
@@ -119,80 +109,55 @@ async def update_action_progress(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the assigned user or admin can update progress"
             )
-    
-    result = await meeting_action.update_progress(db, action_id, progress_update, current_user.id)
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
-    return result
+    return await meeting_action.update_progress(db, action_id, progress_update, current_user.id)
 
-@router.delete("/actions/{action_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{action_id}/comments", response_model=ActionCommentResponse, status_code=status.HTTP_201_CREATED)
+async def add_action_comment(
+    action_id: UUID,
+    comment_in: ActionCommentCreate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Add a comment to an action item"""
+    action_obj = await meeting_action.get(db, action_id)
+    if not action_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
+    return await meeting_action.add_comment(db, action_id, comment_in, current_user.id)
+
+@router.get("/{action_id}/comments", response_model=List[ActionCommentResponse])
+async def get_action_comments(
+    action_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Get all comments for an action"""
+    action_obj = await meeting_action.get(db, action_id)
+    if not action_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
+    return await meeting_action.get_comments(db, action_id, skip, limit)
+
+@router.get("/{action_id}/history", response_model=List[ActionStatusHistoryResponse])
+async def get_action_history(
+    action_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get status change history for an action"""
+    action_obj = await meeting_action.get(db, action_id)
+    if not action_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
+    return await meeting_action.get_status_history(db, action_id)
+
+@router.delete("/{action_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_action(
     action_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
     """Delete an action item"""
-    deleted = await meeting_action.remove(db, action_id)
-    if not deleted:
+    action_obj = await meeting_action.get(db, action_id)
+    if not action_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
-
-# ==================== Minutes Routes ====================
-@router.post("/meetings/{meeting_id}/minutes", response_model=MeetingMinutesResponse, status_code=status.HTTP_201_CREATED)
-async def add_meeting_minutes(
-    meeting_id: UUID,
-    minutes_in: MeetingMinutesCreate,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Add minutes to a meeting"""
-    meeting_obj = await meeting.get(db, meeting_id)
-    if not meeting_obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    return await meeting_minutes.create(db, meeting_id, minutes_in.model_dump(), current_user.id)
-
-@router.get("/meetings/{meeting_id}/minutes", response_model=List[MeetingMinutesResponse])
-async def get_meeting_minutes(
-    meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-):
-    """Get all minutes for a meeting"""
-    return await meeting_minutes.get_meeting_minutes(db, meeting_id, skip, limit)
-
-@router.get("/minutes/{minute_id}", response_model=MeetingMinutesResponse)
-async def get_minutes(
-    minute_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Get minutes by ID"""
-    result = await meeting_minutes.get(db, minute_id)
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Minutes not found")
-    return result
-
-@router.put("/minutes/{minute_id}", response_model=MeetingMinutesResponse)
-async def update_minutes(
-    minute_id: UUID,
-    minutes_in: MeetingMinutesUpdate,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Update minutes"""
-    result = await meeting_minutes.update(db, minute_id, minutes_in.model_dump(exclude_unset=True))
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Minutes not found")
-    return result
-
-@router.delete("/minutes/{minute_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_minutes(
-    minute_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Delete minutes"""
-    deleted = await meeting_minutes.remove(db, minute_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Minutes not found")
+    await meeting_action.remove(db, action_id)

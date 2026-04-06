@@ -3,6 +3,9 @@ Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
 
+import datetime
+from typing import Optional
+
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -10,7 +13,7 @@ from app.db.base import Base
 from app.db.types import UUID as CustomUUID
 from uuid import uuid4
 
-# ==================== Association Tables (No Foreign Key issues) ====================
+# ==================== Association Tables ====================
 
 participant_list_members = Table(
     'participant_list_members',
@@ -18,11 +21,13 @@ participant_list_members = Table(
     Column('participant_list_id', CustomUUID, ForeignKey('participant_lists.id', ondelete='CASCADE'), primary_key=True),
     Column('participant_id', CustomUUID, ForeignKey('participants.id', ondelete='CASCADE'), primary_key=True),
     Column('added_at', DateTime(timezone=True), server_default=func.now()),
+    Column('added_by_id', CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
     Index('ix_plm_list_id', 'participant_list_id'),
-    Index('ix_plm_participant_id', 'participant_id')
+    Index('ix_plm_participant_id', 'participant_id'),
+    Index('ix_plm_added_by', 'added_by_id')
 )
 
-# ==================== Main Models (Ordered by dependencies) ====================
+# ==================== Main Models ====================
 
 class Participant(Base):
     """Independent - no foreign keys to other action tracker tables"""
@@ -30,6 +35,8 @@ class Participant(Base):
     __table_args__ = (
         Index('ix_participants_name', 'name'),
         Index('ix_participants_email', 'email'),
+        Index('ix_participants_created_by', 'created_by_id'),
+        Index('ix_participants_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -40,35 +47,60 @@ class Participant(Base):
     organization = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     
-    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
-    created_by = relationship("User", foreign_keys=[created_by_id])
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     participant_lists = relationship("ParticipantList", secondary=participant_list_members, back_populates="participants")
 
-
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
+    
 class ParticipantList(Base):
     """Depends on Participant and User"""
     __tablename__ = "participant_lists"
     __table_args__ = (
         Index('ix_participant_lists_name', 'name'),
         Index('ix_participant_lists_created_by', 'created_by_id'),
+        Index('ix_participant_lists_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    is_global = Column(Boolean, default=False)
+    is_global = Column(Boolean, default=False, nullable=False)
     
-    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
-    created_by = relationship("User", foreign_keys=[created_by_id])
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     participants = relationship("Participant", secondary=participant_list_members, back_populates="participant_lists")
 
-
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
+    
 class Meeting(Base):
     """Depends on Location, User, Attribute"""
     __tablename__ = "meetings"
@@ -77,6 +109,7 @@ class Meeting(Base):
         Index('ix_meetings_meeting_date', 'meeting_date'),
         Index('ix_meetings_status_id', 'status_id'),
         Index('ix_meetings_created_by', 'created_by_id'),
+        Index('ix_meetings_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -95,21 +128,55 @@ class Meeting(Base):
     facilitator = Column(String(255), nullable=True)
     chairperson_name = Column(String(255), nullable=True)
     
-    # Foreign key to attributes table
     status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     
-
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
-    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    is_active = Column(Boolean, default=True)
+    # Relationships with explicit join conditions and eager loading defaults
+    location = relationship("Location", lazy="selectin")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    status = relationship("Attribute", foreign_keys=[status_id], lazy="selectin")
     
-    # Relationships
-    location = relationship("Location")
-    created_by = relationship("User", foreign_keys=[created_by_id])
+    # One-to-many relationships with cascade delete
+    participants = relationship(
+        "MeetingParticipant", 
+        back_populates="meeting", 
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    minutes = relationship(
+        "MeetingMinutes", 
+        back_populates="meeting", 
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    documents = relationship(
+        "MeetingDocument", 
+        back_populates="meeting", 
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    status_history = relationship(
+        "MeetingStatusHistory", 
+        back_populates="meeting", 
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="MeetingStatusHistory.status_date.desc()"
+    )
 
-    status = relationship("Attribute", foreign_keys=[status_id])  # Add this line
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
 
 
 class MeetingParticipant(Base):
@@ -118,6 +185,9 @@ class MeetingParticipant(Base):
     __table_args__ = (
         Index('ix_mp_meeting_id', 'meeting_id'),
         Index('ix_mp_name', 'name'),
+        Index('ix_mp_attendance_status', 'attendance_status'),
+        Index('ix_mp_created_by', 'created_by_id'),
+        Index('ix_mp_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -128,42 +198,68 @@ class MeetingParticipant(Base):
     telephone = Column(String(50), nullable=True)
     title = Column(String(255), nullable=True)
     organization = Column(String(255), nullable=True)
-    is_chairperson = Column(Boolean, default=False)
+    is_chairperson = Column(Boolean, default=False, nullable=False)
+    attendance_status = Column(String(50), nullable=True, default='pending')  # attended, missed, pending, excused
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
+    # Relationships
     meeting = relationship("Meeting", back_populates="participants")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
 
 
 class MeetingStatusHistory(Base):
-    """
-    Tracks the lifecycle of a meeting.
-    Captures Status changes, Comments, and the date of the status change.
-    """
+    """Tracks the lifecycle of a meeting"""
     __tablename__ = "meeting_status_history"
     __table_args__ = (
         Index('ix_msh_meeting_id', 'meeting_id'),
         Index('ix_msh_status_id', 'status_id'),
         Index('ix_msh_status_date', 'status_date'),
+        Index('ix_msh_created_by', 'created_by_id'),
+        Index('ix_msh_updated_by', 'updated_by_id'),
     )
 
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     meeting_id = Column(CustomUUID, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False)
     
-    # Reference to the Attribute table for the status (same as meeting.status_id)
     status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
-    
-    # Captures the "Comment" and "statusDate" as requested
     comment = Column(Text, nullable=True)
-    status_date = Column(DateTime(timezone=True), server_default=func.now())
+    status_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    # Who performed the status update
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
 
     # Relationships
     meeting = relationship("Meeting", back_populates="status_history")
-    status = relationship("Attribute", foreign_keys=[status_id])
-    updated_by = relationship("User", foreign_keys=[updated_by_id])
+    status = relationship("Attribute", foreign_keys=[status_id], lazy="selectin")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
 
 class MeetingMinutes(Base):
     """Depends on Meeting and User"""
@@ -171,6 +267,8 @@ class MeetingMinutes(Base):
     __table_args__ = (
         Index('ix_mm_meeting_id', 'meeting_id'),
         Index('ix_mm_timestamp', 'timestamp'),
+        Index('ix_mm_created_by', 'created_by_id'),
+        Index('ix_mm_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -179,25 +277,55 @@ class MeetingMinutes(Base):
     topic = Column(String(500), nullable=False)
     discussion = Column(Text, nullable=True)
     decisions = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    recorded_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Who recorded/took the minutes (this is the missing relationship!)
+    recorded_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Relationships
     meeting = relationship("Meeting", back_populates="minutes")
-    recorded_by = relationship("User", foreign_keys=[recorded_by_id])
-
-
+    recorded_by = relationship("User", foreign_keys=[recorded_by_id], lazy="selectin")  # ADD THIS!
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    
+    # One-to-many with cascade and eager loading
+    actions = relationship(
+        "MeetingAction", 
+        back_populates="minutes", 
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()"
+    )
+    @property
+    def recorded_by_name(self) -> Optional[str]:
+        return self.recorded_by.username if self.recorded_by else None
+    
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
 class MeetingAction(Base):
     """Depends on MeetingMinutes, User, Attribute"""
     __tablename__ = "meeting_actions"
     __table_args__ = (
         Index('ix_ma_minute_id', 'minute_id'),
         Index('ix_ma_assigned_to', 'assigned_to_id'),
+        Index('ix_ma_assigned_by', 'assigned_by_id'),
         Index('ix_ma_due_date', 'due_date'),
         Index('ix_ma_priority', 'priority'),
         Index('ix_ma_overall_status_id', 'overall_status_id'),
+        Index('ix_ma_created_by', 'created_by_id'),
+        Index('ix_ma_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -206,41 +334,259 @@ class MeetingAction(Base):
     description = Column(Text, nullable=False)
     
     assigned_to_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    assigned_to_name = Column(String(255), nullable=True)
+    assigned_to_name = Column(String(255), nullable=True)  # This is a column for denormalized data
     assigned_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     due_date = Column(DateTime(timezone=True), nullable=True)
     start_date = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
-    # FIXED: Foreign key to attributes table (not attributes)
     overall_status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
-    overall_progress_percentage = Column(Integer, default=0)
+    overall_progress_percentage = Column(Integer, default=0, nullable=False)
     
-    priority = Column(Integer, default=2)
+    priority = Column(Integer, default=2, nullable=False)
     
     estimated_hours = Column(Float, nullable=True)
     actual_hours = Column(Float, nullable=True)
     
     remarks = Column(Text, nullable=True)
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
-    # Relationships
+    # Relationships with eager loading defaults
     minutes = relationship("MeetingMinutes", back_populates="actions")
-    assigned_to = relationship("User", foreign_keys=[assigned_to_id])
-    assigned_by = relationship("User", foreign_keys=[assigned_by_id])
-    overall_status = relationship("Attribute", foreign_keys=[overall_status_id])  # FIXED: Attribute not AttributeValue
+    assigned_to = relationship("User", foreign_keys=[assigned_to_id], lazy="selectin")
+    assigned_by = relationship("User", foreign_keys=[assigned_by_id], lazy="selectin")
+    overall_status = relationship("Attribute", foreign_keys=[overall_status_id], lazy="selectin")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    
+    # One-to-many with cascade and eager loading
+    status_history = relationship(
+        "ActionStatusHistory", 
+        back_populates="action", 
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ActionStatusHistory.created_at.desc()"
+    )
+    comments = relationship(
+        "ActionComment", 
+        back_populates="action", 
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ActionComment.created_at.desc()"
+    )
 
-
+    # ==================== PROPERTIES FOR DISPLAY ====================
+    
+    @property
+    def created_by_name(self) -> Optional[str]:
+        """Get creator's username from relationship"""
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        """Get last updater's username from relationship"""
+        return self.updated_by.username if self.updated_by else None
+    
+    @property
+    def assigned_to_display_name(self) -> Optional[str]:
+        """
+        Get assigned-to user's display name.
+        Prefers relationship, falls back to denormalized column.
+        Use this for display purposes.
+        """
+        if self.assigned_to:
+            return self.assigned_to.username
+        return self.assigned_to_name  # Use the column value as fallback
+    
+    @property
+    def assigned_by_name(self) -> Optional[str]:
+        """Get assigned-by user's username from relationship"""
+        return self.assigned_by.username if self.assigned_by else None
+    
+    @property
+    def overall_status_name(self) -> Optional[str]:
+        """Get overall status name from relationship"""
+        return self.overall_status.name if self.overall_status else None
+    
+    @property
+    def overall_status_code(self) -> Optional[str]:
+        """Get overall status code from relationship"""
+        return self.overall_status.code if self.overall_status else None
+    
+    @property
+    def overall_status_color(self) -> Optional[str]:
+        """Get overall status color from relationship metadata"""
+        if self.overall_status and self.overall_status.extra_metadata:
+            return self.overall_status.extra_metadata.get('color')
+        return None
+    
+    @property
+    def is_overdue(self) -> bool:
+        """Check if action is overdue (not completed and due date passed)"""
+        if self.completed_at:
+            return False
+        if not self.due_date:
+            return False
+        return self.due_date < datetime.now()
+    
+    @property
+    def progress_status(self) -> str:
+        """Get progress status based on percentage"""
+        if self.completed_at:
+            return "completed"
+        if self.overall_progress_percentage >= 100:
+            return "completed"
+        if self.overall_progress_percentage > 0:
+            return "in_progress"
+        return "not_started"
+    
+    @property
+    def priority_label(self) -> str:
+        """Get human-readable priority label"""
+        priority_map = {
+            1: "High",
+            2: "Medium", 
+            3: "Low",
+            4: "Very Low"
+        }
+        return priority_map.get(self.priority, "Medium")
+    
+    @property
+    def priority_color(self) -> str:
+        """Get color for priority badge"""
+        color_map = {
+            1: "error",
+            2: "warning",
+            3: "info",
+            4: "default"
+        }
+        return color_map.get(self.priority, "default")
+    
+    @property
+    def time_estimate_display(self) -> str:
+        """Get formatted time estimate"""
+        if self.estimated_hours:
+            if self.estimated_hours < 1:
+                return f"{int(self.estimated_hours * 60)} minutes"
+            return f"{self.estimated_hours:.1f} hours"
+        return "Not estimated"
+    
+    @property
+    def actual_time_display(self) -> str:
+        """Get formatted actual time"""
+        if self.actual_hours:
+            if self.actual_hours < 1:
+                return f"{int(self.actual_hours * 60)} minutes"
+            return f"{self.actual_hours:.1f} hours"
+        return "Not logged"
+    
+    @property
+    def time_variance(self) -> Optional[float]:
+        """Calculate time variance (actual - estimated)"""
+        if self.estimated_hours and self.actual_hours:
+            return self.actual_hours - self.estimated_hours
+        return None
+    
+    @property
+    def time_variance_display(self) -> str:
+        """Get formatted time variance"""
+        variance = self.time_variance
+        if variance is None:
+            return "N/A"
+        if variance > 0:
+            return f"+{variance:.1f} hours"
+        elif variance < 0:
+            return f"{variance:.1f} hours"
+        return "On track"
+    
+    # ==================== HELPER METHODS ====================
+    
+    def update_progress(self, new_percentage: int, status_id: Optional[CustomUUID] = None) -> None:
+        """Update progress percentage and auto-set completion if applicable"""
+        self.overall_progress_percentage = min(max(new_percentage, 0), 100)
+        
+        if self.overall_progress_percentage >= 100 and not self.completed_at:
+            self.completed_at = datetime.now()
+        elif self.overall_progress_percentage < 100 and self.completed_at:
+            self.completed_at = None
+        
+        if self.overall_progress_percentage > 0 and not self.start_date:
+            self.start_date = datetime.now()
+        
+        if status_id:
+            self.overall_status_id = status_id
+    
+    def mark_completed(self) -> None:
+        """Mark action as completed"""
+        self.overall_progress_percentage = 100
+        self.completed_at = datetime.now()
+        if not self.start_date:
+            self.start_date = datetime.now()
+    
+    def reopen(self) -> None:
+        """Reopen a completed action"""
+        self.completed_at = None
+        self.overall_progress_percentage = 0
+    
+    def to_dict(self, include_relationships: bool = False) -> dict:
+        """Convert to dictionary for serialization"""
+        result = {
+            "id": str(self.id),
+            "minute_id": str(self.minute_id),
+            "description": self.description,
+            "assigned_to_id": str(self.assigned_to_id) if self.assigned_to_id else None,
+            "assigned_to_name": self.assigned_to_name,
+            "assigned_by_id": str(self.assigned_by_id) if self.assigned_by_id else None,
+            "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "overall_status_id": str(self.overall_status_id) if self.overall_status_id else None,
+            "overall_progress_percentage": self.overall_progress_percentage,
+            "priority": self.priority,
+            "estimated_hours": self.estimated_hours,
+            "actual_hours": self.actual_hours,
+            "remarks": self.remarks,
+            "created_by_id": str(self.created_by_id) if self.created_by_id else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_by_id": str(self.updated_by_id) if self.updated_by_id else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "is_active": self.is_active,
+            
+            # Computed properties
+            "created_by_name": self.created_by_name,
+            "updated_by_name": self.updated_by_name,
+            "assigned_to_display_name": self.assigned_to_display_name,
+            "assigned_by_name": self.assigned_by_name,
+            "overall_status_name": self.overall_status_name,
+            "is_overdue": self.is_overdue,
+            "progress_status": self.progress_status,
+            "priority_label": self.priority_label,
+            "priority_color": self.priority_color,
+        }
+        
+        if include_relationships:
+            result["assigned_to"] = self.assigned_to.username if self.assigned_to else None
+            result["assigned_by"] = self.assigned_by.username if self.assigned_by else None
+            result["created_by"] = self.created_by.username if self.created_by else None
+            result["updated_by"] = self.updated_by.username if self.updated_by else None
+        
+        return result
 class ActionStatusHistory(Base):
     """Depends on MeetingAction, User, Attribute"""
     __tablename__ = "action_status_history"
     __table_args__ = (
         Index('ix_ash_action_id', 'action_id'),
         Index('ix_ash_created_at', 'created_at'),
+        Index('ix_ash_created_by', 'created_by_id'),
         Index('ix_ash_updated_by', 'updated_by_id'),
         Index('ix_ash_individual_status_id', 'individual_status_id'),
     )
@@ -248,18 +594,30 @@ class ActionStatusHistory(Base):
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     action_id = Column(CustomUUID, ForeignKey('meeting_actions.id', ondelete='CASCADE'), nullable=False)
     
-    # FIXED: Foreign key to attributes table (not attributes)
     individual_status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
-    progress_percentage = Column(Integer, default=0)
+    progress_percentage = Column(Integer, default=0, nullable=False)
     remarks = Column(Text, nullable=True)
     
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
+    # Relationships
     action = relationship("MeetingAction", back_populates="status_history")
-    updated_by = relationship("User", foreign_keys=[updated_by_id])
-    individual_status = relationship("Attribute", foreign_keys=[individual_status_id])  # FIXED: Attribute not AttributeValue
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    individual_status = relationship("Attribute", foreign_keys=[individual_status_id], lazy="selectin")
 
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
 
 class ActionComment(Base):
     """Depends on MeetingAction and User"""
@@ -268,6 +626,7 @@ class ActionComment(Base):
         Index('ix_ac_action_id', 'action_id'),
         Index('ix_ac_created_by', 'created_by_id'),
         Index('ix_ac_created_at', 'created_at'),
+        Index('ix_ac_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -276,12 +635,25 @@ class ActionComment(Base):
     comment = Column(Text, nullable=False)
     attachment_url = Column(String(1000), nullable=True)
     
+    # Audit fields
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
+    # Relationships
     action = relationship("MeetingAction", back_populates="comments")
-    created_by = relationship("User", foreign_keys=[created_by_id])
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
 
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
 
 class MeetingDocument(Base):
     """Depends on Meeting, User, Attribute"""
@@ -291,6 +663,8 @@ class MeetingDocument(Base):
         Index('ix_md_document_type_id', 'document_type_id'),
         Index('ix_md_uploaded_by', 'uploaded_by_id'),
         Index('ix_md_uploaded_at', 'uploaded_at'),
+        Index('ix_md_created_by', 'created_by_id'),
+        Index('ix_md_updated_by', 'updated_by_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -301,29 +675,92 @@ class MeetingDocument(Base):
     file_size = Column(Integer, nullable=True)
     mime_type = Column(String(100), nullable=True)
     
-    # FIXED: Foreign key to attributes table (not attributes)
     document_type_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     
     description = Column(Text, nullable=True)
-    version = Column(Integer, default=1)
+    version = Column(Integer, default=1, nullable=False)
     
     uploaded_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_active = Column(Boolean, default=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Audit fields
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     
     # Relationships
     meeting = relationship("Meeting", back_populates="documents")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
-    document_type = relationship("Attribute", foreign_keys=[document_type_id])  # FIXED: Attribute not AttributeValue
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id], lazy="selectin")
+    document_type = relationship("Attribute", foreign_keys=[document_type_id], lazy="selectin")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
+    
+    @property
+    def uploaded_by_name(self) -> Optional[str]:
+        return self.uploaded_by.username if self.uploaded_by else None
 
 
-# Add back_populates relationships that couldn't be defined earlier
-Meeting.participants = relationship("MeetingParticipant", back_populates="meeting", cascade="all, delete-orphan")
-Meeting.minutes = relationship("MeetingMinutes", back_populates="meeting", cascade="all, delete-orphan")
-Meeting.documents = relationship("MeetingDocument", back_populates="meeting", cascade="all, delete-orphan")
-MeetingMinutes.actions = relationship("MeetingAction", back_populates="minutes", cascade="all, delete-orphan")
-MeetingAction.status_history = relationship("ActionStatusHistory", back_populates="action", cascade="all, delete-orphan")
-MeetingAction.comments = relationship("ActionComment", back_populates="action", cascade="all, delete-orphan")
+# ==================== Helper Methods for Eager Loading ====================
 
-Meeting.status_history = relationship("MeetingStatusHistory", back_populates="meeting", cascade="all, delete-orphan")
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+class MeetingQuery:
+    """Helper class for common meeting queries with eager loading"""
+    
+    @staticmethod
+    def get_with_all_relations():
+        """Returns a query with all relationships loaded"""
+        return select(Meeting).options(
+            selectinload(Meeting.participants),
+            selectinload(Meeting.status),
+            selectinload(Meeting.created_by),
+            selectinload(Meeting.updated_by),
+            selectinload(Meeting.location),
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.comments),
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.status_history),
+            selectinload(Meeting.documents),
+            selectinload(Meeting.status_history)
+        )
+    
+    @staticmethod
+    def get_with_minutes_and_actions():
+        """Returns a query with minutes and actions loaded"""
+        return select(Meeting).options(
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions)
+        )
+    
+    @staticmethod
+    def get_with_audit_info():
+        """Returns a query with all audit relationships loaded"""
+        return select(Meeting).options(
+            selectinload(Meeting.created_by),
+            selectinload(Meeting.updated_by),
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.created_by),
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.updated_by),
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.created_by),
+            selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.updated_by),
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.created_by),
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.updated_by),
+            selectinload(Meeting.documents).selectinload(MeetingDocument.created_by),
+            selectinload(Meeting.documents).selectinload(MeetingDocument.updated_by),
+        )
+
+
+# ==================== Model Configuration for Pydantic ====================
+
+# Add this to enable ORM mode for all models
+for model in [Meeting, MeetingMinutes, MeetingAction, MeetingParticipant, 
+              MeetingDocument, MeetingStatusHistory, ActionStatusHistory, 
+              ActionComment, Participant, ParticipantList]:
+    model.__allow_unmapped__ = True

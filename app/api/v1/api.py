@@ -17,6 +17,7 @@ try:
     from app.api.v1.endpoints.address.locations import router as locations_router
     from app.api.v1.endpoints.menus import router as menus_router
     from app.api.v1.endpoints.action_tracker import router as action_tracker_router
+
     
     logger.info("✅ All routers imported successfully")
 except ImportError as e:

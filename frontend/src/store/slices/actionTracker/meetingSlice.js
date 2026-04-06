@@ -87,14 +87,16 @@ export const updateMeeting = createAsyncThunk(
 // Update meeting status - use PUT instead of PATCH
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateStatus',
-  async ({ id, status, status_id }, { rejectWithValue }) => {
+  async ({ id, status, status_id,status_comment,status_date }, { rejectWithValue }) => {
     try {
       console.log('🔵 updateMeetingStatus called with:', { id, status });
       
       // Use PUT to update the meeting with status field
       const response = await api.put(`/action-tracker/meetings/${id}`, { 
         status: status ,
-        status_id: status_id
+        status_id: status_id,
+        status_comment:status_comment,
+        status_date:status_date,
       });
       
       console.log('✅ Status update response:', response.data);

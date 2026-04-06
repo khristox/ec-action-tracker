@@ -6,20 +6,19 @@ import {
 import { 
   Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon, 
   Person as PersonIcon, Schedule as ScheduleIcon,
-  FormatBold as BoldIcon, FormatItalic as ItalicIcon,
-  FormatListBulleted as ListIcon, FormatListNumbered as NumberedListIcon
+  KeyboardArrowDown as ExpandMoreIcon,
+  KeyboardArrowRight as ExpandLessIcon
 } from '@mui/icons-material';
 import ActionItem from './ActionItem';
 
-// Helper to check if content is empty (handles HTML tags)
+// ==================== HELPERS ====================
+
 const isContentEmpty = (content) => {
   if (!content) return true;
-  // Remove HTML tags and check if there's any text content
   const textOnly = content.replace(/<[^>]*>/g, '').trim();
   return textOnly === '';
 };
 
-// Helper to strip HTML for preview (optional)
 const stripHtml = (html) => {
   if (!html) return '';
   const temp = document.createElement('div');
@@ -27,22 +26,21 @@ const stripHtml = (html) => {
   return temp.textContent || temp.innerText || '';
 };
 
-// Rich Text Display Component
-const RichTextDisplay = ({ content, maxPreviewLength = 200 }) => {
+// ==================== SUB-COMPONENTS ====================
+
+const RichTextDisplay = ({ content, maxPreviewLength = 200, isActive }) => {
   const [expanded, setExpanded] = useState(false);
-  const isEmpty = isContentEmpty(content);
-  
-  if (isEmpty) return null;
+  if (isContentEmpty(content)) return null;
   
   const plainText = stripHtml(content);
   const shouldTruncate = plainText.length > maxPreviewLength && !expanded;
   const previewText = shouldTruncate ? plainText.substring(0, maxPreviewLength) + '...' : plainText;
   
   return (
-    <Box sx={{ mt: 1, pl: 2 }}>
+    <Box sx={{ mt: 1, pl: 2, opacity: isActive ? 1 : 0.7 }}>
       {shouldTruncate ? (
         <>
-          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
             {previewText}
           </Typography>
           <Button 
@@ -55,15 +53,14 @@ const RichTextDisplay = ({ content, maxPreviewLength = 200 }) => {
         </>
       ) : (
         <Box 
-          className="rich-text-content"
           sx={{
+            fontSize: '0.875rem',
+            lineHeight: 1.6,
+            color: isActive ? 'text.primary' : 'text.disabled',
             '& p': { margin: 0, mb: 1 },
             '& ul, & ol': { margin: 0, mb: 1, pl: 2 },
-            '& li': { mb: 0.5 },
-            '& h1, & h2, & h3, & h4': { margin: 0, mb: 1 },
-            '& strong, & b': { fontWeight: 'bold' },
-            '& em, & i': { fontStyle: 'italic' },
-            '& a': { color: 'primary.main', textDecoration: 'none' }
+            '& strong': { fontWeight: 600 },
+            '& a': { color: 'primary.main' }
           }}
           dangerouslySetInnerHTML={{ __html: content }}
         />
@@ -72,126 +69,110 @@ const RichTextDisplay = ({ content, maxPreviewLength = 200 }) => {
   );
 };
 
-// Discussion Section Component
-const DiscussionSection = ({ minuteId, discussion, isExpanded, onToggle }) => {
-  if (isContentEmpty(discussion)) return null;
+const CollapsibleSection = ({ title, content, isExpanded, onToggle, color, isActive }) => {
+  if (isContentEmpty(content)) return null;
   
   return (
-    <>
+    <Box sx={{ mt: 2 }}>
       <Typography
         variant="subtitle2"
-        onClick={() => onToggle(minuteId)}
+        onClick={onToggle}
         sx={{ 
           cursor: 'pointer', 
-          color: 'primary.main', 
+          color: isActive ? `${color}.main` : 'text.disabled', 
           display: 'flex', 
           alignItems: 'center', 
-          gap: 1,
-          mt: 2,
-          '&:hover': { textDecoration: 'underline' }
+          gap: 0.5,
+          fontWeight: 600,
+          '&:hover': isActive ? { opacity: 0.8 } : {}
         }}
       >
-        {isExpanded ? '▼' : '▶'} Discussion
+        {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+        {title}
         {!isExpanded && (
           <Chip 
             size="small" 
-            label={stripHtml(discussion).substring(0, 50) + '...'} 
+            label={stripHtml(content).substring(0, 40) + '...'} 
             variant="outlined" 
-            sx={{ ml: 1, fontSize: '0.7rem' }}
+            color={isActive ? color : "default"}
+            sx={{ ml: 1, height: 20, fontSize: '0.65rem' }}
           />
         )}
       </Typography>
       <Collapse in={isExpanded}>
-        <RichTextDisplay content={discussion} />
+        <RichTextDisplay content={content} isActive={isActive} />
       </Collapse>
-    </>
+    </Box>
   );
 };
 
-// Decisions Section Component
-const DecisionsSection = ({ minuteId, decisions, isExpanded, onToggle }) => {
-  if (isContentEmpty(decisions)) return null;
-  
-  return (
-    <>
-      <Typography
-        variant="subtitle2"
-        onClick={() => onToggle(minuteId)}
-        sx={{ 
-          cursor: 'pointer', 
-          color: 'success.main', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 1,
-          mt: 2,
-          '&:hover': { textDecoration: 'underline' }
-        }}
-      >
-        {isExpanded ? '▼' : '▶'} Decisions
-        {!isExpanded && (
-          <Chip 
-            size="small" 
-            label={stripHtml(decisions).substring(0, 50) + '...'} 
-            variant="outlined" 
-            color="success"
-            sx={{ ml: 1, fontSize: '0.7rem' }}
-          />
-        )}
-      </Typography>
-      <Collapse in={isExpanded}>
-        <RichTextDisplay content={decisions} />
-      </Collapse>
-    </>
-  );
-};
-
-// Minutes Header Component
 const MinutesHeader = ({ minute, onEditMinutes, onDeleteMinutes, loading }) => {
-  const formatDateTime = (dateString) => {
-    if (!dateString) return 'TBD';
-    return new Date(dateString).toLocaleString();
-  };
+  const isActive = minute.is_active !== false;
 
   return (
     <>
       <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-        <Typography variant="h6" color="primary" fontWeight={600}>
-          {minute.topic}
-        </Typography>
+        <Stack spacing={0.5}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="h6" color={isActive ? "primary" : "text.disabled"} fontWeight={600}>
+              {minute.topic}
+            </Typography>
+            {!isActive && (
+              <Chip label="INACTIVE" size="small" color="error" variant="filled" sx={{ height: 20, fontWeight: 'bold', fontSize: '0.65rem' }} />
+            )}
+          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            ID: {minute.id}
+          </Typography>
+        </Stack>
+        
         <Stack direction="row" spacing={1}>
-          <Tooltip title="Edit Minutes">
-            <IconButton size="small" onClick={() => onEditMinutes(minute)} disabled={loading}>
-              <EditIcon fontSize="small" />
-            </IconButton>
+          <Tooltip title={isActive ? "Edit Minutes" : "Record is inactive"}>
+            <span>
+              <IconButton 
+                size="small" 
+                onClick={() => onEditMinutes(minute)} 
+                disabled={loading || !isActive}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
-          <Tooltip title="Delete Minutes">
-            <IconButton size="small" color="error" onClick={() => onDeleteMinutes(minute.id)} disabled={loading}>
-              <DeleteIcon fontSize="small" />
-            </IconButton>
+          <Tooltip title={isActive ? "Deactivate Minutes" : "Already inactive"}>
+            <span>
+              <IconButton 
+                size="small" 
+                color="error" 
+                onClick={() => onDeleteMinutes(minute.id)} 
+                disabled={loading || !isActive}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
         </Stack>
       </Box>
 
       <Divider sx={{ my: 1.5 }} />
 
-      <Stack direction="row" spacing={1} flexWrap="wrap" mb={2}>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
         <Chip
-          icon={<PersonIcon />}
-          label={`Recorded by: ${minute.recorded_by_name || minute.created_by_name || 'System'}`}
+          icon={<PersonIcon sx={{ fontSize: '1rem !important' }} />}
+          label={`By: ${minute.recorded_by_name || 'System'}`}
           size="small"
-          variant="outlined"
+          variant="soft"
         />
         <Chip
-          icon={<ScheduleIcon />}
-          label={`Created: ${formatDateTime(minute.created_at)}`}
+          icon={<ScheduleIcon sx={{ fontSize: '1rem !important' }} />}
+          label={`Created: ${new Date(minute.created_at).toLocaleString()}`}
           size="small"
-          variant="outlined"
+          variant="soft"
         />
-        {minute.updated_at && minute.updated_at !== minute.created_at && (
+        {minute.updated_at && (
           <Chip
-            label={`Updated: ${formatDateTime(minute.updated_at)}`}
+            label={`Updated: ${new Date(minute.updated_at).toLocaleString()}`}
             size="small"
-            variant="outlined"
+            variant="soft"
             color="secondary"
           />
         )}
@@ -200,82 +181,52 @@ const MinutesHeader = ({ minute, onEditMinutes, onDeleteMinutes, loading }) => {
   );
 };
 
-// Actions Section Component
-const ActionsSection = ({ minuteId, actions, onAddAction, onUpdate, loading }) => {
-  return (
-    <Box mt={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="subtitle1" fontWeight="bold">
-          Action Items ({actions?.length || 0})
-        </Typography>
-        <Button
-          size="small"
-          startIcon={<AddIcon />}
-          onClick={() => onAddAction(minuteId)}
-          disabled={loading}
-        >
-          Add Action
-        </Button>
-      </Box>
+// ==================== MAIN COMPONENT ====================
 
-      {actions?.length > 0 ? (
-        <Stack spacing={2}>
-          {actions.map((action) => (
-            <ActionItem
-              key={action.id}
-              action={action}
-              minuteId={minuteId}
-              onUpdate={onUpdate}
-              onEdit={onAddAction}
-            />
-          ))}
-        </Stack>
-      ) : (
-        <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
-          No action items. Click "Add Action" to create one.
-        </Typography>
-      )}
-    </Box>
-  );
-};
-
-// Main MinutesList Component
 const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onUpdate, loading }) => {
-  const [expandedDiscussions, setExpandedDiscussions] = useState({});
-  const [expandedDecisions, setExpandedDecisions] = useState({});
+  const [expandedItems, setExpandedItems] = useState({});
 
-  const toggleDiscussion = (id) => {
-    setExpandedDiscussions(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggleSection = (id, type) => {
+    setExpandedItems(prev => ({
+      ...prev,
+      [`${id}-${type}`]: !prev[`${id}-${type}`]
+    }));
   };
 
-  const toggleDecisions = (id) => {
-    setExpandedDecisions(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  if (minutes?.length === 0) {
+  if (!minutes || minutes.length === 0) {
     return (
       <Alert 
         severity="info" 
-        sx={{ mt: 2 }}
+        sx={{ mt: 2, borderRadius: 2 }}
         action={
-          <Button color="info" size="small" onClick={() => onAddAction(null)}>
-            Add Minutes
+          <Button color="inherit" size="small" onClick={() => onAddAction(null, null)}>
+            Add First Minutes
           </Button>
         }
       >
-        No minutes recorded. Click "Add Minutes" to get started.
+        No minutes recorded for this meeting.
       </Alert>
     );
   }
 
   return (
-    <>
-      {minutes?.map((minute) => {
-        const hasDiscussion = !isContentEmpty(minute.discussion);
-        const hasDecisions = !isContentEmpty(minute.decisions);
+    <Box>
+      {minutes.map((minute) => {
+        const isActive = minute.is_active !== false;
+        const hasContent = !isContentEmpty(minute.discussion) || !isContentEmpty(minute.decisions);
 
         return (
-          <Card key={minute.id} variant="outlined" sx={{ mb: 3, borderRadius: 2 }}>
+          <Card 
+            key={minute.id} 
+            variant="outlined" 
+            sx={{ 
+              mb: 3, 
+              borderRadius: 3,
+              border: isActive ? '1px solid #e2e8f0' : '1px dashed #cbd5e1',
+              bgcolor: isActive ? 'background.paper' : '#f8fafc',
+              transition: 'all 0.2s'
+            }}
+          >
             <CardContent>
               <MinutesHeader
                 minute={minute}
@@ -284,42 +235,77 @@ const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onU
                 loading={loading}
               />
 
-              {/* Discussion Section */}
-              <DiscussionSection
-                minuteId={minute.id}
-                discussion={minute.discussion}
-                isExpanded={expandedDiscussions[minute.id] || false}
-                onToggle={toggleDiscussion}
+              <CollapsibleSection
+                title="Discussion"
+                content={minute.discussion}
+                isActive={isActive}
+                color="primary"
+                isExpanded={expandedItems[`${minute.id}-disc`]}
+                onToggle={() => toggleSection(minute.id, 'disc')}
               />
 
-              {/* Decisions Section */}
-              <DecisionsSection
-                minuteId={minute.id}
-                decisions={minute.decisions}
-                isExpanded={expandedDecisions[minute.id] || false}
-                onToggle={toggleDecisions}
+              <CollapsibleSection
+                title="Decisions"
+                content={minute.decisions}
+                isActive={isActive}
+                color="success"
+                isExpanded={expandedItems[`${minute.id}-deci`]}
+                onToggle={() => toggleSection(minute.id, 'deci')}
               />
 
-              {/* Show message if no content */}
-              {!hasDiscussion && !hasDecisions && (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2, fontStyle: 'italic' }}>
-                  No discussion or decisions recorded.
+              {!hasContent && (
+                <Typography variant="body2" color="text.disabled" sx={{ mt: 2, fontStyle: 'italic', pl: 1 }}>
+                  No discussion or decisions provided.
                 </Typography>
               )}
 
-              {/* Actions Section */}
-              <ActionsSection
-                minuteId={minute.id}
-                actions={minute.actions}
-                onAddAction={onAddAction}
-                onUpdate={onUpdate}
-                loading={loading}
-              />
+              <Box mt={4} sx={{ opacity: isActive ? 1 : 0.5 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="subtitle1" fontWeight={700}>
+                    Action Items ({minute.actions?.length || 0})
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={() => onAddAction(minute.id)}
+                    disabled={loading || !isActive}
+                  >
+                    Add Action
+                  </Button>
+                </Box>
+
+                {minute.actions?.length > 0 ? (
+                  <Stack spacing={1.5}>
+                    {minute.actions.map((action) => (
+                      <ActionItem
+                        key={action.id}
+                        action={action}
+                        minuteId={minute.id}
+                        onUpdate={onUpdate}
+                        onEdit={onAddAction}
+                        disabled={!isActive} // Pass disabled prop to ActionItem
+                      />
+                    ))}
+                  </Stack>
+                ) : (
+                  <Box 
+                    sx={{ 
+                      py: 3, border: '1px dashed #e2e8f0', borderRadius: 2, 
+                      textAlign: 'center', bgcolor: 'rgba(0,0,0,0.02)' 
+                    }}
+                  >
+                    <Typography variant="caption" color="text.secondary">
+                      No actions linked to this topic.
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
             </CardContent>
           </Card>
         );
       })}
-    </>
+    </Box>
   );
 };
 

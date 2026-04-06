@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Box, Container, Typography, Paper, Chip, Button, Tabs, Tab, 
-  Stack, Snackbar, Alert, CircularProgress 
+  Stack, Snackbar, Alert, CircularProgress, useMediaQuery, useTheme 
 } from '@mui/material';
 import { 
   ArrowBack as ArrowBackIcon, 
@@ -33,6 +33,8 @@ const MeetingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const meeting = useSelector(selectCurrentMeeting);
   const loading = useSelector(selectMeetingLoading);
@@ -63,34 +65,76 @@ const MeetingDetail = () => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <Container maxWidth="lg" sx={{ py: 3 }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/meetings')} sx={{ mb: 2 }}>Back</Button>
+      <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3 }, px: { xs: 1, sm: 2 } }}>
+        <Button 
+          startIcon={<ArrowBackIcon />} 
+          onClick={() => navigate('/meetings')} 
+          sx={{ mb: 2 }}
+          size={isMobile ? "small" : "medium"}
+        >
+          Back
+        </Button>
 
-        <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
+        <Paper sx={{ p: { xs: 2, sm: 3 }, mb: 3, borderRadius: 2 }}>
+          <Box 
+            display="flex" 
+            flexDirection={{ xs: 'column', sm: 'row' }} 
+            justifyContent="space-between" 
+            alignItems={{ xs: 'stretch', sm: 'flex-start' }} 
+            gap={2}
+          >
             <Box>
-              <Typography variant="h4" fontWeight="bold">{meeting.title}</Typography>
-              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-                Created by: **{meeting.created_by_name}** on {new Date(meeting.created_at).toLocaleString()}
+              <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
+                {meeting.title}
               </Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                <Chip label={meeting.status?.name} color="primary" />
-                <Chip icon={<ScheduleIcon />} label={new Date(meeting.meeting_date).toLocaleString()} variant="outlined" />
-                <Chip icon={<LocationIcon />} label={meeting.location_text || 'TBD'} variant="outlined" />
-              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" gutterBottom sx={{ mt: 0.5 }}>
+                Created by: **{meeting.created_by_name}**
+              </Typography>
+              
+              {/* Chips stack that wraps on mobile */}
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+                <Chip label={meeting.status?.name} color="primary" size="small" />
+                <Chip 
+                  icon={<ScheduleIcon />} 
+                  label={new Date(meeting.meeting_date).toLocaleString()} 
+                  variant="outlined" 
+                  size="small" 
+                />
+                <Chip 
+                  icon={<LocationIcon />} 
+                  label={meeting.location_text || 'TBD'} 
+                  variant="outlined" 
+                  size="small" 
+                />
+              </Box>
             </Box>
-            <Button variant="contained" onClick={() => setShowStatusDialog(true)}>Update Status</Button>
+            
+            <Button 
+              variant="contained" 
+              fullWidth={isMobile}
+              onClick={() => setShowStatusDialog(true)}
+              sx={{ alignSelf: { xs: 'stretch', sm: 'flex-start' } }}
+            >
+              Update Status
+            </Button>
           </Box>
         </Paper>
 
-        <Paper sx={{ borderRadius: 2 }}>
-          <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Paper sx={{ borderRadius: 2, overflow: 'hidden' }}>
+          <Tabs 
+            value={tabValue} 
+            onChange={(e, v) => setTabValue(v)} 
+            variant={isMobile ? "scrollable" : "fullWidth"}
+            scrollButtons="auto"
+            allowScrollButtonsMobile
+            sx={{ borderBottom: 1, borderColor: 'divider' }}
+          >
             <Tab label="Participants" />
             <Tab label="Minutes & Actions" />
             <Tab label="History" />
           </Tabs>
 
-          <Box sx={{ p: 2 }}>
+          <Box sx={{ p: { xs: 1, sm: 2 } }}>
             {tabValue === 0 && (
               <ParticipantList 
                 participants={meeting.participants} 
@@ -102,6 +146,7 @@ const MeetingDetail = () => {
             {tabValue === 1 && (
               <MinutesAndActions 
                 minutes={meeting.minutes} 
+                meetingStatus={meeting.status_name}
                 meetingId={id} 
                 onUpdate={() => dispatch(fetchMeetingById(id))} 
               />
@@ -122,8 +167,11 @@ const MeetingDetail = () => {
           open={snackbar.open} 
           autoHideDuration={3000} 
           onClose={() => setSnackbar({ ...snackbar, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
-          <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
+          <Alert severity={snackbar.severity} variant="filled" sx={{ width: '100%' }}>
+            {snackbar.message}
+          </Alert>
         </Snackbar>
       </Container>
     </LocalizationProvider>

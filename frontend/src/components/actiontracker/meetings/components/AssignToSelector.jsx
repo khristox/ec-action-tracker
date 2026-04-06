@@ -14,6 +14,21 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
   const [participants, setParticipants] = useState([]);
   const [searching, setSearching] = useState(false);
   const [manualEntry, setManualEntry] = useState({ name: '', email: '' });
+  const [systemUsers, setSystemUsers] = useState([]); // Cache for system users
+
+  // Fetch all system users for checking
+  useEffect(() => {
+    const fetchSystemUsers = async () => {
+      try {
+        const response = await api.get(`/users/?skip=0&limit=1000`);
+        const users = response.data?.items || response.data || [];
+        setSystemUsers(users);
+      } catch (err) {
+        console.error("Failed to fetch system users:", err);
+      }
+    };
+    fetchSystemUsers();
+  }, []);
 
   // Fetch meeting participants when dialog opens
   useEffect(() => {
@@ -60,6 +75,28 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
     }
   }, [searchTerm, searchDialogOpen]);
 
+  // Check if a participant is a system user by email or name
+  const isSystemUser = (participant) => {
+    if (!participant) return false;
+    
+    // Check by email
+    if (participant.email) {
+      const userByEmail = systemUsers.find(u => 
+        u.email?.toLowerCase() === participant.email?.toLowerCase()
+      );
+      if (userByEmail) return userByEmail;
+    }
+    
+    // Check by name
+    const userByName = systemUsers.find(u => 
+      u.full_name?.toLowerCase() === participant.name?.toLowerCase() ||
+      u.username?.toLowerCase() === participant.name?.toLowerCase()
+    );
+    if (userByName) return userByName;
+    
+    return false;
+  };
+
   const handleSelectUser = (user) => {
     onChange({
       type: 'user',
@@ -67,34 +104,95 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
       name: user.full_name || user.username,
       email: user.email,
       assigned_to_id: user.id,
-      assigned_to_name: user.full_name || user.username
+      assigned_to_name: {
+        name: user.full_name || user.username,
+        email: user.email,
+        type: 'user',
+        id: user.id
+      }
     });
     setSearchDialogOpen(false);
     setSearchTerm('');
   };
 
   const handleSelectParticipant = (participant) => {
-    onChange({
-      type: 'participant',
-      id: participant.id,
-      name: participant.name,
-      email: participant.email,
-      assigned_to_name: participant.name,
-      assigned_to_id: null
-    });
+    // Check if this participant is a system user
+    const systemUser = isSystemUser(participant);
+    
+    if (systemUser) {
+      // This participant is a system user - set both assigned_to_id and assigned_to_name
+      onChange({
+        type: 'user',
+        id: systemUser.id,
+        name: systemUser.full_name || systemUser.username,
+        email: systemUser.email,
+        assigned_to_id: systemUser.id,
+        assigned_to_name: {
+          name: systemUser.full_name || systemUser.username,
+          email: systemUser.email,
+          type: 'user',
+          id: systemUser.id
+        }
+      });
+    } else {
+      // Not a system user - store only in JSON
+      onChange({
+        type: 'participant',
+        id: participant.id,
+        name: participant.name,
+        email: participant.email,
+        assigned_to_id: null,
+        assigned_to_name: {
+          name: participant.name,
+          email: participant.email,
+          type: 'participant',
+          id: participant.id
+        }
+      });
+    }
     setSearchDialogOpen(false);
     setSearchTerm('');
   };
 
   const handleAddNew = () => {
     if (!manualEntry.name.trim()) return;
-    onChange({
-      type: 'new',
-      name: manualEntry.name,
-      email: manualEntry.email,
-      assigned_to_name: manualEntry.name,
-      assigned_to_id: null
-    });
+    
+    // Check if the new person matches an existing system user
+    const existingUser = systemUsers.find(u => 
+      u.email?.toLowerCase() === manualEntry.email?.toLowerCase() ||
+      u.full_name?.toLowerCase() === manualEntry.name?.toLowerCase() ||
+      u.username?.toLowerCase() === manualEntry.name?.toLowerCase()
+    );
+    
+    if (existingUser) {
+      // Found matching system user - use that instead
+      onChange({
+        type: 'user',
+        id: existingUser.id,
+        name: existingUser.full_name || existingUser.username,
+        email: existingUser.email,
+        assigned_to_id: existingUser.id,
+        assigned_to_name: {
+          name: existingUser.full_name || existingUser.username,
+          email: existingUser.email,
+          type: 'user',
+          id: existingUser.id
+        }
+      });
+    } else {
+      // New person - store only in JSON
+      onChange({
+        type: 'new',
+        name: manualEntry.name,
+        email: manualEntry.email,
+        assigned_to_id: null,
+        assigned_to_name: {
+          name: manualEntry.name,
+          email: manualEntry.email || null,
+          type: 'manual'
+        }
+      });
+    }
     setSearchDialogOpen(false);
     setManualEntry({ name: '', email: '' });
   };
@@ -151,6 +249,7 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
                   >
                     <Typography fontWeight={600}>{user.full_name || user.username}</Typography>
                     <Typography variant="caption" color="text.secondary">{user.email}</Typography>
+                    <Chip size="small" label="System User" color="primary" variant="outlined" sx={{ ml: 1, height: 20 }} />
                   </Paper>
                 ))}
               </Stack>
@@ -163,22 +262,37 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
               <>
                 <Typography variant="subtitle2" sx={{ mt: 2 }}>Meeting Participants</Typography>
                 <Stack spacing={1} maxHeight={200} sx={{ overflowY: 'auto' }}>
-                  {participants.map((p) => (
-                    <Paper
-                      key={p.id}
-                      sx={{ p: 2, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
-                      onClick={() => handleSelectParticipant(p)}
-                    >
-                      <Typography fontWeight={600}>{p.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">{p.email || 'No email'}</Typography>
-                    </Paper>
-                  ))}
+                  {participants.map((p) => {
+                    const systemUser = isSystemUser(p);
+                    return (
+                      <Paper
+                        key={p.id}
+                        sx={{ p: 2, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
+                        onClick={() => handleSelectParticipant(p)}
+                      >
+                        <Typography fontWeight={600}>{p.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{p.email || 'No email'}</Typography>
+                        {systemUser && (
+                          <Chip 
+                            size="small" 
+                            label="Also System User" 
+                            color="success" 
+                            variant="outlined" 
+                            sx={{ ml: 1, height: 20 }}
+                          />
+                        )}
+                      </Paper>
+                    );
+                  })}
                 </Stack>
               </>
             )}
             
             {/* Add New Person */}
             <Typography variant="subtitle2" sx={{ mt: 2 }}>Add New Person</Typography>
+            <Alert severity="info" sx={{ mb: 1 }}>
+              If the email matches an existing system user, they will be linked automatically.
+            </Alert>
             <Stack direction="row" spacing={2}>
               <TextField
                 size="small"

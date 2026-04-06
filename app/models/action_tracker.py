@@ -6,7 +6,7 @@ Make sure this file is imported AFTER users, locations, and attribute tables
 import datetime
 from typing import Optional
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
+from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -334,7 +334,7 @@ class MeetingAction(Base):
     description = Column(Text, nullable=False)
     
     assigned_to_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    assigned_to_name = Column(String(255), nullable=True)  # This is a column for denormalized data
+    assigned_to_name = Column(JSON, nullable=True)  # This is a column for denormalized data
     assigned_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     assigned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     

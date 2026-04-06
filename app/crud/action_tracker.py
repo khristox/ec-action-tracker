@@ -3,12 +3,14 @@ Action Tracker CRUD Operations
 Organized by entity with consistent patterns for audit fields
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func
-from sqlalchemy.orm import selectinload
-from typing import List, Optional, Dict, Any
+import json
+from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
 from datetime import datetime
+
+from sqlalchemy import select, and_, or_, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.crud.base import CRUDBase
 from app.models.action_tracker import (
@@ -152,11 +154,9 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         update_data = obj_in.model_dump(exclude_unset=True)
         participant_ids = update_data.pop('participant_ids', None)
         
-        # Update basic fields
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         
-        # Update participants if provided
         if participant_ids is not None:
             participants = await self._get_participants_by_ids(db, participant_ids)
             db_obj.participants = participants
@@ -238,7 +238,6 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
         self, db: AsyncSession, obj_in: MeetingCreate, created_by_id: UUID
     ) -> Meeting:
         """Create meeting with participants from template or custom list"""
-        # Create meeting
         meeting_data = obj_in.model_dump(exclude={'participant_list_id', 'custom_participants', 'status'})
         meeting = Meeting(
             **meeting_data,
@@ -283,7 +282,7 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
         if new_status_id and db_obj.status_id != new_status_id:
             await self._log_status_change(
                 db, db_obj.id, new_status_id, 
-                status_comment or f"Status changed", 
+                status_comment or "Status changed", 
                 updated_by_id, status_date
             )
             db_obj.status_id = new_status_id
@@ -296,55 +295,29 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
         await db.refresh(db_obj)
         return db_obj
     
-
-    async def add_minutes(
-        self, db: AsyncSession, meeting_id: UUID, minutes_in: MeetingMinutesCreate, recorded_by_id: UUID
-    ) -> MeetingMinutes:
-        """Add minutes to a meeting"""
-        # First check if meeting exists
+    async def update_status(
+        self, db: AsyncSession, meeting_id: UUID, status_id: UUID, 
+        updated_by_id: UUID, comment: str = None
+    ) -> Meeting:
+        """Explicitly update meeting status and log to history"""
         meeting = await self.get(db, meeting_id)
         if not meeting:
-            raise ValueError(f"Meeting {meeting_id} not found")
+            raise ValueError("Meeting not found")
         
-        # Create the minutes
-        minutes = MeetingMinutes(
-            meeting_id=meeting_id,
-            topic=minutes_in.topic,
-            discussion=minutes_in.discussion,
-            decisions=minutes_in.decisions,
-            recorded_by_id=recorded_by_id,
-            created_by_id=recorded_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(minutes)
-        await db.commit()
-        await db.refresh(minutes)
-        return minutes
-
-async def update_status(
-    self, db: AsyncSession, *, meeting_id: UUID, status_id: UUID, 
-    updated_by_id: UUID, comment: str = None
-) -> Meeting:
-    """Explicitly update meeting status and log to history"""
-    meeting = await self.get(db, meeting_id)
-    if not meeting:
-        raise ValueError("Meeting not found")
-    
-    if meeting.status_id != status_id:
-        await self._log_status_change(
-            db, meeting_id, status_id, 
-            comment or f"Status changed from {meeting.status_id} to {status_id}", 
-            updated_by_id
-        )
-        meeting.status_id = status_id
-        meeting.updated_by_id = updated_by_id
-        meeting.updated_at = datetime.now()
+        if meeting.status_id != status_id:
+            await self._log_status_change(
+                db, meeting_id, status_id, 
+                comment or f"Status changed from {meeting.status_id} to {status_id}", 
+                updated_by_id
+            )
+            meeting.status_id = status_id
+            meeting.updated_by_id = updated_by_id
+            meeting.updated_at = datetime.now()
+            
+            await db.commit()
+            await db.refresh(meeting)
         
-        await db.commit()
-        await db.refresh(meeting)
-    
-    return meeting
+        return meeting
     
     async def get_upcoming_meetings(self, db: AsyncSession, limit: int = 10) -> List[Meeting]:
         """Get upcoming meetings"""
@@ -507,38 +480,83 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         return result.scalar_one_or_none()
     
     async def get_meeting_minutes(
-        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100
+        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100,
+        include_inactive: bool = False
     ) -> List[MeetingMinutes]:
         """Get all minutes for a meeting with their actions"""
-        result = await db.execute(
+        query = (
             select(MeetingMinutes)
             .options(selectinload(MeetingMinutes.actions))
-            .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
+            .where(MeetingMinutes.meeting_id == meeting_id)
             .offset(skip)
             .limit(limit)
             .order_by(MeetingMinutes.timestamp.desc())
         )
+        
+        if not include_inactive:
+            query = query.where(MeetingMinutes.is_active == True)
+        
+        result = await db.execute(query)
         return result.scalars().all()
 
 
 # ============================================================================
 # MEETING ACTION CRUD
 # ============================================================================
-
 class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActionUpdate]):
     """CRUD operations for MeetingAction entity"""
+    
+    def _normalize_assigned_to_name(self, value: Optional[Union[str, Dict, Any]]) -> Optional[Dict]:
+        """
+        Convert assigned_to_name to consistent JSON format.
+        Expected format: {"name": "John Doe", "email": "john@example.com", "type": "user|participant|manual", "id": "uuid"}
+        """
+        if value is None:
+            return None
+        if isinstance(value, str):
+            # Try to parse as JSON first
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict) and "name" in parsed:
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            # If not JSON or invalid, treat as plain name
+            return {"name": value, "type": "manual"}
+        if isinstance(value, dict):
+            if "name" not in value:
+                return None
+            # Ensure type is set
+            if "type" not in value:
+                value["type"] = "manual"
+            return value
+        return None
     
     async def create_action(
         self, db: AsyncSession, minute_id: UUID, action_in: MeetingActionCreate, assigned_by_id: UUID
     ) -> MeetingAction:
-        """Create a new action item"""
+        """Create a new action item with JSON assigned_to_name support"""
         action_data = action_in.model_dump()
+        
+        # Get assigned_to_id - validate it exists if provided
+        assigned_to_id = action_data.get('assigned_to_id')
+        if assigned_to_id:
+            # Verify the user exists
+            from app.models.user import User
+            user_exists = await db.execute(
+                select(User).where(User.id == assigned_to_id, User.is_active == True)
+            )
+            if not user_exists.scalar_one_or_none():
+                assigned_to_id = None
+        
+        # Normalize assigned_to_name to JSON
+        assigned_to_name = self._normalize_assigned_to_name(action_data.get('assigned_to_name'))
         
         action = MeetingAction(
             minute_id=minute_id,
             description=action_data.get('description'),
-            assigned_to_id=action_data.get('assigned_to_id'),
-            assigned_to_name=action_data.get('assigned_to_name'),
+            assigned_to_id=assigned_to_id,
+            assigned_to_name=assigned_to_name,
             assigned_by_id=assigned_by_id,
             assigned_at=datetime.now(),
             due_date=action_data.get('due_date'),
@@ -557,12 +575,33 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     async def update_action(
         self, db: AsyncSession, action_id: UUID, action_in: MeetingActionUpdate, updated_by_id: UUID
     ) -> Optional[MeetingAction]:
-        """Update an action item"""
+        """Update an action item with JSON assigned_to_name support"""
         action = await self.get(db, action_id)
         if not action:
             return None
         
         update_data = action_in.model_dump(exclude_unset=True)
+        
+        # Handle assigned_to_id - validate if provided
+        if 'assigned_to_id' in update_data:
+            assigned_to_id = update_data['assigned_to_id']
+            if assigned_to_id:
+                from app.models.user import User
+                user_exists = await db.execute(
+                    select(User).where(User.id == assigned_to_id, User.is_active == True)
+                )
+                if not user_exists.scalar_one_or_none():
+                    assigned_to_id = None
+            action.assigned_to_id = assigned_to_id
+            del update_data['assigned_to_id']
+        
+        # Handle assigned_to_name specially
+        if 'assigned_to_name' in update_data:
+            assigned_to_name = self._normalize_assigned_to_name(update_data['assigned_to_name'])
+            action.assigned_to_name = assigned_to_name
+            del update_data['assigned_to_name']
+        
+        # Update other fields
         for field, value in update_data.items():
             if value is not None:
                 setattr(action, field, value)
@@ -594,14 +633,15 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         db.add(history)
         
         # Update action
+        old_progress = action.overall_progress_percentage or 0
         action.overall_progress_percentage = progress_update.progress_percentage
         action.updated_by_id = updated_by_id
         action.updated_at = datetime.now()
         
         # Auto-update dates based on progress
-        if progress_update.progress_percentage == 100:
+        if progress_update.progress_percentage == 100 and old_progress < 100:
             action.completed_at = datetime.now()
-        elif progress_update.progress_percentage > 0 and (action.overall_progress_percentage or 0) == 0:
+        elif progress_update.progress_percentage > 0 and old_progress == 0:
             action.start_date = datetime.now()
         
         await db.commit()
@@ -641,13 +681,40 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     async def get_actions_assigned_to_user(
         self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100
     ) -> List[MeetingAction]:
-        """Get actions assigned to a specific user"""
+        """Get actions assigned to a specific user by assigned_to_id"""
         result = await db.execute(
             select(MeetingAction)
-            .options(selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting))
+            .options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.created_by),
+                selectinload(MeetingAction.updated_by),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by)
+            )
             .where(
                 MeetingAction.assigned_to_id == user_id,
                 MeetingAction.is_active == True
+            )
+            .offset(skip)
+            .limit(limit)
+            .order_by(MeetingAction.due_date)
+        )
+        return result.scalars().all()
+    
+    async def get_actions_by_assigned_name(
+        self, db: AsyncSession, name: str, skip: int = 0, limit: int = 100
+    ) -> List[MeetingAction]:
+        """Search actions by assigned_to_name JSON field"""
+        # For MySQL JSON search
+        result = await db.execute(
+            select(MeetingAction)
+            .options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting)
+            )
+            .where(
+                MeetingAction.is_active == True,
+                MeetingAction.assigned_to_name.isnot(None),
+                func.json_extract(MeetingAction.assigned_to_name, '$.name').cast(String).ilike(f"%{name}%")
             )
             .offset(skip)
             .limit(limit)
@@ -671,6 +738,12 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         )
         return result.scalars().all()
     
+    async def get_my_tasks(
+        self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[MeetingAction]:
+        """Get tasks for current user (checks assigned_to_id)"""
+        return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
+    
     async def soft_delete(self, db: AsyncSession, action_id: UUID, deleted_by_id: UUID) -> Optional[MeetingAction]:
         """Soft delete an action"""
         action = await self.get(db, action_id)
@@ -681,8 +754,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.commit()
             await db.refresh(action)
         return action
-
-
+    
 # ============================================================================
 # MEETING DOCUMENT CRUD
 # ============================================================================

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, Union
 from uuid import UUID
 from datetime import datetime
 
@@ -7,6 +7,18 @@ from datetime import datetime
 # ==================== Shared Config ====================
 
 class ORMBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==================== Assigned To JSON Schema ====================
+
+class AssignedToInfo(BaseModel):
+    """Schema for assigned_to JSON data stored in meeting_actions"""
+    name: str = Field(..., description="Name of the assigned person")
+    email: Optional[str] = Field(None, description="Email of the assigned person")
+    type: str = Field("manual", description="Type: user, participant, manual")
+    id: Optional[UUID] = Field(None, description="User ID if exists in system")
+    
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -20,8 +32,10 @@ class ParticipantBase(ORMBase):
     organization: Optional[str] = Field(None, max_length=255)
     notes: Optional[str] = None
 
+
 class ParticipantCreate(ParticipantBase):
     pass
+
 
 class ParticipantUpdate(ORMBase):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
@@ -30,6 +44,7 @@ class ParticipantUpdate(ORMBase):
     title: Optional[str] = None
     organization: Optional[str] = None
     notes: Optional[str] = None
+
 
 class ParticipantResponse(ParticipantBase):
     id: UUID
@@ -49,14 +64,17 @@ class ParticipantListBase(ORMBase):
     description: Optional[str] = None
     is_global: bool = False
 
+
 class ParticipantListCreate(ParticipantListBase):
     participant_ids: List[UUID] = Field(default_factory=list)
+
 
 class ParticipantListUpdate(ORMBase):
     name: Optional[str] = None
     description: Optional[str] = None
     is_global: Optional[bool] = None
     participant_ids: Optional[List[UUID]] = None
+
 
 class ParticipantListResponse(ParticipantListBase):
     id: UUID
@@ -82,8 +100,10 @@ class MeetingParticipantBase(ORMBase):
     is_chairperson: bool = False
     attendance_status: Optional[str] = Field("pending", description="attended, missed, pending, excused")
 
+
 class MeetingParticipantCreate(MeetingParticipantBase):
     pass
+
 
 class MeetingParticipantUpdate(ORMBase):
     name: Optional[str] = None
@@ -93,6 +113,7 @@ class MeetingParticipantUpdate(ORMBase):
     organization: Optional[str] = None
     is_chairperson: Optional[bool] = None
     attendance_status: Optional[str] = None
+
 
 class MeetingParticipantResponse(MeetingParticipantBase):
     id: UUID
@@ -127,8 +148,7 @@ class AttributeResponse(ORMBase):
 class MeetingBase(ORMBase):
     """
     Input-only base. Does NOT include `status` as a field because responses
-    receive an ORM Attribute object there, not a string. Subclasses that are
-    purely for input (Create/Update) add `status: Optional[str]` themselves.
+    receive an ORM Attribute object there, not a string.
     """
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
@@ -146,31 +166,25 @@ class MeetingBase(ORMBase):
     @field_validator('end_time', mode='before')
     @classmethod
     def validate_end_time(cls, v: Any, info: Any) -> Any:
-        # Parse string to datetime if needed
         if isinstance(v, str):
             try:
-                # Handle ISO format with or without Z
                 v = datetime.fromisoformat(v.replace('Z', '+00:00'))
             except ValueError:
                 raise ValueError('Invalid datetime format for end_time')
         
-        # Get start_time from the data (may be parsed or still string)
         start_time = info.data.get('start_time')
         if start_time and v:
-            # Parse start_time if it's still a string
             if isinstance(start_time, str):
                 try:
                     start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                 except ValueError:
                     raise ValueError('Invalid datetime format for start_time')
-            # Now compare datetime objects
             if v <= start_time:
                 raise ValueError('End time must be after start time')
         return v
 
 
 class MeetingCreate(MeetingBase):
-    # status as a plain string makes sense only on input
     status: Optional[str] = None
     participant_list_id: Optional[UUID] = None
     custom_participants: List[MeetingParticipantCreate] = Field(default_factory=list)
@@ -189,12 +203,10 @@ class MeetingUpdate(ORMBase):
     facilitator: Optional[str] = None
     chairperson_name: Optional[str] = None
     status_id: Optional[UUID] = None
-    # Plain string shorthand accepted on input; resolve to status_id in the route
     status: Optional[str] = Field(
         None, description="Meeting status slug e.g. pending/started/ended/closed/cancelled"
     )
     is_active: Optional[bool] = None
-    
     status_comment: Optional[str] = Field(None, description="Comment explaining the status change")
     status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
 
@@ -202,7 +214,7 @@ class MeetingUpdate(ORMBase):
 # ==================== Meeting Responses ====================
 
 class MeetingCreateResponse(ORMBase):
-    """Flat response returned after POST /meetings — no nested relationships."""
+    """Flat response returned after POST /meetings"""
     id: UUID
     title: str
     description: Optional[str] = None
@@ -254,10 +266,7 @@ class MeetingListResponse(ORMBase):
 
 
 class MeetingResponse(MeetingBase):
-    """
-    Full detail response. `status` is the ORM Attribute relationship
-    represented as an AttributeResponse object.
-    """
+    """Full detail response with nested relationships"""
     id: UUID
     created_by_id: UUID
     created_by_name: Optional[str] = None
@@ -266,15 +275,11 @@ class MeetingResponse(MeetingBase):
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
     is_active: bool = True
-
     status_comment: Optional[str] = None
     status_date: Optional[datetime] = None
-
-    # Flattened from the ORM relationship
     status_name: Optional[str] = None
     location_name: Optional[str] = None
     status: Optional[AttributeResponse] = None
-
     participants: List[MeetingParticipantResponse] = Field(default_factory=list)
     minutes: List['MeetingMinutesResponse'] = Field(default_factory=list)
     documents: List['MeetingDocumentResponse'] = Field(default_factory=list)
@@ -282,15 +287,10 @@ class MeetingResponse(MeetingBase):
     @field_validator('status', mode='before')
     @classmethod
     def coerce_status(cls, v: Any) -> Any:
-        """
-        Convert ORM Attribute object to AttributeResponse dict.
-        If it's already a dict or None, pass through.
-        """
         if v is None:
             return None
         if isinstance(v, dict):
             return v
-        # ORM object - extract the data we need
         try:
             return {
                 'id': getattr(v, 'id', None),
@@ -305,7 +305,6 @@ class MeetingResponse(MeetingBase):
 
     @model_validator(mode='after')
     def sync_status_name(self) -> 'MeetingResponse':
-        """Keep status_name in sync with status for convenience."""
         if self.status and not self.status_name:
             self.status_name = self.status.name
         return self
@@ -316,6 +315,7 @@ class MeetingPaginationResponse(ORMBase):
     total: int
     page: int
     size: int
+    pages: int = 0
 
 
 # ==================== Meeting Minutes Schemas ====================
@@ -325,13 +325,16 @@ class MeetingMinutesBase(ORMBase):
     discussion: Optional[str] = None
     decisions: Optional[str] = None
 
+
 class MeetingMinutesCreate(MeetingMinutesBase):
     pass
+
 
 class MeetingMinutesUpdate(ORMBase):
     topic: Optional[str] = None
     discussion: Optional[str] = None
     decisions: Optional[str] = None
+
 
 class MeetingMinutesResponse(MeetingMinutesBase):
     id: UUID
@@ -354,27 +357,48 @@ class MeetingMinutesResponse(MeetingMinutesBase):
 class MeetingActionBase(ORMBase):
     description: str = Field(..., min_length=1)
     assigned_to_id: Optional[UUID] = None
-    assigned_to_name: Optional[str] = Field(None, max_length=255)
+    assigned_to_name: Optional[Union[str, Dict, AssignedToInfo]] = Field(
+        None, 
+        description="Can be string (legacy), dict, or AssignedToInfo object"
+    )
     due_date: Optional[datetime] = None
     priority: int = Field(2, ge=1, le=4)
     estimated_hours: Optional[float] = Field(None, ge=0)
     remarks: Optional[str] = None
 
+    @field_validator('assigned_to_name', mode='before')
+    @classmethod
+    def validate_assigned_to_name(cls, v: Any) -> Optional[Dict]:
+        """Convert various formats to consistent JSON structure"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return {"name": v, "type": "manual"}
+        if isinstance(v, dict):
+            if "name" not in v:
+                raise ValueError("assigned_to_name must have a 'name' field")
+            return v
+        if hasattr(v, 'model_dump'):
+            return v.model_dump()
+        return v
+
+
 class MeetingActionCreate(MeetingActionBase):
     """Schema for creating an action"""
-    assigned_to_id: Optional[UUID] = None
-    assigned_to_name: Optional[str] = Field(None, max_length=255)  # Add this explicitly
+    pass
+
 
 class MeetingActionUpdate(ORMBase):
     description: Optional[str] = None
     assigned_to_id: Optional[UUID] = None
-    assigned_to_name: Optional[str] = None
+    assigned_to_name: Optional[Union[str, Dict, AssignedToInfo]] = None
     due_date: Optional[datetime] = None
     priority: Optional[int] = Field(None, ge=1, le=4)
     estimated_hours: Optional[float] = None
     overall_status_id: Optional[UUID] = None
     overall_progress_percentage: Optional[int] = Field(None, ge=0, le=100)
     remarks: Optional[str] = None
+
 
 class MeetingActionResponse(MeetingActionBase):
     id: UUID
@@ -395,6 +419,20 @@ class MeetingActionResponse(MeetingActionBase):
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
     is_active: bool = True
+    
+    @property
+    def assigned_to_display_name(self) -> str:
+        """Helper to get display name from JSON or relationship"""
+        if self.assigned_to_name and isinstance(self.assigned_to_name, dict):
+            return self.assigned_to_name.get('name', 'Unassigned')
+        return 'Unassigned'
+    
+    @property
+    def assigned_to_email(self) -> Optional[str]:
+        """Helper to get email from JSON"""
+        if self.assigned_to_name and isinstance(self.assigned_to_name, dict):
+            return self.assigned_to_name.get('email')
+        return None
 
 
 # ==================== Action Status History Schemas ====================
@@ -404,8 +442,10 @@ class ActionStatusHistoryBase(ORMBase):
     progress_percentage: int = Field(0, ge=0, le=100)
     remarks: Optional[str] = None
 
+
 class ActionStatusHistoryCreate(ActionStatusHistoryBase):
     pass
+
 
 class ActionStatusHistoryResponse(ActionStatusHistoryBase):
     id: UUID
@@ -434,13 +474,16 @@ class ActionCommentBase(ORMBase):
     comment: str = Field(..., min_length=1)
     attachment_url: Optional[str] = None
 
+
 class ActionCommentCreate(ActionCommentBase):
     pass
+
 
 class ActionCommentUpdate(ORMBase):
     comment: Optional[str] = None
     attachment_url: Optional[str] = None
     is_active: Optional[bool] = None
+
 
 class ActionCommentResponse(ActionCommentBase):
     id: UUID
@@ -461,13 +504,16 @@ class MeetingDocumentBase(ORMBase):
     document_type_id: UUID = Field(..., description="Document type attribute value UUID")
     description: Optional[str] = None
 
+
 class MeetingDocumentCreate(MeetingDocumentBase):
     pass
+
 
 class MeetingDocumentUpdate(ORMBase):
     document_type_id: Optional[UUID] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None
+
 
 class MeetingDocumentResponse(MeetingDocumentBase):
     id: UUID
@@ -520,6 +566,7 @@ class MeetingSummary(ORMBase):
     pending_actions: int
     overdue_actions: int
 
+
 class ActionSummary(ORMBase):
     total_actions: int
     completed_actions: int
@@ -537,6 +584,7 @@ class ActionSummary(ORMBase):
             )
         return self
 
+
 class MyTaskResponse(ORMBase):
     id: UUID
     description: str
@@ -547,6 +595,7 @@ class MyTaskResponse(ORMBase):
     overall_status_name: Optional[str] = None
     priority: int
     is_overdue: bool = False
+    assigned_to_display_name: Optional[str] = None
 
 
 # ==================== Resolve Forward References ====================

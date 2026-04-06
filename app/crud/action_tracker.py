@@ -573,32 +573,22 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         return action
     
     async def update_action(
-        self, db: AsyncSession, action_id: UUID, action_in: MeetingActionUpdate, updated_by_id: UUID
+        self, db: AsyncSession, action_id: UUID, obj_in: MeetingActionUpdate, updated_by_id: UUID
     ) -> Optional[MeetingAction]:
-        """Update an action item with JSON assigned_to_name support"""
+        """Update an action item with audit fields"""
         action = await self.get(db, action_id)
         if not action:
             return None
         
-        update_data = action_in.model_dump(exclude_unset=True)
+        update_data = obj_in.model_dump(exclude_unset=True)
         
-        # Handle assigned_to_id - validate if provided
-        if 'assigned_to_id' in update_data:
-            assigned_to_id = update_data['assigned_to_id']
-            if assigned_to_id:
-                from app.models.user import User
-                user_exists = await db.execute(
-                    select(User).where(User.id == assigned_to_id, User.is_active == True)
-                )
-                if not user_exists.scalar_one_or_none():
-                    assigned_to_id = None
-            action.assigned_to_id = assigned_to_id
-            del update_data['assigned_to_id']
-        
-        # Handle assigned_to_name specially
+        # Handle assigned_to_name if it's in the update
         if 'assigned_to_name' in update_data:
             assigned_to_name = self._normalize_assigned_to_name(update_data['assigned_to_name'])
-            action.assigned_to_name = assigned_to_name
+            if assigned_to_name is not None:
+                action.assigned_to_name = assigned_to_name
+            elif assigned_to_name is None and 'assigned_to_name' in update_data:
+                action.assigned_to_name = None
             del update_data['assigned_to_name']
         
         # Update other fields
@@ -632,21 +622,26 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         )
         db.add(history)
         
-        # Update action
-        old_progress = action.overall_progress_percentage or 0
+        # Update action progress
         action.overall_progress_percentage = progress_update.progress_percentage
+        
+        # CRITICAL FIX: Update the overall_status_id as well
+        if progress_update.individual_status_id:
+            action.overall_status_id = progress_update.individual_status_id
+        
         action.updated_by_id = updated_by_id
         action.updated_at = datetime.now()
         
         # Auto-update dates based on progress
-        if progress_update.progress_percentage == 100 and old_progress < 100:
+        if progress_update.progress_percentage == 100:
             action.completed_at = datetime.now()
-        elif progress_update.progress_percentage > 0 and old_progress == 0:
+        elif progress_update.progress_percentage > 0 and (action.overall_progress_percentage or 0) == 0:
             action.start_date = datetime.now()
         
         await db.commit()
         await db.refresh(action)
         return action
+
     
     async def add_comment(
         self, db: AsyncSession, action_id: UUID, comment_in: ActionCommentCreate, created_by_id: UUID
@@ -755,6 +750,31 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.refresh(action)
         return action
     
+    async def get_status_history(
+        self, db: AsyncSession, action_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[ActionStatusHistory]:
+        """
+        Get status change history for an action.
+        Returns all status history entries for the given action, ordered by creation date descending.
+        """
+        result = await db.execute(
+            select(ActionStatusHistory)
+            .options(
+                selectinload(ActionStatusHistory.created_by),
+                selectinload(ActionStatusHistory.updated_by),
+                selectinload(ActionStatusHistory.individual_status)
+            )
+            .where(
+                ActionStatusHistory.action_id == action_id,
+                ActionStatusHistory.is_active == True
+            )
+            .order_by(ActionStatusHistory.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+
 # ============================================================================
 # MEETING DOCUMENT CRUD
 # ============================================================================

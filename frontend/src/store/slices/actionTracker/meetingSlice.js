@@ -122,17 +122,20 @@ export const addMeetingAction = createAsyncThunk(
 );
 
 // Update action progress
+// In your actionSlice.js
 export const updateActionProgress = createAsyncThunk(
-  'meetings/updateActionProgress',
-  async ({ actionId, progress }, { rejectWithValue }) => {
-    try {
-      const response = await api.post(`/action-tracker/actions/${actionId}/progress`, {
-        overall_progress_percentage: progress
-      });
-      return response.data;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.detail || 'Failed to update progress');
-    }
+  'actions/updateActionProgress',
+  async ({ id, progressData }) => {
+    // Ensure the payload structure matches backend expectations
+    const payload = {
+      progress_percentage: progressData.progress_percentage,
+      individual_status_id: progressData.individual_status_id,
+      remarks: progressData.remarks
+    };
+    
+    console.log('Sending progress update to backend:', payload);
+    const response = await api.post(`/action-tracker/actions/${id}/progress`, payload);
+    return response.data;
   }
 );
 

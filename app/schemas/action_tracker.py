@@ -591,11 +591,14 @@ class MyTaskResponse(ORMBase):
     meeting_title: str
     meeting_date: datetime
     due_date: Optional[datetime] = None
-    overall_progress_percentage: int
+    overall_progress_percentage: int = 0
     overall_status_name: Optional[str] = None
-    priority: int
-    is_overdue: bool = False
-    assigned_to_display_name: Optional[str] = None
+    priority: int = 2
+    is_overdue: bool = False  # Default to False
+    assigned_by_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Resolve Forward References ====================

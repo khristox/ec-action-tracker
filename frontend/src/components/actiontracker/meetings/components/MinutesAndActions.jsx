@@ -96,6 +96,7 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
     setError(null);
     try {
       if (editingItem.action) {
+        // Use the correct endpoint for update
         await api.put(`/action-tracker/actions/${editingItem.action.id}`, formData);
       } else {
         await api.post(`/action-tracker/actions/minutes/${selectedMinuteId}/actions`, formData);
@@ -103,11 +104,13 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
       onUpdate();
       closeAllDialogs();
     } catch (err) {
+      console.error('Save action failed', err);
       setError(err.response?.data?.detail || "Failed to save action");
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <Box sx={{ p: 2 }}>

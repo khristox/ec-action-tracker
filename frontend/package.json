@@ -26,6 +26,7 @@
     "date-fns": "^4.1.0",
     "dayjs": "^1.11.20",
     "formik": "^2.4.9",
+    "framer-motion": "^12.38.0",
     "notistack": "^3.0.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

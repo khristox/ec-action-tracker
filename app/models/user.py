@@ -71,7 +71,7 @@ class User(Base):
     
     
     # Nationality - Linked to Country attribute group
-    nationality_attribute_id = Column(CustomUUID, ForeignKey("attribute_values.id", ondelete="SET NULL"), nullable=True, index=True)
+    nationality_attribute_id = Column(CustomUUID, ForeignKey("attributes.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # ==================== ACCOUNT SECURITY ====================
     last_login = Column(DateTime(timezone=True), nullable=True)
@@ -106,7 +106,7 @@ class User(Base):
     
     # Nationality (from attribute system)
     nationality = relationship(
-        "AttributeValue", 
+        "Attribute", 
         foreign_keys=[nationality_attribute_id], 
         lazy="selectin"
     )

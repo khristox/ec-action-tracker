@@ -4,7 +4,7 @@ import {
   TextField, Button, LinearProgress, Alert,
   FormControl, InputLabel, Select, MenuItem,
   useMediaQuery, useTheme, IconButton, Typography,
-  Stack // <--- Added this to the import list
+  Stack
 } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
@@ -28,16 +28,49 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
   useEffect(() => {
     if (open) {
       if (editingAction) {
-        // ... (Assignment parsing logic from your previous implementation)
+        let parsedAssignment = null;
+        
+        // Parse assigned_to_name if it exists
+        if (editingAction.assigned_to_name) {
+          try {
+            const data = typeof editingAction.assigned_to_name === 'string' 
+              ? JSON.parse(editingAction.assigned_to_name) 
+              : editingAction.assigned_to_name;
+            
+            parsedAssignment = {
+              type: data.type || 'manual',
+              id: data.id || editingAction.assigned_to_id,
+              name: data.name || editingAction.assigned_to_name,
+              email: data.email,
+              assigned_to_id: editingAction.assigned_to_id || data.id,
+              assigned_to_name: data
+            };
+          } catch (e) {
+            parsedAssignment = {
+              type: 'manual',
+              name: editingAction.assigned_to_name,
+              email: '',
+              assigned_to_id: null,
+              assigned_to_name: { name: editingAction.assigned_to_name, type: 'manual' }
+            };
+          }
+        }
+
         setFormData({
           description: editingAction.description || '',
-          assigned_to: null, // Replace with your parsing logic
+          assigned_to: parsedAssignment,
           due_date: editingAction.due_date ? new Date(editingAction.due_date) : null,
           priority: editingAction.priority || 2,
           remarks: editingAction.remarks || ''
         });
       } else {
-        setFormData({ description: '', assigned_to: null, due_date: null, priority: 2, remarks: '' });
+        setFormData({
+          description: '',
+          assigned_to: null,
+          due_date: null,
+          priority: 2,
+          remarks: ''
+        });
       }
     }
   }, [editingAction, open]);
@@ -98,8 +131,7 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
             <Alert severity="error" sx={{ mb: 2 }}>{localError || error}</Alert>
           )}
           
-          {/* Stack ensures a strictly vertical, single-column layout */}
-          <Stack spacing={3} sx={{ mt: 0.5 }}> 
+          <Stack spacing={3} sx={{ mt: 0.5 }}>
             
             <TextField
               fullWidth
@@ -123,9 +155,7 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
               label="Due Date & Time"
               value={formData.due_date}
               onChange={(newValue) => setFormData({ ...formData, due_date: newValue })}
-              // Standard restriction: User cannot pick a time in the past
               disablePast 
-              // Enforce 5 mins from now to avoid immediate expiration
               minDateTime={addMinutes(new Date(), 5)}
               slotProps={{
                 textField: {

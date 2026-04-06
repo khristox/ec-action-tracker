@@ -17,6 +17,12 @@ from app.schemas.action_tracker import (
 router = APIRouter()
 
 # ==================== STATIC ROUTES ====================
+def calculate_is_overdue(due_date, completed_at) -> bool:
+    """Safely calculate if an action is overdue"""
+    if not due_date or completed_at:
+        return False
+    return due_date < datetime.now()
+
 @router.get("/my-tasks", response_model=List[MyTaskResponse])
 async def get_my_tasks(
     db: AsyncSession = Depends(deps.get_db),
@@ -32,12 +38,13 @@ async def get_my_tasks(
             meeting_title=action.minutes.meeting.title if action.minutes and action.minutes.meeting else "",
             meeting_date=action.minutes.meeting.meeting_date if action.minutes and action.minutes.meeting else datetime.now(),
             due_date=action.due_date,
-            overall_progress_percentage=action.overall_progress_percentage,
+            overall_progress_percentage=action.overall_progress_percentage or 0,
             overall_status_name=action.overall_status_name,
             priority=action.priority,
-            is_overdue=action.due_date and action.due_date < datetime.now() and not action.completed_at
+            is_overdue=calculate_is_overdue(action.due_date, action.completed_at)
         ))
     return result
+
 
 # ==================== COLLECTION ROUTES ====================
 @router.get("/", response_model=List[MeetingActionResponse])
@@ -78,6 +85,8 @@ async def get_action(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
     return result
 
+# In app/api/v1/endpoints/action_tracker/actions.py
+
 @router.put("/{action_id}", response_model=MeetingActionResponse)
 async def update_action(
     action_id: UUID,
@@ -86,10 +95,14 @@ async def update_action(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Update action item"""
-    result = await meeting_action.get(db, action_id)
-    if not result:
+    # First check if action exists
+    action_obj = await meeting_action.get(db, action_id)
+    if not action_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
-    return await meeting_action.update(db, action_id, action_in)
+    
+    # Update using the correct method
+    updated_action = await meeting_action.update_action(db, action_id, action_in, current_user.id)
+    return updated_action
 
 @router.post("/{action_id}/progress", response_model=MeetingActionResponse)
 async def update_action_progress(

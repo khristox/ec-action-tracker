@@ -34,6 +34,7 @@
     "react-quill-new": "^3.7.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^7.13.2",
+    "recharts": "^3.8.1",
     "yup": "^1.7.1"
   },
   "devDependencies": {

@@ -1,0 +1,2 @@
+import"./rolldown-runtime-Dw2cE7zH.js";import{Kn as e,Nn as t,Xn as n,ar as r,nr as i}from"./mui-vendor-CBm4kJdu.js";r();var a=i(),o=()=>(0,a.jsx)(t,{maxWidth:`md`,sx:{py:4},children:(0,a.jsxs)(n,{sx:{p:4,textAlign:`center`},children:[(0,a.jsx)(e,{variant:`h4`,gutterBottom:!0,children:`Edit Meeting`}),(0,a.jsx)(e,{variant:`body2`,color:`text.secondary`,children:`Edit meeting functionality coming soon.`})]})});export{o as default};
+//# sourceMappingURL=EditMeeting-CyR3IaG-.js.map

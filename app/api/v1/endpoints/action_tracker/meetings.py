@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.api import deps
 from app.crud.action_tracker import meeting, meeting_action, meeting_minutes, meeting_participant
 
+from app.models.general.dynamic_attribute import Attribute
 from app.models.user import User
 from app.models.action_tracker import Meeting, MeetingAction, MeetingDocument, MeetingParticipant, MeetingQuery, MeetingStatusHistory, MeetingMinutes
 from app.schemas.action_tracker import (
@@ -55,7 +56,6 @@ async def create_meeting(
         message="Meeting created successfully"
     )
 
-
 # ==================== LIST MEETINGS ====================
 @router.get("/", response_model=MeetingPaginationResponse)
 async def get_meetings(
@@ -84,6 +84,12 @@ async def get_meetings(
             )
         )
     
+    # FIX: Handle status filter correctly for relationship
+    if status:
+        # Use .has() for relationship comparison
+        filters.append(Meeting.status.has(Attribute.short_name == status))
+    
+    # Build the main query
     query = (
         select(Meeting)
         .where(and_(*filters))
@@ -98,22 +104,11 @@ async def get_meetings(
         .limit(limit)
     )
     
-    if status:
-        status_id = await get_status_id_by_short_name(db, status)
-        if status_id:
-            query = query.where(Meeting.status_id == status_id)
-        else:
-            return {"items": [], "total": 0, "page": page, "size": limit, "pages": 0}
-    
     result = await db.execute(query)
     meetings_list = result.scalars().all()
 
+    # Count query with same filters
     count_query = select(func.count(Meeting.id)).where(and_(*filters))
-    if status:
-        status_id = await get_status_id_by_short_name(db, status)
-        if status_id:
-            count_query = count_query.where(Meeting.status_id == status_id)
-    
     count_res = await db.execute(count_query)
     total_count = count_res.scalar() or 0
 
@@ -165,7 +160,6 @@ async def get_meetings(
         "size": limit,
         "pages": (total_count + limit - 1) // limit
     }
-
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(

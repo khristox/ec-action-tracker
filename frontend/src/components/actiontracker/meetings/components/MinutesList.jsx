@@ -1,7 +1,8 @@
+// MinutesList.jsx - Updated to safely handle actions
 import React, { useState } from 'react';
 import {
   Card, CardContent, Typography, Box, Button, Stack, Chip,
-  Divider, IconButton, Tooltip, Collapse, Alert
+  Divider, IconButton, Tooltip, Collapse, Alert, CircularProgress
 } from '@mui/material';
 import { 
   Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon, 
@@ -115,7 +116,7 @@ const MinutesHeader = ({ minute, onEditMinutes, onDeleteMinutes, loading }) => {
         <Stack spacing={0.5}>
           <Stack direction="row" spacing={1} alignItems="center">
             <Typography variant="h6" color={isActive ? "primary" : "text.disabled"} fontWeight={600}>
-              {minute.topic}
+              {minute.topic || minute.title || 'Untitled Minutes'}
             </Typography>
             {!isActive && (
               <Chip label="INACTIVE" size="small" color="error" variant="filled" sx={{ height: 20, fontWeight: 'bold', fontSize: '0.65rem' }} />
@@ -160,19 +161,19 @@ const MinutesHeader = ({ minute, onEditMinutes, onDeleteMinutes, loading }) => {
           icon={<PersonIcon sx={{ fontSize: '1rem !important' }} />}
           label={`By: ${minute.recorded_by_name || 'System'}`}
           size="small"
-          variant="soft"
+          variant="outlined"
         />
         <Chip
           icon={<ScheduleIcon sx={{ fontSize: '1rem !important' }} />}
-          label={`Created: ${new Date(minute.created_at).toLocaleString()}`}
+          label={`Created: ${minute.created_at ? new Date(minute.created_at).toLocaleString() : 'Unknown'}`}
           size="small"
-          variant="soft"
+          variant="outlined"
         />
         {minute.updated_at && (
           <Chip
             label={`Updated: ${new Date(minute.updated_at).toLocaleString()}`}
             size="small"
-            variant="soft"
+            variant="outlined"
             color="secondary"
           />
         )}
@@ -183,7 +184,7 @@ const MinutesHeader = ({ minute, onEditMinutes, onDeleteMinutes, loading }) => {
 
 // ==================== MAIN COMPONENT ====================
 
-const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onUpdate, loading }) => {
+const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onUpdate, loading, isMeetingStarted }) => {
   const [expandedItems, setExpandedItems] = useState({});
 
   const toggleSection = (id, type) => {
@@ -193,13 +194,23 @@ const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onU
     }));
   };
 
+  // Debug logging
+  React.useEffect(() => {
+    console.log('MinutesList received minutes:', minutes);
+    minutes?.forEach(minute => {
+      console.log(`Minute ${minute.id} - Topic: ${minute.topic}`);
+      console.log(`Actions for minute ${minute.id}:`, minute.actions);
+      console.log(`Number of actions: ${minute.actions?.length || 0}`);
+    });
+  }, [minutes]);
+
   if (!minutes || minutes.length === 0) {
     return (
       <Alert 
         severity="info" 
         sx={{ mt: 2, borderRadius: 2 }}
         action={
-          <Button color="inherit" size="small" onClick={() => onAddAction(null, null)}>
+          <Button color="inherit" size="small" onClick={() => onAddAction(null)}>
             Add First Minutes
           </Button>
         }
@@ -214,7 +225,9 @@ const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onU
       {minutes.map((minute) => {
         const isActive = minute.is_active !== false;
         const hasContent = !isContentEmpty(minute.discussion) || !isContentEmpty(minute.decisions);
-
+        // Safely get actions - ensure it's an array
+        const actions = Array.isArray(minute.actions) ? minute.actions : [];
+        
         return (
           <Card 
             key={minute.id} 
@@ -262,31 +275,39 @@ const MinutesList = ({ minutes, onEditMinutes, onDeleteMinutes, onAddAction, onU
               <Box mt={4} sx={{ opacity: isActive ? 1 : 0.5 }}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                   <Typography variant="subtitle1" fontWeight={700}>
-                    Action Items ({minute.actions?.length || 0})
+                    Action Items ({actions.length})
                   </Typography>
                   <Button
                     size="small"
                     variant="outlined"
                     startIcon={<AddIcon />}
                     onClick={() => onAddAction(minute.id)}
-                    disabled={loading || !isActive}
+                    disabled={loading || !isActive || !isMeetingStarted}
                   >
                     Add Action
                   </Button>
                 </Box>
 
-                {minute.actions?.length > 0 ? (
+                {actions.length > 0 ? (
                   <Stack spacing={1.5}>
-                    {minute.actions.map((action) => (
-                      <ActionItem
-                        key={action.id}
-                        action={action}
-                        minuteId={minute.id}
-                        onUpdate={onUpdate}
-                        onEdit={onAddAction}
-                        disabled={!isActive} // Pass disabled prop to ActionItem
-                      />
-                    ))}
+                    {actions.map((action) => {
+                      // Safely check if action exists
+                      if (!action) {
+                        console.warn('Undefined action found in minute', minute.id);
+                        return null;
+                      }
+                      console.log('Rendering action:', action);
+                      return (
+                        <ActionItem
+                          key={action.id || Math.random()}
+                          action={action}
+                          minuteId={minute.id}
+                          onUpdate={onUpdate}
+                          onEdit={onAddAction}
+                          disabled={!isActive || !isMeetingStarted}
+                        />
+                      );
+                    })}
                   </Stack>
                 ) : (
                   <Box 

@@ -59,15 +59,18 @@ export const fetchActionById = createAsyncThunk(
 
 // frontend/src/store/slices/actionTracker/actionSlice.js
 
+// In your actionSlice.js
 export const updateActionProgress = createAsyncThunk(
   'actions/updateActionProgress',
   async ({ id, progressData }) => {
-    // Ensure the payload matches backend expectations
+    // Ensure the payload structure matches backend expectations
     const payload = {
       progress_percentage: progressData.progress_percentage,
       individual_status_id: progressData.individual_status_id,
       remarks: progressData.remarks
     };
+    
+    console.log('Sending progress update to backend:', payload);
     const response = await api.post(`/action-tracker/actions/${id}/progress`, payload);
     return response.data;
   }

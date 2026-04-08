@@ -1,292 +1,276 @@
-import React, { useState, useEffect } from 'react';
+// ActionItem.jsx - Complete working version
+import React, { useState } from 'react';
 import {
-  Paper, Stack, Box, Typography, Chip, IconButton, Tooltip,
-  Button, LinearProgress, Alert, Divider
+  Paper, CardContent, Typography, Chip, Stack, Divider,
+  IconButton, Tooltip, LinearProgress, Collapse, Button,
+  Box
 } from '@mui/material';
 import {
-  Edit as EditIcon, Delete as DeleteIcon, Person as PersonIcon,
-  Schedule as ScheduleIcon, PriorityHigh as PriorityIcon,
-  Comment as CommentIcon, CheckCircle as CheckCircleIcon
+  Edit as EditIcon, CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon, PlayCircle as PlayCircleIcon, Schedule as ScheduleIcon,
+  Person as PersonIcon, Comment as CommentIcon, ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon, Assignment as AssignmentIcon
 } from '@mui/icons-material';
-import api from '../../../../services/api';
-import CommentsDialog from './CommentsDialog';
 
-// Helper function to get display name from assigned_to object
-const getAssignedDisplayName = (action) => {
-  // Check if assigned_to relationship exists (system user)
-  if (action.assigned_to?.username) {
-    return action.assigned_to.username;
+const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  // If action is undefined or null, show error state
+  if (!action) {
+    console.error('ActionItem received undefined action');
+    return (
+      <Paper sx={{ p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
+        <Typography variant="body2" color="error">Error: Action data is missing</Typography>
+      </Paper>
+    );
   }
-  
-  // Check if assigned_to_name is an object (new format)
+
+  // Helper function to safely get string value from any type
+  const getStringValue = (value, defaultValue = 'N/A') => {
+    if (!value) return defaultValue;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'object') {
+      if (value.name) return value.name;
+      if (value.label) return value.label;
+      if (value.value) return String(value.value);
+      return defaultValue;
+    }
+    return defaultValue;
+  };
+
+  // Get description safely
+  const description = getStringValue(action.description, action.title || 'Untitled Action');
+
+  // Get assigned to safely
+  let assignedTo = 'Unassigned';
   if (action.assigned_to_name) {
-    if (typeof action.assigned_to_name === 'object') {
-      return action.assigned_to_name.name || 'Unassigned';
+    assignedTo = getStringValue(action.assigned_to_name, 'Assigned User');
+  } else if (action.assigned_to) {
+    assignedTo = getStringValue(action.assigned_to, 'Assigned User');
+  } else if (action.assignee) {
+    assignedTo = getStringValue(action.assignee, 'Assigned User');
+  }
+
+  // Get status info
+  let status = { label: 'Pending', color: '#ff9800', bgColor: '#fff3e0', icon: <AssignmentIcon fontSize="small" /> };
+  const statusValue = getStringValue(action.status || action.action_status, '');
+  
+  if (statusValue) {
+    const statusLower = statusValue.toLowerCase();
+    if (statusLower === 'completed') {
+      status = { label: 'Completed', color: '#4caf50', bgColor: '#e8f5e9', icon: <CheckCircleIcon fontSize="small" /> };
+    } else if (statusLower === 'overdue') {
+      status = { label: 'Overdue', color: '#f44336', bgColor: '#ffebee', icon: <WarningIcon fontSize="small" /> };
+    } else if (statusLower === 'in-progress' || statusLower === 'in_progress' || statusLower === 'started') {
+      status = { label: 'In Progress', color: '#2196f3', bgColor: '#e3f2fd', icon: <PlayCircleIcon fontSize="small" /> };
     }
-    // Legacy string format
-    return action.assigned_to_name;
+  }
+
+  // Get priority info
+  let priority = { label: 'Medium', color: '#ff9800', bgColor: '#fff3e0', icon: '🟠' };
+  const priorityValue = action.priority;
+  
+  if (priorityValue) {
+    const priorityNum = parseInt(priorityValue);
+    if (priorityNum === 1) priority = { label: 'High', color: '#f44336', bgColor: '#ffebee', icon: '🔴' };
+    else if (priorityNum === 2) priority = { label: 'Medium', color: '#ff9800', bgColor: '#fff3e0', icon: '🟠' };
+    else if (priorityNum === 3) priority = { label: 'Low', color: '#4caf50', bgColor: '#e8f5e9', icon: '🟢' };
+    else if (priorityNum === 4) priority = { label: 'Very Low', color: '#9e9e9e', bgColor: '#f5f5f5', icon: '⚪' };
+  }
+
+  // Get due date safely
+  let dueDateString = null;
+  if (action.due_date) {
+    try {
+      dueDateString = new Date(action.due_date).toLocaleDateString();
+    } catch (e) {
+      dueDateString = null;
+    }
   }
   
-  return 'Unassigned';
-};
+  const isOverdue = action.is_overdue === true || (dueDateString && new Date(action.due_date) < new Date() && status.label !== 'Completed');
 
-const ActionItem = ({ action, minuteId, onUpdate, onEdit }) => {
-  const [updatingProgress, setUpdatingProgress] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(false);
-  const [error, setError] = useState(null);
-  const [statusOptions, setStatusOptions] = useState([]);
-  const [selectedStatusId, setSelectedStatusId] = useState(null);
+  // Get progress safely
+  const progress = action.overall_progress_percentage || action.progress_percentage || 0;
 
-  // Fetch status options on mount
-  useEffect(() => {
-    const fetchStatusOptions = async () => {
-      try {
-        const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
-        const attributes = response.data.items || response.data || [];
-        const actionStatuses = attributes.filter(a => a.code?.startsWith('ACTION_STATUS_'));
-        setStatusOptions(actionStatuses);
-        
-        // Set default status based on current progress
-        if (action.overall_status_id) {
-          setSelectedStatusId(action.overall_status_id);
-        } else if (actionStatuses.length > 0) {
-          // Auto-select based on progress
-          const progress = action.overall_progress_percentage || 0;
-          if (progress === 100) {
-            const completed = actionStatuses.find(s => s.code === 'ACTION_STATUS_COMPLETED');
-            if (completed) setSelectedStatusId(completed.id);
-          } else if (progress > 0) {
-            const inProgress = actionStatuses.find(s => s.code === 'ACTION_STATUS_IN_PROGRESS');
-            if (inProgress) setSelectedStatusId(inProgress.id);
-          } else {
-            const pending = actionStatuses.find(s => s.code === 'ACTION_STATUS_PENDING');
-            if (pending) setSelectedStatusId(pending.id);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch status options:', err);
-      }
-    };
-    fetchStatusOptions();
-  }, [action.overall_status_id, action.overall_progress_percentage]);
-
-  const handleUpdateProgress = async () => {
-    const newProgress = Math.min((action.overall_progress_percentage || 0) + 25, 100);
-    
-    // Find appropriate status ID based on new progress
-    let statusId = selectedStatusId;
-    if (!statusId && statusOptions.length > 0) {
-      if (newProgress === 100) {
-        const completed = statusOptions.find(s => s.code === 'ACTION_STATUS_COMPLETED');
-        statusId = completed?.id;
-      } else if (newProgress > 0) {
-        const inProgress = statusOptions.find(s => s.code === 'ACTION_STATUS_IN_PROGRESS');
-        statusId = inProgress?.id;
-      } else {
-        const pending = statusOptions.find(s => s.code === 'ACTION_STATUS_PENDING');
-        statusId = pending?.id;
-      }
-    }
-    
-    if (!statusId) {
-      setError('Unable to determine status. Please refresh and try again.');
-      setTimeout(() => setError(null), 3000);
-      return;
-    }
-    
-    setUpdatingProgress(true);
-    setError(null);
-    
-    try {
-      const payload = {
-        progress_percentage: newProgress,
-        individual_status_id: statusId,
-        remarks: `Progress updated from ${action.overall_progress_percentage || 0}% to ${newProgress}%`
-      };
-      
-      console.log('Updating progress with payload:', payload);
-      
-      const response = await api.post(`/action-tracker/actions/${action.id}/progress`, payload);
-      
-      if (response.data) {
-        onUpdate(); // Refresh the parent component
-      }
-    } catch (err) {
-      console.error("Failed to update progress", err);
-      const errorMsg = err.response?.data?.detail || err.response?.data?.message || 'Failed to update progress';
-      setError(typeof errorMsg === 'object' ? JSON.stringify(errorMsg) : errorMsg);
-      setTimeout(() => setError(null), 3000);
-    } finally {
-      setUpdatingProgress(false);
-    }
-  };
-
-  const handleDeleteAction = async () => {
-    if (!window.confirm("Delete this action item? This action cannot be undone.")) return;
-    try {
-      await api.delete(`/action-tracker/actions/${action.id}`);
-      onUpdate();
-    } catch (err) {
-      console.error("Failed to delete action", err);
-      setError(err.response?.data?.detail || 'Failed to delete action');
-      setTimeout(() => setError(null), 3000);
-    }
-  };
-
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 1: return 'error';
-      case 2: return 'warning';
-      case 3: return 'info';
-      case 4: return 'default';
-      default: return 'default';
-    }
-  };
-
-  const getPriorityLabel = (priority) => {
-    switch (priority) {
-      case 1: return 'High';
-      case 2: return 'Medium';
-      case 3: return 'Low';
-      case 4: return 'Very Low';
-      default: return 'Medium';
-    }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'TBD';
-    return new Date(dateString).toLocaleDateString();
-  };
-
-  const formatDateTime = (dateString) => {
-    if (!dateString) return 'TBD';
-    return new Date(dateString).toLocaleString();
-  };
-
-  const assignedDisplayName = getAssignedDisplayName(action);
+  // Get remarks safely
+  const remarks = getStringValue(action.remarks || action.notes, '');
 
   return (
-    <>
-      <Paper sx={{ p: 2, bgcolor: '#fafafa', borderRadius: 2, mb: 2 }} elevation={0}>
-        <Stack spacing={1.5}>
-          {/* Error Alert */}
-          {error && (
-            <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 1 }}>
-              {error}
-            </Alert>
-          )}
-          
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={1}>
-            <Box flex={1} minWidth={200}>
-              <Typography variant="subtitle2" fontWeight={600}>
-                {action.description}
-              </Typography>
-              <Stack direction="row" spacing={1} mt={1} flexWrap="wrap" useFlexGap>
-                <Chip
-                  size="small"
-                  icon={<PersonIcon />}
-                  label={`Assigned to: ${assignedDisplayName}`}
-                />
-                <Chip
-                  size="small"
-                  icon={<ScheduleIcon />}
-                  label={`Due: ${formatDate(action.due_date)}`}
-                />
-                <Chip
-                  size="small"
-                  icon={<PriorityIcon />}
-                  label={`Priority: ${getPriorityLabel(action.priority)}`}
-                  color={getPriorityColor(action.priority)}
-                />
-                <Chip
-                  size="small"
-                  icon={<CommentIcon />}
-                  label={`Comments: ${action.comments?.length || 0}`}
-                  onClick={() => setCommentsOpen(true)}
-                  sx={{ cursor: 'pointer' }}
-                />
-              </Stack>
-              {action.remarks && (
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-                  <strong>Remarks:</strong> {action.remarks}
-                </Typography>
-              )}
-            </Box>
-            <Box textAlign="right" minWidth={120}>
-              <Typography variant="caption" color="text.secondary">Progress</Typography>
-              <Box display="flex" alignItems="center" gap={1}>
-                <LinearProgress
-                  variant="determinate"
-                  value={action.overall_progress_percentage || 0}
-                  sx={{ flex: 1, height: 8, borderRadius: 4 }}
-                />
-                <Typography variant="caption" fontWeight={600}>
-                  {action.overall_progress_percentage || 0}%
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-
-          <Box display="flex" justifyContent="flex-end" gap={1} flexWrap="wrap">
-            {action.overall_progress_percentage !== 100 && (
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={handleUpdateProgress}
-                disabled={updatingProgress}
-              >
-                {updatingProgress ? 'Updating...' : 'Update Progress (+25%)'}
-              </Button>
-            )}
-            <Button
-              size="small"
-              startIcon={<EditIcon />}
-              onClick={() => onEdit(minuteId, action)}
-            >
-              Edit
-            </Button>
-            <Button
-              size="small"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={handleDeleteAction}
-            >
-              Delete
-            </Button>
-          </Box>
-
-          {action.completed_at && (
-            <Alert severity="success" icon={<CheckCircleIcon />} sx={{ mt: 1 }}>
-              Completed on {formatDateTime(action.completed_at)}
-            </Alert>
-          )}
-
-          <Divider />
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Chip
-              size="small"
-              label={`Created by: ${action.created_by_name || 'System'} on ${formatDateTime(action.created_at)}`}
-              variant="outlined"
+    <Paper 
+      elevation={0} 
+      sx={{ 
+        borderRadius: 2, 
+        border: '1px solid',
+        borderColor: isOverdue ? '#ffebee' : '#e2e8f0',
+        bgcolor: isOverdue ? '#fff5f5' : 'white',
+        transition: 'all 0.2s',
+        '&:hover': { boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }
+      }}
+    >
+      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+        {/* Header with Status and Priority */}
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+            <Chip 
+              size="small" 
+              label={status.label}
+              icon={status.icon}
+              sx={{ 
+                bgcolor: status.bgColor, 
+                color: status.color, 
+                fontWeight: 600,
+                height: 24,
+                '& .MuiChip-icon': { color: status.color }
+              }}
             />
-            {action.updated_at && action.updated_at !== action.created_at && (
-              <Chip
-                size="small"
-                label={`Updated by: ${action.updated_by_name || 'System'} on ${formatDateTime(action.updated_at)}`}
-                variant="outlined"
-                color="secondary"
+            <Chip 
+              size="small" 
+              label={`${priority.icon} ${priority.label}`}
+              sx={{ 
+                bgcolor: priority.bgColor, 
+                color: priority.color, 
+                fontWeight: 600,
+                height: 24
+              }}
+            />
+            {isOverdue && (
+              <Chip 
+                size="small" 
+                label="OVERDUE" 
+                color="error" 
+                sx={{ fontWeight: 700, height: 24 }}
               />
             )}
           </Stack>
+          
+          <Stack direction="row" spacing={0.5}>
+            <Tooltip title="Edit Action">
+              <IconButton 
+                size="small" 
+                onClick={() => onEdit(minuteId, action)} 
+                disabled={disabled}
+                sx={{ p: 0.5 }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Stack>
-      </Paper>
 
-      <CommentsDialog
-        open={commentsOpen}
-        onClose={() => setCommentsOpen(false)}
-        action={action}
-        onUpdate={onUpdate}
-      />
-    </>
+        {/* Description */}
+        <Typography 
+          variant="body1" 
+          fontWeight={700} 
+          sx={{ mb: 1.5, lineHeight: 1.4 }}
+        >
+          {description}
+        </Typography>
+
+        {/* Additional Details - Using Stack */}
+        <Stack spacing={1.5} sx={{ mb: 2 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <PersonIcon sx={{ fontSize: 16, color: '#64748b' }} />
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+              Assigned to:
+            </Typography>
+            <Typography variant="caption" fontWeight={600}>
+              {assignedTo}
+            </Typography>
+          </Stack>
+          
+          <Stack direction="row" spacing={1} alignItems="center">
+            <ScheduleIcon sx={{ fontSize: 16, color: '#64748b' }} />
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+              Due Date:
+            </Typography>
+            <Typography 
+              variant="caption" 
+              fontWeight={600}
+              color={isOverdue ? 'error.main' : 'text.primary'}
+            >
+              {dueDateString || 'No due date'}
+            </Typography>
+          </Stack>
+        </Stack>
+
+        {/* Progress Section */}
+        {progress > 0 && (
+          <Box sx={{ mb: 1.5 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                Progress
+              </Typography>
+              <Typography variant="caption" fontWeight={700} color="primary.main">
+                {progress}%
+              </Typography>
+            </Stack>
+            <LinearProgress 
+              variant="determinate" 
+              value={progress} 
+              sx={{ 
+                height: 6, 
+                borderRadius: 3, 
+                bgcolor: '#e0e0e0',
+                '& .MuiLinearProgress-bar': { 
+                  bgcolor: status.color,
+                  borderRadius: 3
+                }
+              }}
+            />
+          </Box>
+        )}
+
+        {/* Remarks Section */}
+        {remarks && remarks !== 'N/A' && remarks !== '' && (
+          <>
+            <Button
+              size="small"
+              onClick={() => setExpanded(!expanded)}
+              sx={{ textTransform: 'none', mt: 0.5, p: 0 }}
+            >
+              {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              {expanded ? 'Hide remarks' : 'Show remarks'}
+            </Button>
+            <Collapse in={expanded}>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 1.5, 
+                  mt: 1, 
+                  bgcolor: '#f8fafc',
+                  borderRadius: 1.5
+                }}
+              >
+                <Stack direction="row" spacing={1}>
+                  <CommentIcon sx={{ fontSize: 16, color: '#64748b' }} />
+                  <Typography variant="body2" color="text.secondary">
+                    {remarks}
+                  </Typography>
+                </Stack>
+              </Paper>
+            </Collapse>
+          </>
+        )}
+
+        {/* Metadata Footer */}
+        <Divider sx={{ my: 1.5 }} />
+        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+          <Typography variant="caption" color="text.disabled">
+            ID: {typeof action.id === 'string' ? action.id.slice(0, 8) : 'Unknown'}
+          </Typography>
+          {action.completed_at && (
+            <Chip 
+              size="small" 
+              label={`Completed: ${new Date(action.completed_at).toLocaleDateString()}`}
+              variant="outlined"
+              sx={{ height: 20, fontSize: '0.65rem' }}
+            />
+          )}
+        </Stack>
+      </CardContent>
+    </Paper>
   );
 };
 

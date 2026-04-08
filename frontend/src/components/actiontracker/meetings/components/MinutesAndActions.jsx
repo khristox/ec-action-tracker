@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useMemo } from 'react';
+// MinutesAndActions.jsx - Complete working version
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { 
   Box, Button, Alert, Collapse, Snackbar, 
-  ToggleButtonGroup, ToggleButton, Typography, Stack, Fade 
+  ToggleButtonGroup, ToggleButton, Typography, Stack, Fade, CircularProgress
 } from '@mui/material';
 import { 
   Add as AddIcon, 
@@ -11,61 +12,180 @@ import {
   EventNote as NoteIcon
 } from '@mui/icons-material';
 import api from '../../../../services/api';
-
-// Sub-components
 import MinutesList from './MinutesList';
-import AddMinutesDialog from './AddMinutesDialog';
-import AddActionDialog from './AddActionDialog';
+import CombinedMinutesActionsForm from './CombinedMinutesActionsForm';
 
-const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
-  // 1. Status Check
-  // Assuming 'Started' is the trigger. Use lowercase for safety.
- const isStarted = meetingStatus?.toLowerCase().endsWith('started');
-  // 2. State Management
+const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, onUpdate }) => {
+  const isStarted = meetingStatus?.toLowerCase().endsWith('started');
   const [filter, setFilter] = useState('active');
-  const [dialogs, setDialogs] = useState({ minutes: false, action: false });
-  const [editingItem, setEditingItem] = useState({ minute: null, action: null });
-  const [selectedMinuteId, setSelectedMinuteId] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingMinutes, setEditingMinutes] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  const [minutesWithActions, setMinutesWithActions] = useState([]);
+  const [loadingActions, setLoadingActions] = useState(false);
 
-  // 3. Filter Logic
+  // Fetch actions for a specific minute
+  const fetchActionsForMinute = useCallback(async (minuteId) => {
+    try {
+      const response = await api.get(`/action-tracker/minutes/${minuteId}/actions`);
+      const actions = response.data.data || response.data || [];
+      console.log(`Fetched ${actions.length} actions for minute ${minuteId}`, actions);
+      return actions;
+    } catch (err) {
+      console.error(`Error fetching actions for minute ${minuteId}:`, err);
+      return [];
+    }
+  }, []);
+
+  // Load minutes with their actions
+  const loadMinutesWithActions = useCallback(async () => {
+    if (!initialMinutes || initialMinutes.length === 0) {
+      console.log('No initial minutes provided');
+      setMinutesWithActions([]);
+      return;
+    }
+
+    console.log('Loading actions for minutes:', initialMinutes.length);
+    setLoadingActions(true);
+    
+    try {
+      const minutesWithActionsData = await Promise.all(
+        initialMinutes.map(async (minute) => {
+          const actions = await fetchActionsForMinute(minute.id);
+          return {
+            ...minute,
+            actions: actions || []
+          };
+        })
+      );
+      console.log('Minutes with actions loaded:', minutesWithActionsData.length);
+      setMinutesWithActions(minutesWithActionsData);
+    } catch (err) {
+      console.error('Error loading minutes with actions:', err);
+      // Fallback: set minutes without actions
+      setMinutesWithActions(initialMinutes.map(m => ({ ...m, actions: [] })));
+    } finally {
+      setLoadingActions(false);
+    }
+  }, [initialMinutes, fetchActionsForMinute]);
+
+  // Reload when initialMinutes changes
+  useEffect(() => {
+    loadMinutesWithActions();
+  }, [loadMinutesWithActions]);
+
+  // Refresh all data
+  const handleRefresh = useCallback(async () => {
+    if (onUpdate) {
+      await onUpdate();
+      // After parent updates, reload actions
+      setTimeout(() => {
+        loadMinutesWithActions();
+      }, 500);
+    }
+  }, [onUpdate, loadMinutesWithActions]);
+
   const filteredMinutes = useMemo(() => {
-    if (!minutes) return [];
-    if (filter === 'all') return minutes;
-    return minutes.filter(m => {
+    if (!minutesWithActions || minutesWithActions.length === 0) return [];
+    if (filter === 'all') return minutesWithActions;
+    return minutesWithActions.filter(m => {
       const isActive = m.is_active !== false;
       return filter === 'active' ? isActive : !isActive;
     });
-  }, [minutes, filter]);
+  }, [minutesWithActions, filter]);
 
-  // 4. Action Handlers
-  const closeAllDialogs = useCallback(() => {
-    setDialogs({ minutes: false, action: false });
-    setEditingItem({ minute: null, action: null });
-    setError(null);
-  }, []);
-
-  const handleOpenMinutes = (minute = null) => {
-    setEditingItem(prev => ({ ...prev, minute }));
-    setDialogs(prev => ({ ...prev, minutes: true }));
+  const handleOpenForm = (minutesData = null) => {
+    if (minutesData) {
+      // When editing, also fetch the actions for this minute
+      const loadMinuteWithActions = async () => {
+        setLoading(true);
+        const actions = await fetchActionsForMinute(minutesData.id);
+        setEditingMinutes({
+          ...minutesData,
+          actions: actions
+        });
+        setFormOpen(true);
+        setLoading(false);
+      };
+      loadMinuteWithActions();
+    } else {
+      setEditingMinutes(null);
+      setFormOpen(true);
+    }
   };
 
-  const handleSaveMinutes = async (formData) => {
+  const handleSaveCombined = async (data) => {
     setLoading(true);
     setError(null);
+    
     try {
-      if (editingItem.minute) {
-        await api.put(`/action-tracker/minutes/${editingItem.minute.id}`, formData);
+      if (editingMinutes) {
+        // Update existing minutes
+        await api.put(`/action-tracker/minutes/${editingMinutes.id}`, {
+          topic: data.minutes.topic,
+          content: data.minutes.content,
+          summary: data.minutes.summary
+        });
+        
+        // Update or create actions
+        for (const action of data.actions) {
+          if (action.id && !action.isNew) {
+            // Update existing action
+            await api.put(`/action-tracker/actions/${action.id}`, {
+              description: action.description,
+              assigned_to_name: action.assigned_to?.assigned_to_name || null,
+              assigned_to_id: action.assigned_to?.assigned_to_id || null,
+              priority: action.priority,
+              due_date: action.due_date ? new Date(action.due_date).toISOString() : null,
+              remarks: action.remarks || ''
+            });
+          } else if (action.description) {
+            // Create new action
+            await api.post(`/action-tracker/actions/minutes/${editingMinutes.id}/actions`, {
+              description: action.description,
+              assigned_to_name: action.assigned_to?.assigned_to_name || null,
+              assigned_to_id: action.assigned_to?.assigned_to_id || null,
+              priority: action.priority,
+              due_date: action.due_date ? new Date(action.due_date).toISOString() : null,
+              remarks: action.remarks || ''
+            });
+          }
+        }
+        setSuccessMsg('Minutes and actions updated successfully');
       } else {
-        await api.post(`/action-tracker/meetings/${meetingId}/minutes`, formData);
+        // Create new minutes
+        const minutesResponse = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
+          topic: data.minutes.topic,
+          content: data.minutes.content,
+          summary: data.minutes.summary
+        });
+        const newMinutesId = minutesResponse.data.id;
+        
+        // Create all actions for this minutes
+        if (data.actions.length > 0) {
+          const actionPromises = data.actions.map(action =>
+            api.post(`/action-tracker/actions/minutes/${newMinutesId}/actions`, {
+              description: action.description,
+              assigned_to_name: action.assigned_to?.assigned_to_name || null,
+              assigned_to_id: action.assigned_to?.assigned_to_id || null,
+              priority: action.priority,
+              due_date: action.due_date ? new Date(action.due_date).toISOString() : null,
+              remarks: action.remarks || ''
+            })
+          );
+          await Promise.all(actionPromises);
+        }
+        setSuccessMsg(`Minutes and ${data.actions.length} action(s) added successfully`);
       }
-      setSuccessMsg(`Minutes ${editingItem.minute ? 'updated' : 'added'} successfully`);
-      onUpdate();
-      closeAllDialogs();
+      
+      handleRefresh(); // Refresh data
+      setFormOpen(false);
+      setEditingMinutes(null);
     } catch (err) {
-      setError(err.response?.data?.detail || "Failed to save minutes.");
+      console.error('Save failed', err);
+      setError(err.response?.data?.detail || 'Failed to save minutes and actions');
     } finally {
       setLoading(false);
     }
@@ -75,9 +195,9 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
     if (!window.confirm("Are you sure? This will deactivate these minutes.")) return;
     setLoading(true);
     try {
-      await api.delete(`/action-tracker/minutes/${minuteId}`); 
+      await api.delete(`/action-tracker/minutes/${minuteId}`);
       setSuccessMsg("Minutes deactivated");
-      onUpdate(); 
+      handleRefresh();
     } catch (err) {
       setError("Failed to delete minutes.");
     } finally {
@@ -85,32 +205,13 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
     }
   };
 
-  const handleOpenAction = (minuteId, action = null) => {
-    setSelectedMinuteId(minuteId);
-    setEditingItem(prev => ({ ...prev, action }));
-    setDialogs(prev => ({ ...prev, action: true }));
-  };
-
-  const handleSaveAction = async (formData) => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (editingItem.action) {
-        // Use the correct endpoint for update
-        await api.put(`/action-tracker/actions/${editingItem.action.id}`, formData);
-      } else {
-        await api.post(`/action-tracker/actions/minutes/${selectedMinuteId}/actions`, formData);
-      }
-      onUpdate();
-      closeAllDialogs();
-    } catch (err) {
-      console.error('Save action failed', err);
-      setError(err.response?.data?.detail || "Failed to save action");
-    } finally {
-      setLoading(false);
+  const handleAddAction = (minuteId) => {
+    // This will open the combined form with the minute pre-selected
+    const minute = minutesWithActions.find(m => m.id === minuteId);
+    if (minute) {
+      handleOpenForm(minute);
     }
   };
-
 
   return (
     <Box sx={{ p: 2 }}>
@@ -120,7 +221,7 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
         </Alert>
       </Collapse>
 
-      {/* Header with Filter and Conditional Add Button */}
+      {/* Header */}
       <Stack 
         direction={{ xs: 'column', md: 'row' }} 
         justifyContent="space-between" 
@@ -152,13 +253,12 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
           </ToggleButtonGroup>
         </Box>
 
-        {/* Status-based Add Button */}
         {isStarted ? (
           <Fade in={isStarted}>
             <Button 
               variant="contained" 
               startIcon={<AddIcon />} 
-              onClick={() => handleOpenMinutes()} 
+              onClick={() => handleOpenForm()} 
               disabled={loading}
               sx={{ 
                 borderRadius: 2.5, 
@@ -169,7 +269,7 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
                 fontWeight: 600
               }}
             >
-              Add Minutes
+              Add Minutes & Actions
             </Button>
           </Fade>
         ) : (
@@ -182,32 +282,37 @@ const MinutesAndActions = ({ minutes, meetingId, meetingStatus, onUpdate }) => {
         )}
       </Stack>
 
-      {/* List Component */}
-      <MinutesList
-        minutes={filteredMinutes}
-        onEditMinutes={handleOpenMinutes}
-        onDeleteMinutes={handleDeleteMinutes}
-        onAddAction={handleOpenAction}
-        onUpdate={onUpdate}
-        loading={loading}
-        isMeetingStarted={isStarted} // Pass this to disable edit/delete if ended
-      />
+      {/* Loading indicator for actions */}
+      {loadingActions && (
+        <Box display="flex" justifyContent="center" alignItems="center" my={4}>
+          <CircularProgress size={32} />
+          <Typography variant="body2" sx={{ ml: 2 }}>Loading actions...</Typography>
+        </Box>
+      )}
 
-      {/* Dialogs */}
-      <AddMinutesDialog
-        open={dialogs.minutes}
-        onClose={closeAllDialogs}
-        onSave={handleSaveMinutes}
-        editingMinutes={editingItem.minute}
-        loading={loading}
-      />
+      {/* Minutes List Component */}
+      {!loadingActions && (
+        <MinutesList
+          minutes={filteredMinutes}
+          onEditMinutes={handleOpenForm}
+          onDeleteMinutes={handleDeleteMinutes}
+          onAddAction={handleAddAction}
+          onUpdate={handleRefresh}
+          loading={loading}
+          isMeetingStarted={isStarted}
+        />
+      )}
 
-      <AddActionDialog
-        open={dialogs.action}
-        onClose={closeAllDialogs}
-        onSave={handleSaveAction}
-        editingAction={editingItem.action}
+      {/* Combined Form Dialog */}
+      <CombinedMinutesActionsForm
+        open={formOpen}
+        onClose={() => {
+          setFormOpen(false);
+          setEditingMinutes(null);
+        }}
+        onSave={handleSaveCombined}
         meetingId={meetingId}
+        editingMinutes={editingMinutes}
         loading={loading}
       />
 

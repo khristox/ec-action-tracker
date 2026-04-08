@@ -234,6 +234,7 @@ const AppContent = () => {
 };
 
 export default function App() {
+  const baseUrl = import.meta.env.BASE_URL;
   return (
     <ThemeContextProvider>
       <SnackbarProvider 
@@ -241,7 +242,7 @@ export default function App() {
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
         autoHideDuration={4000}
       >
-        <Router>
+        <Router basename={baseUrl}>
           <AppContent />
         </Router>
       </SnackbarProvider>

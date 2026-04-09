@@ -267,6 +267,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             logger.error(f"Error getting multi {self.model.__name__}: {e}")
             raise
     
+    
     async def count(
         self, 
         db: AsyncSession, 

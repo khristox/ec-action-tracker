@@ -1,26 +1,36 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../../../services/api';
 
+// Fetch Participants with trailing slash
 export const fetchParticipants = createAsyncThunk(
   'participants/fetchParticipants',
   async (params = {}) => {
-    const response = await api.get('/action-tracker/participants', { params });
+    const response = await api.get('/action-tracker/participants/', { params });
+    
+    if (response.data && typeof response.data === 'object') {
+      if ('items' in response.data && Array.isArray(response.data.items)) {
+        return response.data;
+      }
+      if (Array.isArray(response.data)) {
+        return {
+          items: response.data,
+          total: response.data.length,
+          pages: 1,
+          page: params.page || 1,
+          limit: params.limit || response.data.length
+        };
+      }
+    }
     return response.data;
   }
 );
 
-export const fetchMyParticipants = createAsyncThunk(
-  'participants/fetchMyParticipants',
-  async () => {
-    const response = await api.get('/action-tracker/participants/my');
-    return response.data;
-  }
-);
-
+// Create Participant with trailing slash
 export const createParticipant = createAsyncThunk(
   'participants/createParticipant',
   async (participantData) => {
-    const response = await api.post('/action-tracker/participants', participantData);
+    // Adding '/' ensures FastAPI doesn't trigger a 307/301 redirect
+    const response = await api.post('/action-tracker/participants/', participantData);
     return response.data;
   }
 );
@@ -28,7 +38,7 @@ export const createParticipant = createAsyncThunk(
 export const updateParticipant = createAsyncThunk(
   'participants/updateParticipant',
   async ({ id, data }) => {
-    const response = await api.put(`/action-tracker/participants/${id}`, data);
+    const response = await api.put(`/action-tracker/participants/${id}/`, data);
     return response.data;
   }
 );
@@ -36,33 +46,21 @@ export const updateParticipant = createAsyncThunk(
 export const deleteParticipant = createAsyncThunk(
   'participants/deleteParticipant',
   async (id) => {
-    await api.delete(`/action-tracker/participants/${id}`);
+    await api.delete(`/action-tracker/participants/${id}/`);
     return id;
-  }
-);
-
-export const fetchParticipantLists = createAsyncThunk(
-  'participants/fetchParticipantLists',
-  async () => {
-    const response = await api.get('/action-tracker/participant-lists');
-    return response.data;
-  }
-);
-
-export const createParticipantList = createAsyncThunk(
-  'participants/createParticipantList',
-  async (listData) => {
-    const response = await api.post('/action-tracker/participant-lists', listData);
-    return response.data;
   }
 );
 
 const participantSlice = createSlice({
   name: 'participants',
   initialState: {
-    participants: [],
-    myParticipants: [],
-    participantLists: [],
+    participants: {
+      items: [],
+      total: 0,
+      pages: 1,
+      page: 1,
+      limit: 20
+    },
     loading: false,
     error: null,
   },
@@ -70,56 +68,43 @@ const participantSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    clearParticipants: (state) => {
+      state.participants = { items: [], total: 0, pages: 1, page: 1, limit: 20 };
+    }
   },
   extraReducers: (builder) => {
     builder
-      // Fetch Participants
       .addCase(fetchParticipants.pending, (state) => {
         state.loading = true;
+        state.error = null;
       })
       .addCase(fetchParticipants.fulfilled, (state, action) => {
         state.loading = false;
-        state.participants = action.payload;
+        state.participants = {
+          items: action.payload.items || [],
+          total: action.payload.total || 0,
+          pages: action.payload.pages || 1,
+          page: action.payload.page || 1,
+          limit: action.payload.limit || 20
+        };
       })
       .addCase(fetchParticipants.rejected, (state, action) => {
         state.loading = false;
+        state.error = action.error.message || 'Failed to fetch participants';
+      })
+      .addCase(createParticipant.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(createParticipant.fulfilled, (state) => {
+        state.loading = false;
+        // We let the component re-fetch the list to ensure pagination stays correct
+      })
+      .addCase(createParticipant.rejected, (state, action) => {
+        state.loading = false;
         state.error = action.error.message;
-      })
-      // Fetch My Participants
-      .addCase(fetchMyParticipants.fulfilled, (state, action) => {
-        state.myParticipants = action.payload;
-      })
-      // Create Participant
-      .addCase(createParticipant.fulfilled, (state, action) => {
-        state.participants.unshift(action.payload);
-        state.myParticipants.unshift(action.payload);
-      })
-      // Update Participant
-      .addCase(updateParticipant.fulfilled, (state, action) => {
-        const index = state.participants.findIndex(p => p.id === action.payload.id);
-        if (index !== -1) {
-          state.participants[index] = action.payload;
-        }
-        const myIndex = state.myParticipants.findIndex(p => p.id === action.payload.id);
-        if (myIndex !== -1) {
-          state.myParticipants[myIndex] = action.payload;
-        }
-      })
-      // Delete Participant
-      .addCase(deleteParticipant.fulfilled, (state, action) => {
-        state.participants = state.participants.filter(p => p.id !== action.payload);
-        state.myParticipants = state.myParticipants.filter(p => p.id !== action.payload);
-      })
-      // Fetch Participant Lists
-      .addCase(fetchParticipantLists.fulfilled, (state, action) => {
-        state.participantLists = action.payload;
-      })
-      // Create Participant List
-      .addCase(createParticipantList.fulfilled, (state, action) => {
-        state.participantLists.unshift(action.payload);
       });
   },
 });
 
-export const { clearError } = participantSlice.actions;
+export const { clearError, clearParticipants } = participantSlice.actions;
 export default participantSlice.reducer;

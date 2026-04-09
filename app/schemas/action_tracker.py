@@ -22,71 +22,6 @@ class AssignedToInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ==================== Participant Schemas ====================
-
-class ParticipantBase(ORMBase):
-    name: str = Field(..., min_length=1, max_length=255)
-    email: Optional[str] = Field(None, max_length=255)
-    telephone: Optional[str] = Field(None, max_length=50)
-    title: Optional[str] = Field(None, max_length=255)
-    organization: Optional[str] = Field(None, max_length=255)
-    notes: Optional[str] = None
-
-
-class ParticipantCreate(ParticipantBase):
-    pass
-
-
-class ParticipantUpdate(ORMBase):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    email: Optional[str] = None
-    telephone: Optional[str] = None
-    title: Optional[str] = None
-    organization: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class ParticipantResponse(ParticipantBase):
-    id: UUID
-    created_by_id: Optional[UUID] = None
-    created_by_name: Optional[str] = None
-    created_at: datetime
-    updated_by_id: Optional[UUID] = None
-    updated_by_name: Optional[str] = None
-    updated_at: Optional[datetime] = None
-    is_active: bool = True
-
-
-# ==================== Participant List Schemas ====================
-
-class ParticipantListBase(ORMBase):
-    name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    is_global: bool = False
-
-
-class ParticipantListCreate(ParticipantListBase):
-    participant_ids: List[UUID] = Field(default_factory=list)
-
-
-class ParticipantListUpdate(ORMBase):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_global: Optional[bool] = None
-    participant_ids: Optional[List[UUID]] = None
-
-
-class ParticipantListResponse(ParticipantListBase):
-    id: UUID
-    created_by_id: Optional[UUID] = None
-    created_by_name: Optional[str] = None
-    created_at: datetime
-    updated_by_id: Optional[UUID] = None
-    updated_by_name: Optional[str] = None
-    updated_at: Optional[datetime] = None
-    is_active: bool = True
-    participants: List[ParticipantResponse] = Field(default_factory=list)
-    participant_count: int = 0
 
 
 # ==================== Meeting Participant Schemas ====================
@@ -357,34 +292,44 @@ class MeetingMinutesResponse(MeetingMinutesBase):
 class MeetingActionBase(ORMBase):
     description: str = Field(..., min_length=1)
     assigned_to_id: Optional[UUID] = None
-    assigned_to_name: Optional[Union[str, Dict, AssignedToInfo]] = Field(
-        None, 
-        description="Can be string (legacy), dict, or AssignedToInfo object"
-    )
+    # This stores the Dict/JSON from the DB
+    assigned_to_name: Optional[Union[str, Dict, Any]] = Field(None)
     due_date: Optional[datetime] = None
     priority: int = Field(2, ge=1, le=4)
-    estimated_hours: Optional[float] = Field(None, ge=0)
     remarks: Optional[str] = None
 
     @field_validator('assigned_to_name', mode='before')
     @classmethod
-    def validate_assigned_to_name(cls, v: Any) -> Optional[Dict]:
-        """Convert various formats to consistent JSON structure"""
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return {"name": v, "type": "manual"}
-        if isinstance(v, dict):
-            if "name" not in v:
-                raise ValueError("assigned_to_name must have a 'name' field")
-            return v
-        if hasattr(v, 'model_dump'):
-            return v.model_dump()
+    def validate_assigned_to_name(cls, v: Any) -> Any:
+        if v is None: return None
+        # Ensure it's handled as a dict internally if it's a string
+        if isinstance(v, str): return {"name": v, "type": "manual"}
         return v
 
+class MeetingActionResponse(MeetingActionBase):
+    id: UUID
+    minute_id: UUID
+    overall_progress_percentage: int = 0
+    created_at: datetime
+    is_active: bool = True
+    
+    # This is the "Magic Field" for React
+    assigned_to_name_display: str = "Unassigned"
 
+    @model_validator(mode="after")
+    def set_display_name(self) -> "MeetingActionResponse":
+        # Look at the field inherited from the base class
+        assigned = self.assigned_to_name
+        
+        if isinstance(assigned, dict):
+            self.assigned_to_name_display = assigned.get('name', 'Unassigned')
+        elif isinstance(assigned, str):
+            self.assigned_to_name_display = assigned
+        else:
+            self.assigned_to_name_display = 'Unassigned'
+        return self
+    
 class MeetingActionCreate(MeetingActionBase):
-    """Schema for creating an action"""
     pass
 
 
@@ -420,20 +365,27 @@ class MeetingActionResponse(MeetingActionBase):
     updated_at: Optional[datetime] = None
     is_active: bool = True
     
-    @property
-    def assigned_to_display_name(self) -> str:
-        """Helper to get display name from JSON or relationship"""
-        if self.assigned_to_name and isinstance(self.assigned_to_name, dict):
-            return self.assigned_to_name.get('name', 'Unassigned')
-        return 'Unassigned'
-    
-    @property
-    def assigned_to_email(self) -> Optional[str]:
-        """Helper to get email from JSON"""
-        if self.assigned_to_name and isinstance(self.assigned_to_name, dict):
-            return self.assigned_to_name.get('email')
-        return None
+    # This is the dedicated string field for the Frontend
+    assigned_to_name_display: Optional[str] = "Unassigned"
 
+    @model_validator(mode="after")
+    def set_display_name(self) -> "MeetingActionResponse":
+        """
+        Extracts a clean string from the assigned_to_name dictionary 
+        to prevent [object Object] on the frontend.
+        """
+        # Access the dictionary created by the field_validator in the Base class
+        assigned = self.assigned_to_name
+        
+        if isinstance(assigned, dict):
+            self.assigned_to_name_display = assigned.get('name', 'Unassigned')
+        elif isinstance(assigned, str):
+            self.assigned_to_name_display = assigned
+        else:
+            self.assigned_to_name_display = 'Unassigned'
+            
+        return self
+    
 
 # ==================== Action Status History Schemas ====================
 
@@ -600,6 +552,15 @@ class MyTaskResponse(ORMBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode='after')
+    def set_task_display_name(self) -> 'MyTaskResponse':
+        # If your CRUD passes the object, extract the name string here
+        if hasattr(self, 'assigned_to_name') and isinstance(self.assigned_to_name, dict):
+            self.assigned_to_display_name = self.assigned_to_name.get('name')
+        return self
+
+
+# Add to app/schemas/action_tracker.py
 
 # ==================== Resolve Forward References ====================
 

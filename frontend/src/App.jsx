@@ -35,10 +35,10 @@ const MyTasks = lazy(() => import('./components/actiontracker/actions/MyTasks'))
 const ActionDetail = lazy(() => import('./components/actiontracker/actions/ActionDetail'));
 
 // Action Tracker - Participants
-const ParticipantsList = lazy(() => import('./components/actiontracker/participants/ParticipantsList'));
+const ParticipantsLists = lazy(() => import('./components/actiontracker/participants/ParticipantsLists'));
 const CreateParticipant = lazy(() => import('./components/actiontracker/participants/CreateParticipant'));
 const ParticipantDetail = lazy(() => import('./components/actiontracker/participants/ParticipantDetail'));
-const ParticipantLists = lazy(() => import('./components/actiontracker/participants/ParticipantLists'));
+const ParticipantLists = lazy(() => import('./components/actiontracker/participants/ParticipantsLists'));
 
 // Action Tracker - Documents & Reports
 const DocumentsList = lazy(() => import('./components/actiontracker/documents/DocumentsList'));
@@ -204,7 +204,7 @@ const AppContent = () => {
           <Route path="actions/:id" element={<ActionDetail />} />
           
           {/* ==================== PARTICIPANTS ROUTES ==================== */}
-          <Route path="participants" element={<ParticipantsList />} />
+          <Route path="participants" element={<ParticipantsLists />} />
           <Route path="participants/create" element={<CreateParticipant />} />
           <Route path="participants/:id" element={<ParticipantDetail />} />
           <Route path="participant-lists" element={<ParticipantLists />} />

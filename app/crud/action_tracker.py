@@ -1,14 +1,15 @@
 """
 Action Tracker CRUD Operations
-Organized by entity with consistent patterns for audit fields
+Complete implementation with all CRUD operations for all entities
 """
 
 import json
 from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
 from datetime import datetime
+from contextlib import asynccontextmanager
 
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_, func, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,153 +21,413 @@ from app.models.action_tracker import (
 )
 from app.schemas.action_tracker import (
     MeetingCreate, MeetingUpdate, MeetingMinutesCreate, MeetingMinutesUpdate,
-    MeetingActionCreate, MeetingActionUpdate, ParticipantCreate, ParticipantUpdate,
-    ParticipantListCreate, ParticipantListUpdate, MeetingDocumentCreate, 
+    MeetingActionCreate, MeetingActionUpdate, 
+    MeetingDocumentCreate, 
     MeetingDocumentUpdate, ActionProgressUpdate, ActionCommentCreate,
     ActionCommentUpdate
+)
+from app.schemas.action_tracker_participants import (
+    ParticipantCreate, 
+    ParticipantListCreate, 
+    ParticipantListUpdate, 
+    ParticipantUpdate
 )
 
 
 # ============================================================================
-# PARTICIPANT CRUD
+# BASE CLASS WITH AUDIT MIXIN
 # ============================================================================
 
-class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate]):
-    """CRUD operations for Participant entity"""
+class AuditMixin:
+    """Mixin for audit trail functionality"""
     
+    async def _set_audit_fields(self, obj, created_by_id: UUID = None, updated_by_id: UUID = None):
+        """Set audit fields on an object"""
+        if created_by_id:
+            obj.created_by_id = created_by_id
+            obj.created_at = datetime.now()
+        if updated_by_id:
+            obj.updated_by_id = updated_by_id
+        obj.updated_at = datetime.now()
+        if not hasattr(obj, 'is_active'):
+            obj.is_active = True
+        return obj
+    
+    async def _update_audit_fields(self, obj, updated_by_id: UUID):
+        """Update audit fields on an existing object"""
+        obj.updated_by_id = updated_by_id
+        obj.updated_at = datetime.now()
+        return obj
+
+
+# ============================================================================
+# PARTICIPANT CRUD - COMPLETE
+# ============================================================================
+
+class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate], AuditMixin):
+    
+    # CREATE
     async def create(
-        self, db: AsyncSession, obj_in: ParticipantCreate, created_by_id: UUID
+        self, 
+        db: AsyncSession, 
+        obj_in: Union[ParticipantCreate, Dict[str, Any]],
+        created_by_id: UUID
     ) -> Participant:
-        """Create participant with audit fields"""
-        db_obj = Participant(
-            **obj_in.model_dump(),
-            created_by_id=created_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
-    
-    async def update(
-        self, db: AsyncSession, db_obj: Participant, obj_in: ParticipantUpdate, updated_by_id: UUID
-    ) -> Participant:
-        """Update participant with audit fields"""
-        update_data = obj_in.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        
-        db_obj.updated_by_id = updated_by_id
-        db_obj.updated_at = datetime.now()
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
-    
-    async def soft_delete(self, db: AsyncSession, participant_id: UUID, deleted_by_id: UUID) -> Optional[Participant]:
-        """Soft delete participant"""
-        participant = await self.get(db, participant_id)
-        if participant:
-            participant.is_active = False
-            participant.updated_by_id = deleted_by_id
-            participant.updated_at = datetime.now()
+        """Create a new participant with audit fields"""
+        try:
+            if isinstance(obj_in, ParticipantCreate):
+                obj_data = obj_in.model_dump()
+            else:
+                obj_data = obj_in.copy()
+            
+            if not obj_data.get('name'):
+                raise ValueError("Name is required for creating a participant")
+            
+            if obj_data.get('email'):
+                existing = await self.get_by_email(db, obj_data['email'])
+                if existing:
+                    raise ValueError(f"Participant with email '{obj_data['email']}' already exists")
+            
+            db_obj = Participant(**obj_data)
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(db_obj)
             await db.commit()
-            await db.refresh(participant)
-        return participant
-    
-    async def get_by_email(self, db: AsyncSession, email: str) -> Optional[Participant]:
+            await db.refresh(db_obj)
+            return db_obj
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create participant: {str(e)}")
+
+    # READ (Single)
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[Participant]:
+        """Get a single participant by ID"""
         result = await db.execute(
             select(Participant).where(
-                Participant.email == email,
+                Participant.id == id,
                 Participant.is_active == True
             )
         )
         return result.scalar_one_or_none()
-    
+
+    # READ (Multiple with filters)
+    async def get_multi(
+        self,
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 100,
+        filters: Optional[Dict[str, Any]] = None,
+        include_inactive: bool = False
+    ) -> List[Participant]:
+        """Get multiple participants with filtering"""
+        query = select(Participant)
+        
+        if not include_inactive:
+            query = query.where(Participant.is_active == True)
+
+        if filters:
+            search = filters.get("search")
+            if search:
+                term = f"%{search}%"
+                query = query.where(
+                    or_(
+                        Participant.name.ilike(term),
+                        Participant.email.ilike(term),
+                        Participant.organization.ilike(term),
+                    )
+                )
+            
+            organization = filters.get("organization")
+            if organization:
+                query = query.where(Participant.organization == organization)
+
+        query = query.order_by(Participant.name).offset(skip).limit(limit)
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    # READ (Count)
+    async def count(
+        self,
+        db: AsyncSession,
+        filters: Optional[Dict[str, Any]] = None,
+        include_inactive: bool = False
+    ) -> int:
+        """Count participants with optional filtering"""
+        query = select(func.count(Participant.id))
+        
+        if not include_inactive:
+            query = query.where(Participant.is_active == True)
+
+        if filters:
+            search = filters.get("search")
+            if search:
+                term = f"%{search}%"
+                query = query.where(
+                    or_(
+                        Participant.name.ilike(term),
+                        Participant.email.ilike(term),
+                        Participant.organization.ilike(term),
+                    )
+                )
+
+        result = await db.execute(query)
+        return result.scalar() or 0
+
+    # READ (By email)
+    async def get_by_email(
+        self, 
+        db: AsyncSession, 
+        email: str,
+        include_inactive: bool = False
+    ) -> Optional[Participant]:
+        """Get a participant by email address"""
+        if not email:
+            return None
+        
+        query = select(Participant).where(Participant.email == email)
+        if not include_inactive:
+            query = query.where(Participant.is_active == True)
+        
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
+    # READ (Search)
     async def search(
-        self, db: AsyncSession, query: str, skip: int = 0, limit: int = 100
+        self,
+        db: AsyncSession,
+        query: str,
+        limit: int = 10,
+        include_inactive: bool = False
     ) -> List[Participant]:
         """Search participants by name, email, or organization"""
-        search_term = f"%{query}%"
+        term = f"%{query}%"
+        search_query = select(Participant).where(
+            or_(
+                Participant.name.ilike(term),
+                Participant.email.ilike(term),
+                Participant.organization.ilike(term),
+            )
+        )
+        
+        if not include_inactive:
+            search_query = search_query.where(Participant.is_active == True)
+        
+        search_query = search_query.limit(limit)
+        result = await db.execute(search_query)
+        return result.scalars().all()
+
+    # READ (By organization)
+    async def get_by_organization(
+        self,
+        db: AsyncSession,
+        organization: str,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Participant]:
+        """Get participants by organization"""
         result = await db.execute(
             select(Participant)
             .where(
-                Participant.is_active == True,
-                or_(
-                    Participant.name.ilike(search_term),
-                    Participant.email.ilike(search_term),
-                    Participant.organization.ilike(search_term)
-                )
+                Participant.organization == organization,
+                Participant.is_active == True
             )
             .offset(skip)
             .limit(limit)
-            .order_by(Participant.name)
-        )
-        return result.scalars().all()
-    
-    async def get_my_participants(self, db: AsyncSession, created_by_id: UUID) -> List[Participant]:
-        """Get participants created by a specific user"""
-        result = await db.execute(
-            select(Participant)
-            .where(
-                Participant.created_by_id == created_by_id,
-                Participant.is_active == True
-            )
-            .order_by(Participant.name)
         )
         return result.scalars().all()
 
+    # UPDATE
+    async def update(
+        self, 
+        db: AsyncSession, 
+        id: UUID, 
+        obj_in: Union[ParticipantUpdate, Dict[str, Any]],
+        updated_by_id: UUID
+    ) -> Optional[Participant]:
+        """Update a participant with audit fields"""
+        try:
+            db_obj = await self.get(db, id)
+            if not db_obj:
+                return None
+            
+            if isinstance(obj_in, ParticipantUpdate):
+                update_data = obj_in.model_dump(exclude_unset=True)
+            else:
+                update_data = obj_in
+            
+            if 'email' in update_data and update_data['email'] and update_data['email'] != db_obj.email:
+                existing = await self.get_by_email(db, update_data['email'])
+                if existing and existing.id != id:
+                    raise ValueError(f"Participant with email '{update_data['email']}' already exists")
+            
+            for field, value in update_data.items():
+                if value is not None and hasattr(db_obj, field):
+                    setattr(db_obj, field, value)
+            
+            await self._update_audit_fields(db_obj, updated_by_id)
+            
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update participant: {str(e)}")
+
+    # DELETE (Soft)
+    async def soft_delete(
+        self, 
+        db: AsyncSession, 
+        id: UUID, 
+        deleted_by_id: UUID
+    ) -> Optional[Participant]:
+        """Soft delete a participant with audit fields"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, deleted_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete participant: {str(e)}")
+
+    # DELETE (Hard)
+    async def hard_delete(
+        self, 
+        db: AsyncSession, 
+        id: UUID
+    ) -> bool:
+        """Hard delete a participant permanently"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                await db.delete(db_obj)
+                await db.commit()
+                return True
+            return False
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to hard delete participant: {str(e)}")
+
+    # BULK OPERATIONS
+    async def bulk_create(
+        self,
+        db: AsyncSession,
+        participants: List[Union[ParticipantCreate, Dict[str, Any]]],
+        created_by_id: UUID
+    ) -> List[Participant]:
+        """Bulk create participants"""
+        created = []
+        for participant_data in participants:
+            try:
+                new_participant = await self.create(db, participant_data, created_by_id)
+                created.append(new_participant)
+            except Exception as e:
+                print(f"Failed to create participant: {e}")
+                continue
+        return created
+
+    async def bulk_update(
+        self,
+        db: AsyncSession,
+        updates: List[Dict[str, Any]],
+        updated_by_id: UUID
+    ) -> List[Participant]:
+        """Bulk update participants"""
+        updated = []
+        for update_data in updates:
+            try:
+                participant_id = update_data.pop('id')
+                participant = await self.update(db, participant_id, update_data, updated_by_id)
+                if participant:
+                    updated.append(participant)
+            except Exception as e:
+                print(f"Failed to update participant: {e}")
+                continue
+        return updated
+
+    async def bulk_delete(
+        self,
+        db: AsyncSession,
+        ids: List[UUID],
+        deleted_by_id: UUID
+    ) -> int:
+        """Bulk soft delete participants"""
+        deleted_count = 0
+        for participant_id in ids:
+            try:
+                result = await self.soft_delete(db, participant_id, deleted_by_id)
+                if result:
+                    deleted_count += 1
+            except Exception as e:
+                print(f"Failed to delete participant {participant_id}: {e}")
+                continue
+        return deleted_count
+
 
 # ============================================================================
-# PARTICIPANT LIST CRUD
+# PARTICIPANT LIST CRUD - COMPLETE
 # ============================================================================
 
-class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, ParticipantListUpdate]):
-    """CRUD operations for ParticipantList entity"""
+class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, ParticipantListUpdate], AuditMixin):
     
+    # CREATE
     async def create(
         self, db: AsyncSession, obj_in: ParticipantListCreate, created_by_id: UUID
     ) -> ParticipantList:
         """Create participant list with audit fields"""
-        participant_ids = getattr(obj_in, 'participant_ids', [])
-        list_data = obj_in.model_dump(exclude={'participant_ids'})
-        
-        db_obj = ParticipantList(
-            **list_data,
-            created_by_id=created_by_id,
-            created_at=datetime.now(),
-            is_active=True
+        try:
+            participant_ids = getattr(obj_in, 'participant_ids', [])
+            list_data = obj_in.model_dump(exclude={'participant_ids'})
+            
+            db_obj = ParticipantList(**list_data)
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            if participant_ids:
+                participants = await self._get_participants_by_ids(db, participant_ids)
+                db_obj.participants = participants
+            
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create participant list: {str(e)}")
+
+    # READ (Single)
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[ParticipantList]:
+        """Get a single participant list by ID"""
+        result = await db.execute(
+            select(ParticipantList)
+            .options(selectinload(ParticipantList.participants))
+            .where(ParticipantList.id == id, ParticipantList.is_active == True)
         )
+        return result.scalar_one_or_none()
+
+    # READ (Multiple)
+    async def get_multi(
+        self,
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 100,
+        include_inactive: bool = False
+    ) -> List[ParticipantList]:
+        """Get multiple participant lists"""
+        query = select(ParticipantList).options(selectinload(ParticipantList.participants))
         
-        if participant_ids:
-            participants = await self._get_participants_by_ids(db, participant_ids)
-            db_obj.participants = participants
+        if not include_inactive:
+            query = query.where(ParticipantList.is_active == True)
         
-        db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
-    
-    async def update(
-        self, db: AsyncSession, db_obj: ParticipantList, obj_in: ParticipantListUpdate, updated_by_id: UUID
-    ) -> ParticipantList:
-        """Update participant list with audit fields"""
-        update_data = obj_in.model_dump(exclude_unset=True)
-        participant_ids = update_data.pop('participant_ids', None)
-        
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        
-        if participant_ids is not None:
-            participants = await self._get_participants_by_ids(db, participant_ids)
-            db_obj.participants = participants
-        
-        db_obj.updated_by_id = updated_by_id
-        db_obj.updated_at = datetime.now()
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
-    
+        query = query.offset(skip).limit(limit).order_by(ParticipantList.name)
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    # READ (Accessible lists)
     async def get_accessible_lists(
         self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100
     ) -> List[ParticipantList]:
@@ -186,41 +447,165 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             .order_by(ParticipantList.name)
         )
         return result.scalars().all()
-    
+
+    # READ (By owner)
+    async def get_by_owner(
+        self,
+        db: AsyncSession,
+        owner_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[ParticipantList]:
+        """Get lists created by a specific user"""
+        result = await db.execute(
+            select(ParticipantList)
+            .options(selectinload(ParticipantList.participants))
+            .where(
+                ParticipantList.created_by_id == owner_id,
+                ParticipantList.is_active == True
+            )
+            .offset(skip)
+            .limit(limit)
+            .order_by(ParticipantList.name)
+        )
+        return result.scalars().all()
+
+    # UPDATE
+    async def update(
+        self, db: AsyncSession, db_obj: ParticipantList, obj_in: ParticipantListUpdate, updated_by_id: UUID
+    ) -> ParticipantList:
+        """Update participant list with audit fields"""
+        try:
+            update_data = obj_in.model_dump(exclude_unset=True)
+            participant_ids = update_data.pop('participant_ids', None)
+            
+            for field, value in update_data.items():
+                setattr(db_obj, field, value)
+            
+            if participant_ids is not None:
+                participants = await self._get_participants_by_ids(db, participant_ids)
+                db_obj.participants = participants
+            
+            await self._update_audit_fields(db_obj, updated_by_id)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update participant list: {str(e)}")
+
+    # DELETE (Soft)
+    async def soft_delete(
+        self, db: AsyncSession, id: UUID, deleted_by_id: UUID
+    ) -> Optional[ParticipantList]:
+        """Soft delete a participant list"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, deleted_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete participant list: {str(e)}")
+
+    # DELETE (Hard)
+    async def hard_delete(self, db: AsyncSession, id: UUID) -> bool:
+        """Hard delete a participant list"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                await db.delete(db_obj)
+                await db.commit()
+                return True
+            return False
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to hard delete participant list: {str(e)}")
+
+    # LIST MANAGEMENT
     async def add_participants(
         self, db: AsyncSession, list_id: UUID, participant_ids: List[UUID], added_by_id: UUID
     ) -> Optional[ParticipantList]:
         """Add participants to a list"""
-        list_obj = await self.get(db, list_id)
-        if not list_obj:
-            return None
-        
-        participants = await self._get_participants_by_ids(db, participant_ids)
-        list_obj.participants.extend(participants)
-        list_obj.updated_by_id = added_by_id
-        list_obj.updated_at = datetime.now()
-        
-        await db.commit()
-        await db.refresh(list_obj)
-        return list_obj
-    
+        try:
+            list_obj = await self.get(db, list_id)
+            if not list_obj:
+                return None
+            
+            participants = await self._get_participants_by_ids(db, participant_ids)
+            existing_ids = {p.id for p in list_obj.participants}
+            new_participants = [p for p in participants if p.id not in existing_ids]
+            
+            list_obj.participants.extend(new_participants)
+            await self._update_audit_fields(list_obj, added_by_id)
+            
+            await db.commit()
+            await db.refresh(list_obj)
+            return list_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add participants: {str(e)}")
+
     async def remove_participant(
         self, db: AsyncSession, list_id: UUID, participant_id: UUID, removed_by_id: UUID
     ) -> bool:
         """Remove a participant from a list"""
-        list_obj = await self.get(db, list_id)
-        if not list_obj:
+        try:
+            list_obj = await self.get(db, list_id)
+            if not list_obj:
+                return False
+            
+            original_count = len(list_obj.participants)
+            list_obj.participants = [p for p in list_obj.participants if p.id != participant_id]
+            
+            if len(list_obj.participants) < original_count:
+                await self._update_audit_fields(list_obj, removed_by_id)
+                await db.commit()
+                return True
+            
             return False
-        
-        list_obj.participants = [p for p in list_obj.participants if p.id != participant_id]
-        list_obj.updated_by_id = removed_by_id
-        list_obj.updated_at = datetime.now()
-        
-        await db.commit()
-        return True
-    
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to remove participant: {str(e)}")
+
+    async def duplicate_list(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        new_name: str,
+        created_by_id: UUID
+    ) -> Optional[ParticipantList]:
+        """Duplicate an existing participant list"""
+        try:
+            original = await self.get(db, list_id)
+            if not original:
+                return None
+            
+            new_list = ParticipantList(
+                name=new_name,
+                description=f"Copy of {original.name}",
+                is_global=original.is_global,
+                participants=original.participants.copy()
+            )
+            await self._set_audit_fields(new_list, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(new_list)
+            await db.commit()
+            await db.refresh(new_list)
+            return new_list
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to duplicate list: {str(e)}")
+
+    # HELPERS
     async def _get_participants_by_ids(self, db: AsyncSession, participant_ids: List[UUID]) -> List[Participant]:
         """Helper to fetch participants by IDs"""
+        if not participant_ids:
+            return []
+        
         result = await db.execute(
             select(Participant).where(Participant.id.in_(participant_ids))
         )
@@ -228,455 +613,94 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
 
 
 # ============================================================================
-# MEETING CRUD
+# MEETING ACTION CRUD - COMPLETE
 # ============================================================================
 
-class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate]):
-    """CRUD operations for Meeting entity"""
+class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActionUpdate], AuditMixin):
     
-    async def create_with_participants(
-        self, db: AsyncSession, obj_in: MeetingCreate, created_by_id: UUID
-    ) -> Meeting:
-        """Create meeting with participants from template or custom list"""
-        meeting_data = obj_in.model_dump(exclude={'participant_list_id', 'custom_participants', 'status'})
-        meeting = Meeting(
-            **meeting_data,
-            created_by_id=created_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(meeting)
-        await db.flush()
-        
-        # Log initial status
-        await self._log_status_change(db, meeting.id, meeting.status_id, "Meeting created", created_by_id)
-        
-        # Add participants from template list
-        if obj_in.participant_list_id:
-            await self._add_participants_from_template(db, meeting, obj_in.participant_list_id, created_by_id)
-        
-        # Add custom participants
-        await self._add_custom_participants(db, meeting, obj_in.custom_participants, created_by_id)
-        
-        await db.commit()
-        await db.refresh(meeting)
-        return meeting
-    
-    async def update(
-        self, db: AsyncSession, db_obj: Meeting, obj_in: MeetingUpdate, updated_by_id: UUID
-    ) -> Meeting:
-        """Update meeting with audit fields and status change logging"""
-        update_data = obj_in.model_dump(exclude_unset=True)
-        
-        # Extract status-related fields
-        new_status_id = update_data.pop('status_id', None)
-        status_comment = update_data.pop('status_comment', None)
-        status_date = update_data.pop('status_date', None)
-        
-        # Update basic fields
-        for field, value in update_data.items():
-            if value is not None:
-                setattr(db_obj, field, value)
-        
-        # Handle status change
-        if new_status_id and db_obj.status_id != new_status_id:
-            await self._log_status_change(
-                db, db_obj.id, new_status_id, 
-                status_comment or "Status changed", 
-                updated_by_id, status_date
-            )
-            db_obj.status_id = new_status_id
-        
-        # Update audit fields
-        db_obj.updated_by_id = updated_by_id
-        db_obj.updated_at = datetime.now()
-        
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
-    
-    async def update_status(
-        self, db: AsyncSession, meeting_id: UUID, status_id: UUID, 
-        updated_by_id: UUID, comment: str = None
-    ) -> Meeting:
-        """Explicitly update meeting status and log to history"""
-        meeting = await self.get(db, meeting_id)
-        if not meeting:
-            raise ValueError("Meeting not found")
-        
-        if meeting.status_id != status_id:
-            await self._log_status_change(
-                db, meeting_id, status_id, 
-                comment or f"Status changed from {meeting.status_id} to {status_id}", 
-                updated_by_id
-            )
-            meeting.status_id = status_id
-            meeting.updated_by_id = updated_by_id
-            meeting.updated_at = datetime.now()
-            
-            await db.commit()
-            await db.refresh(meeting)
-        
-        return meeting
-    
-    async def get_upcoming_meetings(self, db: AsyncSession, limit: int = 10) -> List[Meeting]:
-        """Get upcoming meetings"""
-        result = await db.execute(
-            select(Meeting)
-            .options(selectinload(Meeting.participants))
-            .where(
-                Meeting.meeting_date >= datetime.now(),
-                Meeting.is_active == True
-            )
-            .order_by(Meeting.meeting_date)
-            .limit(limit)
-        )
-        return result.scalars().all()
-    
-    async def get_meetings_by_status(
-        self, db: AsyncSession, status_id: UUID, skip: int = 0, limit: int = 100
-    ) -> List[Meeting]:
-        """Get meetings filtered by status"""
-        result = await db.execute(
-            select(Meeting)
-            .options(selectinload(Meeting.participants))
-            .where(Meeting.status_id == status_id, Meeting.is_active == True)
-            .offset(skip)
-            .limit(limit)
-            .order_by(Meeting.meeting_date.desc())
-        )
-        return result.scalars().all()
-
-    async def get_meeting_with_details(self, db: AsyncSession, meeting_id: UUID) -> Optional[Meeting]:
-        """Get meeting with all related data loaded"""
-        result = await db.execute(
-            select(Meeting)
-            .options(
-                selectinload(Meeting.participants),
-                selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions),
-                selectinload(Meeting.documents),
-                selectinload(Meeting.status_history).selectinload(MeetingStatusHistory.status)
-            )
-            .where(Meeting.id == meeting_id, Meeting.is_active == True)
-        )
-        return result.scalar_one_or_none()
-
-    async def add_minutes(
-        self, db: AsyncSession, meeting_id: UUID, minutes_in: MeetingMinutesCreate, recorded_by_id: UUID
-    ) -> MeetingMinutes:
-        """Add minutes to a meeting"""
-        minutes = MeetingMinutes(
-            meeting_id=meeting_id,
-            **minutes_in.model_dump(),
-            recorded_by_id=recorded_by_id,
-            created_by_id=recorded_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(minutes)
-        await db.commit()
-        await db.refresh(minutes)
-        return minutes
-    
-    async def soft_delete(self, db: AsyncSession, meeting_id: UUID, deleted_by_id: UUID) -> Optional[Meeting]:
-        """Soft delete a meeting"""
-        meeting = await self.get(db, meeting_id)
-        if meeting:
-            meeting.is_active = False
-            meeting.updated_by_id = deleted_by_id
-            meeting.updated_at = datetime.now()
-            await db.commit()
-            await db.refresh(meeting)
-        return meeting
-    
-    # ========== PRIVATE HELPERS ==========
-    
-    async def _log_status_change(
-        self, db: AsyncSession, meeting_id: UUID, status_id: UUID, 
-        comment: str, updated_by_id: UUID, status_date: datetime = None
-    ) -> None:
-        """Log meeting status change to history"""
-        history = MeetingStatusHistory(
-            meeting_id=meeting_id,
-            status_id=status_id,
-            comment=comment,
-            status_date=status_date or datetime.now(),
-            created_by_id=updated_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(history)
-    
-    async def _add_participants_from_template(
-        self, db: AsyncSession, meeting: Meeting, template_id: UUID, created_by_id: UUID
-    ) -> None:
-        """Add participants from a template list"""
-        result = await db.execute(
-            select(ParticipantList)
-            .options(selectinload(ParticipantList.participants))
-            .where(ParticipantList.id == template_id)
-        )
-        participant_list = result.scalar_one_or_none()
-        
-        if participant_list:
-            for template_participant in participant_list.participants:
-                meeting_participant = MeetingParticipant(
-                    meeting_id=meeting.id,
-                    name=template_participant.name,
-                    email=template_participant.email,
-                    telephone=template_participant.telephone,
-                    title=template_participant.title,
-                    organization=template_participant.organization,
-                    is_chairperson=(template_participant.name == meeting.chairperson_name),
-                    created_by_id=created_by_id,
-                    created_at=datetime.now(),
-                    is_active=True
-                )
-                db.add(meeting_participant)
-    
-    async def _add_custom_participants(
-        self, db: AsyncSession, meeting: Meeting, custom_participants: List, created_by_id: UUID
-    ) -> None:
-        """Add custom participants to meeting"""
-        for custom_participant in custom_participants:
-            meeting_participant = MeetingParticipant(
-                meeting_id=meeting.id,
-                **custom_participant.model_dump(),
-                created_by_id=created_by_id,
-                created_at=datetime.now(),
-                is_active=True
-            )
-            db.add(meeting_participant)
-
-
-# ============================================================================
-# MEETING MINUTES CRUD
-# ============================================================================
-
-class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingMinutesUpdate]):
-    """CRUD operations for MeetingMinutes entity"""
-    
-    async def update(
-        self, db: AsyncSession, db_obj: MeetingMinutes, obj_in: MeetingMinutesUpdate, updated_by_id: UUID
-    ) -> MeetingMinutes:
-        """Update minutes with audit fields"""
-        update_data = obj_in.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        
-        db_obj.updated_by_id = updated_by_id
-        db_obj.updated_at = datetime.now()
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
-    
-    async def get_minutes_with_actions(self, db: AsyncSession, minutes_id: UUID) -> Optional[MeetingMinutes]:
-        """Get minutes with their actions loaded"""
-        result = await db.execute(
-            select(MeetingMinutes)
-            .options(selectinload(MeetingMinutes.actions))
-            .where(MeetingMinutes.id == minutes_id, MeetingMinutes.is_active == True)
-        )
-        return result.scalar_one_or_none()
-    
-    async def get_meeting_minutes(
-        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100,
-        include_inactive: bool = False
-    ) -> List[MeetingMinutes]:
-        """Get all minutes for a meeting with their actions"""
-        query = (
-            select(MeetingMinutes)
-            .options(selectinload(MeetingMinutes.actions))
-            .where(MeetingMinutes.meeting_id == meeting_id)
-            .offset(skip)
-            .limit(limit)
-            .order_by(MeetingMinutes.timestamp.desc())
-        )
-        
-        if not include_inactive:
-            query = query.where(MeetingMinutes.is_active == True)
-        
-        result = await db.execute(query)
-        return result.scalars().all()
-
-
-# ============================================================================
-# MEETING ACTION CRUD
-# ============================================================================
-class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActionUpdate]):
-    """CRUD operations for MeetingAction entity"""
-    
-    def _normalize_assigned_to_name(self, value: Optional[Union[str, Dict, Any]]) -> Optional[Dict]:
-        """
-        Convert assigned_to_name to consistent JSON format.
-        Expected format: {"name": "John Doe", "email": "john@example.com", "type": "user|participant|manual", "id": "uuid"}
-        """
-        if value is None:
-            return None
-        if isinstance(value, str):
-            # Try to parse as JSON first
-            try:
-                parsed = json.loads(value)
-                if isinstance(parsed, dict) and "name" in parsed:
-                    return parsed
-            except (json.JSONDecodeError, TypeError):
-                pass
-            # If not JSON or invalid, treat as plain name
-            return {"name": value, "type": "manual"}
-        if isinstance(value, dict):
-            if "name" not in value:
-                return None
-            # Ensure type is set
-            if "type" not in value:
-                value["type"] = "manual"
-            return value
-        return None
-    
+    # CREATE
     async def create_action(
         self, db: AsyncSession, minute_id: UUID, action_in: MeetingActionCreate, assigned_by_id: UUID
     ) -> MeetingAction:
-        """Create a new action item with JSON assigned_to_name support"""
-        action_data = action_in.model_dump()
-        
-        # Get assigned_to_id - validate it exists if provided
-        assigned_to_id = action_data.get('assigned_to_id')
-        if assigned_to_id:
-            # Verify the user exists
-            from app.models.user import User
-            user_exists = await db.execute(
-                select(User).where(User.id == assigned_to_id, User.is_active == True)
+        """Create a new action item"""
+        try:
+            action_data = action_in.model_dump()
+            
+            assigned_to_id = action_data.get('assigned_to_id')
+            if assigned_to_id:
+                from app.models.user import User
+                user_exists = await db.execute(
+                    select(User).where(User.id == assigned_to_id, User.is_active == True)
+                )
+                if not user_exists.scalar_one_or_none():
+                    assigned_to_id = None
+            
+            assigned_to_name = self._normalize_assigned_to_name(action_data.get('assigned_to_name'))
+            
+            action = MeetingAction(
+                minute_id=minute_id,
+                description=action_data.get('description'),
+                assigned_to_id=assigned_to_id,
+                assigned_to_name=assigned_to_name,
+                assigned_by_id=assigned_by_id,
+                assigned_at=datetime.now(),
+                due_date=action_data.get('due_date'),
+                priority=action_data.get('priority', 2),
+                estimated_hours=action_data.get('estimated_hours'),
+                remarks=action_data.get('remarks'),
+                created_by_id=assigned_by_id,
+                created_at=datetime.now(),
+                is_active=True
             )
-            if not user_exists.scalar_one_or_none():
-                assigned_to_id = None
-        
-        # Normalize assigned_to_name to JSON
-        assigned_to_name = self._normalize_assigned_to_name(action_data.get('assigned_to_name'))
-        
-        action = MeetingAction(
-            minute_id=minute_id,
-            description=action_data.get('description'),
-            assigned_to_id=assigned_to_id,
-            assigned_to_name=assigned_to_name,
-            assigned_by_id=assigned_by_id,
-            assigned_at=datetime.now(),
-            due_date=action_data.get('due_date'),
-            priority=action_data.get('priority', 2),
-            estimated_hours=action_data.get('estimated_hours'),
-            remarks=action_data.get('remarks'),
-            created_by_id=assigned_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(action)
-        await db.commit()
-        await db.refresh(action)
-        return action
-    
-    async def update_action(
-        self, db: AsyncSession, action_id: UUID, obj_in: MeetingActionUpdate, updated_by_id: UUID
-    ) -> Optional[MeetingAction]:
-        """Update an action item with audit fields"""
-        action = await self.get(db, action_id)
-        if not action:
-            return None
-        
-        update_data = obj_in.model_dump(exclude_unset=True)
-        
-        # Handle assigned_to_name if it's in the update
-        if 'assigned_to_name' in update_data:
-            assigned_to_name = self._normalize_assigned_to_name(update_data['assigned_to_name'])
-            if assigned_to_name is not None:
-                action.assigned_to_name = assigned_to_name
-            elif assigned_to_name is None and 'assigned_to_name' in update_data:
-                action.assigned_to_name = None
-            del update_data['assigned_to_name']
-        
-        # Update other fields
-        for field, value in update_data.items():
-            if value is not None:
-                setattr(action, field, value)
-        
-        action.updated_by_id = updated_by_id
-        action.updated_at = datetime.now()
-        await db.commit()
-        await db.refresh(action)
-        return action
-    
-    async def update_progress(
-        self, db: AsyncSession, action_id: UUID, progress_update: ActionProgressUpdate, updated_by_id: UUID
-    ) -> MeetingAction:
-        """Update action progress and log to history"""
-        action = await self.get(db, action_id)
-        if not action:
-            raise ValueError("Action not found")
-        
-        # Log to status history
-        history = ActionStatusHistory(
-            action_id=action_id,
-            individual_status_id=progress_update.individual_status_id,
-            remarks=progress_update.remarks,
-            progress_percentage=progress_update.progress_percentage,
-            created_by_id=updated_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(history)
-        
-        # Update action progress
-        action.overall_progress_percentage = progress_update.progress_percentage
-        
-        # CRITICAL FIX: Update the overall_status_id as well
-        if progress_update.individual_status_id:
-            action.overall_status_id = progress_update.individual_status_id
-        
-        action.updated_by_id = updated_by_id
-        action.updated_at = datetime.now()
-        
-        # Auto-update dates based on progress
-        if progress_update.progress_percentage == 100:
-            action.completed_at = datetime.now()
-        elif progress_update.progress_percentage > 0 and (action.overall_progress_percentage or 0) == 0:
-            action.start_date = datetime.now()
-        
-        await db.commit()
-        await db.refresh(action)
-        return action
+            
+            db.add(action)
+            await db.commit()
+            await db.refresh(action)
+            return action
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create action: {str(e)}")
 
-    
-    async def add_comment(
-        self, db: AsyncSession, action_id: UUID, comment_in: ActionCommentCreate, created_by_id: UUID
-    ) -> ActionComment:
-        """Add a comment to an action"""
-        comment = ActionComment(
-            action_id=action_id,
-            comment=comment_in.comment,
-            attachment_url=comment_in.attachment_url,
-            created_by_id=created_by_id,
-            created_at=datetime.now(),
-            is_active=True
-        )
-        db.add(comment)
-        await db.commit()
-        await db.refresh(comment)
-        return comment
-    
-    async def get_comments(
-        self, db: AsyncSession, action_id: UUID, skip: int = 0, limit: int = 100
-    ) -> List[ActionComment]:
-        """Get all comments for an action"""
+    # READ (Single)
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingAction]:
+        """Get a single action by ID"""
         result = await db.execute(
-            select(ActionComment)
-            .where(ActionComment.action_id == action_id, ActionComment.is_active == True)
-            .offset(skip)
-            .limit(limit)
-            .order_by(ActionComment.created_at.desc())
+            select(MeetingAction)
+            .options(
+                selectinload(MeetingAction.minutes),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by)
+            )
+            .where(MeetingAction.id == id, MeetingAction.is_active == True)
         )
+        return result.scalar_one_or_none()
+
+    # READ (Multiple)
+    async def get_multi(
+        self,
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 100,
+        include_inactive: bool = False
+    ) -> List[MeetingAction]:
+        """Get multiple actions"""
+        query = select(MeetingAction).options(
+            selectinload(MeetingAction.minutes),
+            selectinload(MeetingAction.assigned_to)
+        )
+        
+        if not include_inactive:
+            query = query.where(MeetingAction.is_active == True)
+        
+        query = query.offset(skip).limit(limit).order_by(MeetingAction.due_date)
+        result = await db.execute(query)
         return result.scalars().all()
-    
+
+    # READ (By user)
     async def get_actions_assigned_to_user(
         self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100
     ) -> List[MeetingAction]:
-        """Get actions assigned to a specific user by assigned_to_id"""
+        """Get actions assigned to a specific user"""
         result = await db.execute(
             select(MeetingAction)
             .options(
@@ -695,28 +719,15 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             .order_by(MeetingAction.due_date)
         )
         return result.scalars().all()
-    
-    async def get_actions_by_assigned_name(
-        self, db: AsyncSession, name: str, skip: int = 0, limit: int = 100
+
+    # READ (My tasks)
+    async def get_my_tasks(
+        self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100
     ) -> List[MeetingAction]:
-        """Search actions by assigned_to_name JSON field"""
-        # For MySQL JSON search
-        result = await db.execute(
-            select(MeetingAction)
-            .options(
-                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting)
-            )
-            .where(
-                MeetingAction.is_active == True,
-                MeetingAction.assigned_to_name.isnot(None),
-                func.json_extract(MeetingAction.assigned_to_name, '$.name').cast(String).ilike(f"%{name}%")
-            )
-            .offset(skip)
-            .limit(limit)
-            .order_by(MeetingAction.due_date)
-        )
-        return result.scalars().all()
-    
+        """Get tasks for current user"""
+        return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
+
+    # READ (Overdue)
     async def get_overdue_actions(self, db: AsyncSession, skip: int = 0, limit: int = 100) -> List[MeetingAction]:
         """Get overdue actions"""
         result = await db.execute(
@@ -732,31 +743,188 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             .order_by(MeetingAction.due_date)
         )
         return result.scalars().all()
-    
-    async def get_my_tasks(
-        self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100
+
+    # READ (By status)
+    async def get_actions_by_status(
+        self, db: AsyncSession, status_id: UUID, skip: int = 0, limit: int = 100
     ) -> List[MeetingAction]:
-        """Get tasks for current user (checks assigned_to_id)"""
-        return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
-    
-    async def soft_delete(self, db: AsyncSession, action_id: UUID, deleted_by_id: UUID) -> Optional[MeetingAction]:
-        """Soft delete an action"""
-        action = await self.get(db, action_id)
-        if action:
-            action.is_active = False
-            action.updated_by_id = deleted_by_id
-            action.updated_at = datetime.now()
+        """Get actions by status"""
+        result = await db.execute(
+            select(MeetingAction)
+            .where(
+                MeetingAction.overall_status_id == status_id,
+                MeetingAction.is_active == True
+            )
+            .offset(skip)
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    # UPDATE
+    async def update_action(
+        self, db: AsyncSession, action_id: UUID, obj_in: MeetingActionUpdate, updated_by_id: UUID
+    ) -> Optional[MeetingAction]:
+        """Update an action item"""
+        try:
+            action = await self.get(db, action_id)
+            if not action:
+                return None
+            
+            update_data = obj_in.model_dump(exclude_unset=True)
+            
+            if 'assigned_to_name' in update_data:
+                assigned_to_name = self._normalize_assigned_to_name(update_data['assigned_to_name'])
+                if assigned_to_name is not None:
+                    action.assigned_to_name = assigned_to_name
+                del update_data['assigned_to_name']
+            
+            for field, value in update_data.items():
+                if value is not None:
+                    setattr(action, field, value)
+            
+            await self._update_audit_fields(action, updated_by_id)
             await db.commit()
             await db.refresh(action)
-        return action
-    
+            return action
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update action: {str(e)}")
+
+    # UPDATE (Progress)
+    async def update_progress(
+        self, db: AsyncSession, action_id: UUID, progress_update: ActionProgressUpdate, updated_by_id: UUID
+    ) -> MeetingAction:
+        """Update action progress and log to history"""
+        try:
+            action = await self.get(db, action_id)
+            if not action:
+                raise ValueError("Action not found")
+            
+            history = ActionStatusHistory(
+                action_id=action_id,
+                individual_status_id=progress_update.individual_status_id,
+                remarks=progress_update.remarks,
+                progress_percentage=progress_update.progress_percentage,
+                created_by_id=updated_by_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            db.add(history)
+            
+            action.overall_progress_percentage = progress_update.progress_percentage
+            
+            if progress_update.individual_status_id:
+                action.overall_status_id = progress_update.individual_status_id
+            
+            await self._update_audit_fields(action, updated_by_id)
+            
+            if progress_update.progress_percentage == 100:
+                action.completed_at = datetime.now()
+            elif progress_update.progress_percentage > 0 and (action.overall_progress_percentage or 0) == 0:
+                action.start_date = datetime.now()
+            
+            await db.commit()
+            await db.refresh(action)
+            return action
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update progress: {str(e)}")
+
+    # DELETE (Soft)
+    async def soft_delete(self, db: AsyncSession, action_id: UUID, deleted_by_id: UUID) -> Optional[MeetingAction]:
+        """Soft delete an action"""
+        try:
+            action = await self.get(db, action_id)
+            if action:
+                action.is_active = False
+                await self._update_audit_fields(action, deleted_by_id)
+                await db.commit()
+                await db.refresh(action)
+            return action
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete action: {str(e)}")
+
+    # COMMENTS
+    async def add_comment(
+        self, db: AsyncSession, action_id: UUID, comment_in: ActionCommentCreate, created_by_id: UUID
+    ) -> ActionComment:
+        """Add a comment to an action"""
+        try:
+            comment = ActionComment(
+                action_id=action_id,
+                comment=comment_in.comment,
+                attachment_url=comment_in.attachment_url,
+                created_by_id=created_by_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            db.add(comment)
+            await db.commit()
+            await db.refresh(comment)
+            return comment
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add comment: {str(e)}")
+
+    async def get_comments(
+        self, db: AsyncSession, action_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[ActionComment]:
+        """Get all comments for an action"""
+        result = await db.execute(
+            select(ActionComment)
+            .where(ActionComment.action_id == action_id, ActionComment.is_active == True)
+            .offset(skip)
+            .limit(limit)
+            .order_by(ActionComment.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def update_comment(
+        self, db: AsyncSession, comment_id: UUID, comment: str, updated_by_id: UUID
+    ) -> Optional[ActionComment]:
+        """Update a comment"""
+        try:
+            result = await db.execute(
+                select(ActionComment).where(ActionComment.id == comment_id)
+            )
+            comment_obj = result.scalar_one_or_none()
+            
+            if comment_obj:
+                comment_obj.comment = comment
+                await self._update_audit_fields(comment_obj, updated_by_id)
+                await db.commit()
+                await db.refresh(comment_obj)
+            return comment_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update comment: {str(e)}")
+
+    async def delete_comment(
+        self, db: AsyncSession, comment_id: UUID, deleted_by_id: UUID
+    ) -> bool:
+        """Soft delete a comment"""
+        try:
+            result = await db.execute(
+                select(ActionComment).where(ActionComment.id == comment_id)
+            )
+            comment_obj = result.scalar_one_or_none()
+            
+            if comment_obj:
+                comment_obj.is_active = False
+                await self._update_audit_fields(comment_obj, deleted_by_id)
+                await db.commit()
+                return True
+            return False
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete comment: {str(e)}")
+
+    # STATUS HISTORY
     async def get_status_history(
         self, db: AsyncSession, action_id: UUID, skip: int = 0, limit: int = 100
     ) -> List[ActionStatusHistory]:
-        """
-        Get status change history for an action.
-        Returns all status history entries for the given action, ordered by creation date descending.
-        """
+        """Get status change history for an action"""
         result = await db.execute(
             select(ActionStatusHistory)
             .options(
@@ -774,104 +942,251 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         )
         return result.scalars().all()
 
-
-# ============================================================================
-# MEETING DOCUMENT CRUD
-# ============================================================================
-
-class CRUDMeetingDocument(CRUDBase[MeetingDocument, MeetingDocumentCreate, MeetingDocumentUpdate]):
-    """CRUD operations for MeetingDocument entity"""
-    
-    async def create_document(
-        self, db: AsyncSession, meeting_id: UUID, document_in: MeetingDocumentCreate, 
-        file_path: str, file_size: int, mime_type: str, uploaded_by_id: UUID
-    ) -> MeetingDocument:
-        """Create and upload a document"""
-        document = MeetingDocument(
-            meeting_id=meeting_id,
-            file_path=file_path,
-            file_size=file_size,
-            mime_type=mime_type,
-            uploaded_by_id=uploaded_by_id,
-            created_by_id=uploaded_by_id,
-            created_at=datetime.now(),
-            is_active=True,
-            **document_in.model_dump()
-        )
-        db.add(document)
-        await db.commit()
-        await db.refresh(document)
-        return document
-    
-    async def update_document(
-        self, db: AsyncSession, document_id: UUID, obj_in: MeetingDocumentUpdate, updated_by_id: UUID
-    ) -> Optional[MeetingDocument]:
-        """Update document metadata"""
-        document = await self.get(db, document_id)
-        if not document:
+    # HELPERS
+    def _normalize_assigned_to_name(self, value: Optional[Union[str, Dict, Any]]) -> Optional[Dict]:
+        """Convert assigned_to_name to consistent JSON format"""
+        if value is None:
             return None
-        
-        update_data = obj_in.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(document, field, value)
-        
-        document.updated_by_id = updated_by_id
-        document.updated_at = datetime.now()
-        await db.commit()
-        await db.refresh(document)
-        return document
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict) and "name" in parsed:
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return {"name": value, "type": "manual"}
+        if isinstance(value, dict):
+            if "name" not in value:
+                return None
+            if "type" not in value:
+                value["type"] = "manual"
+            return value
+        return None
+
+
+# ============================================================================
+# INITIALIZE CRUD INSTANCES
+# ============================================================================
+
+participant = CRUDParticipant(Participant)
+participant_list = CRUDParticipantList(ParticipantList)
+meeting_action = CRUDMeetingAction(MeetingAction)
+
+# Note: Add similar complete implementations for:
+# - CRUDMeeting
+# - CRUDMeetingMinutes  
+# - CRUDMeetingDocument
+# - CRUDMeetingParticipant
+# - CRUDDashboard
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+
+
+# ============================================================================
+# MEETING CRUD - COMPLETE
+# ============================================================================
+
+class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate], AuditMixin):
+    """CRUD operations for Meeting entity"""
     
-    async def get_meeting_documents(
-        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100
-    ) -> List[MeetingDocument]:
-        """Get all documents for a meeting"""
+    async def create(
+        self, db: AsyncSession, obj_in: MeetingCreate, created_by_id: UUID
+    ) -> Meeting:
+        """Create a new meeting"""
+        try:
+            meeting_data = obj_in.model_dump(exclude={'participant_list_id', 'custom_participants'})
+            db_obj = Meeting(**meeting_data)
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create meeting: {str(e)}")
+    
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
+        """Get a meeting by ID"""
         result = await db.execute(
-            select(MeetingDocument)
-            .where(MeetingDocument.meeting_id == meeting_id, MeetingDocument.is_active == True)
+            select(Meeting)
+            .options(selectinload(Meeting.participants))
+            .where(Meeting.id == id, Meeting.is_active == True)
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_multi(
+        self, db: AsyncSession, skip: int = 0, limit: int = 100, include_inactive: bool = False
+    ) -> List[Meeting]:
+        """Get multiple meetings"""
+        query = select(Meeting).options(selectinload(Meeting.participants))
+        if not include_inactive:
+            query = query.where(Meeting.is_active == True)
+        query = query.offset(skip).limit(limit).order_by(Meeting.meeting_date.desc())
+        result = await db.execute(query)
+        return result.scalars().all()
+    
+    async def update(
+        self, db: AsyncSession, id: UUID, obj_in: MeetingUpdate, updated_by_id: UUID
+    ) -> Optional[Meeting]:
+        """Update a meeting"""
+        try:
+            db_obj = await self.get(db, id)
+            if not db_obj:
+                return None
+            
+            update_data = obj_in.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                if value is not None:
+                    setattr(db_obj, field, value)
+            
+            await self._update_audit_fields(db_obj, updated_by_id)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update meeting: {str(e)}")
+    
+    async def soft_delete(self, db: AsyncSession, id: UUID, deleted_by_id: UUID) -> Optional[Meeting]:
+        """Soft delete a meeting"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, deleted_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete meeting: {str(e)}")
+
+
+# ============================================================================
+# MEETING MINUTES CRUD - COMPLETE
+# ============================================================================
+
+class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingMinutesUpdate], AuditMixin):
+    """CRUD operations for MeetingMinutes entity"""
+    
+    async def create(
+        self, db: AsyncSession, meeting_id: UUID, obj_in: MeetingMinutesCreate, created_by_id: UUID
+    ) -> MeetingMinutes:
+        """Create meeting minutes"""
+        try:
+            minutes_data = obj_in.model_dump()
+            db_obj = MeetingMinutes(meeting_id=meeting_id, **minutes_data)
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create minutes: {str(e)}")
+    
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingMinutes]:
+        """Get minutes by ID"""
+        result = await db.execute(
+            select(MeetingMinutes)
+            .options(selectinload(MeetingMinutes.actions))
+            .where(MeetingMinutes.id == id, MeetingMinutes.is_active == True)
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_by_meeting(
+        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[MeetingMinutes]:
+        """Get all minutes for a meeting"""
+        result = await db.execute(
+            select(MeetingMinutes)
+            .options(selectinload(MeetingMinutes.actions))
+            .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
             .offset(skip)
             .limit(limit)
-            .order_by(MeetingDocument.uploaded_at.desc())
+            .order_by(MeetingMinutes.timestamp.desc())
         )
         return result.scalars().all()
     
-    async def soft_delete(self, db: AsyncSession, document_id: UUID, deleted_by_id: UUID) -> Optional[MeetingDocument]:
-        """Soft delete a document"""
-        document = await self.get(db, document_id)
-        if document:
-            document.is_active = False
-            document.updated_by_id = deleted_by_id
-            document.updated_at = datetime.now()
+    async def update(
+        self, db: AsyncSession, id: UUID, obj_in: MeetingMinutesUpdate, updated_by_id: UUID
+    ) -> Optional[MeetingMinutes]:
+        """Update minutes"""
+        try:
+            db_obj = await self.get(db, id)
+            if not db_obj:
+                return None
+            
+            update_data = obj_in.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                if value is not None:
+                    setattr(db_obj, field, value)
+            
+            await self._update_audit_fields(db_obj, updated_by_id)
             await db.commit()
-            await db.refresh(document)
-        return document
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update minutes: {str(e)}")
+    
+    async def soft_delete(self, db: AsyncSession, id: UUID, deleted_by_id: UUID) -> Optional[MeetingMinutes]:
+        """Soft delete minutes"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, deleted_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete minutes: {str(e)}")
 
 
 # ============================================================================
-# MEETING PARTICIPANT CRUD
+# MEETING PARTICIPANT CRUD - COMPLETE
 # ============================================================================
 
-class CRUDMeetingParticipant:
+class CRUDMeetingParticipant(AuditMixin):
     """CRUD operations for MeetingParticipant entity"""
     
-    async def update_attendance(
-        self, db: AsyncSession, participant_id: UUID, attendance_status: str, updated_by_id: UUID
-    ) -> Optional[MeetingParticipant]:
-        """Update participant attendance status"""
-        result = await db.execute(
-            select(MeetingParticipant).where(MeetingParticipant.id == participant_id)
-        )
-        participant = result.scalar_one_or_none()
-        
-        if participant:
-            participant.attendance_status = attendance_status
-            participant.updated_by_id = updated_by_id
-            participant.updated_at = datetime.now()
+    async def create(
+        self, db: AsyncSession, meeting_id: UUID, participant_data: Dict[str, Any], created_by_id: UUID
+    ) -> MeetingParticipant:
+        """Add a participant to a meeting"""
+        try:
+            db_obj = MeetingParticipant(meeting_id=meeting_id, **participant_data)
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(db_obj)
             await db.commit()
-            await db.refresh(participant)
-        
-        return participant
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add meeting participant: {str(e)}")
     
-    async def get_meeting_participants(self, db: AsyncSession, meeting_id: UUID) -> List[MeetingParticipant]:
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingParticipant]:
+        """Get a meeting participant by ID"""
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == id,
+                MeetingParticipant.is_active == True
+            )
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_by_meeting(
+        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[MeetingParticipant]:
         """Get all participants for a meeting"""
         result = await db.execute(
             select(MeetingParticipant)
@@ -879,13 +1194,153 @@ class CRUDMeetingParticipant:
                 MeetingParticipant.meeting_id == meeting_id,
                 MeetingParticipant.is_active == True
             )
+            .offset(skip)
+            .limit(limit)
             .order_by(MeetingParticipant.is_chairperson.desc(), MeetingParticipant.name)
         )
         return result.scalars().all()
+    
+    async def update_attendance(
+        self, db: AsyncSession, participant_id: UUID, attendance_status: str, updated_by_id: UUID
+    ) -> Optional[MeetingParticipant]:
+        """Update participant attendance status"""
+        try:
+            db_obj = await self.get(db, participant_id)
+            if db_obj:
+                db_obj.attendance_status = attendance_status
+                await self._update_audit_fields(db_obj, updated_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update attendance: {str(e)}")
+    
+    async def remove(self, db: AsyncSession, participant_id: UUID, removed_by_id: UUID) -> bool:
+        """Remove a participant from a meeting (soft delete)"""
+        try:
+            db_obj = await self.get(db, participant_id)
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, removed_by_id)
+                await db.commit()
+                return True
+            return False
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to remove meeting participant: {str(e)}")
+    
+    async def bulk_add(
+        self, db: AsyncSession, meeting_id: UUID, participants_data: List[Dict[str, Any]], created_by_id: UUID
+    ) -> List[MeetingParticipant]:
+        """Bulk add participants to a meeting"""
+        created = []
+        for participant_data in participants_data:
+            try:
+                new_participant = await self.create(db, meeting_id, participant_data, created_by_id)
+                created.append(new_participant)
+            except Exception as e:
+                print(f"Failed to add participant: {e}")
+                continue
+        return created
 
 
 # ============================================================================
-# DASHBOARD SUMMARY CRUD
+# MEETING DOCUMENT CRUD - COMPLETE
+# ============================================================================
+
+class CRUDMeetingDocument(CRUDBase[MeetingDocument, MeetingDocumentCreate, MeetingDocumentUpdate], AuditMixin):
+    """CRUD operations for MeetingDocument entity"""
+    
+    async def create(
+        self, db: AsyncSession, meeting_id: UUID, obj_in: MeetingDocumentCreate, 
+        file_path: str, file_size: int, mime_type: str, created_by_id: UUID
+    ) -> MeetingDocument:
+        """Create a meeting document"""
+        try:
+            document_data = obj_in.model_dump()
+            db_obj = MeetingDocument(
+                meeting_id=meeting_id,
+                file_path=file_path,
+                file_size=file_size,
+                mime_type=mime_type,
+                **document_data
+            )
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create document: {str(e)}")
+    
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingDocument]:
+        """Get a document by ID"""
+        result = await db.execute(
+            select(MeetingDocument).where(
+                MeetingDocument.id == id,
+                MeetingDocument.is_active == True
+            )
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_by_meeting(
+        self, db: AsyncSession, meeting_id: UUID, skip: int = 0, limit: int = 100
+    ) -> List[MeetingDocument]:
+        """Get all documents for a meeting"""
+        result = await db.execute(
+            select(MeetingDocument)
+            .where(
+                MeetingDocument.meeting_id == meeting_id,
+                MeetingDocument.is_active == True
+            )
+            .offset(skip)
+            .limit(limit)
+            .order_by(MeetingDocument.uploaded_at.desc())
+        )
+        return result.scalars().all()
+    
+    async def update(
+        self, db: AsyncSession, id: UUID, obj_in: MeetingDocumentUpdate, updated_by_id: UUID
+    ) -> Optional[MeetingDocument]:
+        """Update document metadata"""
+        try:
+            db_obj = await self.get(db, id)
+            if not db_obj:
+                return None
+            
+            update_data = obj_in.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                if value is not None:
+                    setattr(db_obj, field, value)
+            
+            await self._update_audit_fields(db_obj, updated_by_id)
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update document: {str(e)}")
+    
+    async def soft_delete(self, db: AsyncSession, id: UUID, deleted_by_id: UUID) -> Optional[MeetingDocument]:
+        """Soft delete a document"""
+        try:
+            db_obj = await self.get(db, id)
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, deleted_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete document: {str(e)}")
+
+
+# ============================================================================
+# DASHBOARD CRUD - COMPLETE
 # ============================================================================
 
 class CRUDDashboard:
@@ -893,31 +1348,32 @@ class CRUDDashboard:
     
     async def get_summary(self, db: AsyncSession) -> Dict[str, Any]:
         """Get dashboard summary statistics"""
-        # Meetings
-        total_meetings = await self._count_active(db, Meeting)
-        upcoming_meetings = await self._count_upcoming_meetings(db)
-        
-        # Actions
-        total_actions = await self._count_active(db, MeetingAction)
-        pending_actions = await self._count_pending_actions(db)
-        overdue_actions = await self._count_overdue_actions(db)
-        completed_actions = await self._count_completed_actions(db)
-        
-        # Participants
-        total_participants = await self._count_active(db, Participant)
-        
-        return {
-            "total_meetings": total_meetings,
-            "upcoming_meetings": upcoming_meetings,
-            "total_actions": total_actions,
-            "pending_actions": pending_actions,
-            "overdue_actions": overdue_actions,
-            "completed_actions": completed_actions,
-            "total_participants": total_participants,
-            "completion_rate": round((completed_actions / total_actions * 100), 2) if total_actions > 0 else 0
-        }
-    
-    # ========== PRIVATE HELPERS ==========
+        try:
+            # Meetings
+            total_meetings = await self._count_active(db, Meeting)
+            upcoming_meetings = await self._count_upcoming_meetings(db)
+            
+            # Actions
+            total_actions = await self._count_active(db, MeetingAction)
+            pending_actions = await self._count_pending_actions(db)
+            overdue_actions = await self._count_overdue_actions(db)
+            completed_actions = await self._count_completed_actions(db)
+            
+            # Participants
+            total_participants = await self._count_active(db, Participant)
+            
+            return {
+                "total_meetings": total_meetings,
+                "upcoming_meetings": upcoming_meetings,
+                "total_actions": total_actions,
+                "pending_actions": pending_actions,
+                "overdue_actions": overdue_actions,
+                "completed_actions": completed_actions,
+                "total_participants": total_participants,
+                "completion_rate": round((completed_actions / total_actions * 100), 2) if total_actions > 0 else 0
+            }
+        except Exception as e:
+            raise ValueError(f"Failed to get dashboard summary: {str(e)}")
     
     async def _count_active(self, db: AsyncSession, model) -> int:
         """Count active records for a model"""
@@ -989,7 +1445,7 @@ dashboard = CRUDDashboard()
 
 __all__ = [
     "participant",
-    "participant_list", 
+    "participant_list",
     "meeting",
     "meeting_minutes",
     "meeting_action",
@@ -1003,5 +1459,6 @@ __all__ = [
     "CRUDMeetingAction",
     "CRUDMeetingDocument",
     "CRUDMeetingParticipant",
-    "CRUDDashboard"
+    "CRUDDashboard",
+    "AuditMixin"
 ]

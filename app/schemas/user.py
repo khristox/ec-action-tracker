@@ -60,7 +60,7 @@ class UserBase(BaseModel):
         None,
         max_length=20,
         description="Phone number with international format",
-        example="+254712345678"
+        example="+256712345678"
     )
     is_active: bool = Field(
         True,
@@ -97,7 +97,7 @@ class UserBase(BaseModel):
                 "username": "john_doe",
                 "first_name": "John",
                 "last_name": "Doe",
-                "phone": "+254712345678",
+                "phone": "+256712345678",
                 "preferred_currency": "KES",
                 "language": "en",
                 "timezone": "Africa/Nairobi"
@@ -191,7 +191,7 @@ class UserCreate(UserBase):
                 "username": "john_doe",
                 "first_name": "John",
                 "last_name": "Doe",
-                "phone": "+254712345678",
+                "phone": "+256712345678",
                 "password": "SecurePass123",
                 "roles": ["user", "property_manager"]
             }
@@ -356,7 +356,7 @@ class UserResponse(UserBase):
                 "username": "john_doe",
                 "first_name": "John",
                 "last_name": "Doe",
-                "phone": "+254712345678",
+                "phone": "+256712345678",
                 "is_active": True,
                 "is_verified": True,
                 "preferred_currency": "KES",

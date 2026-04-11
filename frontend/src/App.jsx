@@ -20,8 +20,6 @@ const SignUp = lazy(() => import('./pages/SignUp'));
 
 // Action Tracker - Dashboard
 const Dashboard = lazy(() => import('./components/actiontracker/dashboard/Dashboard'));
-//const Dashboard = lazy(() => import('./pages/Dashboard'));  // Use the working one
-
 
 // Action Tracker - Meetings
 const Meetings = lazy(() => import('./components/actiontracker/meetings/Meetings'));
@@ -36,9 +34,12 @@ const ActionDetail = lazy(() => import('./components/actiontracker/actions/Actio
 
 // Action Tracker - Participants
 const ParticipantsLists = lazy(() => import('./components/actiontracker/participants/ParticipantsLists'));
+const ParticipantListsManager = lazy(() => import('./components/actiontracker/participants/ParticipantListsManager'));
 const CreateParticipant = lazy(() => import('./components/actiontracker/participants/CreateParticipant'));
 const ParticipantDetail = lazy(() => import('./components/actiontracker/participants/ParticipantDetail'));
-const ParticipantLists = lazy(() => import('./components/actiontracker/participants/ParticipantsLists'));
+
+// Action Tracker - Bulk Import
+const BulkImportPage = lazy(() => import('./components/actiontracker/participants/BulkImportPage'));  // ← MOVED HERE
 
 // Action Tracker - Documents & Reports
 const DocumentsList = lazy(() => import('./components/actiontracker/documents/DocumentsList'));
@@ -204,16 +205,32 @@ const AppContent = () => {
           <Route path="actions/:id" element={<ActionDetail />} />
           
           {/* ==================== PARTICIPANTS ROUTES ==================== */}
+          {/* All Participants - Grid/Table View */}
           <Route path="participants" element={<ParticipantsLists />} />
+          {/* Create New Participant */}
           <Route path="participants/create" element={<CreateParticipant />} />
+          {/* View Participant Details */}
           <Route path="participants/:id" element={<ParticipantDetail />} />
-          <Route path="participant-lists" element={<ParticipantLists />} />
+          {/* Edit Participant */}
+          <Route path="participants/:id/edit" element={<CreateParticipant />} />
+          {/* Bulk Import Participants */}
+          <Route path="participants/import" element={<BulkImportPage />} />
+          
+          {/* ==================== PARTICIPANT LISTS ROUTES ==================== */}
+          {/* Manage Participant Lists - Create, Edit, Delete Lists */}
+          <Route path="participant-lists" element={<ParticipantListsManager />} />
+          {/* View Specific List Details */}
+          <Route path="participant-lists/:id" element={<ParticipantListsManager />} />
+          {/* Alternative path from menu */}
+          <Route path="participants/lists" element={<ParticipantListsManager />} />
           
           {/* ==================== DOCUMENTS ROUTES ==================== */}
           <Route path="documents" element={<DocumentsList />} />
+          <Route path="documents/:category" element={<DocumentsList />} />
           
           {/* ==================== REPORTS ROUTES ==================== */}
           <Route path="reports" element={<ReportsList />} />
+          <Route path="reports/:type" element={<ReportsList />} />
           
           {/* ==================== CALENDAR & SETTINGS ==================== */}
           <Route path="calendar" element={<CalendarView />} />
@@ -222,6 +239,11 @@ const AppContent = () => {
           <Route path="settings/security" element={<Settings />} />
           <Route path="settings/notifications" element={<Settings />} />
           <Route path="settings/preferences" element={<Settings />} />
+          <Route path="settings/users" element={<Settings />} />
+          <Route path="settings/roles" element={<Settings />} />
+          <Route path="settings/audit" element={<Settings />} />
+          <Route path="settings/status" element={<Settings />} />
+          <Route path="settings/document-types" element={<Settings />} />
         </Route>
 
         {/* Error Pages */}

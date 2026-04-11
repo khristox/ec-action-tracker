@@ -116,47 +116,102 @@ for code in "${!ROLE_IDS[@]}"; do
 done
 echo ""
 
-# ==================== CREATE MENUS IN ORDER (PARENTS FIRST) ====================
-print_info "Creating Action Tracker menus (parents first, then children)..."
+# ==================== GET EXISTING MENUS ====================
+print_info "Fetching existing menus to determine replacements..."
+
+EXISTING_MENUS_RESPONSE=$(curl -s -X GET "${API_URL}/menus/all" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null)
+
+declare -A EXISTING_MENU_IDS
+while IFS= read -r line; do
+    code=$(echo "$line" | jq -r '.code')
+    id=$(echo "$line" | jq -r '.id')
+    if [ -n "$code" ] && [ "$code" != "null" ]; then
+        EXISTING_MENU_IDS["$code"]="$id"
+    fi
+done < <(echo "$EXISTING_MENUS_RESPONSE" | jq -c '.[]' 2>/dev/null)
+
+print_info "Found ${#EXISTING_MENU_IDS[@]} existing menus in database"
+echo ""
+
+# ==================== CREATE OR REPLACE MENUS ====================
+print_info "Creating/Replacing Action Tracker menus..."
 echo ""
 
 declare -A MENU_IDS
 SUCCESS_COUNT=0
 FAIL_COUNT=0
+UPDATE_COUNT=0
+CREATE_COUNT=0
 SKIP_COUNT=0
 
-# Function to get menu ID by code
-get_menu_id() {
+# Function to delete existing menu if REPLACE mode is enabled
+delete_existing_menu() {
     local menu_code=$1
-    EXISTING_RESPONSE=$(curl -s -X GET "${API_URL}/menus/all" \
-        -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null)
-    echo "$EXISTING_RESPONSE" | jq -r ".[] | select(.code==\"${menu_code}\") | .id" 2>/dev/null
+    local menu_id=${EXISTING_MENU_IDS["$menu_code"]}
+    
+    if [ -n "$menu_id" ] && [ "$menu_id" != "null" ]; then
+        print_warning "  Deleting existing menu: ${menu_code} (ID: ${menu_id:0:8}...)"
+        
+        # First delete all permissions for this menu
+        curl -s -X DELETE "${API_URL}/menus/${menu_id}/permissions" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
+        
+        # Then delete the menu
+        DELETE_RESPONSE=$(curl -s -X DELETE "${API_URL}/menus/${menu_id}" \
+            -H "Authorization: Bearer $ADMIN_TOKEN")
+        
+        if echo "$DELETE_RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then
+            print_error "    Failed to delete: $(echo "$DELETE_RESPONSE" | jq -r '.detail')"
+            return 1
+        else
+            print_success "    Deleted successfully"
+            unset EXISTING_MENU_IDS["$menu_code"]
+            return 0
+        fi
+    fi
+    return 0
 }
 
-# Function to create a menu
-create_menu() {
+# Function to create or update a menu
+create_or_replace_menu() {
     local code=$1
     local title=$2
     local icon=$3
     local path=$4
     local sort_order=$5
     local parent_code=$6
+    local replace=${7:-true}  # Default to true to replace existing
     
     # Check if menu already exists
-    EXISTING_ID=$(get_menu_id "$code")
-    if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
-        print_warning "  ⏭️  Already exists: ${title} (${code})"
+    EXISTING_ID="${EXISTING_MENU_IDS[$code]}"
+    
+    # If replace is true and menu exists, delete it first
+    if [ "$replace" = "true" ] && [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
+        print_info "  Replacing: ${title} (${code})..."
+        delete_existing_menu "$code"
+        if [ $? -ne 0 ]; then
+            ((FAIL_COUNT++))
+            return 1
+        fi
+        ((UPDATE_COUNT++))
+    elif [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
+        print_warning "  ⏭️  Keeping existing: ${title} (${code})"
         MENU_IDS["$code"]="$EXISTING_ID"
         ((SKIP_COUNT++))
         return 0
+    else
+        print_info "  Creating: ${title} (${code})..."
     fi
-    
-    print_info "  Creating: ${title} (${code})..."
     
     # Get parent ID if parent_code provided
     PARENT_ID="null"
     if [ -n "$parent_code" ] && [ "$parent_code" != "" ]; then
         PARENT_ID="${MENU_IDS[$parent_code]}"
+        if [ -z "$PARENT_ID" ] || [ "$PARENT_ID" == "null" ]; then
+            # Check if parent exists in existing menus
+            PARENT_ID="${EXISTING_MENU_IDS[$parent_code]}"
+        fi
         if [ -z "$PARENT_ID" ] || [ "$PARENT_ID" == "null" ]; then
             print_error "    ❌ Parent '${parent_code}' not found! Cannot create child menu."
             ((FAIL_COUNT++))
@@ -164,11 +219,13 @@ create_menu() {
         fi
     fi
     
-    # Handle path
+    # Handle path - ensure relative path (no leading slash if empty)
     if [ -z "$path" ] || [ "$path" == "" ]; then
         path_value="null"
     else
-        path_value="\"$path\""
+        # Ensure path is relative (remove leading slash if present)
+        path="${path#/}"
+        path_value="\"${path}\""
     fi
     
     # Build JSON payload
@@ -207,6 +264,7 @@ EOF
     if [ -n "$MENU_ID" ] && [ "$MENU_ID" != "null" ]; then
         print_success "    ✅ Created (ID: ${MENU_ID:0:8}...)"
         MENU_IDS["$code"]="$MENU_ID"
+        ((CREATE_COUNT++))
         ((SUCCESS_COUNT++))
         return 0
     else
@@ -221,15 +279,15 @@ EOF
 print_info "STEP 1: Creating root menus for Action Tracker..."
 echo ""
 
-# Core Action Tracker Menus
-create_menu "dashboard" "Dashboard" "Dashboard" "/dashboard" 1 ""
-create_menu "meetings" "Meetings" "Event" "/meetings" 2 ""
-create_menu "actions" "Actions" "Assignment" "/actions" 3 ""
-create_menu "participants" "Participants" "People" "/participants" 4 ""
-create_menu "documents" "Documents" "Folder" "/documents" 5 ""
-create_menu "reports" "Reports" "Assessment" "/reports" 6 ""
-create_menu "calendar" "Calendar" "Calendar" "/calendar" 7 ""
-create_menu "settings" "Settings" "Settings" "" 99 ""
+# Core Action Tracker Menus with RELATIVE PATHS (using underscores, no hyphens)
+create_or_replace_menu "dashboard" "Dashboard" "Dashboard" "dashboard" 1 "" true
+create_or_replace_menu "meetings" "Meetings" "Event" "meetings" 2 "" true
+create_or_replace_menu "actions" "Actions" "Assignment" "actions" 3 "" true
+create_or_replace_menu "participants" "Participants" "People" "participants" 4 "" true
+create_or_replace_menu "documents" "Documents" "Folder" "documents" 5 "" true
+create_or_replace_menu "reports" "Reports" "Assessment" "reports" 6 "" true
+create_or_replace_menu "calendar" "Calendar" "Calendar" "calendar" 7 "" true
+create_or_replace_menu "settings" "Settings" "Settings" "" 99 "" true
 
 echo ""
 
@@ -237,11 +295,11 @@ echo ""
 print_info "STEP 2: Creating Meetings submenus (parent: meetings)..."
 echo ""
 
-if [ -n "${MENU_IDS["meetings"]}" ]; then
-    create_menu "meetings-list" "All Meetings" "List" "/meetings" 1 "meetings"
-    create_menu "meetings-create" "Create Meeting" "Add" "/meetings/create" 2 "meetings"
-    create_menu "meetings-minutes" "Meeting Minutes" "Description" "/meetings/minutes" 3 "meetings"
-    create_menu "meetings-participants" "Meeting Participants" "People" "/meetings/participants" 4 "meetings"
+if [ -n "${MENU_IDS["meetings"]}" ] || [ -n "${EXISTING_MENU_IDS["meetings"]}" ]; then
+    create_or_replace_menu "meetings_list" "All Meetings" "List" "meetings" 1 "meetings" true
+    create_or_replace_menu "meetings_create" "Create Meeting" "Add" "meetings/create" 2 "meetings" true
+    create_or_replace_menu "meetings_minutes" "Meeting Minutes" "Description" "meetings/minutes" 3 "meetings" true
+    create_or_replace_menu "meetings_participants" "Meeting Participants" "People" "meetings/participants" 4 "meetings" true
 else
     print_error "Parent 'meetings' not found! Cannot create submenus."
 fi
@@ -252,12 +310,12 @@ echo ""
 print_info "STEP 3: Creating Actions submenus (parent: actions)..."
 echo ""
 
-if [ -n "${MENU_IDS["actions"]}" ]; then
-    create_menu "my-tasks" "My Tasks" "Task" "/actions/my-tasks" 1 "actions"
-    create_menu "all-actions" "All Actions" "List" "/actions/all" 2 "actions"
-    create_menu "overdue-actions" "Overdue Actions" "Warning" "/actions/overdue" 3 "actions"
-    create_menu "action-assign" "Assign Actions" "Assignment" "/actions/assign" 4 "actions"
-    create_menu "action-progress" "Progress Updates" "TrendingUp" "/actions/progress" 5 "actions"
+if [ -n "${MENU_IDS["actions"]}" ] || [ -n "${EXISTING_MENU_IDS["actions"]}" ]; then
+    create_or_replace_menu "my_tasks" "My Tasks" "Task" "actions/my-tasks" 1 "actions" true
+    create_or_replace_menu "all_actions" "All Actions" "List" "actions/all" 2 "actions" true
+    create_or_replace_menu "overdue_actions" "Overdue Actions" "Warning" "actions/overdue" 3 "actions" true
+    create_or_replace_menu "action_assign" "Assign Actions" "Assignment" "actions/assign" 4 "actions" true
+    create_or_replace_menu "action_progress" "Progress Updates" "TrendingUp" "actions/progress" 5 "actions" true
 else
     print_error "Parent 'actions' not found! Cannot create submenus."
 fi
@@ -268,25 +326,34 @@ echo ""
 print_info "STEP 4: Creating Participants submenus (parent: participants)..."
 echo ""
 
-if [ -n "${MENU_IDS["participants"]}" ]; then
-    create_menu "participants-list" "All Participants" "List" "/participants" 1 "participants"
-    create_menu "participant-lists" "Participant Lists" "Group" "/participants/lists" 2 "participants"
-    create_menu "participants-create" "Add Participant" "PersonAdd" "/participants/create" 3 "participants"
-else
-    print_error "Parent 'participants' not found! Cannot create submenus."
+if [ -n "${MENU_IDS["participants"]}" ] || [ -n "${EXISTING_MENU_IDS["participants"]}" ]; then
+    # Main participants list
+    create_or_replace_menu "participants_list" "All Participants" "List" "participants" 1 "participants" true
+    
+    # Participant Lists management
+    create_or_replace_menu "participant_lists" "Participant Lists" "Group" "participant-lists" 2 "participants" true
+    
+    # Add single participant form
+    create_or_replace_menu "participants_create" "Add Participant" "PersonAdd" "participants/create" 3 "participants" true
+    
+    # NEW: Bulk import participants
+    create_or_replace_menu "participants_import" "Bulk Import" "Upload" "participants/import" 4 "participants" true
+    
+    # NEW: Manage list members (submenu under participant-lists)
+    if [ -n "${MENU_IDS["participant_lists"]}" ] || [ -n "${EXISTING_MENU_IDS["participant_lists"]}" ]; then
+        create_or_replace_menu "list_members" "Manage Members" "People" "participant-lists/:id/members" 1 "participant_lists" true
+    fi
 fi
-
-echo ""
 
 # ==================== STEP 5: Create DOCUMENTS SUBMENUS ====================
 print_info "STEP 5: Creating Documents submenus (parent: documents)..."
 echo ""
 
-if [ -n "${MENU_IDS["documents"]}" ]; then
-    create_menu "documents-all" "All Documents" "Folder" "/documents" 1 "documents"
-    create_menu "documents-agendas" "Agendas" "Article" "/documents/agendas" 2 "documents"
-    create_menu "documents-minutes" "Minutes" "Description" "/documents/minutes" 3 "documents"
-    create_menu "documents-reports" "Reports" "Assessment" "/documents/reports" 4 "documents"
+if [ -n "${MENU_IDS["documents"]}" ] || [ -n "${EXISTING_MENU_IDS["documents"]}" ]; then
+    create_or_replace_menu "documents_all" "All Documents" "Folder" "documents" 1 "documents" true
+    create_or_replace_menu "documents_agendas" "Agendas" "Article" "documents/agendas" 2 "documents" true
+    create_or_replace_menu "documents_minutes" "Minutes" "Description" "documents/minutes" 3 "documents" true
+    create_or_replace_menu "documents_reports" "Reports" "Assessment" "documents/reports" 4 "documents" true
 else
     print_error "Parent 'documents' not found! Cannot create submenus."
 fi
@@ -297,11 +364,11 @@ echo ""
 print_info "STEP 6: Creating Reports submenus (parent: reports)..."
 echo ""
 
-if [ -n "${MENU_IDS["reports"]}" ]; then
-    create_menu "reports-meetings" "Meeting Reports" "Event" "/reports/meetings" 1 "reports"
-    create_menu "reports-actions" "Action Reports" "Assignment" "/reports/actions" 2 "reports"
-    create_menu "reports-participants" "Participant Reports" "People" "/reports/participants" 3 "reports"
-    create_menu "reports-export" "Export Data" "Download" "/reports/export" 4 "reports"
+if [ -n "${MENU_IDS["reports"]}" ] || [ -n "${EXISTING_MENU_IDS["reports"]}" ]; then
+    create_or_replace_menu "reports_meetings" "Meeting Reports" "Event" "reports/meetings" 1 "reports" true
+    create_or_replace_menu "reports_actions" "Action Reports" "Assignment" "reports/actions" 2 "reports" true
+    create_or_replace_menu "reports_participants" "Participant Reports" "People" "reports/participants" 3 "reports" true
+    create_or_replace_menu "reports_export" "Export Data" "Download" "reports/export" 4 "reports" true
 else
     print_error "Parent 'reports' not found! Cannot create submenus."
 fi
@@ -312,27 +379,27 @@ echo ""
 print_info "STEP 7: Creating Settings submenus (parent: settings)..."
 echo ""
 
-if [ -n "${MENU_IDS["settings"]}" ]; then
+if [ -n "${MENU_IDS["settings"]}" ] || [ -n "${EXISTING_MENU_IDS["settings"]}" ]; then
     # User Profile & Account Settings (All users)
-    create_menu "profile" "Profile" "Person" "/settings/profile" 1 "settings"
-    create_menu "security" "Security" "Security" "/settings/security" 2 "settings"
-    create_menu "notifications" "Notifications" "Notifications" "/settings/notifications" 3 "settings"
-    create_menu "preferences" "Preferences" "Tune" "/settings/preferences" 4 "settings"
+    create_or_replace_menu "profile" "Profile" "Person" "settings/profile" 1 "settings" true
+    create_or_replace_menu "security" "Security" "Security" "settings/security" 2 "settings" true
+    create_or_replace_menu "notifications" "Notifications" "Notifications" "settings/notifications" 3 "settings" true
+    create_or_replace_menu "preferences" "Preferences" "Tune" "settings/preferences" 4 "settings" true
     
     # System Administration (Admin only)
-    create_menu "users" "User Management" "People" "/settings/users" 10 "settings"
-    create_menu "roles" "Role Management" "Badge" "/settings/roles" 11 "settings"
-    create_menu "audit" "Audit Logs" "History" "/settings/audit" 12 "settings"
+    create_or_replace_menu "users" "User Management" "People" "settings/users" 10 "settings" true
+    create_or_replace_menu "roles" "Role Management" "Badge" "settings/roles" 11 "settings" true
+    create_or_replace_menu "audit" "Audit Logs" "History" "settings/audit" 12 "settings" true
     
     # Action Tracker Specific Settings
-    create_menu "status-config" "Status Configuration" "Settings" "/settings/status" 15 "settings"
-    create_menu "document-types" "Document Types" "Folder" "/settings/document-types" 16 "settings"
+    create_or_replace_menu "status_config" "Status Configuration" "Settings" "settings/status" 15 "settings" true
+    create_or_replace_menu "document_types" "Document Types" "Folder" "settings/document-types" 16 "settings" true
 else
     print_error "Parent 'settings' not found! Cannot create submenus."
 fi
 
 echo ""
-print_info "Menu creation summary: Created: $SUCCESS_COUNT, Skipped: $SKIP_COUNT, Failed: $FAIL_COUNT"
+print_info "Menu creation summary: Created: $CREATE_COUNT, Updated: $UPDATE_COUNT, Skipped: $SKIP_COUNT, Failed: $FAIL_COUNT"
 echo ""
 
 # ==================== DEFINE MOBILE BOTTOM NAVIGATION VISIBILITY ====================
@@ -405,42 +472,54 @@ print_info "Assigning menu permissions to roles..."
 print_separator
 echo ""
 
-# Define role menu permissions for Action Tracker
+# Define role menu permissions for Action Tracker (UPDATED with underscores)
 declare -A ROLE_MENUS
 
-# Admin & Super Admin - Full access to everything
-ROLE_MENUS["admin"]="dashboard,meetings,meetings-list,meetings-create,meetings-minutes,meetings-participants,actions,my-tasks,all-actions,overdue-actions,action-assign,action-progress,participants,participants-list,participant-lists,participants-create,documents,documents-all,documents-agendas,documents-minutes,documents-reports,reports,reports-meetings,reports-actions,reports-participants,reports-export,calendar,settings,profile,security,notifications,preferences,users,roles,audit,status-config,document-types"
-ROLE_MENUS["super_admin"]="dashboard,meetings,meetings-list,meetings-create,meetings-minutes,meetings-participants,actions,my-tasks,all-actions,overdue-actions,action-assign,action-progress,participants,participants-list,participant-lists,participants-create,documents,documents-all,documents-agendas,documents-minutes,documents-reports,reports,reports-meetings,reports-actions,reports-participants,reports-export,calendar,settings,profile,security,notifications,preferences,users,roles,audit,status-config,document-types"
+# Admin & Super Admin - Full access to everything (using underscore codes)
+ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,notifications,preferences,users,roles,audit,status_config,document_types"
+ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,notifications,preferences,users,roles,audit,status_config,document_types"
 
 # Meeting Creator - Full meeting management
-ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings-list,meetings-create,meetings-minutes,meetings-participants,actions,my-tasks,participants,participants-list,participant-lists,documents,documents-all,calendar,settings,profile,security,notifications"
+ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,participants,participants_list,participant_lists,documents,documents_all,calendar,settings,profile,security,notifications,preferences"
 
 # Meeting Participant - View meetings only
-ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings-list,meetings-minutes,actions,my-tasks,documents,documents-all,calendar,settings,profile,security,notifications"
+ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,meetings_minutes,actions,my_tasks,documents,documents_all,calendar,settings,profile,security,notifications"
 
 # Action Assigner - Create and assign actions
-ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings-list,actions,all-actions,action-assign,action-progress,participants,participants-list,reports,reports-actions,calendar,settings,profile,security,notifications"
+ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,action_progress,participants,participants_list,participant_lists,reports,reports_actions,calendar,settings,profile,security,notifications,preferences"
 
 # Action Owner - Complete assigned actions
-ROLE_MENUS["action_owner"]="dashboard,meetings,meetings-list,actions,my-tasks,action-progress,calendar,settings,profile,security,notifications"
+ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,action_progress,calendar,settings,profile,security,notifications"
 
 # Action Viewer - Monitor action status
-ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings-list,actions,all-actions,reports,reports-actions,calendar,settings,profile,security,notifications"
+ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,reports,reports_actions,calendar,settings,profile,security,notifications"
 
-# Participant Manager - Manage participant lists
-ROLE_MENUS["participant_manager"]="dashboard,participants,participants-list,participant-lists,participants-create,meetings,meetings-list,meetings-participants,calendar,settings,profile,security,notifications"
+# Participant Manager - Full participant and list management
+ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,meetings_participants,calendar,settings,profile,security,notifications,preferences"
 
 # Document Manager - Manage documents
-ROLE_MENUS["document_manager"]="dashboard,documents,documents-all,documents-agendas,documents-minutes,documents-reports,meetings,meetings-list,calendar,settings,profile,security,notifications"
+ROLE_MENUS["document_manager"]="dashboard,documents,documents_all,documents_agendas,documents_minutes,documents_reports,meetings,meetings_list,calendar,settings,profile,security,notifications"
 
 # Report Viewer - View reports
-ROLE_MENUS["report_viewer"]="dashboard,reports,reports-meetings,reports-actions,reports-participants,reports-export,calendar,settings,profile,security,notifications"
+ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,notifications"
 
 # Basic User - Limited access
-ROLE_MENUS["user"]="dashboard,meetings,meetings-list,actions,my-tasks,calendar,settings,profile,security,notifications"
+ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,calendar,settings,profile,security,notifications"
 
 PERMISSION_SUCCESS=0
 PERMISSION_FAIL=0
+
+# First, clear existing permissions for all menus to avoid duplicates
+print_info "Clearing existing menu permissions..."
+for role_code in "${!ROLE_MENUS[@]}"; do
+    ROLE_ID="${ROLE_IDS[$role_code]}"
+    if [ -n "$ROLE_ID" ]; then
+        curl -s -X DELETE "${API_URL}/roles/${ROLE_ID}/permissions" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
+    fi
+done
+print_success "Cleared existing permissions"
+echo ""
 
 for role_code in "${!ROLE_MENUS[@]}"; do
     ROLE_ID="${ROLE_IDS[$role_code]}"
@@ -458,6 +537,9 @@ for role_code in "${!ROLE_MENUS[@]}"; do
     
     for menu_code in "${MENU_CODES[@]}"; do
         MENU_ID="${MENU_IDS[$menu_code]}"
+        if [ -z "$MENU_ID" ] || [ "$MENU_ID" == "null" ]; then
+            MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
+        fi
         if [ -n "$MENU_ID" ] && [ "$MENU_ID" != "null" ]; then
             MENU_IDS_LIST+=("$MENU_ID")
         else
@@ -542,6 +624,15 @@ if [ -n "$ADMIN_COUNT" ] && [ "$ADMIN_COUNT" -gt 0 ]; then
         (if .path then " → " + .path else "" end),
         (if .children and (.children | length) > 0 then .children | display(level + 1) else empty end);
     display(0)' 2>/dev/null
+    
+    # Specifically show participant lists menu
+    echo ""
+    echo -e "${CYAN}📋 Participant Lists Menu:${NC}"
+    echo "$ADMIN_MENUS" | jq -r '
+    .. | 
+    select(.code? == "participant_lists") | 
+    "  ✅ Found: " + .title + " (Path: " + (.path // "N/A") + ")"
+    ' 2>/dev/null
 else
     print_warning "No menus retrieved for admin"
 fi
@@ -556,8 +647,8 @@ echo ""
 echo -e "${CYAN}📊 Summary:${NC}"
 echo "  • Root menus created: $(echo "$ADMIN_MENUS" | jq '[.[] | select(.parent_id == null)] | length' 2>/dev/null)"
 echo "  • Total menus in database: $(echo "$ADMIN_MENUS" | jq 'length' 2>/dev/null)"
-echo "  • Menus created this run: ${SUCCESS_COUNT}"
-echo "  • Menus skipped: ${SKIP_COUNT}"
+echo "  • New menus created: ${CREATE_COUNT}"
+echo "  • Menus replaced: ${UPDATE_COUNT}"
 [ $FAIL_COUNT -gt 0 ] && echo "  • Menus failed: ${FAIL_COUNT}"
 echo "  • Roles with permissions: ${PERMISSION_SUCCESS}"
 echo ""
@@ -582,6 +673,10 @@ echo ""
 echo "  # Get all menus"
 echo "  curl -X GET \"${API_URL}/menus/all\" \\"
 echo "    -H \"Authorization: Bearer \$ADMIN_TOKEN\" | jq '.[] | {code, title}'"
+echo ""
+echo "  # Check participant lists menu"
+echo "  curl -X GET \"${API_URL}/menus/\" \\"
+echo "    -H \"Authorization: Bearer \$ADMIN_TOKEN\" | jq '.. | select(.code? == \"participant_lists\")'"
 echo ""
 
 print_separator

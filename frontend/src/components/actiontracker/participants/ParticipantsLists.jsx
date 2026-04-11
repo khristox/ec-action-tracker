@@ -21,7 +21,9 @@ import {
   MoreVert as MoreVertIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Description as DescriptionIcon,  // ← Add this line
+
 } from '@mui/icons-material';
 import { 
   fetchParticipants, 
@@ -70,10 +72,16 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
     setTouched(prev => ({ ...prev, [field]: true }));
   };
 
+  const handleBlur = (field) => () => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+  };
+
   const validateField = (field, value) => {
     switch (field) {
       case 'name':
-        return !value.trim() ? 'Name is required' : '';
+        if (!value.trim()) return 'Name is required';
+        if (value.length < 2) return 'Name must be at least 2 characters';
+        return '';
       case 'email':
         if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
           return 'Enter a valid email address';
@@ -81,7 +89,7 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
         return '';
       case 'telephone':
         if (value && !/^[\d\s+()-]{8,}$/.test(value)) {
-          return 'Enter a valid phone number';
+          return 'Enter a valid phone number (min 8 digits)';
         }
         return '';
       default:
@@ -99,6 +107,7 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
   };
 
   const handleSubmit = async () => {
+    // Mark all fields as touched to show errors
     const allTouched = Object.keys(form).reduce((acc, key) => ({ ...acc, [key]: true }), {});
     setTouched(allTouched);
     
@@ -107,13 +116,24 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
       return;
     }
     
+    if (form.name.length < 2) {
+      setError('Name must be at least 2 characters.');
+      return;
+    }
+    
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       setError('Please enter a valid email address.');
       return;
     }
     
+    if (form.telephone && !/^[\d\s+()-]{8,}$/.test(form.telephone)) {
+      setError('Please enter a valid phone number (minimum 8 digits).');
+      return;
+    }
+    
     setSaving(true);
     setError(null);
+    
     try {
       if (isEditing) {
         await dispatch(updateParticipant({ 
@@ -124,9 +144,17 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
         const submitData = meetingId ? { ...form, meeting_id: meetingId } : form;
         await dispatch(createParticipant(submitData)).unwrap();
       }
-      setForm({ name: '', email: '', telephone: '', title: '', organization: '', notes: '' });
+      
+      // Reset form
+      setForm({ 
+        name: '', email: '', telephone: '', title: '', organization: '', notes: '' 
+      });
       setTouched({});
-      onSuccess();
+      
+      // Call success callback
+      if (onSuccess) onSuccess();
+      
+      // Close dialog
       onClose();
     } catch (err) {
       setError(err.message || `Failed to ${isEditing ? 'update' : 'create'} participant.`);
@@ -180,12 +208,17 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
         py: isMobile ? 2 : 2.5,
       }}>
         {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
+          <Alert 
+            severity="error" 
+            sx={{ mb: 3, borderRadius: 2 }} 
+            onClose={() => setError(null)}
+          >
             {error}
           </Alert>
         )}
         
         <Grid container spacing={isMobile ? 2.5 : 2}>
+          {/* Full Name - Required */}
           <Grid size={12}>
             <TextField
               fullWidth
@@ -193,9 +226,10 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
               label="Full Name"
               value={form.name}
               onChange={handleChange('name')}
+              onBlur={handleBlur('name')}
               error={!!getFieldError('name')}
-              helperText={getFieldError('name')}
-              placeholder="Enter participant's full name"
+              helperText={getFieldError('name') || "Enter the participant's full name"}
+              placeholder="e.g., John Doe"
               size={isMobile ? "medium" : "small"}
               InputProps={{
                 startAdornment: (
@@ -207,6 +241,7 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
             />
           </Grid>
 
+          {/* Email and Phone - Row */}
           <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               fullWidth
@@ -214,9 +249,10 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
               type="email"
               value={form.email}
               onChange={handleChange('email')}
+              onBlur={handleBlur('email')}
               error={!!getFieldError('email')}
-              helperText={getFieldError('email') || 'Optional'}
-              placeholder="email@example.com"
+              helperText={getFieldError('email') || "Optional - for notifications"}
+              placeholder="john.doe@example.com"
               size={isMobile ? "medium" : "small"}
               InputProps={{
                 startAdornment: (
@@ -235,9 +271,10 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
               type="tel"
               value={form.telephone}
               onChange={handleChange('telephone')}
+              onBlur={handleBlur('telephone')}
               error={!!getFieldError('telephone')}
-              helperText={getFieldError('telephone') || 'Optional'}
-              placeholder="+1234567890"
+              helperText={getFieldError('telephone') || "Optional - for SMS updates"}
+              placeholder="+256712345678"
               size={isMobile ? "medium" : "small"}
               InputProps={{
                 startAdornment: (
@@ -249,13 +286,14 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
             />
           </Grid>
 
+          {/* Title and Organization - Row */}
           <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               fullWidth
               label="Title / Role"
               value={form.title}
               onChange={handleChange('title')}
-              placeholder="e.g., Project Manager"
+              placeholder="e.g., Project Manager, Director"
               size={isMobile ? "medium" : "small"}
               InputProps={{
                 startAdornment: (
@@ -264,6 +302,7 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
                   </InputAdornment>
                 ),
               }}
+              helperText="Optional - Job title or role"
             />
           </Grid>
 
@@ -273,7 +312,7 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
               label="Organization"
               value={form.organization}
               onChange={handleChange('organization')}
-              placeholder="Company name"
+              placeholder="e.g., Electoral Commission, Ministry"
               size={isMobile ? "medium" : "small"}
               InputProps={{
                 startAdornment: (
@@ -282,9 +321,11 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
                   </InputAdornment>
                 ),
               }}
+              helperText="Optional - Company or organization name"
             />
           </Grid>
 
+          {/* Notes */}
           <Grid size={12}>
             <TextField
               fullWidth
@@ -293,8 +334,16 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
               label="Additional Notes"
               value={form.notes}
               onChange={handleChange('notes')}
-              placeholder="Any additional information..."
+              placeholder="Any additional information about this participant..."
               size={isMobile ? "medium" : "small"}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1.5 }}>
+                    <DescriptionIcon fontSize="small" color="action" />
+                  </InputAdornment>
+                ),
+              }}
+              helperText="Optional - Extra notes or comments"
             />
           </Grid>
         </Grid>
@@ -322,16 +371,19 @@ const ParticipantFormDialog = ({ open, onClose, onSuccess, meetingId, editPartic
           disabled={saving || !isFormValid()}
           fullWidth={isMobile}
           size="large"
-          startIcon={saving ? <CircularProgress size={isMobile ? 20 : 16} /> : (isEditing ? <SaveIcon /> : <AddIcon />)}
+          startIcon={
+            saving ? 
+              <CircularProgress size={isMobile ? 20 : 16} /> : 
+              (isEditing ? <SaveIcon /> : <AddIcon />)
+          }
           sx={{ py: isMobile ? 1.5 : 1, fontWeight: 600 }}
         >
-          {saving ? 'Saving...' : (isEditing ? 'Update' : 'Add')}
+          {saving ? 'Saving...' : (isEditing ? 'Update Participant' : 'Add Participant')}
         </Button>
       </DialogActions>
     </Dialog>
   );
 };
-
 // ==================== Delete Confirmation Dialog ====================
 const DeleteConfirmDialog = ({ open, onClose, onConfirm, participantName, deleting }) => {
   const theme = useTheme();

@@ -95,7 +95,7 @@ TENANT_JSON=$(cat <<EOF
     "first_name": "John",
     "last_name": "Doe",
     "email": "john.doe@example.com",
-    "phone": "+254712345678",
+    "phone": "+256712345678",
     "alternative_phone": "+254723456789",
     "emergency_contact_name": "Jane Doe",
     "emergency_contact_phone": "+254734567890",

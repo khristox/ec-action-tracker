@@ -91,7 +91,7 @@ class ParticipantList(Base):
     # Relationships
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
-    participants = relationship("Participant", secondary=participant_list_members, back_populates="participant_lists")
+    participants = relationship("Participant", secondary=participant_list_members, back_populates="participant_lists", lazy="selectin")
 
     @property
     def created_by_name(self) -> Optional[str]:

@@ -20,30 +20,33 @@ from app.core.config import settings
 
 router = APIRouter()
 
-
-
-
 # ==================== MOBILE BOTTOM NAVIGATION CONFIGURATION ====================
 
 # Define which menus should show on mobile bottom navigation for each role
 MOBILE_BOTTOM_NAV_CONFIG: Dict[str, Set[str]] = {
     "admin": {
-        "dashboard", "properties", "tenants", "payments", "calendar"
+        "dashboard", "meetings", "actions", "participants", "calendar"
     },
-    "property_manager": {
-        "dashboard", "properties", "tenants", "payments", "calendar"
+    "super_admin": {
+        "dashboard", "meetings", "actions", "participants", "calendar"
     },
-    "landlord": {
-        "dashboard", "properties", "tenants", "payments", "calendar"
+    "meeting_creator": {
+        "dashboard", "meetings", "actions", "calendar"
     },
-    "tenant": {
-        "dashboard", "payments", "maintenance", "calendar", "documents"
+    "meeting_participant": {
+        "dashboard", "meetings", "actions", "calendar"
     },
-    "accountant": {
-        "dashboard", "payments", "reports", "analytics", "calendar"
+    "action_assigner": {
+        "dashboard", "actions", "meetings", "calendar"
+    },
+    "action_owner": {
+        "dashboard", "actions", "calendar"
+    },
+    "participant_manager": {
+        "dashboard", "participants", "meetings", "calendar"
     },
     "user": {
-        "dashboard", "properties", "payments", "calendar"
+        "dashboard", "meetings", "actions", "calendar"
     }
 }
 
@@ -51,7 +54,12 @@ MOBILE_BOTTOM_NAV_CONFIG: Dict[str, Set[str]] = {
 NEVER_MOBILE_BOTTOM = {
     "settings", "profile", "security", "notifications", "preferences",
     "users", "roles", "audit", "backup", "api_keys",
-    "structures", "units", "leases"
+    "documents_all", "documents_agendas", "documents_minutes", "documents_reports",
+    "reports_meetings", "reports_actions", "reports_participants", "reports_export",
+    "meetings_list", "meetings_create", "meetings_minutes", "meetings_participants",
+    "my_tasks", "all_actions", "overdue_actions", "action_assign", "action_progress",
+    "participants_list", "participant_lists", "participants_create", "participants_import",
+    "list_members", "status_config", "document_types"
 }
 
 def should_show_mobile_bottom(role_code: str, menu_code: str) -> bool:
@@ -62,33 +70,30 @@ def should_show_mobile_bottom(role_code: str, menu_code: str) -> bool:
     if role_code in MOBILE_BOTTOM_NAV_CONFIG:
         return menu_code in MOBILE_BOTTOM_NAV_CONFIG[role_code]
     
-    return menu_code in {"dashboard", "payments"}
+    return menu_code in {"dashboard", "meetings", "actions", "calendar"}
 
-# ==================== MENU ENDPOINTS ====================
+# ==================== HELPER FUNCTIONS ====================
 
-# app/api/v1/endpoints/menus.py
-
-@router.get("/", response_model=List[MenuTreeResponse])
-async def get_menus(
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    hierarchy: bool = Query(True, description="Return hierarchical structure"),
-    flat: bool = Query(False, description="Return flat list instead of hierarchy"),
-    include_inactive: bool = Query(False, description="Include inactive menus"),
-) -> List[MenuTreeResponse]:
-    """Get all menus accessible to the current user with their permissions."""
+async def get_user_menus_with_permissions(
+    db: AsyncSession, 
+    user: User,
+    include_inactive: bool = False
+) -> tuple[List[Menu], Dict[UUID, RoleMenuPermission]]:
+    """Get all menus and permissions for a user with proper async loading."""
     from sqlalchemy import and_
     
     # Get user's role IDs
-    user_role_ids = [role.id for role in current_user.roles]
+    user_role_ids = [role.id for role in user.roles]
     
     if not user_role_ids:
-        return []
+        return [], {}
     
-    # Get all permissions for the user's roles
+    # Get all permissions for the user's roles with eager loading of menu
     perm_result = await db.execute(
         select(RoleMenuPermission)
-        .options(selectinload(RoleMenuPermission.menu))
+        .options(
+            selectinload(RoleMenuPermission.menu)
+        )
         .where(
             and_(
                 RoleMenuPermission.role_id.in_(user_role_ids),
@@ -100,35 +105,20 @@ async def get_menus(
     
     # Build a map of menu_id -> permission
     permission_map = {}
+    menus_dict = {}
+    
     for perm in permissions:
         if perm.menu_id not in permission_map:
             permission_map[perm.menu_id] = perm
+        
+        if perm.menu and (include_inactive or perm.menu.is_active):
+            if perm.menu.id not in menus_dict:
+                menus_dict[perm.menu.id] = perm.menu
     
-    # Get unique menus from permissions
-    menus = []
-    for perm in permissions:
-        if perm.menu and perm.menu.is_active:
-            menus.append(perm.menu)
-    
-    # Remove duplicates (in case user has multiple roles)
-    seen_ids = set()
-    unique_menus = []
-    for menu in menus:
-        if menu.id not in seen_ids:
-            seen_ids.add(menu.id)
-            unique_menus.append(menu)
-    menus = unique_menus
-    
-    if hierarchy and not flat:
-        # Build hierarchy with permission data
-        return build_menu_hierarchy_with_permissions(menus, permission_map)
-    else:
-        # Return flat list with permission data
-        return [build_menu_response_with_permissions(menu, permission_map.get(menu.id)) for menu in menus]
+    return list(menus_dict.values()), permission_map
 
-
-def build_menu_response_with_permissions(menu: Menu, permission: Optional[RoleMenuPermission]) -> MenuResponse:
-    """Build a MenuResponse with permission data."""
+def build_menu_response_sync(menu: Menu, permission: Optional[RoleMenuPermission]) -> MenuResponse:
+    """Build a MenuResponse synchronously (no async calls)."""
     return MenuResponse(
         id=menu.id,
         code=menu.code,
@@ -148,39 +138,18 @@ def build_menu_response_with_permissions(menu: Menu, permission: Optional[RoleMe
         can_access=permission.can_access if permission else True,
         can_show_mb_bottom=permission.can_show_mb_bottom if permission else False,
         level=0,
-        has_children=bool(menu.children)
+        has_children=False
     )
 
-
-def build_menu_hierarchy_with_permissions(menus: List[Menu], permission_map: Dict[UUID, RoleMenuPermission]) -> List[MenuTreeResponse]:
-    """Build hierarchical menu structure with permission data."""
+def build_menu_hierarchy_sync(menus: List[Menu], permission_map: Dict[UUID, RoleMenuPermission]) -> List[MenuTreeResponse]:
+    """Build hierarchical menu structure synchronously."""
     menu_dict = {}
     root_menus = []
     
     # First pass: create all menu responses
     for menu in menus:
         permission = permission_map.get(menu.id)
-        menu_response = MenuResponse(
-            id=menu.id,
-            code=menu.code,
-            title=menu.title,
-            icon=menu.icon,
-            path=menu.path,
-            parent_id=menu.parent_id,
-            sort_order=menu.sort_order,
-            is_active=menu.is_active,
-            requires_auth=menu.requires_auth,
-            target=menu.target,
-            badge=menu.badge,
-            created_at=menu.created_at,
-            updated_at=menu.updated_at,
-            children=[],
-            can_view=permission.can_view if permission else True,
-            can_access=permission.can_access if permission else True,
-            can_show_mb_bottom=permission.can_show_mb_bottom if permission else False,
-            level=0,
-            has_children=False
-        )
+        menu_response = build_menu_response_sync(menu, permission)
         menu_dict[menu.id] = menu_response
     
     # Second pass: build hierarchy
@@ -212,6 +181,32 @@ def build_menu_hierarchy_with_permissions(menus: List[Menu], permission_map: Dic
     
     return root_menus
 
+# ==================== MENU ENDPOINTS ====================
+
+@router.get("/", response_model=List[MenuTreeResponse])
+async def get_menus(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    hierarchy: bool = Query(True, description="Return hierarchical structure"),
+    flat: bool = Query(False, description="Return flat list instead of hierarchy"),
+    include_inactive: bool = Query(False, description="Include inactive menus"),
+) -> List[MenuTreeResponse]:
+    """Get all menus accessible to the current user with their permissions."""
+    
+    # Get menus and permissions using async helper
+    menus, permission_map = await get_user_menus_with_permissions(db, current_user, include_inactive)
+    
+    if not menus:
+        return []
+    
+    if hierarchy and not flat:
+        # Build hierarchy synchronously
+        return build_menu_hierarchy_sync(menus, permission_map)
+    else:
+        # Return flat list
+        return [build_menu_response_sync(menu, permission_map.get(menu.id)) for menu in menus]
+
+
 @router.get("/all", response_model=List[MenuResponse])
 async def get_all_menus_admin(
     db: AsyncSession = Depends(deps.get_db),
@@ -227,6 +222,7 @@ async def get_all_menus_admin(
             detail="Admin access required"
         )
     
+    # Load menus with children eagerly
     query = select(Menu).options(
         selectinload(Menu.children)
     ).order_by(Menu.sort_order)
@@ -241,7 +237,10 @@ async def get_all_menus_admin(
     
     result = await db.execute(query)
     menus = result.scalars().all()
-    return menus
+    
+    # Build responses synchronously
+    return [build_menu_response_sync(menu, None) for menu in menus]
+
 
 @router.get("/flat", response_model=List[MenuResponse])
 async def get_flat_menus(
@@ -250,22 +249,9 @@ async def get_flat_menus(
     include_inactive: bool = Query(False, description="Include inactive menus"),
 ) -> List[MenuResponse]:
     """Get flat list of menus accessible to the current user."""
-    role_ids = [role.id for role in current_user.roles]
-    all_menus = await menu.get_all(db, active_only=not include_inactive)
-    
-    if role_ids:
-        result = await db.execute(
-            select(RoleMenuPermission.menu_id).where(
-                RoleMenuPermission.role_id.in_(role_ids),
-                RoleMenuPermission.can_view == True
-            )
-        )
-        allowed_menu_ids = {row[0] for row in result.all()}
-        menus = [m for m in all_menus if m.id in allowed_menu_ids]
-    else:
-        menus = all_menus
-    
-    return menus
+    menus, permission_map = await get_user_menus_with_permissions(db, current_user, include_inactive)
+    return [build_menu_response_sync(menu, permission_map.get(menu.id)) for menu in menus]
+
 
 @router.get("/{menu_id}", response_model=MenuResponse)
 async def get_menu(
@@ -274,7 +260,12 @@ async def get_menu(
     current_user: User = Depends(deps.get_current_user),
 ) -> MenuResponse:
     """Get a specific menu by ID."""
-    menu_item = await menu.get(db, menu_id)
+    # Eager load the menu
+    result = await db.execute(
+        select(Menu).options(selectinload(Menu.children)).where(Menu.id == menu_id)
+    )
+    menu_item = result.scalar_one_or_none()
+    
     if not menu_item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -287,7 +278,15 @@ async def get_menu(
     if any(role.code in ["admin", "super_admin"] for role in current_user.roles):
         has_permission = True
     else:
-        for perm in menu_item.role_permissions:
+        # Eager load permissions
+        perm_result = await db.execute(
+            select(RoleMenuPermission)
+            .options(selectinload(RoleMenuPermission.role))
+            .where(RoleMenuPermission.menu_id == menu_id)
+        )
+        permissions = perm_result.scalars().all()
+        
+        for perm in permissions:
             if perm.role_id in user_role_ids and perm.can_view:
                 has_permission = True
                 break
@@ -298,7 +297,8 @@ async def get_menu(
             detail="Access denied to this menu"
         )
     
-    return menu_item
+    return build_menu_response_sync(menu_item, None)
+
 
 @router.post("/", response_model=MenuResponse, status_code=status.HTTP_201_CREATED)
 async def create_menu(
@@ -331,22 +331,8 @@ async def create_menu(
     new_menu = await menu.create(db, menu_in)
     await db.refresh(new_menu)
     
-    return MenuResponse(
-        id=new_menu.id,
-        code=new_menu.code,
-        title=new_menu.title,
-        icon=new_menu.icon,
-        path=new_menu.path,
-        parent_id=new_menu.parent_id,
-        sort_order=new_menu.sort_order,
-        is_active=new_menu.is_active,
-        requires_auth=new_menu.requires_auth,
-        target=new_menu.target,
-        badge=new_menu.badge,
-        created_at=new_menu.created_at,
-        updated_at=new_menu.updated_at,
-        children=[]
-    )
+    return build_menu_response_sync(new_menu, None)
+
 
 @router.put("/{menu_id}", response_model=MenuResponse)
 async def update_menu(
@@ -378,7 +364,8 @@ async def update_menu(
             )
     
     updated_menu = await menu.update(db, menu_id, menu_in)
-    return updated_menu
+    return build_menu_response_sync(updated_menu, None)
+
 
 @router.delete("/{menu_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_menu(
@@ -424,7 +411,89 @@ async def get_role_menu_permissions(
         .where(RoleMenuPermission.role_id == role_id)
     )
     permissions = result.scalars().all()
-    return [RoleMenuPermissionResponse.model_validate(p, from_attributes=True) for p in permissions]
+    return [RoleMenuPermissionResponse.model_validate(p) for p in permissions]
+
+
+@router.post("/permissions/batch", response_model=dict)
+async def assign_menu_permissions_batch(
+    permissions_in: List[RoleMenuPermissionCreate],
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict:
+    """Assign multiple menu permissions in batch (admin only)."""
+    if not any(role.code in ["admin", "super_admin"] for role in current_user.roles):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    results = []
+    errors = []
+    success_count = 0
+    
+    for permission_in in permissions_in:
+        try:
+            # Get role and menu
+            role_result = await db.execute(select(Role).where(Role.id == permission_in.role_id))
+            role = role_result.scalar_one_or_none()
+            
+            menu_result = await db.execute(select(Menu).where(Menu.id == permission_in.menu_id))
+            menu_item = menu_result.scalar_one_or_none()
+            
+            if not role or not menu_item:
+                errors.append(f"Role or menu not found for permission")
+                continue
+            
+            # Auto-determine can_show_mb_bottom
+            can_show_mb_bottom = permission_in.can_show_mb_bottom
+            if can_show_mb_bottom is None:
+                can_show_mb_bottom = should_show_mobile_bottom(role.code, menu_item.code)
+            
+            # Check if permission already exists
+            existing_result = await db.execute(
+                select(RoleMenuPermission).where(
+                    RoleMenuPermission.role_id == permission_in.role_id,
+                    RoleMenuPermission.menu_id == permission_in.menu_id
+                )
+            )
+            existing = existing_result.scalar_one_or_none()
+            
+            if existing:
+                existing.can_view = permission_in.can_view
+                existing.can_access = permission_in.can_access
+                existing.can_show_mb_bottom = can_show_mb_bottom
+                existing.updated_at = datetime.now()
+                results.append(existing)
+            else:
+                new_permission = RoleMenuPermission(
+                    role_id=permission_in.role_id,
+                    menu_id=permission_in.menu_id,
+                    can_view=permission_in.can_view,
+                    can_access=permission_in.can_access,
+                    can_show_mb_bottom=can_show_mb_bottom,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
+                db.add(new_permission)
+                results.append(new_permission)
+            
+            success_count += 1
+            
+        except Exception as e:
+            errors.append(str(e))
+    
+    if results:
+        await db.commit()
+        for result in results:
+            await db.refresh(result)
+    
+    # Return simple response without trying to serialize complex relationships
+    return {
+        "success": success_count,
+        "failed": len(errors),
+        "errors": errors if errors else None,
+        "message": f"Successfully assigned {success_count} permissions"
+    }
 
 @router.post("/permissions", response_model=RoleMenuPermissionResponse)
 async def assign_menu_permission(
@@ -439,7 +508,7 @@ async def assign_menu_permission(
             detail="Admin access required"
         )
     
-    # Get role and menu
+    # Get role and menu with eager loading
     role_result = await db.execute(select(Role).where(Role.id == permission_in.role_id))
     role = role_result.scalar_one_or_none()
     
@@ -466,6 +535,7 @@ async def assign_menu_permission(
         can_show_mb_bottom=can_show_mb_bottom
     )
     return permission
+
 
 @router.put("/permissions/{permission_id}", response_model=RoleMenuPermissionResponse)
 async def update_menu_permission(
@@ -511,6 +581,7 @@ async def update_menu_permission(
     await db.commit()
     await db.refresh(permission)
     return permission
+
 
 @router.delete("/permissions/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_menu_permission(
@@ -565,7 +636,8 @@ async def get_my_mobile_bottom_menus(
             menus_dict[perm.menu.id] = perm.menu
     
     menus = sorted(menus_dict.values(), key=lambda m: m.sort_order)
-    return menus
+    return [build_menu_response_sync(menu, None) for menu in menus]
+
 
 @router.post("/permissions/sync-mobile-bottom")
 async def sync_mobile_bottom_permissions(
@@ -592,16 +664,22 @@ async def sync_mobile_bottom_permissions(
     menu_result = await db.execute(select(Menu))
     menus = {m.id: m for m in menu_result.scalars().all()}
     
-    # Get all permissions
-    perm_result = await db.execute(select(RoleMenuPermission))
+    # Get all permissions with eager loading
+    perm_result = await db.execute(
+        select(RoleMenuPermission)
+        .options(
+            selectinload(RoleMenuPermission.role),
+            selectinload(RoleMenuPermission.menu)
+        )
+    )
     permissions = perm_result.scalars().all()
     
     changes = []
     updates = 0
     
     for permission in permissions:
-        role = role_dict.get(permission.role_id)
-        menu = menus.get(permission.menu_id)
+        role = permission.role or role_dict.get(permission.role_id)
+        menu = permission.menu or menus.get(permission.menu_id)
         
         if not role or not menu:
             continue
@@ -629,6 +707,7 @@ async def sync_mobile_bottom_permissions(
         "updates_performed": updates if not dry_run else 0,
         "changes": changes[:100]
     }
+
 
 @router.get("/mobile-bottom/config", response_model=Dict)
 async def get_mobile_bottom_config(

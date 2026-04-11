@@ -42,7 +42,7 @@ async def create_participant(
     obj_data = participant_in.model_dump() 
     obj_data["created_by_id"] = current_user.id
     
-    return await participant.create(db, obj_in=obj_data)
+    return await participant.create(db, obj_in=obj_data, created_by_id=current_user.id)
 
 
 @router.post("/bulk", response_model=List[ParticipantResponse])

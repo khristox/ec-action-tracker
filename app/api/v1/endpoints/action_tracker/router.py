@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.api import deps
 from app.models.user import User
-from . import participants, participant_lists, meetings, minutes, actions, documents, dashboard
+from . import participants, participant_lists, meetings, minutes, actions, documents, dashboard, import_export
 from .status_utils import get_valid_meeting_statuses
 
 router = APIRouter()
@@ -13,11 +13,12 @@ router = APIRouter()
 # Include all sub‑routers
 router.include_router(participants.router, prefix="/participants", tags=["participants"])
 router.include_router(participant_lists.router, prefix="/participant-lists", tags=["participant-lists"])
-router.include_router(meetings.router, prefix="/meetings", tags=["meetings"])  # ← This must exist
+router.include_router(meetings.router, prefix="/meetings", tags=["meetings"])
 router.include_router(minutes.router, prefix="/minutes", tags=["minutes"])
 router.include_router(actions.router, prefix="/actions", tags=["actions"])
 router.include_router(documents.router, prefix="/documents", tags=["documents"])
 router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+router.include_router(import_export.router, prefix="/participants", tags=["import-export"])  # ← ADD THIS LINE
 
 # Top‑level debug endpoints
 @router.get("/ping")

@@ -2,6 +2,8 @@
 from fastapi import APIRouter
 import logging
 
+from app.api.v1.endpoints.action_tracker import router as action_tracker_router
+
 logger = logging.getLogger(__name__)
 
 # Import routers with debug
@@ -16,8 +18,6 @@ try:
     from app.api.v1.endpoints.attributes import router as attributes_router
     from app.api.v1.endpoints.address.locations import router as locations_router
     from app.api.v1.endpoints.menus import router as menus_router
-    from app.api.v1.endpoints.action_tracker import router as action_tracker_router
-
     
     logger.info("✅ All routers imported successfully")
 except ImportError as e:
@@ -43,8 +43,10 @@ api_router.include_router(attributes_router, prefix="/attributes", tags=["attrib
 api_router.include_router(locations_router, prefix="/locations", tags=["locations"])
 api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 
-# Action Tracker
+# Action Tracker (this already includes all sub-routers)
 api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker"])
+
+# DO NOT add import_export separately here - it should be inside action_tracker_router
 
 # Log summary
 logger.info(f"✅ API Router configured with {len(api_router.routes)} routes")

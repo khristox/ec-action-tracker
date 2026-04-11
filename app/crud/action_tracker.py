@@ -33,6 +33,9 @@ from app.schemas.action_tracker_participants import (
     ParticipantUpdate
 )
 
+from app.models.action_tracker import participant_list_members
+
+
 
 # ============================================================================
 # BASE CLASS WITH AUDIT MIXIN
@@ -71,7 +74,7 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
         self, 
         db: AsyncSession, 
         obj_in: Union[ParticipantCreate, Dict[str, Any]],
-        created_by_id: UUID
+        created_by_id: UUID  # This parameter is required
     ) -> Participant:
         """Create a new participant with audit fields"""
         try:
@@ -80,16 +83,22 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             else:
                 obj_data = obj_in.copy()
             
+            # Ensure required fields
             if not obj_data.get('name'):
                 raise ValueError("Name is required for creating a participant")
             
+            # Check for duplicate email if provided
             if obj_data.get('email'):
                 existing = await self.get_by_email(db, obj_data['email'])
                 if existing:
                     raise ValueError(f"Participant with email '{obj_data['email']}' already exists")
             
+            # Create participant with audit fields
             db_obj = Participant(**obj_data)
-            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            db_obj.created_by_id = created_by_id  # Set the created_by_id
+            db_obj.created_at = datetime.now()
+            db_obj.updated_at = datetime.now()
+            db_obj.is_active = True
             
             db.add(db_obj)
             await db.commit()
@@ -99,6 +108,7 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
         except Exception as e:
             await db.rollback()
             raise ValueError(f"Failed to create participant: {str(e)}")
+        
 
     # READ (Single)
     async def get(self, db: AsyncSession, id: UUID) -> Optional[Participant]:
@@ -611,6 +621,346 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         )
         return result.scalars().all()
 
+
+
+    async def create_with_participants(
+        self, 
+        db: AsyncSession, 
+        obj_in: ParticipantListCreate, 
+        participant_ids: List[UUID],
+        created_by_id: UUID
+    ) -> ParticipantList:
+        """Create a participant list with members"""
+        try:
+            # Create the list
+            list_data = obj_in.model_dump(exclude={'participant_ids'})
+            db_obj = ParticipantList(**list_data)
+            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
+            
+            db.add(db_obj)
+            await db.flush()  # Get the ID
+            
+            # Add participants to the list
+            if participant_ids:
+                await self._add_participants_to_list(db, db_obj.id, participant_ids, created_by_id)
+            
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create participant list: {str(e)}")
+    
+    async def add_participants_to_list(
+        self, 
+        db: AsyncSession, 
+        list_id: UUID, 
+        participant_ids: List[UUID], 
+        added_by_id: UUID
+    ) -> bool:
+        """Add participants to an existing list"""
+        try:
+            # Use the junction table directly
+            from app.models.action_tracker import participant_list_members
+            
+            for participant_id in participant_ids:
+                # Check if already exists
+                result = await db.execute(
+                    select(participant_list_members).where(
+                        participant_list_members.c.participant_list_id == list_id,
+                        participant_list_members.c.participant_id == participant_id
+                    )
+                )
+                if not result.first():
+                    stmt = participant_list_members.insert().values(
+                        participant_list_id=list_id,
+                        participant_id=participant_id,
+                        added_at=datetime.now(),
+                        added_by_id=added_by_id
+                    )
+                    await db.execute(stmt)
+            
+            await db.commit()
+            return True
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add participants to list: {str(e)}")
+    
+    async def remove_participant_from_list(
+        self, 
+        db: AsyncSession, 
+        list_id: UUID, 
+        participant_id: UUID
+    ) -> bool:
+        """Remove a participant from a list"""
+        try:
+            from app.models.action_tracker import participant_list_members
+            
+            stmt = participant_list_members.delete().where(
+                participant_list_members.c.participant_list_id == list_id,
+                participant_list_members.c.participant_id == participant_id
+            )
+            result = await db.execute(stmt)
+            await db.commit()
+            return result.rowcount > 0
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to remove participant from list: {str(e)}")
+    
+    async def get_list_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Participant]:
+        """Get all participants in a list with pagination"""
+        from app.models.action_tracker import participant_list_members
+        
+        result = await db.execute(
+            select(Participant)
+            .join(participant_list_members, Participant.id == participant_list_members.c.participant_id)
+            .where(
+                participant_list_members.c.participant_list_id == list_id,
+                Participant.is_active == True
+            )
+            .offset(skip)
+            .limit(limit)
+            .order_by(Participant.name)
+        )
+        return result.scalars().all()
+    
+    async def get_list_participants_count(
+        self,
+        db: AsyncSession,
+        list_id: UUID
+    ) -> int:
+        """Get total count of participants in a list"""
+        from app.models.action_tracker import participant_list_members
+        
+        result = await db.execute(
+            select(func.count())
+            .select_from(participant_list_members)
+            .where(participant_list_members.c.participant_list_id == list_id)
+        )
+        return result.scalar() or 0
+    
+    async def get_participant_lists(
+        self, 
+        db: AsyncSession, 
+        participant_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[ParticipantList]:
+        """Get all lists a participant belongs to"""
+        result = await db.execute(
+            select(ParticipantList)
+            .join(participant_list_members, ParticipantList.id == participant_list_members.c.participant_list_id)
+            .where(
+                participant_list_members.c.participant_id == participant_id,
+                ParticipantList.is_active == True
+            )
+            .offset(skip)
+            .limit(limit)
+        )
+        return result.scalars().all()
+    
+    async def _add_participants_to_list(
+        self, 
+        db: AsyncSession, 
+        list_id: UUID, 
+        participant_ids: List[UUID], 
+        added_by_id: UUID
+    ):
+        """Internal method to add participants to list"""
+        from app.models.action_tracker import participant_list_members
+        
+        for participant_id in participant_ids:
+            stmt = participant_list_members.insert().values(
+                participant_list_id=list_id,
+                participant_id=participant_id,
+                added_at=datetime.now(),
+                added_by_id=added_by_id
+            )
+            await db.execute(stmt)
+    
+    async def get_participants_not_in_list(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Participant]:
+        """Get participants that are not in a specific list"""
+        query = select(Participant).where(
+            Participant.is_active == True,
+            ~Participant.id.in_(
+                select(participant_list_members.c.participant_id).where(
+                    participant_list_members.c.participant_list_id == list_id
+                )
+            )
+        )
+        
+        if search:
+            term = f"%{search}%"
+            query = query.where(
+                or_(
+                    Participant.name.ilike(term),
+                    Participant.email.ilike(term)
+                )
+            )
+        
+        query = query.offset(skip).limit(limit)
+        result = await db.execute(query)
+        return result.scalars().all()
+
+# Add these methods to CRUDParticipantList class
+
+    async def add_participants_to_list_batch(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        participant_ids: List[UUID],
+        added_by_id: UUID
+    ) -> Dict[str, Any]:
+        """Add multiple participants to a list in batch"""
+        from app.models.action_tracker import participant_list_members
+        
+        added_count = 0
+        skipped_ids = []
+        errors = []
+        
+        # Get existing members to avoid duplicates
+        existing_result = await db.execute(
+            select(participant_list_members.c.participant_id).where(
+                participant_list_members.c.participant_list_id == list_id
+            )
+        )
+        existing_ids = {row[0] for row in existing_result.all()}
+        
+        for participant_id in participant_ids:
+            if participant_id in existing_ids:
+                skipped_ids.append(participant_id)
+                continue
+            
+            try:
+                stmt = participant_list_members.insert().values(
+                    participant_list_id=list_id,
+                    participant_id=participant_id,
+                    added_at=datetime.now(),
+                    added_by_id=added_by_id
+                )
+                await db.execute(stmt)
+                added_count += 1
+            except Exception as e:
+                errors.append(f"Failed to add {participant_id}: {str(e)}")
+        
+        await db.commit()
+        
+        return {
+            "added_count": added_count,
+            "skipped_count": len(skipped_ids),
+            "skipped_ids": skipped_ids,
+            "errors": errors
+        }
+
+
+    async def get_participants_not_in_list_paginated(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 20
+    ) -> tuple[List[Participant], int]:
+        """Get participants not in a specific list with pagination"""
+        from app.models.action_tracker import participant_list_members
+        
+        # Subquery to get participant IDs that are in the list
+        subquery = select(participant_list_members.c.participant_id).where(
+            participant_list_members.c.participant_list_id == list_id
+        )
+        
+        query = select(Participant).where(
+            Participant.is_active == True,
+            Participant.id.not_in(subquery)
+        )
+        
+        if search:
+            term = f"%{search}%"
+            query = query.where(
+                or_(
+                    Participant.name.ilike(term),
+                    Participant.email.ilike(term),
+                    Participant.organization.ilike(term)
+                )
+            )
+        
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Get paginated results
+        query = query.offset(skip).limit(limit).order_by(Participant.name)
+        result = await db.execute(query)
+        
+        return result.scalars().all(), total
+
+
+    async def get_list_with_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID
+    ) -> Optional[ParticipantList]:
+        """Get a participant list with its members eagerly loaded"""
+        result = await db.execute(
+            select(ParticipantList)
+            .options(selectinload(ParticipantList.participants))
+            .where(ParticipantList.id == list_id, ParticipantList.is_active == True)
+        )
+        return result.scalar_one_or_none()
+
+
+    async def get_all_lists_with_counts(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> tuple[List[ParticipantList], int]:
+        """Get all accessible lists with participant counts"""
+        from app.models.action_tracker import participant_list_members
+        
+        # Base query for accessible lists
+        query = select(ParticipantList).where(
+            ParticipantList.is_active == True,
+            or_(
+                ParticipantList.created_by_id == user_id,
+                ParticipantList.is_global == True
+            )
+        )
+        
+        # Get total count
+        count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+        total = count_result.scalar() or 0
+        
+        # Get paginated results with participant counts
+        query = query.offset(skip).limit(limit).order_by(ParticipantList.name)
+        result = await db.execute(query)
+        lists = result.scalars().all()
+        
+        # Load participant counts for each list
+        for lst in lists:
+            count_result = await db.execute(
+                select(func.count()).select_from(participant_list_members).where(
+                    participant_list_members.c.participant_list_id == lst.id
+                )
+            )
+            lst.participant_count = count_result.scalar() or 0
+        
+        return lists, total
 
 # ============================================================================
 # MEETING ACTION CRUD - COMPLETE

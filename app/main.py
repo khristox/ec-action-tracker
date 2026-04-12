@@ -1,80 +1,68 @@
 """
 Action Tracker - Main Application Entry Point
-Optimized for sub-path hosting (/actiontracker)
 """
 import logging
-import time
 import os
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
-from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from dotenv import load_dotenv # Ensure you have python-dotenv installed
+
+# 1. LOAD ENVIRONMENT VARIABLES FIRST
+# This makes os.getenv("FRONTEND_DIST_PATH") work
+load_dotenv()
 
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db.base import async_engine
 from app.api.v1.api import api_router
-from app.middleware.audit_middleware import AuditMiddleware
 
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# ==================== APPLICATION STATE ====================
+# ==================== FRONTEND PATH LOGIC ====================
 
-class AppState:
-    start_time: float = 0
-    database_connected: bool = False
-    request_count: int = 0
+def get_frontend_path() -> Optional[Path]:
+    """
+    Get the path to the frontend dist directory.
+    """
+    # Try the env var specifically
+    env_path = os.getenv("FRONTEND_DIST_PATH")
+    if env_path:
+        path = Path(env_path)
+        if path.exists() and path.is_dir():
+            return path
+            
+    # Fallback to hardcoded static if env var fails
+    fallback = Path("/home/chris/Chr/Apps/ECATMIS/static")
+    if fallback.exists() and fallback.is_dir():
+        return fallback
+        
+    return None
 
-app_state = AppState()
-
-# ==================== PATH CONFIGURATION ====================
-
-# We use "static" as the folder name where your React 'dist' files live
-STATIC_DIR = Path.cwd() / "static"
-ASSETS_DIR = STATIC_DIR / "assets"
-
-# ==================== LIFESPAN ====================
+# ==================== APP INITIALIZATION ====================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Starting Action Tracker on Port 8001")
-    app_state.start_time = time.time()
-
-    # Database Heartbeat
-    try:
-        async with async_engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        app_state.database_connected = True
-        logger.info("✅ Database Connection: SUCCESSFUL")
-    except Exception as e:
-        app_state.database_connected = False
-        logger.error(f"❌ Database Connection: FAILED - {e}")
-
+    logger.info("🚀 Action Tracker STARTUP")
     yield
-    await async_engine.dispose()
-
-# ==================== FASTAPI APP ====================
+    if async_engine:
+        await async_engine.dispose()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     lifespan=lifespan,
-    # Move docs to prevent conflict with frontend paths
-    docs_url="/actiontracker/api/docs",
-    openapi_url="/actiontracker/api/openapi.json",
 )
 
-# ==================== MIDDLEWARE ====================
-
-app.add_middleware(AuditMiddleware)
-
+# CORS
 if settings.CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
@@ -84,51 +72,47 @@ if settings.CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-# ==================== API ROUTES ====================
-
-# Include backend API first
+# API Routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-@app.get("/health", tags=["System"])
-async def health_check():
-    return {"status": "healthy" if app_state.database_connected else "degraded"}
+# ==================== FRONTEND SERVING ====================
 
-# ==================== RELATIVE FRONTEND SERVING ====================
+# settings.DEBUG is now correctly False because load_dotenv() was called
+if not settings.DEBUG:
+    frontend_dist = get_frontend_path()
+    
+    if frontend_dist:
+        logger.info(f"🎨 Serving frontend from: {frontend_dist}")
+        
+        # Mount the assets subfolder (Standard for Vite/React/Vue)
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        
+        @app.get("/")
+        async def serve_index():
+            return FileResponse(frontend_dist / "index.html")
 
-if STATIC_DIR.exists() and STATIC_DIR.is_dir():
-    # 1. Mount Assets specifically for the sub-path
-    # Browser will look for: /actiontracker/assets/index-xxx.js
-    if ASSETS_DIR.exists():
-        app.mount(
-            "/actiontracker/assets", 
-            StaticFiles(directory=str(ASSETS_DIR)), 
-            name="static_assets"
-        )
-
-    # 2. Serve other static files (favicon, manifest, etc)
-    @app.get("/actiontracker/{file_name:path}", include_in_schema=False)
-    async def serve_static_files(file_name: str):
-        # Prevent API calls from hitting this
-        if file_name.startswith("api/"):
-            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        @app.get("/{path:path}")
+        async def serve_spa(path: str):
+            # Ignore API/Docs
+            if path.startswith(("api/", "docs", "redoc", "openapi.json")):
+                raise HTTPException(status_code=404)
             
-        file_path = STATIC_DIR / file_name
-        if file_path.is_file():
-            return FileResponse(str(file_path))
+            # If file exists (like favicon.ico), serve it
+            file_path = frontend_dist / path
+            if file_path.exists() and file_path.is_file():
+                return FileResponse(file_path)
             
-        # 3. SPA Catch-all: Return index.html for any React Route
-        return FileResponse(str(STATIC_DIR / "index.html"))
-
-    # 4. Handle the base sub-path redirect
-    @app.get("/actiontracker", include_in_schema=False)
-    async def redirect_to_actiontracker():
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/actiontracker/")
+            # Otherwise, serve index.html for SPA routing
+            return FileResponse(frontend_dist / "index.html")
+    else:
+        # This is where your error was triggering
+        logger.error(f"❌ FRONTEND_DIST_PATH is: {os.getenv('FRONTEND_DIST_PATH')}")
+        logger.error("❌ Frontend directory not found! Check if /static exists.")
 else:
-    logger.warning(f"⚠️ Static directory NOT found at {STATIC_DIR}. API-only mode.")
-
-# ==================== EXECUTION ====================
+    logger.info("🔧 DEBUG=True: Frontend serving via FastAPI is disabled.")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=settings.DEBUG)

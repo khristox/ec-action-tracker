@@ -8,7 +8,7 @@ import {
 } from '@mui/icons-material';
 
 // Updated to point to your local public/logo.png file
-const ecLogo = "/logo.png";
+const ecLogo = "./logo.png";
 
 const features = [
   {

@@ -1340,6 +1340,10 @@ meeting_action = CRUDMeetingAction(MeetingAction)
 # MEETING CRUD - COMPLETE
 # ============================================================================
 
+# ============================================================================
+# MEETING CRUD - COMPLETE
+# ============================================================================
+
 class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate], AuditMixin):
     """CRUD operations for Meeting entity"""
     
@@ -1359,6 +1363,110 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate], AuditMixin):
         except Exception as e:
             await db.rollback()
             raise ValueError(f"Failed to create meeting: {str(e)}")
+    
+    # ADD THIS METHOD - create_with_participants
+    async def create_with_participants(
+        self,
+        db: AsyncSession,
+        obj_in: MeetingCreate,
+        created_by_id: UUID
+    ) -> Meeting:
+        """
+        Create a meeting with participants from template or custom list.
+        
+        Args:
+            db: Database session
+            obj_in: Meeting creation data
+            created_by_id: ID of the user creating the meeting
+            
+        Returns:
+            Created meeting with participants
+        """
+        try:
+            # Extract meeting data
+            meeting_data = obj_in.model_dump(exclude={'participant_list_id', 'custom_participants'})
+            
+            # Create meeting with audit fields
+            meeting = Meeting(
+                **meeting_data,
+                created_by_id=created_by_id,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                is_active=True
+            )
+            db.add(meeting)
+            await db.flush()  # Get the meeting ID
+            
+            # Add participants from template list if provided
+            if obj_in.participant_list_id:
+                await self._add_participants_from_template(db, meeting, obj_in.participant_list_id, created_by_id)
+            
+            # Add custom participants if provided
+            if obj_in.custom_participants:
+                await self._add_custom_participants(db, meeting, obj_in.custom_participants, created_by_id)
+            
+            await db.commit()
+            await db.refresh(meeting)
+            return meeting
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create meeting with participants: {str(e)}")
+    
+    async def _add_participants_from_template(
+        self,
+        db: AsyncSession,
+        meeting: Meeting,
+        template_id: UUID,
+        created_by_id: UUID
+    ) -> None:
+        """Add participants from a template list to the meeting"""
+        # Get the template list with its participants
+        template = await participant_list.get(db, template_id)
+        if template and template.participants:
+            for participant in template.participants:
+                meeting_participant = MeetingParticipant(
+                    meeting_id=meeting.id,
+                    name=participant.name,
+                    email=participant.email,
+                    telephone=participant.telephone,
+                    title=participant.title,
+                    organization=participant.organization,
+                    is_chairperson=(participant.name == meeting.chairperson_name),
+                    created_by_id=created_by_id,
+                    created_at=datetime.now(),
+                    is_active=True
+                )
+                db.add(meeting_participant)
+    
+    async def _add_custom_participants(
+        self,
+        db: AsyncSession,
+        meeting: Meeting,
+        custom_participants: List,
+        created_by_id: UUID
+    ) -> None:
+        """Add custom participants to the meeting"""
+        for custom_participant in custom_participants:
+            # Handle both dict and Pydantic model
+            if hasattr(custom_participant, 'model_dump'):
+                participant_data = custom_participant.model_dump()
+            else:
+                participant_data = custom_participant
+            
+            meeting_participant = MeetingParticipant(
+                meeting_id=meeting.id,
+                name=participant_data.get('name'),
+                email=participant_data.get('email'),
+                telephone=participant_data.get('telephone'),
+                title=participant_data.get('title'),
+                organization=participant_data.get('organization'),
+                is_chairperson=(participant_data.get('name') == meeting.chairperson_name),
+                created_by_id=created_by_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            db.add(meeting_participant)
     
     async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
         """Get a meeting by ID"""
@@ -1415,8 +1523,186 @@ class CRUDMeeting(CRUDBase[Meeting, MeetingCreate, MeetingUpdate], AuditMixin):
         except Exception as e:
             await db.rollback()
             raise ValueError(f"Failed to delete meeting: {str(e)}")
+        
 
-
+    async def get_meeting_with_details(
+            self,
+            db: AsyncSession,
+            meeting_id: UUID
+        ) -> Optional[Meeting]:
+            """Get a meeting with all related data loaded (participants, minutes, actions, documents, status history)"""
+            try:
+                result = await db.execute(
+                    select(Meeting)
+                    .options(
+                        selectinload(Meeting.participants),
+                        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions),
+                        selectinload(Meeting.documents),
+                        selectinload(Meeting.status_history).selectinload(MeetingStatusHistory.status)
+                    )
+                    .where(Meeting.id == meeting_id, Meeting.is_active == True)
+                )
+                return result.scalar_one_or_none()
+            except Exception as e:
+                raise ValueError(f"Failed to get meeting with details: {str(e)}")
+            
+    # ADD THIS METHOD
+    async def add_minutes(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        minutes_in: MeetingMinutesCreate,
+        recorded_by_id: UUID
+    ) -> MeetingMinutes:
+        """
+        Add minutes to a meeting.
+        
+        Args:
+            db: Database session
+            meeting_id: ID of the meeting
+            minutes_in: Minutes creation data
+            recorded_by_id: ID of the user recording the minutes
+            
+        Returns:
+            Created meeting minutes
+        """
+        try:
+            # Check if meeting exists
+            meeting_obj = await self.get(db, meeting_id)
+            if not meeting_obj:
+                raise ValueError(f"Meeting with id {meeting_id} not found")
+            
+            # Create minutes with audit fields
+            minutes = MeetingMinutes(
+                meeting_id=meeting_id,
+                **minutes_in.model_dump(),
+                recorded_by_id=recorded_by_id,
+                created_by_id=recorded_by_id,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                is_active=True
+            )
+            db.add(minutes)
+            await db.commit()
+            await db.refresh(minutes)
+            return minutes
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add meeting minutes: {str(e)}")
+    
+    async def get_minutes(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[MeetingMinutes]:
+        """
+        Get all minutes for a meeting.
+        
+        Args:
+            db: Database session
+            meeting_id: ID of the meeting
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of meeting minutes
+        """
+        try:
+            result = await db.execute(
+                select(MeetingMinutes)
+                .options(selectinload(MeetingMinutes.actions))
+                .where(
+                    MeetingMinutes.meeting_id == meeting_id,
+                    MeetingMinutes.is_active == True
+                )
+                .offset(skip)
+                .limit(limit)
+                .order_by(MeetingMinutes.timestamp.desc())
+            )
+            return result.scalars().all()
+        except Exception as e:
+            raise ValueError(f"Failed to get meeting minutes: {str(e)}")
+    
+    async def update_minutes(
+        self,
+        db: AsyncSession,
+        minutes_id: UUID,
+        minutes_in: MeetingMinutesUpdate,
+        updated_by_id: UUID
+    ) -> Optional[MeetingMinutes]:
+        """
+        Update meeting minutes.
+        
+        Args:
+            db: Database session
+            minutes_id: ID of the minutes to update
+            minutes_in: Minutes update data
+            updated_by_id: ID of the user updating the minutes
+            
+        Returns:
+            Updated meeting minutes
+        """
+        try:
+            result = await db.execute(
+                select(MeetingMinutes).where(MeetingMinutes.id == minutes_id)
+            )
+            minutes = result.scalar_one_or_none()
+            
+            if not minutes:
+                return None
+            
+            update_data = minutes_in.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                if value is not None:
+                    setattr(minutes, field, value)
+            
+            await self._update_audit_fields(minutes, updated_by_id)
+            await db.commit()
+            await db.refresh(minutes)
+            return minutes
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update meeting minutes: {str(e)}")
+    
+    async def delete_minutes(
+        self,
+        db: AsyncSession,
+        minutes_id: UUID,
+        deleted_by_id: UUID
+    ) -> bool:
+        """
+        Soft delete meeting minutes.
+        
+        Args:
+            db: Database session
+            minutes_id: ID of the minutes to delete
+            deleted_by_id: ID of the user deleting the minutes
+            
+        Returns:
+            True if deleted, False otherwise
+        """
+        try:
+            result = await db.execute(
+                select(MeetingMinutes).where(MeetingMinutes.id == minutes_id)
+            )
+            minutes = result.scalar_one_or_none()
+            
+            if not minutes:
+                return False
+            
+            minutes.is_active = False
+            await self._update_audit_fields(minutes, deleted_by_id)
+            await db.commit()
+            return True
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete meeting minutes: {str(e)}")
+            
 # ============================================================================
 # MEETING MINUTES CRUD - COMPLETE
 # ============================================================================
@@ -1501,6 +1787,31 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
             raise ValueError(f"Failed to delete minutes: {str(e)}")
 
 
+    async def get_minutes_with_actions(
+            self,
+            db: AsyncSession,
+            minutes_id: UUID
+        ) -> Optional[MeetingMinutes]:
+            """
+            Get minutes with their actions loaded.
+            
+            Args:
+                db: Database session
+                minutes_id: ID of the minutes to retrieve
+                
+            Returns:
+                Meeting minutes with actions eagerly loaded
+            """
+            try:
+                result = await db.execute(
+                    select(MeetingMinutes)
+                    .options(selectinload(MeetingMinutes.actions))
+                    .where(MeetingMinutes.id == minutes_id, MeetingMinutes.is_active == True)
+                )
+                return result.scalar_one_or_none()
+            except Exception as e:
+                raise ValueError(f"Failed to get minutes with actions: {str(e)}")
+        
 # ============================================================================
 # MEETING PARTICIPANT CRUD - COMPLETE
 # ============================================================================

@@ -9,7 +9,8 @@ from datetime import datetime
 from app.api import deps
 from app.models.user import User
 from app.models.role import Role
-from app.models.menu import Menu, RoleMenuPermission
+from app.models.menu import Menu
+from app.models.role import RoleMenuPermission
 from app.crud.menu import menu, role_menu_permission
 from app.schemas.menu import (
     MenuCreate, MenuUpdate, MenuResponse, MenuTreeResponse,

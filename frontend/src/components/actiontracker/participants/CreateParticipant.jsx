@@ -248,7 +248,7 @@ const CreateParticipant = () => {
                 onBlur={handleBlur('telephone')}
                 error={!!getFieldError('telephone')}
                 helperText={getFieldError('telephone') || "Optional - for SMS updates"}
-                placeholder="+254712345678"
+                placeholder="+256712345678"
                 size={isMobile ? "medium" : "small"}
                 InputProps={{
                   startAdornment: (

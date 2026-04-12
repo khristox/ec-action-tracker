@@ -155,7 +155,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
       }}>
         {!isCollapsed && (
           <Stack direction="row" spacing={1.5} alignItems="center">
-            <Avatar src="/logo.png" sx={{ width: 32, height: 32 }} />
+            <Avatar src="./logo.png" sx={{ width: 32, height: 32 }} />
             <Typography variant="subtitle1" fontWeight={700} noWrap>
               EC Uganda
             </Typography>

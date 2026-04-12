@@ -1,193 +1,315 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/components/actiontracker/actions/MyTasks.jsx
+import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  Container, Typography, Paper, Box, Grid, Card, CardContent,
-  Button, Chip, IconButton, TextField, InputAdornment,
-  Stack, LinearProgress, Avatar, Divider, Tooltip, Pagination,
-  Skeleton, Alert, Grow, useTheme, useMediaQuery
+  Container, Paper, Typography, Box, Stack, Chip, Button,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Avatar, IconButton, Tooltip, Alert, CircularProgress, Pagination,
+  TextField, InputAdornment, MenuItem, Select, FormControl, InputLabel,
+  Card, CardContent, Grid, LinearProgress
 } from '@mui/material';
 import {
-  Search as SearchIcon, Refresh as RefreshIcon, Assignment as AssignmentIcon,
-  Schedule as ScheduleIcon, Person as PersonIcon, CheckCircle as CheckCircleIcon,
-  Warning as WarningIcon, PlayCircle as PlayCircleIcon, Pending as PendingIcon,
-  Visibility as VisibilityIcon, Edit as EditIcon, AccessTime as AccessTimeIcon,
-  Close as CloseIcon, FilterList as FilterIcon
+  Visibility, Schedule, Person, PriorityHigh,
+  CheckCircle, Cancel, Warning, Search, Refresh,
+  AccessTime, Event, Assignment
 } from '@mui/icons-material';
-import { 
-  fetchMyTasks, updateActionProgress, setFilters 
-} from '../../../store/slices/actionTracker/actionSlice';
+import { fetchMyTasks } from '../../../store/slices/actionTracker/actionSlice';
 
-const ActionsList = () => {
+const PRIORITY = {
+  1: { label: 'High', color: 'error' },
+  2: { label: 'Medium', color: 'warning' },
+  3: { label: 'Low', color: 'success' },
+  4: { label: 'Very Low', color: 'default' }
+};
+
+// Helper to validate UUID format
+const isValidUUID = (id) => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
+};
+
+const MyTasks = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  
-  const { myTasks, loading, updatingProgress, filters, error } = useSelector((state) => state.actions);
+  const { myTasks, loading, error } = useSelector((state) => state.actions);
+  const [page, setPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const limit = 10;
 
-  const fetchData = useCallback(() => {
-    dispatch(fetchMyTasks({ ...filters, page: myTasks.page }));
-  }, [dispatch, myTasks.page, filters]);
+  useEffect(() => {
+    fetchTasks();
+  }, [page, searchTerm, statusFilter, priorityFilter]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleStatusFilter = (status) => {
-    dispatch(setFilters({ status, page: 1 }));
+  const fetchTasks = () => {
+    dispatch(fetchMyTasks({
+      page,
+      limit,
+      search: searchTerm,
+      status: statusFilter,
+      priority: priorityFilter
+    }));
   };
 
-  const getStatusStyle = (action) => {
-    if (action.completed_at) return { color: '#4caf50', icon: <CheckCircleIcon fontSize="small"/>, label: 'Completed' };
-    if (action.is_overdue) return { color: '#f44336', icon: <WarningIcon fontSize="small"/>, label: 'Overdue' };
-    if (action.overall_progress_percentage > 0) return { color: '#2196f3', icon: <PlayCircleIcon fontSize="small"/>, label: 'In Progress' };
-    return { color: '#ff9800', icon: <PendingIcon fontSize="small"/>, label: 'Pending' };
+  const handleViewTask = (taskId) => {
+    // Validate UUID before navigating
+    if (!isValidUUID(taskId)) {
+      console.error('Invalid task ID:', taskId);
+      return;
+    }
+    navigate(`/actions/${taskId}`);
   };
 
-  // --- Sub-Component: Stat Card Filter ---
-  const FilterStat = ({ title, count, status, icon, color }) => {
-    const isActive = filters.status === status;
+  const tasks = myTasks.items || [];
+  const overdueCount = tasks.filter(t => t.is_overdue === true).length;
+  const completedCount = tasks.filter(t => t.completed_at !== null).length;
+  const inProgressCount = tasks.filter(t => t.overall_progress_percentage > 0 && t.overall_progress_percentage < 100 && !t.completed_at).length;
+  const notStartedCount = tasks.filter(t => t.overall_progress_percentage === 0 && !t.completed_at).length;
+
+  if (loading && tasks.length === 0) {
     return (
-      <Paper
-        elevation={isActive ? 4 : 0}
-        onClick={() => handleStatusFilter(status)}
-        sx={{
-          p: 2, borderRadius: 3, cursor: 'pointer', textAlign: 'center',
-          border: '2px solid',
-          borderColor: isActive ? color : 'transparent',
-          bgcolor: isActive ? `${color}08` : 'background.paper',
-          transition: 'all 0.2s ease',
-          '&:hover': { transform: 'translateY(-3px)', bgcolor: `${color}12` }
-        }}
-      >
-        <Avatar sx={{ bgcolor: `${color}15`, color: color, mx: 'auto', mb: 1, width: 40, height: 40 }}>
-          {icon}
-        </Avatar>
-        <Typography variant="h5" fontWeight={800}>{count}</Typography>
-        <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ textTransform: 'uppercase' }}>
-          {title}
-        </Typography>
-      </Paper>
+      <Container sx={{ py: 4 }}>
+        <Stack spacing={2}>
+          <CircularProgress />
+        </Stack>
+      </Container>
     );
-  };
-
-  // --- Sub-Component: Action Card ---
-  const ActionCard = ({ action, index }) => {
-    const status = getStatusStyle(action);
-    
-    return (
-      <Grow in timeout={index * 100}>
-        <Card sx={{ 
-          mb: 2, borderRadius: 4, display: 'flex', 
-          borderLeft: `6px solid ${status.color}`,
-          boxShadow: '0 2px 12px rgba(0,0,0,0.05)'
-        }}>
-          <CardContent sx={{ flex: 1, p: 3 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-              <Typography variant="overline" fontWeight={700} sx={{ color: status.color }}>
-                {status.label}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                ID: {action.id.slice(0, 8)}
-              </Typography>
-            </Box>
-
-            <Typography 
-              variant="h6" fontWeight={700} gutterBottom 
-              sx={{ cursor: 'pointer', '&:hover': { color: 'primary.main' } }}
-              onClick={() => navigate(`/actions/${action.id}`)}
-            >
-              {action.description}
-            </Typography>
-
-            <Stack direction="row" spacing={1} mb={2} flexWrap="wrap" useFlexGap>
-              <Chip size="small" icon={<ScheduleIcon />} label={new Date(action.due_date).toLocaleDateString()} variant="outlined" />
-              <Chip size="small" icon={<PersonIcon />} label={action.assigned_by_name || 'Admin'} variant="outlined" />
-              {action.is_overdue && !action.completed_at && <Chip size="small" label="URGENT" color="error" sx={{ fontWeight: 900 }} />}
-            </Stack>
-
-            <Box sx={{ mt: 2 }}>
-              <Box display="flex" justifyContent="space-between" mb={0.5}>
-                <Typography variant="caption" fontWeight={700}>Progress</Typography>
-                <Typography variant="caption" fontWeight={700}>{action.overall_progress_percentage}%</Typography>
-              </Box>
-              <LinearProgress 
-                variant="determinate" 
-                value={action.overall_progress_percentage} 
-                sx={{ height: 6, borderRadius: 3, bgcolor: '#eee', '& .MuiLinearProgress-bar': { bgcolor: status.color } }}
-              />
-            </Box>
-          </CardContent>
-          
-          <Divider orientation="vertical" flexItem />
-          
-          <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', p: 1, gap: 1, bgcolor: '#fafafa' }}>
-            <Tooltip title="View Details"><IconButton onClick={() => navigate(`/actions/${action.id}`)}><VisibilityIcon color="primary"/></IconButton></Tooltip>
-            <Tooltip title="Edit Task"><IconButton onClick={() => navigate(`/actions/${action.id}/edit`)}><EditIcon /></IconButton></Tooltip>
-            {action.overall_progress_percentage < 100 && (
-               <Tooltip title="Quick Progress (+25%)">
-                 <IconButton color="success" onClick={() => dispatch(updateActionProgress({ id: action.id, progressData: { overall_progress_percentage: Math.min(action.overall_progress_percentage + 25, 100) }}))}>
-                    <PlayCircleIcon />
-                 </IconButton>
-               </Tooltip>
-            )}
-          </Box>
-        </Card>
-      </Grow>
-    );
-  };
+  }
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* Header Area */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
-        <Box>
-          <Typography variant="h4" fontWeight={900} color="primary.main">My Task Board</Typography>
-          <Typography variant="body2" color="text.secondary">Real-time action item tracking</Typography>
-        </Box>
-        <IconButton onClick={fetchData} sx={{ bgcolor: 'white', boxShadow: 1 }}><RefreshIcon /></IconButton>
+      {/* Header */}
+      <Box mb={3}>
+        <Typography variant="h4" fontWeight={700} gutterBottom>
+          My Tasks
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Manage and track your assigned action items
+        </Typography>
       </Box>
 
-      {/* Hero Stats - Replaces Tabs */}
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        <Grid item xs={6} sm={4} md={2.4}><FilterStat title="All" count={myTasks.total} status="all" icon={<AssignmentIcon />} color="#607d8b" /></Grid>
-        <Grid item xs={6} sm={4} md={2.4}><FilterStat title="Pending" count={myTasks.pendingCount || 0} status="pending" icon={<PendingIcon />} color="#ff9800" /></Grid>
-        <Grid item xs={6} sm={4} md={2.4}><FilterStat title="In Progress" count={myTasks.inProgressCount || 0} status="in_progress" icon={<PlayCircleIcon />} color="#2196f3" /></Grid>
-        <Grid item xs={6} sm={4} md={2.4}><FilterStat title="Overdue" count={myTasks.overdueCount || 0} status="overdue" icon={<WarningIcon />} color="#f44336" /></Grid>
-        <Grid item xs={6} sm={4} md={2.4}><FilterStat title="Done" count={myTasks.completedCount || 0} status="completed" icon={<CheckCircleIcon />} color="#4caf50" /></Grid>
+      {/* Stats Cards */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#2563EB">
+                {tasks.length}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">Total Tasks</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#FEF2F2', border: '1px solid #FEE2E2' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#DC2626">
+                {overdueCount}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">Overdue</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#FEFCE8', border: '1px solid #FEF08A' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#CA8A04">
+                {inProgressCount}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">In Progress</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#ECFDF5', border: '1px solid #D1FAE5' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#059669">
+                {completedCount}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">Completed</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
-      {/* Search Bar */}
-      <TextField
-        fullWidth
-        placeholder="Search tasks..."
-        variant="outlined"
-        value={filters.search}
-        onChange={(e) => dispatch(setFilters({ search: e.target.value, page: 1 }))}
-        sx={{ mb: 3, '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'white' } }}
-        InputProps={{
-          startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment>,
-          endAdornment: <InputAdornment position="end"><FilterIcon color="action" /></InputAdornment>
-        }}
-      />
+      {/* Search and Filter */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search tasks by description..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              label="Status"
+            >
+              <MenuItem value="all">All Status</MenuItem>
+              <MenuItem value="overdue">Overdue</MenuItem>
+              <MenuItem value="in_progress">In Progress</MenuItem>
+              <MenuItem value="completed">Completed</MenuItem>
+              <MenuItem value="not_started">Not Started</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Priority</InputLabel>
+            <Select
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+              label="Priority"
+            >
+              <MenuItem value="all">All Priorities</MenuItem>
+              <MenuItem value="1">High</MenuItem>
+              <MenuItem value="2">Medium</MenuItem>
+              <MenuItem value="3">Low</MenuItem>
+              <MenuItem value="4">Very Low</MenuItem>
+            </Select>
+          </FormControl>
+          <Button variant="outlined" startIcon={<Refresh />} onClick={fetchTasks}>
+            Refresh
+          </Button>
+        </Stack>
+      </Paper>
 
-      {/* List Area */}
-      {loading ? (
-        <Stack spacing={2}>{[1, 2, 3].map(i => <Skeleton key={i} variant="rounded" height={140} sx={{ borderRadius: 4 }} />)}</Stack>
-      ) : myTasks.items.length === 0 ? (
-        <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 5, bgcolor: '#f9f9f9', border: '2px dashed #ddd' }}>
-          <AssignmentIcon sx={{ fontSize: 60, color: '#ccc', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">No tasks found for this filter</Typography>
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Tasks Table */}
+      {tasks.length === 0 ? (
+        <Paper sx={{ p: 6, textAlign: 'center' }}>
+          <Assignment sx={{ fontSize: 64, color: '#CBD5E1', mb: 2 }} />
+          <Typography variant="h6" fontWeight={600} gutterBottom>
+            No Tasks Found
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {searchTerm ? 'Try adjusting your search or filters' : 'You have no assigned tasks at the moment'}
+          </Typography>
         </Paper>
       ) : (
-        <Box>
-          {myTasks.items.map((action, index) => <ActionCard key={action.id} action={action} index={index} />)}
-          <Box display="flex" justifyContent="center" mt={4}>
-            <Pagination count={myTasks.totalPages} page={myTasks.page} onChange={(e, v) => dispatch(fetchMyTasks({ ...filters, page: v }))} color="primary" />
-          </Box>
-        </Box>
+        <>
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#F8FAFC' }}>
+                  <TableCell sx={{ fontWeight: 700 }}>Task</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Meeting</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Priority</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {tasks.map((task) => {
+                  const priority = PRIORITY[task.priority] || PRIORITY[2];
+                  const isOverdue = task.is_overdue && !task.completed_at;
+                  
+                  return (
+                    <TableRow 
+                      key={task.id} 
+                      hover 
+                      sx={{ 
+                        bgcolor: isOverdue ? '#FEF2F2' : 'transparent',
+                        '&:hover': { bgcolor: isOverdue ? '#FEE2E2' : 'action.hover' }
+                      }}
+                    >
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={500}>
+                          {task.description}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {task.meeting_title || '—'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <AccessTime fontSize="small" color={isOverdue ? 'error' : 'action'} />
+                          <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
+                            {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No due date'}
+                          </Typography>
+                        </Stack>
+                        {isOverdue && (
+                          <Typography variant="caption" color="error">
+                            Overdue
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={priority.label}
+                          color={priority.color}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Box sx={{ flex: 1, bgcolor: '#E5E7EB', borderRadius: 2, height: 6 }}>
+                            <Box
+                              sx={{
+                                width: `${task.overall_progress_percentage}%`,
+                                bgcolor: isOverdue ? '#EF4444' : '#3B82F6',
+                                borderRadius: 2,
+                                height: 6
+                              }}
+                            />
+                          </Box>
+                          <Typography variant="caption" fontWeight={500}>
+                            {task.overall_progress_percentage}%
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title="View Details">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleViewTask(task.id)}
+                            color="primary"
+                          >
+                            <Visibility />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          
+          {myTasks.totalPages > 1 && (
+            <Stack alignItems="center" mt={3}>
+              <Pagination
+                count={myTasks.totalPages}
+                page={page}
+                onChange={(_, val) => setPage(val)}
+                color="primary"
+              />
+            </Stack>
+          )}
+        </>
       )}
     </Container>
   );
 };
 
-export default ActionsList;
+export default MyTasks;

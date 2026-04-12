@@ -14,7 +14,7 @@ import {
 import { login, clearError, selectAuth } from '../../store/slices/authSlice';
 
 // Path to your image in the public folder
-const ecLogo = "/logo.png";
+const ecLogo = "./logo.png";
 
 function SlideTransition(props) {
   return <Slide {...props} direction="up" />;

@@ -8,7 +8,7 @@ import api from '../../../services/api';
 export const fetchParticipants = createAsyncThunk(
   'participants/fetchParticipants',
   async (params = {}) => {
-    const response = await api.get('/action-tracker/participants', { params });
+    const response = await api.get('/action-tracker/participants/', { params });
     return response.data;
   }
 );
@@ -65,7 +65,7 @@ export const searchParticipants = createAsyncThunk(
 export const fetchParticipantLists = createAsyncThunk(
   'participants/fetchParticipantLists',
   async (params = {}) => {
-    const response = await api.get('/action-tracker/participant-lists', { params });
+    const response = await api.get('/action-tracker/participant-lists/', { params });
     return response.data;
   }
 );
@@ -81,7 +81,7 @@ export const fetchParticipantList = createAsyncThunk(
 export const createParticipantList = createAsyncThunk(
   'participants/createParticipantList',
   async (listData) => {
-    const response = await api.post('/action-tracker/participant-lists', listData);
+    const response = await api.post('/action-tracker/participant-lists/', listData);
     return response.data;
   }
 );

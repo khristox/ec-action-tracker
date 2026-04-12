@@ -2,28 +2,33 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-
-  base: './',
+  // Use absolute path for base (no leading dot)
+  base: '/',
   
   plugins: [react()],
   server: {
     port: 3000,
     proxy: {
+      // Proxy all API requests to backend
       '/api': {
         target: 'http://localhost:8001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/api/v1')
+        // Don't rewrite - keep the original path
+        // The backend expects /api/v1/...
+      },
+      // Also proxy action-tracker endpoints
+      '/action-tracker': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
       }
     }
   },
   build: {
     outDir: 'dist',
     sourcemap: true,
-    // For Rolldown, use different configuration
     rollupOptions: {
       output: {
-        // Rolldown uses a different API for manual chunks
-        manualChunks(id) {
+        manualChunks: (id) => {
           if (id.includes('node_modules')) {
             if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
               return 'react-vendor';

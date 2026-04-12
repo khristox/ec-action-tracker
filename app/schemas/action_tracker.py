@@ -170,6 +170,9 @@ class MeetingCreateResponse(ORMBase):
     is_active: bool = True
     message: str = "Meeting created successfully"
 
+    model_config = ConfigDict(from_attributes=True)
+
+
 
 class MeetingListResponse(ORMBase):
     id: UUID

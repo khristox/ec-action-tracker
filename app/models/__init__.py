@@ -18,6 +18,11 @@ from app.models.general.dynamic_attribute import (
 )
 from app.models.address.location import Location
 
+# Import Menu and RoleMenuPermission models (ADD THESE)
+from app.models.menu import Menu
+from app.models.role import  RoleMenuPermission
+
+
 # Then import action tracker models
 from app.models.action_tracker import (
     Participant,
@@ -46,6 +51,8 @@ __all__ = [
     'AttributeValue',
     'EntityAttribute',
     'Location',
+    'Menu',              # ADD THIS
+    'RoleMenuPermission', # ADD THIS
     "Participant",
     "ParticipantList",
     "Meeting",

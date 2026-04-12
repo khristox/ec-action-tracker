@@ -1,7 +1,6 @@
 #!/bin/bash
 # app/db/seed/scripts/seed_attributes.sh
 # Seed Attribute data for Action Tracker (Electoral Commission)
-# This creates attribute definitions and their values
 
 # ==================== CONFIGURATION ====================
 DEFAULT_BASE_URL="http://localhost:8001"
@@ -92,22 +91,64 @@ if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
 fi
 print_success "Authenticated"
 
+# ==================== GET ATTRIBUTE GROUP ID ====================
+print_info "Fetching Action Tracker attribute group..."
+
+# First, get or create the Action Tracker attribute group
+GROUP_RESPONSE=$(curl -s -X GET "${API_URL}/attribute-groups/by-code/ACTION_TRACKER" \
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+
+GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+
+if [ -z "$GROUP_ID" ]; then
+    print_info "Creating Action Tracker attribute group..."
+    GROUP_RESPONSE=$(curl -s -X POST "${API_URL}/attribute-groups/" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "code": "ACTION_TRACKER",
+            "name": "Action Tracker",
+            "description": "Action Tracker application attributes"
+        }')
+    GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+fi
+
+if [ -z "$GROUP_ID" ]; then
+    print_error "Failed to get or create attribute group"
+    exit 1
+fi
+
+print_success "Attribute Group ID: ${GROUP_ID:0:8}..."
+
 # ==================== FUNCTION TO CREATE ATTRIBUTE ====================
 create_attribute() {
     local code=$1
     local name=$2
     local description=$3
+    local data_type=$4
+    local options_json=$5
+    local extra_metadata_json=$6
     
     print_info "Creating attribute: ${name} (${code})..."
     
-    JSON_PAYLOAD=$(cat <<EOF
-{
-    "code": "${code}",
-    "name": "${name}",
-    "description": "${description}"
-}
-EOF
-)
+    # Build JSON payload using jq for proper escaping
+    JSON_PAYLOAD=$(jq -n \
+        --arg group_id "$GROUP_ID" \
+        --arg code "$code" \
+        --arg name "$name" \
+        --arg description "$description" \
+        --arg data_type "$data_type" \
+        --argjson options "$options_json" \
+        --argjson extra_metadata "$extra_metadata_json" \
+        '{
+            group_id: $group_id,
+            code: $code,
+            name: $name,
+            description: $description,
+            data_type: $data_type,
+            options: $options,
+            extra_metadata: $extra_metadata
+        }')
     
     RESPONSE=$(curl -s -X POST "${API_URL}/attributes/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -126,7 +167,6 @@ EOF
         # Check if attribute already exists
         if [[ "$ERROR" == *"already exists"* ]]; then
             print_warning "    ⏭️  Attribute already exists, fetching ID..."
-            # Get existing attribute ID
             GET_RESPONSE=$(curl -s -X GET "${API_URL}/attributes/by-code/${code}" \
                 -H "Authorization: Bearer $ADMIN_TOKEN")
             ATTRIBUTE_ID=$(echo "$GET_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
@@ -143,92 +183,40 @@ EOF
     fi
 }
 
-# ==================== FUNCTION TO CREATE ATTRIBUTE VALUE ====================
-create_attribute_value() {
-    local attribute_id=$1
-    local code=$2
-    local name=$3
-    local description=$4
-    local sort_order=$5
-    
-    JSON_PAYLOAD=$(cat <<EOF
-{
-    "attribute_id": "${attribute_id}",
-    "code": "${code}",
-    "name": "${name}",
-    "description": "${description}",
-    "sort_order": ${sort_order},
-    "is_active": true
-}
-EOF
-)
-    
-    RESPONSE=$(curl -s -X POST "${API_URL}/attribute-values/" \
-        -H "Authorization: Bearer $ADMIN_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "$JSON_PAYLOAD")
-    
-    VALUE_ID=$(echo "$RESPONSE" | jq -r '.id // empty' 2>/dev/null)
-    
-    if [ -n "$VALUE_ID" ] && [ "$VALUE_ID" != "null" ]; then
-        print_success "      ✅ Value created: ${name} (${code})"
-        return 0
-    else
-        ERROR=$(echo "$RESPONSE" | jq -r '.detail // .message // "Unknown error"' 2>/dev/null)
-        
-        # Check if value already exists
-        if [[ "$ERROR" == *"already exists"* ]]; then
-            print_warning "      ⏭️  Value already exists: ${name} (${code})"
-            return 0
-        fi
-        
-        print_error "      ❌ Failed to create value: ${ERROR}"
-        return 1
-    fi
-}
-
-# ==================== CREATE ATTRIBUTES AND VALUES ====================
+# ==================== CREATE ATTRIBUTES ====================
 print_separator
-print_header "Creating Attributes and Values"
+print_header "Creating Attributes"
 print_separator
 echo ""
 
 # Track success/failure
 TOTAL_ATTRIBUTES=0
 SUCCESS_ATTRIBUTES=0
-TOTAL_VALUES=0
-SUCCESS_VALUES=0
 
 # ==================== 1. MEETING STATUS ====================
 echo ""
 print_header "1. Meeting Status Attribute"
 echo ""
 
-ATTRIBUTE_ID=$(create_attribute "meeting_status" "Meeting Status" "Status of meetings from scheduling to completion")
+OPTIONS='[
+    {"value": "scheduled", "label": "Scheduled", "color": "#3B82F6", "icon": "event"},
+    {"value": "ongoing", "label": "Ongoing", "color": "#F59E0B", "icon": "play_circle"},
+    {"value": "completed", "label": "Completed", "color": "#10B981", "icon": "check_circle"},
+    {"value": "cancelled", "label": "Cancelled", "color": "#EF4444", "icon": "cancel"},
+    {"value": "postponed", "label": "Postponed", "color": "#8B5CF6", "icon": "pending"}
+]'
 
+EXTRA_METADATA='{
+    "display_as": "badge",
+    "filterable": true,
+    "sortable": true,
+    "category": "workflow"
+}'
+
+create_attribute "MEETING_STATUS" "Meeting Status" "Status of meetings from scheduling to completion" "select" "$OPTIONS" "$EXTRA_METADATA"
 if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
     ((TOTAL_ATTRIBUTES++))
     ((SUCCESS_ATTRIBUTES++))
-    
-    # Meeting Status Values
-    echo "  Creating values..."
-    create_attribute_value "$ATTRIBUTE_ID" "pending" "Pending" "Meeting scheduled but not started" 1
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "started" "Started" "Meeting in progress" 2
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "ended" "Ended" "Meeting ended" 3
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "awaiting_action" "Awaiting Action" "Meeting completed, awaiting action items" 4
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "closed" "Closed" "Meeting fully completed and closed" 5
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "cancelled" "Cancelled" "Meeting cancelled" 6
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
 fi
 
 # ==================== 2. ACTION STATUS (Overall) ====================
@@ -236,60 +224,67 @@ echo ""
 print_header "2. Action Status Attribute (Overall)"
 echo ""
 
-ATTRIBUTE_ID=$(create_attribute "action_status" "Action Status" "Overall status of action items")
+OPTIONS='[
+    {"value": "pending", "label": "Pending", "color": "#F59E0B", "icon": "pending"},
+    {"value": "in_progress", "label": "In Progress", "color": "#3B82F6", "icon": "play_circle"},
+    {"value": "completed", "label": "Completed", "color": "#10B981", "icon": "check_circle"},
+    {"value": "overdue", "label": "Overdue", "color": "#EF4444", "icon": "warning"},
+    {"value": "blocked", "label": "Blocked", "color": "#6B7280", "icon": "cancel"},
+    {"value": "cancelled", "label": "Cancelled", "color": "#EF4444", "icon": "cancel"}
+]'
 
+EXTRA_METADATA='{
+    "display_as": "badge",
+    "filterable": true,
+    "sortable": true,
+    "category": "workflow",
+    "progress_mapping": {
+        "pending": 0,
+        "in_progress": 50,
+        "completed": 100,
+        "overdue": 0,
+        "blocked": 0,
+        "cancelled": 0
+    }
+}'
+
+create_attribute "ACTION_STATUS" "Action Status" "Overall status of action items" "select" "$OPTIONS" "$EXTRA_METADATA"
 if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
     ((TOTAL_ATTRIBUTES++))
     ((SUCCESS_ATTRIBUTES++))
-    
-    # Action Status Values
-    echo "  Creating values..."
-    create_attribute_value "$ATTRIBUTE_ID" "pending" "Pending" "Action not yet started" 1
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "in_progress" "In Progress" "Action being worked on" 2
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "completed" "Completed" "Action completed" 3
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "overdue" "Overdue" "Action past due date" 4
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "blocked" "Blocked" "Action blocked by dependency" 5
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "cancelled" "Cancelled" "Action cancelled" 6
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
 fi
 
-# ==================== 3. INDIVIDUAL STATUS (User self-reporting) ====================
+# ==================== 3. INDIVIDUAL STATUS ====================
 echo ""
-print_header "3. Individual Status Attribute (User Self-Reporting)"
+print_header "3. Individual Status Attribute"
 echo ""
 
-ATTRIBUTE_ID=$(create_attribute "individual_status" "Individual Status" "User's self-reported status for assigned actions")
+OPTIONS='[
+    {"value": "not_started", "label": "Not Started", "color": "#9CA3AF", "icon": "pending"},
+    {"value": "in_progress", "label": "In Progress", "color": "#3B82F6", "icon": "play_circle"},
+    {"value": "blocked", "label": "Blocked", "color": "#EF4444", "icon": "warning"},
+    {"value": "review", "label": "Ready for Review", "color": "#8B5CF6", "icon": "pending_actions"},
+    {"value": "completed", "label": "Completed", "color": "#10B981", "icon": "check_circle"}
+]'
 
+EXTRA_METADATA='{
+    "display_as": "badge",
+    "filterable": true,
+    "category": "self_reporting",
+    "requires_comment": ["blocked"],
+    "progress_mapping": {
+        "not_started": 0,
+        "in_progress": 25,
+        "blocked": 0,
+        "review": 90,
+        "completed": 100
+    }
+}'
+
+create_attribute "INDIVIDUAL_STATUS" "Individual Status" "User's self-reported status for assigned actions" "select" "$OPTIONS" "$EXTRA_METADATA"
 if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
     ((TOTAL_ATTRIBUTES++))
     ((SUCCESS_ATTRIBUTES++))
-    
-    # Individual Status Values
-    echo "  Creating values..."
-    create_attribute_value "$ATTRIBUTE_ID" "not_started" "Not Started" "Haven't started yet" 1
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "in_progress" "In Progress" "Actively working on it" 2
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "blocked" "Blocked" "Stuck, need assistance" 3
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "review" "Ready for Review" "Completed, awaiting review" 4
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "completed" "Completed" "Fully completed" 5
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
 fi
 
 # ==================== 4. DOCUMENT TYPE ====================
@@ -297,31 +292,26 @@ echo ""
 print_header "4. Document Type Attribute"
 echo ""
 
-ATTRIBUTE_ID=$(create_attribute "document_type" "Document Type" "Types of documents attached to meetings")
+OPTIONS='[
+    {"value": "agenda", "label": "Agenda", "icon": "article"},
+    {"value": "presentation", "label": "Presentation", "icon": "slideshow"},
+    {"value": "report", "label": "Report", "icon": "assessment"},
+    {"value": "minutes", "label": "Minutes", "icon": "description"},
+    {"value": "attachment", "label": "Attachment", "icon": "attach_file"},
+    {"value": "reference", "label": "Reference", "icon": "menu_book"}
+]'
 
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "filterable": true,
+    "category": "document_management",
+    "allowed_extensions": ["pdf", "doc", "docx", "xlsx", "pptx", "jpg", "png"]
+}'
+
+create_attribute "DOCUMENT_TYPE" "Document Type" "Types of documents attached to meetings" "select" "$OPTIONS" "$EXTRA_METADATA"
 if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
     ((TOTAL_ATTRIBUTES++))
     ((SUCCESS_ATTRIBUTES++))
-    
-    # Document Type Values
-    echo "  Creating values..."
-    create_attribute_value "$ATTRIBUTE_ID" "agenda" "Agenda" "Meeting agenda document" 1
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "presentation" "Presentation" "Presentation slides" 2
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "report" "Report" "Meeting report" 3
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "minutes" "Minutes" "Meeting minutes" 4
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "attachment" "Attachment" "General attachment" 5
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "reference" "Reference" "Reference material" 6
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
 fi
 
 # ==================== 5. ACTION PRIORITY ====================
@@ -329,25 +319,25 @@ echo ""
 print_header "5. Action Priority Attribute"
 echo ""
 
-ATTRIBUTE_ID=$(create_attribute "action_priority" "Action Priority" "Priority levels for action items")
+OPTIONS='[
+    {"value": "low", "label": "Low", "color": "#10B981", "icon": "arrow_downward", "days_to_complete": 14},
+    {"value": "medium", "label": "Medium", "color": "#F59E0B", "icon": "remove", "days_to_complete": 7},
+    {"value": "high", "label": "High", "color": "#EF4444", "icon": "arrow_upward", "days_to_complete": 3},
+    {"value": "urgent", "label": "Urgent", "color": "#7C3AED", "icon": "priority_high", "days_to_complete": 1}
+]'
 
+EXTRA_METADATA='{
+    "display_as": "badge",
+    "filterable": true,
+    "sortable": true,
+    "category": "workflow",
+    "default": "medium"
+}'
+
+create_attribute "ACTION_PRIORITY" "Action Priority" "Priority levels for action items" "select" "$OPTIONS" "$EXTRA_METADATA"
 if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
     ((TOTAL_ATTRIBUTES++))
     ((SUCCESS_ATTRIBUTES++))
-    
-    # Priority Values
-    echo "  Creating values..."
-    create_attribute_value "$ATTRIBUTE_ID" "low" "Low" "Low priority - can be done when time permits" 1
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "medium" "Medium" "Medium priority - standard timeline" 2
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "high" "High" "High priority - needs attention soon" 3
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "urgent" "Urgent" "Urgent - immediate attention required" 4
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
 fi
 
 # ==================== 6. PARTICIPANT LIST VISIBILITY ====================
@@ -355,22 +345,74 @@ echo ""
 print_header "6. Participant List Visibility Attribute"
 echo ""
 
-ATTRIBUTE_ID=$(create_attribute "participant_list_visibility" "Participant List Visibility" "Visibility levels for participant lists")
+OPTIONS='[
+    {"value": "public", "label": "Public", "color": "#3B82F6", "icon": "public", "description": "Visible to all users"},
+    {"value": "private", "label": "Private", "color": "#6B7280", "icon": "lock", "description": "Visible only to creator"},
+    {"value": "team_only", "label": "Team Only", "color": "#8B5CF6", "icon": "group", "description": "Visible only to team members"}
+]'
 
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "filterable": true,
+    "category": "permissions",
+    "default": "private"
+}'
+
+create_attribute "PARTICIPANT_LIST_VISIBILITY" "Participant List Visibility" "Visibility levels for participant lists" "select" "$OPTIONS" "$EXTRA_METADATA"
 if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
     ((TOTAL_ATTRIBUTES++))
     ((SUCCESS_ATTRIBUTES++))
-    
-    # Visibility Values
-    echo "  Creating values..."
-    create_attribute_value "$ATTRIBUTE_ID" "public" "Public" "Visible to all users" 1
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "private" "Private" "Visible only to creator" 2
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
-    
-    create_attribute_value "$ATTRIBUTE_ID" "team_only" "Team Only" "Visible only to team members" 3
-    ((TOTAL_VALUES++)); ((SUCCESS_VALUES++))
+fi
+
+# ==================== 7. NOTIFICATION TYPE ====================
+echo ""
+print_header "7. Notification Type Attribute"
+echo ""
+
+OPTIONS='[
+    {"value": "email", "label": "Email", "icon": "email"},
+    {"value": "in_app", "label": "In-App", "icon": "notifications"},
+    {"value": "sms", "label": "SMS", "icon": "sms"},
+    {"value": "webhook", "label": "Webhook", "icon": "webhook"}
+]'
+
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "filterable": true,
+    "category": "notifications",
+    "default": "email"
+}'
+
+create_attribute "NOTIFICATION_TYPE" "Notification Type" "Types of notifications sent to users" "select" "$OPTIONS" "$EXTRA_METADATA"
+if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
+    ((TOTAL_ATTRIBUTES++))
+    ((SUCCESS_ATTRIBUTES++))
+fi
+
+# ==================== 8. RECURRENCE PATTERN ====================
+echo ""
+print_header "8. Recurrence Pattern Attribute"
+echo ""
+
+OPTIONS='[
+    {"value": "none", "label": "None", "icon": "close"},
+    {"value": "daily", "label": "Daily", "icon": "today"},
+    {"value": "weekly", "label": "Weekly", "icon": "calendar_view_week"},
+    {"value": "monthly", "label": "Monthly", "icon": "calendar_month"},
+    {"value": "quarterly", "label": "Quarterly", "icon": "calendar_today"},
+    {"value": "yearly", "label": "Yearly", "icon": "event"}
+]'
+
+EXTRA_METADATA='{
+    "display_as": "select",
+    "category": "scheduling",
+    "default": "none"
+}'
+
+create_attribute "RECURRENCE_PATTERN" "Recurrence Pattern" "Recurrence pattern for recurring meetings" "select" "$OPTIONS" "$EXTRA_METADATA"
+if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "" ]; then
+    ((TOTAL_ATTRIBUTES++))
+    ((SUCCESS_ATTRIBUTES++))
 fi
 
 # ==================== SUMMARY ====================
@@ -382,16 +424,17 @@ echo ""
 
 echo -e "${CYAN}📊 Summary:${NC}"
 echo "  • Attributes created: ${SUCCESS_ATTRIBUTES}/${TOTAL_ATTRIBUTES}"
-echo "  • Attribute values created: ${SUCCESS_VALUES}/${TOTAL_VALUES}"
 echo ""
 
 echo -e "${CYAN}📋 Attributes Created:${NC}"
-echo "  ✅ meeting_status - Meeting Status"
-echo "  ✅ action_status - Action Status (Overall)"
-echo "  ✅ individual_status - Individual Status (User Self-Reporting)"
-echo "  ✅ document_type - Document Type"
-echo "  ✅ action_priority - Action Priority"
-echo "  ✅ participant_list_visibility - Participant List Visibility"
+echo "  ✅ MEETING_STATUS - Meeting Status (select)"
+echo "  ✅ ACTION_STATUS - Action Status (select)"
+echo "  ✅ INDIVIDUAL_STATUS - Individual Status (select)"
+echo "  ✅ DOCUMENT_TYPE - Document Type (select)"
+echo "  ✅ ACTION_PRIORITY - Action Priority (select)"
+echo "  ✅ PARTICIPANT_LIST_VISIBILITY - Participant List Visibility (select)"
+echo "  ✅ NOTIFICATION_TYPE - Notification Type (select)"
+echo "  ✅ RECURRENCE_PATTERN - Recurrence Pattern (select)"
 echo ""
 
 echo -e "${CYAN}🔧 Next Steps:${NC}"

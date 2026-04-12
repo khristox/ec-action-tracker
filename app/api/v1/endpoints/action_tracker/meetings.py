@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
+from venv import logger
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select, or_, desc
@@ -14,7 +15,7 @@ from app.crud.action_tracker import meeting, meeting_action, meeting_minutes, me
 
 from app.models.general.dynamic_attribute import Attribute
 from app.models.user import User
-from app.models.action_tracker import Meeting, MeetingAction, MeetingDocument, MeetingParticipant, MeetingQuery, MeetingStatusHistory, MeetingMinutes
+from app.models.action_tracker import Meeting, MeetingAction, MeetingDocument, MeetingParticipant, MeetingQuery, MeetingStatus, MeetingStatusHistory, MeetingMinutes
 from app.schemas.action_tracker import (
     MeetingActionCreate, MeetingActionResponse, MeetingCreateResponse, MeetingMinutesCreate, MeetingMinutesResponse, MeetingPaginationResponse, MeetingCreate, MeetingParticipantResponse, MeetingParticipantUpdate, 
     MeetingStatusHistoryResponse, MeetingUpdate, MeetingResponse, MeetingListResponse
@@ -32,29 +33,74 @@ async def create_meeting(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Create a new meeting with audit fields"""
-    result = await meeting.create_with_participants(db, meeting_in, current_user.id)
+    try:
+        # Log the incoming data
+        print(f"Creating meeting for user: {current_user.id}")
+        print(f"Meeting data: {meeting_in.model_dump()}")
+        
+        # Ensure created_by_id is set
+        meeting_data = meeting_in.model_dump()
+        
+        result = await meeting.create_with_participants(db, meeting_in, current_user.id)
+        
+        print(f"Meeting created successfully: {result.id}")
+        
+        return MeetingCreateResponse(
+            id=result.id,
+            title=result.title,
+            description=result.description,
+            meeting_date=result.meeting_date,
+            start_time=result.start_time,
+            end_time=result.end_time,
+            location_text=result.location_text,
+            agenda=result.agenda,
+            facilitator=result.facilitator,
+            chairperson_name=result.chairperson_name,
+            status_id=result.status_id,
+            created_by_id=result.created_by_id,
+            created_by_name=current_user.username,
+            created_at=result.created_at,
+            updated_by_id=None,
+            updated_by_name=None,
+            updated_at=None,
+            is_active=result.is_active,
+            message="Meeting created successfully"
+        )
+        
+    except Exception as e:
+        # Log the full error
+        print(f"Error creating meeting: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create meeting: {str(e)}"
+        )
     
-    return MeetingCreateResponse(
-        id=result.id,
-        title=result.title,
-        description=result.description,
-        meeting_date=result.meeting_date,
-        start_time=result.start_time,
-        end_time=result.end_time,
-        location_text=result.location_text,
-        agenda=result.agenda,
-        facilitator=result.facilitator,
-        chairperson_name=result.chairperson_name,
-        status_id=result.status_id,
-        created_by_id=result.created_by_id,
-        created_by_name=current_user.username,  # Add user name
-        created_at=result.created_at,
-        updated_by_id=None,  # No update on create
-        updated_by_name=None,
-        updated_at=None,
-        is_active=result.is_active,
-        message="Meeting created successfully"
+# In your meetings.py or status_utils.py
+
+async def get_default_meeting_status(db: AsyncSession) -> Optional[MeetingStatus]:
+    """Get the default meeting status (usually 'scheduled')"""
+    from app.models.action_tracker import MeetingStatus
+    
+    result = await db.execute(
+        select(MeetingStatus).where(
+            MeetingStatus.code == 'scheduled',
+            MeetingStatus.is_active == True
+        )
     )
+    status = result.scalar_one_or_none()
+    
+    if not status:
+        # Fallback: get any active status
+        result = await db.execute(
+            select(MeetingStatus).where(MeetingStatus.is_active == True).limit(1)
+        )
+        status = result.scalar_one_or_none()
+    
+    return status
 
 # ==================== LIST MEETINGS ====================
 @router.get("/", response_model=MeetingPaginationResponse)

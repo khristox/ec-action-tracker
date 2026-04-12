@@ -3,7 +3,6 @@ Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
 
-import datetime
 from typing import Optional
 
 from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
@@ -178,6 +177,22 @@ class Meeting(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
 
+
+# app/models/action_tracker.py
+
+class MeetingStatus(Base):
+    """Meeting status lookup table"""
+    __tablename__ = "meeting_statuses"
+    
+    id = Column(CustomUUID, primary_key=True, default=uuid4)
+    code = Column(String(50), nullable=False, unique=True)  # 'scheduled', 'ongoing', 'completed', 'cancelled'
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    color = Column(String(20), nullable=True)  # For UI display
+    sort_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
 class MeetingParticipant(Base):
     """Depends on Meeting"""

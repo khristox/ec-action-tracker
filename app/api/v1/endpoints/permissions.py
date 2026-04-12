@@ -14,36 +14,27 @@ from app.schemas.permission import PermissionCreate, PermissionUpdate, Permissio
 router = APIRouter()
 
 
-@router.get("/", response_model=List[PermissionResponse])
+@router.get("/permissions")
 async def get_permissions(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=100),
-    resource: Optional[str] = Query(None),
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.require_admin),
-) -> List[PermissionResponse]:
-    """
-    Get all permissions (admin only).
-    """
+    skip: int = 0,
+    limit: int = 100,
+    resource: Optional[str] = None,
+    current_user: User = Depends(deps.get_current_user)
+):
+    # Build filters dictionary
+    filters = {}
+    if resource:
+        filters["resource"] = resource
+    
     permissions = await permission_crud.get_multi(
-        db, skip=skip, limit=limit, resource=resource
+        db, 
+        skip=skip, 
+        limit=limit, 
+        filters=filters  # ← Use filters parameter
     )
     
-    return [
-        PermissionResponse(
-            id=perm.id,
-            name=perm.name,
-            code=perm.code,
-            resource=perm.resource,
-            action=perm.action,
-            description=perm.description,
-            is_system=perm.is_system,
-            created_at=perm.created_at,
-            updated_at=perm.updated_at
-        )
-        for perm in permissions
-    ]
-
+    return permissions
 
 @router.get("/{permission_id}", response_model=PermissionResponse)
 async def get_permission(

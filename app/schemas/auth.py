@@ -40,3 +40,13 @@ class MessageResponse(BaseModel):
     """Schema for simple message response"""
     message: str
     success: bool = True
+
+class ResendVerificationRequest(BaseModel):
+    """Request model for resending verification email"""
+    email: EmailStr  # This validates email format
+
+
+class PasswordChange(BaseModel):
+    """Schema for changing password"""
+    current_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8)

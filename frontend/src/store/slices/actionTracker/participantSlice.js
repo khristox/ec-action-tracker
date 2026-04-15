@@ -199,6 +199,32 @@ export const importParticipants = createAsyncThunk(
   }
 );
 
+// ==================== MEETING PARTICIPANTS (Async Thunks) ====================
+
+export const fetchMeetingParticipants = createAsyncThunk(
+  'participants/fetchMeetingParticipants',
+  async (meetingId) => {
+    const response = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
+    return response.data;
+  }
+);
+
+export const addParticipantToMeeting = createAsyncThunk(
+  'participants/addParticipantToMeeting',
+  async ({ meetingId, participantData }) => {
+    const response = await api.post(`/action-tracker/meetings/${meetingId}/participants`, participantData);
+    return response.data;
+  }
+);
+
+export const removeMeetingParticipant = createAsyncThunk(
+  'participants/removeMeetingParticipant',
+  async ({ meetingId, participantId }) => {
+    await api.delete(`/action-tracker/meetings/${meetingId}/participants/${participantId}`);
+    return { meetingId, participantId };
+  }
+);
+
 // ==================== Slice ====================
 
 const participantSlice = createSlice({
@@ -219,6 +245,13 @@ const participantSlice = createSlice({
     // List Members
     listMembers: {},
     availableParticipants: {},
+    // Meeting Participants (for create meeting flow)
+    meetingParticipants: {
+      custom: [],      // Custom participants added during meeting creation
+      fromLists: [],   // Participants added from lists
+      all: []          // Combined list
+    },
+    selectedListForMeeting: null,
     // Statistics
     listStatistics: {},
     allListsStatistics: null,
@@ -259,6 +292,168 @@ const participantSlice = createSlice({
     },
     setParticipantsLimit: (state, action) => {
       state.participants.limit = action.payload;
+    },
+    
+    // ==================== MEETING PARTICIPANT REDUCERS ====================
+    addCustomParticipant: (state, action) => {
+      const newParticipant = {
+        id: `temp_${Date.now()}_${Math.random()}`,
+        ...action.payload,
+        is_custom: true,
+        added_at: new Date().toISOString()
+      };
+      state.meetingParticipants.custom.push(newParticipant);
+      state.meetingParticipants.all = [
+        ...state.meetingParticipants.fromLists,
+        ...state.meetingParticipants.custom
+      ];
+    },
+    
+    removeCustomParticipant: (state, action) => {
+      const index = action.payload;
+      state.meetingParticipants.custom = state.meetingParticipants.custom.filter((_, i) => i !== index);
+      state.meetingParticipants.all = [
+        ...state.meetingParticipants.fromLists,
+        ...state.meetingParticipants.custom
+      ];
+    },
+    
+    updateCustomParticipant: (state, action) => {
+      const { index, data } = action.payload;
+      if (state.meetingParticipants.custom[index]) {
+        state.meetingParticipants.custom[index] = {
+          ...state.meetingParticipants.custom[index],
+          ...data
+        };
+        state.meetingParticipants.all = [
+          ...state.meetingParticipants.fromLists,
+          ...state.meetingParticipants.custom
+        ];
+      }
+    },
+    
+    setMeetingChairperson: (state, action) => {
+      const participantId = action.payload;
+      
+      // Update in custom participants
+      state.meetingParticipants.custom = state.meetingParticipants.custom.map(p => ({
+        ...p,
+        is_chairperson: p.id === participantId
+      }));
+      
+      // Update in fromLists participants
+      state.meetingParticipants.fromLists = state.meetingParticipants.fromLists.map(p => ({
+        ...p,
+        is_chairperson: p.id === participantId
+      }));
+      
+      // Update combined list
+      state.meetingParticipants.all = state.meetingParticipants.all.map(p => ({
+        ...p,
+        is_chairperson: p.id === participantId
+      }));
+    },
+    
+    addParticipantsFromListToMeeting: (state, action) => {
+      const { listId, participants } = action.payload;
+      const selectedList = state.lists.find(l => l.id === listId);
+      
+      if (selectedList && participants) {
+        const newParticipants = participants.map(p => ({
+          id: p.id,
+          name: p.name,
+          email: p.email,
+          telephone: p.telephone,
+          title: p.title,
+          organization: p.organization,
+          is_chairperson: false,
+          from_list: true,
+          list_id: listId,
+          list_name: selectedList.name
+        }));
+        
+        state.meetingParticipants.fromLists = [
+          ...state.meetingParticipants.fromLists,
+          ...newParticipants
+        ];
+        state.meetingParticipants.all = [
+          ...state.meetingParticipants.fromLists,
+          ...state.meetingParticipants.custom
+        ];
+      }
+    },
+    
+    removeLocalMeetingParticipant: (state, action) => {
+      const participantId = action.payload;
+      
+      // Remove from fromLists
+      state.meetingParticipants.fromLists = state.meetingParticipants.fromLists.filter(
+        p => p.id !== participantId
+      );
+      
+      // Remove from custom
+      state.meetingParticipants.custom = state.meetingParticipants.custom.filter(
+        p => p.id !== participantId
+      );
+      
+      // Update combined list
+      state.meetingParticipants.all = [
+        ...state.meetingParticipants.fromLists,
+        ...state.meetingParticipants.custom
+      ];
+    },
+    
+    clearMeetingParticipants: (state) => {
+      state.meetingParticipants = {
+        custom: [],
+        fromLists: [],
+        all: []
+      };
+      state.selectedListForMeeting = null;
+    },
+    
+    setSelectedListForMeeting: (state, action) => {
+      state.selectedListForMeeting = action.payload;
+    },
+    
+    // Batch add multiple custom participants
+    addMultipleCustomParticipants: (state, action) => {
+      const newParticipants = action.payload.map((p, index) => ({
+        id: `temp_${Date.now()}_${index}_${Math.random()}`,
+        ...p,
+        is_custom: true,
+        added_at: new Date().toISOString()
+      }));
+      state.meetingParticipants.custom.push(...newParticipants);
+      state.meetingParticipants.all = [
+        ...state.meetingParticipants.fromLists,
+        ...state.meetingParticipants.custom
+      ];
+    },
+    
+    // Update participant attendance for meeting
+    updateParticipantAttendance: (state, action) => {
+      const { participantId, attendanceStatus } = action.payload;
+      const updateAttendance = (participant) => {
+        if (participant.id === participantId) {
+          return { ...participant, attendance_status: attendanceStatus };
+        }
+        return participant;
+      };
+      
+      state.meetingParticipants.fromLists = state.meetingParticipants.fromLists.map(updateAttendance);
+      state.meetingParticipants.custom = state.meetingParticipants.custom.map(updateAttendance);
+      state.meetingParticipants.all = state.meetingParticipants.all.map(updateAttendance);
+    },
+    
+    // Reset all meeting participant state (for new meeting)
+    resetMeetingParticipants: (state) => {
+      state.meetingParticipants = {
+        custom: [],
+        fromLists: [],
+        all: []
+      };
+      state.selectedListForMeeting = null;
     }
   },
   extraReducers: (builder) => {
@@ -473,9 +668,41 @@ const participantSlice = createSlice({
       .addCase(importParticipants.rejected, (state, action) => {
         state.importLoading = false;
         state.error = action.error.message;
+      })
+      
+      // ========== Meeting Participants ==========
+      .addCase(fetchMeetingParticipants.fulfilled, (state, action) => {
+        state.meetingParticipants.all = action.payload;
+        state.meetingParticipants.fromLists = action.payload.filter(p => !p.is_custom);
+        state.meetingParticipants.custom = action.payload.filter(p => p.is_custom);
+      })
+      
+      .addCase(removeMeetingParticipant.fulfilled, (state, action) => {
+        const { participantId } = action.payload;
+        state.meetingParticipants.fromLists = state.meetingParticipants.fromLists.filter(
+          p => p.id !== participantId
+        );
+        state.meetingParticipants.custom = state.meetingParticipants.custom.filter(
+          p => p.id !== participantId
+        );
+        state.meetingParticipants.all = [
+          ...state.meetingParticipants.fromLists,
+          ...state.meetingParticipants.custom
+        ];
       });
   },
 });
+
+// ==================== Selectors ====================
+export const selectAllParticipants = (state) => state.participants.participants.items;
+export const selectParticipantLists = (state) => state.participants.lists;
+export const selectMeetingParticipants = (state) => state.participants.meetingParticipants;
+export const selectMeetingParticipantsAll = (state) => state.participants.meetingParticipants.all;
+export const selectMeetingParticipantsCount = (state) => state.participants.meetingParticipants.all.length;
+export const selectMeetingChairperson = (state) => 
+  state.participants.meetingParticipants.all.find(p => p.is_chairperson);
+export const selectParticipantsLoading = (state) => state.participants.loading;
+export const selectParticipantsError = (state) => state.participants.error;
 
 // ==================== Exports ====================
 export const { 
@@ -486,7 +713,19 @@ export const {
   clearSearchResults,
   clearAllListsData,
   setPage,
-  setParticipantsLimit
+  setParticipantsLimit,
+  // Meeting participant actions
+  addCustomParticipant,
+  removeCustomParticipant,
+  updateCustomParticipant,
+  setMeetingChairperson,
+  addParticipantsFromListToMeeting,
+  removeLocalMeetingParticipant,
+  clearMeetingParticipants,
+  setSelectedListForMeeting,
+  addMultipleCustomParticipants,
+  updateParticipantAttendance,
+  resetMeetingParticipants
 } = participantSlice.actions;
 
 export default participantSlice.reducer;

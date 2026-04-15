@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -22,7 +22,6 @@ import {
   CircularProgress,
   Chip,
   Fade,
-  Grow,
   Tooltip,
   Zoom
 } from '@mui/material';
@@ -59,11 +58,9 @@ import {
   setFilters,
   resetFilters,
   selectAllMeetings,
-  selectMeetingLoading,
+  selectMeetingsLoading,
   selectMeetingError,
   selectStatusOptions,
-  selectMeetingsTotal,
-  selectMeetingsHasMore,
   selectMeetingsFilters,
   selectFilteredMeetings,
   selectUpcomingMeetings,
@@ -271,15 +268,12 @@ const Meetings = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
-  const observer = useRef();
   
   // Memoized selectors from Redux
   const meetings = useSelector(selectAllMeetings);
-  const loading = useSelector(selectMeetingLoading);
+  const loading = useSelector(selectMeetingsLoading);
   const error = useSelector(selectMeetingError);
   const statusOptions = useSelector(selectStatusOptions);
-  const total = useSelector(selectMeetingsTotal);
-  const hasMore = useSelector(selectMeetingsHasMore);
   const filters = useSelector(selectMeetingsFilters);
   const filteredMeetings = useSelector(selectFilteredMeetings);
   const upcomingMeetings = useSelector(selectUpcomingMeetings);
@@ -678,7 +672,7 @@ const Meetings = () => {
             width: '100%',
             alignItems: 'stretch'
           }}>
-            {paginatedMeetings.map((meeting, index) => (
+            {paginatedMeetings.map((meeting) => (
               <Box 
                 key={meeting.id} 
                 sx={{ 

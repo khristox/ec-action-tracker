@@ -1,30 +1,108 @@
 # app/api/v1/endpoints/admin.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone
+from typing import Any, List, Optional
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Any, List
+from sqlalchemy import select, or_, func
+from sqlalchemy.orm import selectinload
 
 from app.api import deps
+from app.core.security import get_password_hash
 from app.crud.user import user as user_crud
 from app.crud.role import role as role_crud
-from app.schemas.user import UserResponse, UserCreate
+from app.models.user import User
+from app.models.role import Role
+from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.role import RoleResponse
-from app.models.user import User as UserModel
+from app.schemas.auth import MessageResponse
 
 router = APIRouter()
 
 
-# Admin-only endpoints (must have admin role)
+@router.get("/users", response_model=dict)
+async def get_users(
+    db: AsyncSession = Depends(deps.get_db),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    role: Optional[str] = None,
+    current_user: User = Depends(deps.get_current_admin),
+) -> Any:
+    """Get list of users with pagination and filters (admin only)."""
+    from asyncio.log import logger
+    
+    # Build query with eager loading of roles
+    query = select(User).options(selectinload(User.roles))
+    
+    # Apply filters
+    if search:
+        query = query.where(
+            or_(
+                User.username.ilike(f"%{search}%"),
+                User.email.ilike(f"%{search}%"),
+                User.first_name.ilike(f"%{search}%"),
+                User.last_name.ilike(f"%{search}%"),
+            )
+        )
+    
+    if is_active is not None:
+        query = query.where(User.is_active == is_active)
+    
+    if role:
+        query = query.where(User.roles.any(Role.code == role))
+    
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total = await db.scalar(count_query)
+    
+    # Apply pagination
+    query = query.offset((page - 1) * limit).limit(limit)
+    result = await db.execute(query)
+    users = result.scalars().all()
+    
+    # Convert users to response format
+    user_list = []
+    for user in users:
+        user_list.append({
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name or "",
+            "last_name": user.last_name or "",
+            "middle_name": getattr(user, "middle_name", "") or "",
+            "phone": user.phone or "",
+            "roles": [r.code for r in user.roles] if user.roles else [],
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "last_login": user.last_login.isoformat() if user.last_login else None,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        })
+    
+    logger.info(f"Admin {current_user.username} fetched {len(user_list)} users")
+    
+    return {
+        "items": user_list,
+        "total": total or 0,
+        "page": page,
+        "limit": limit,
+    }
+
+
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_by_admin(
     *,
     db: AsyncSession = Depends(deps.get_db),
     user_in: UserCreate,
-    current_user: UserModel = Depends(deps.get_current_admin)
+    current_user: User = Depends(deps.get_current_admin)
 ) -> Any:
-    """
-    Create new user. Admin only.
-    """
+    """Create new user. Admin only."""
+    from asyncio.log import logger
+    
     # Check if user exists by email
     user_exists = await user_crud.get_by_email(db, email=user_in.email)
     if user_exists:
@@ -49,8 +127,8 @@ async def create_user_by_admin(
         username=user_in.username,
         full_name=f"{user_in.first_name or ''} {user_in.last_name or ''}".strip() or user_in.username,
         password=user_in.password,
-        roles=user_in.roles,
-        is_verified=user_in.is_verified
+        roles=user_in.roles or ["user"],
+        is_verified=user_in.is_verified or False
     )
     
     if not new_user:
@@ -59,14 +137,19 @@ async def create_user_by_admin(
             detail="Failed to create user"
         )
     
+    await db.commit()
+    await db.refresh(new_user)
+    
+    logger.info(f"Admin {current_user.username} created user: {new_user.username}")
+    
     return UserResponse(
         id=new_user.id,
         email=new_user.email,
         username=new_user.username,
-        first_name=new_user.first_name,
-        last_name=new_user.last_name,
-        middle_name=new_user.middle_name,
-        phone=new_user.phone,
+        first_name=new_user.first_name or "",
+        last_name=new_user.last_name or "",
+        middle_name=getattr(new_user, "middle_name", "") or "",
+        phone=new_user.phone or "",
         is_active=new_user.is_active,
         is_verified=new_user.is_verified,
         created_at=new_user.created_at,
@@ -74,19 +157,17 @@ async def create_user_by_admin(
     )
 
 
-# Management endpoints - can be accessed by admin OR manager role
-@router.put("/users/{user_id}/roles", response_model=UserResponse)
-async def update_user_roles(
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user_by_admin(
     *,
     db: AsyncSession = Depends(deps.get_db),
     user_id: str,
-    role_names: List[str],
-    current_user: UserModel = Depends(deps.get_current_admin)  # Use get_current_admin which checks for admin role
+    user_in: UserUpdate,
+    current_user: User = Depends(deps.get_current_admin)
 ) -> Any:
-    """
-    Update user roles. Admin only.
-    """
-    import uuid
+    """Update user. Admin only."""
+    from asyncio.log import logger
+    
     try:
         user_uuid = uuid.UUID(user_id)
     except ValueError:
@@ -95,7 +176,156 @@ async def update_user_roles(
             detail="Invalid user ID format"
         )
     
-    target_user = await user_crud.get_with_roles(db, user_uuid)
+    # Get user WITHOUT filtering by active status
+    # Use a direct query instead of user_crud.get if it filters inactive users
+    result = await db.execute(
+        select(User).where(User.id == user_uuid)
+    )
+    target_user = result.scalar_one_or_none()
+    
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User not found with ID: {user_id}"
+        )
+    
+    # Update user fields
+    update_data = user_in.dict(exclude_unset=True)
+    logger.info(f"Updating user {target_user.username} with data: {update_data}")
+    
+    for field, value in update_data.items():
+        if value is not None and hasattr(target_user, field):
+            setattr(target_user, field, value)
+    
+    target_user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(target_user)
+    
+    logger.info(f"Admin {current_user.username} updated user: {target_user.username} (active: {target_user.is_active})")
+    
+    return UserResponse(
+        id=target_user.id,
+        email=target_user.email,
+        username=target_user.username,
+        first_name=target_user.first_name or "",
+        last_name=target_user.last_name or "",
+        middle_name=getattr(target_user, "middle_name", "") or "",
+        phone=target_user.phone or "",
+        is_active=target_user.is_active,
+        is_verified=target_user.is_verified,
+        created_at=target_user.created_at,
+        updated_at=target_user.updated_at
+    )
+@router.delete("/users/{user_id}", response_model=MessageResponse)
+async def delete_user_by_admin(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    user_id: str,
+    current_user: User = Depends(deps.get_current_admin)
+) -> Any:
+    """Delete user. Admin only."""
+    from asyncio.log import logger
+    
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+    
+    # Prevent self-deletion
+    if user_uuid == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account"
+        )
+    
+    # Get user
+    target_user = await user_crud.get(db, id=user_uuid)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    await db.delete(target_user)
+    await db.commit()
+    
+    logger.info(f"Admin {current_user.username} deleted user: {target_user.username}")
+    
+    return MessageResponse(message="User deleted successfully")
+
+
+@router.post("/users/{user_id}/reset-password", response_model=MessageResponse)
+async def reset_user_password(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    user_id: str,
+    password_data: dict,
+    current_user: User = Depends(deps.get_current_admin)
+) -> Any:
+    """Reset user password (admin only)."""
+    from asyncio.log import logger
+    
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+    
+    # Get user
+    target_user = await user_crud.get(db, id=user_uuid)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    new_password = password_data.get("new_password")
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters"
+        )
+    
+    # Update password
+    target_user.hashed_password = get_password_hash(new_password)
+    target_user.password_changed_at = datetime.now(timezone.utc)
+    await db.commit()
+    
+    logger.info(f"Admin {current_user.username} reset password for user: {target_user.username}")
+    
+    return MessageResponse(message="Password reset successfully")
+
+
+@router.put("/users/{user_id}/roles", response_model=UserResponse)
+async def update_user_roles(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    user_id: str,
+    role_names: List[str],  # The body is a list directly
+    current_user: User = Depends(deps.get_current_admin)
+) -> Any:
+    """Update user roles. Admin only."""
+    from asyncio.log import logger
+    
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+    
+    # Get user with roles using eager loading
+    result = await db.execute(
+        select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
+    )
+    target_user = result.scalar_one_or_none()
+    
     if not target_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -103,62 +333,87 @@ async def update_user_roles(
         )
     
     # Clear existing roles
-    for role_obj in target_user.roles:
-        await user_crud.remove_role(db, user_uuid, role_obj.id)
+    target_user.roles.clear()
     
     # Add new roles
     for role_name in role_names:
-        role_obj = await role_crud.get_by_name(db, role_name)
+        # Get role by code/name
+        result = await db.execute(
+            select(Role).where(Role.code == role_name)
+        )
+        role_obj = result.scalar_one_or_none()
         if role_obj:
-            await user_crud.add_role(db, user_uuid, role_obj.id)
+            target_user.roles.append(role_obj)
     
-    # Refresh user
-    updated_user = await user_crud.get_with_roles(db, user_uuid)
+    target_user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(target_user)
+    
+    logger.info(f"Admin {current_user.username} updated roles for user: {target_user.username}")
     
     return UserResponse(
-        id=updated_user.id,
-        email=updated_user.email,
-        username=updated_user.username,
-        first_name=updated_user.first_name,
-        last_name=updated_user.last_name,
-        middle_name=updated_user.middle_name,
-        phone=updated_user.phone,
-        is_active=updated_user.is_active,
-        is_verified=updated_user.is_verified,
-        created_at=updated_user.created_at,
-        updated_at=updated_user.updated_at
+        id=target_user.id,
+        email=target_user.email,
+        username=target_user.username,
+        first_name=target_user.first_name or "",
+        last_name=target_user.last_name or "",
+        middle_name=getattr(target_user, "middle_name", "") or "",
+        phone=target_user.phone or "",
+        is_active=target_user.is_active,
+        is_verified=target_user.is_verified,
+        roles=[role.code for role in target_user.roles],
+        created_at=target_user.created_at,
+        updated_at=target_user.updated_at
     )
 
 
-# Reporting endpoints - can be accessed by admin, manager, OR analyst
 @router.get("/reports/user-statistics")
 async def get_user_statistics(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: UserModel = Depends(deps.get_current_admin)  # Admin only for now
+    current_user: User = Depends(deps.get_current_admin)
 ) -> Any:
-    """
-    Get user statistics. Admin only.
-    """
-    total_users = await user_crud.count_users(db, active_only=False)
-    active_users = await user_crud.count_users(db, active_only=True)
+    """Get user statistics. Admin only."""
+    from asyncio.log import logger
+    
+    # Count users
+    result = await db.execute(select(func.count()).select_from(User))
+    total_users = result.scalar() or 0
+    
+    result = await db.execute(select(func.count()).select_from(User).where(User.is_active == True))
+    active_users = result.scalar() or 0
+    
+    result = await db.execute(select(func.count()).select_from(User).where(User.is_verified == True))
+    verified_users = result.scalar() or 0
+    
+    # Count by roles
+    result = await db.execute(
+        select(func.count()).select_from(User).where(User.roles.any(Role.code == 'admin'))
+    )
+    admin_users = result.scalar() or 0
+    
+    logger.info(f"Admin {current_user.username} fetched user statistics")
     
     return {
         "total_users": total_users,
         "active_users": active_users,
-        "inactive_users": total_users - active_users
+        "inactive_users": total_users - active_users,
+        "verified_users": verified_users,
+        "unverified_users": total_users - verified_users,
+        "admin_users": admin_users
     }
 
 
-# Get all roles - admin only
 @router.get("/roles", response_model=List[RoleResponse])
 async def get_roles(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: UserModel = Depends(deps.get_current_admin)
+    current_user: User = Depends(deps.get_current_admin)
 ) -> Any:
-    """
-    Get all roles. Admin only.
-    """
+    """Get all roles. Admin only."""
+    from asyncio.log import logger
+    
     roles = await role_crud.get_multi(db)
+    
+    logger.info(f"Admin {current_user.username} fetched {len(roles)} roles")
     
     return [
         RoleResponse(

@@ -27,7 +27,7 @@ import {
   fetchMeetingById, 
   fetchMeetingStatusOptions, 
   selectCurrentMeeting, 
-  selectMeetingLoading, 
+  selectMeetingsLoading, 
   selectStatusOptions,
   selectUpdateSuccess,
   clearUpdateSuccess
@@ -103,7 +103,7 @@ const MeetingDetail = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const meeting = useSelector(selectCurrentMeeting);
-  const loading = useSelector(selectMeetingLoading);
+  const loading = useSelector(selectMeetingsLoading);
   const statusOptions = useSelector(selectStatusOptions);
   const updateSuccess = useSelector(selectUpdateSuccess);
 

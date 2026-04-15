@@ -1,0 +1,83 @@
+# .dockerignore
+
+# Exclude frontend source
+frontend/
+frontend_src/
+node_modules/
+
+# Exclude database migration files
+alembic/
+alembic.ini
+
+# Exclude scripts and tests
+scripts/
+tests/
+
+# Exclude uploads and their contents
+uploads/
+uploads/*
+
+# Exclude Docker files
+docker*
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Exclude Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Exclude virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exclude git
+.git/
+.gitignore
+
+# Exclude logs
+logs/
+*.log
+
+# Exclude backup files
+backup/
+*.bak
+
+# Exclude temporary files
+*.tmp
+*.temp
+
+# Exclude OS files
+.DS_Store
+Thumbs.db
+
+# Exclude environment files
+.env
+.env.*
+!.env.docker
+
+# Exclude build artifacts
+dist/
+build/
+*.egg-info/
+
+# Exclude documentation
+README.md
+*.md
+docs/
+
+# Exclude static source (if you have a separate static source)
+# Note: Keep the compiled static folder
+!static/
+static_src/

@@ -5,7 +5,7 @@ User Model - Core authentication with standard fields
 Extended attributes go to user_attributes table
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, Date, ForeignKey, Index, Integer, Table, JSON
+from sqlalchemy import Column, LargeBinary, String, Boolean, DateTime, Date, ForeignKey, Index, Integer, Table, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -81,10 +81,21 @@ class User(Base):
     lock_reason = Column(String(255), nullable=True)
     
     # Verification Tokens
-    verification_token = Column(String(255), nullable=True)
+    verification_token = Column(String(1000), nullable=True)
     verification_token_expires = Column(DateTime(timezone=True), nullable=True)
     reset_token = Column(String(255), nullable=True)
     reset_token_expires = Column(DateTime(timezone=True), nullable=True)
+
+
+    verification_sent_at = Column(DateTime, nullable=True)
+    verification_sent_count = Column(Integer, default=0)
+    reset_sent_at = Column(DateTime, nullable=True)
+    reset_sent_count = Column(Integer, default=0)
+
+
+    # Profile picture fields
+    profile_picture = Column(LargeBinary, nullable=True)  # Stores compressed image as BLOB
+    profile_picture_type = Column(String(50), nullable=True)  # Stores MIME type
     
     # ==================== AUDIT FIELDS ====================
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

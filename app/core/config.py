@@ -1,5 +1,7 @@
 # app/core/config.py
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, List, Union, Any
 from pydantic import AnyHttpUrl, Field, field_validator, ValidationInfo, SecretStr
@@ -9,6 +11,11 @@ import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def is_running_in_docker() -> bool:
+    """Detect if running inside Docker container"""
+    return os.path.exists('/.dockerenv') or os.getenv('IN_DOCKER', 'false').lower() == 'true'
 
 class Environment(str, Enum):
     DEVELOPMENT = "development"
@@ -26,6 +33,11 @@ class Settings(BaseSettings):
     ENVIRONMENT: Environment = Environment.DEVELOPMENT
     DEBUG: bool = False
 
+    API_BASE_URL: Optional[AnyHttpUrl] = Field(
+        default="http://localhost:8001",
+        description="Base URL for API endpoints (e.g., https://api.example.com). If not set, it will be auto-detected."
+    )
+        
     # Audit Log Settings
     LOG_API_ACCESS: bool = True
     LOG_ALL_API_ACCESS: bool = False
@@ -245,6 +257,19 @@ class Settings(BaseSettings):
             logger.info("🔐 Using main SECRET_KEY for refresh tokens")
         else:
             logger.info("🔐 Using dedicated refresh token secret key")
+
+    @property
+    def is_docker(self) -> bool:
+        return is_running_in_docker()
+    
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def validate_database_url(cls, v: str, info: ValidationInfo) -> str:
+        """Auto-adjust database URL for Docker"""
+        if is_running_in_docker() and 'localhost' in v:
+            v = v.replace('localhost', 'mysql')
+            logger.info("Auto-converted DATABASE_URL for Docker")
+        return v
 
 
 # Create settings instance

@@ -7,8 +7,9 @@ import {
   actionReducer,
   dashboardReducer,
 } from './slices/actionTracker';
-
-
+import adminReducer from './slices/adminSlice';
+import roleReducer from './slices/roleSlice';
+import profileReducer from './slices/profileSlice';
 
 export const store = configureStore({
   reducer: {
@@ -17,6 +18,9 @@ export const store = configureStore({
     meetings: meetingReducer,
     participants: participantReducer,
     actions: actionReducer,
+    admin: adminReducer,        // Only once
+    profile: profileReducer,
+    roles: roleReducer,
     dashboard: dashboardReducer,
   },
   middleware: (getDefaultMiddleware) =>

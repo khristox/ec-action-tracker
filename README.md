@@ -26,3 +26,21 @@ A comprehensive Action Tracker for managing properties, tenants, leases, and pay
 ```bash
 git clone https://github.com/yourusername/rms.git
 cd rms
+
+
+
+
+# Switch to Docker environment
+./switch-env.sh docker
+
+# Build and start containers
+docker-compose up -d --build
+
+# Check logs
+docker-compose logs -f app
+
+# Switch back to local development
+./switch-env.sh local
+
+# Run local development
+python app/main.py

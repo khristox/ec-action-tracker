@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Database Initialization and Seeding Script for Action Tracker
-Seeds users and roles, then runs all scripts in the scripts folder
+Optimized for Docker with enhanced error handling and container support
 """
 
 import asyncio
@@ -10,18 +10,21 @@ import sys
 import logging
 import traceback
 import subprocess
+import signal
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import urlparse
 import re
 import getpass
-from datetime import date, datetime, timedelta
+from contextlib import asynccontextmanager
+from functools import wraps
 
 import asyncpg
 import aiomysql
 import aiosqlite
 from sqlalchemy import text, select, func, inspect
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Add project root to path
@@ -39,29 +42,96 @@ from app.models.refresh_token import RefreshToken
 from app.models.general.dynamic_attribute import (
     AttributeGroup, Attribute, AttributeValue, EntityAttribute
 )
-
 from app.core.security import get_password_hash
 
-# Configure logging
+# Configure logging for Docker
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)-8s | %(message)s',
+    format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
+# Suppress noisy loggers
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('aiomysql').setLevel(logging.WARNING)
+
+# ==================== DOCKER ENVIRONMENT DETECTION ====================
+
+def is_running_in_docker() -> bool:
+    """Detect if running inside Docker container"""
+    return os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+
+def get_environment() -> str:
+    """Get current environment (docker, development, production)"""
+    if is_running_in_docker():
+        return 'docker'
+    return os.getenv('APP_ENV', 'development')
+
+def get_retry_config() -> Dict[str, Any]:
+    """Get retry configuration based on environment"""
+    if get_environment() == 'docker':
+        return {
+            'max_retries': 30,
+            'retry_delay': 2,
+            'retry_backoff': 1.5
+        }
+    return {
+        'max_retries': 5,
+        'retry_delay': 1,
+        'retry_backoff': 1
+    }
 
 # ==================== CONFIGURATION ====================
 
 class SeedConfig:
     DEFAULT_BASE_URL = getattr(settings, 'BACKEND_URL', 'http://localhost:8001')
-    DEFAULT_USERNAME = getattr(settings, 'ADMIN_USERNAME', 'admin')
-    DEFAULT_PASSWORD = getattr(settings, 'ADMIN_PASSWORD', 'Admin123!')
-    PASSWORD_MAX_LENGTH = 72  # bcrypt limit
+    DEFAULT_USERNAME = os.getenv('ADMIN_USERNAME', getattr(settings, 'ADMIN_USERNAME', 'admin'))
+    DEFAULT_PASSWORD = os.getenv('ADMIN_PASSWORD', getattr(settings, 'ADMIN_PASSWORD', 'Admin123!'))
+    PASSWORD_MAX_LENGTH = 72
+    SKIP_SEED = os.getenv('SKIP_SEED', 'false').lower() == 'true'
+    SEED_ONLY_IF_EMPTY = os.getenv('SEED_ONLY_IF_EMPTY', 'true').lower() == 'true'
+    DROP_EXISTING = os.getenv('DROP_EXISTING_TABLES', 'false').lower() == 'true'
 
 
 def truncate_password(password: str) -> str:
     return password[:SeedConfig.PASSWORD_MAX_LENGTH]
+
+
+# ==================== RETRY DECORATOR ====================
+
+def retry_on_failure(max_retries: int = None, delay: int = None, backoff: float = None):
+    """Decorator to retry database operations on failure"""
+    config = get_retry_config()
+    max_retries = max_retries or config['max_retries']
+    delay = delay or config['retry_delay']
+    backoff = backoff or config['retry_backoff']
+    
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            current_delay = delay
+            
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (OperationalError, ConnectionError, ConnectionRefusedError) as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Retry {attempt + 1}/{max_retries} after {current_delay}s: {str(e)[:100]}")
+                        await asyncio.sleep(current_delay)
+                        current_delay *= backoff
+                    else:
+                        logger.error(f"Failed after {max_retries} attempts")
+                        raise
+                except Exception as e:
+                    logger.error(f"Non-retryable error: {e}")
+                    raise
+            
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 # ==================== CONFIGURATION PROMPTS ====================
@@ -69,12 +139,15 @@ def truncate_password(password: str) -> str:
 def get_config_from_user(base_url: Optional[str] = None,
                          username: Optional[str] = None,
                          password: Optional[str] = None) -> Tuple[str, str, str]:
-    is_interactive = sys.stdin.isatty()
+    """Get configuration with Docker-aware defaults"""
+    is_interactive = sys.stdin.isatty() and not is_running_in_docker()
+    
     if not base_url:
         default_url = SeedConfig.DEFAULT_BASE_URL
         if is_interactive:
             print("\n" + "=" * 60)
             print("  Action Tracker - SEED CONFIGURATION")
+            print(f"  Environment: {get_environment()}")
             print("=" * 60)
             base_url = input(f"Enter API base URL [{default_url}]: ").strip() or default_url
         else:
@@ -87,7 +160,7 @@ def get_config_from_user(base_url: Optional[str] = None,
             username = input(f"Enter admin username [{default_username}]: ").strip() or default_username
         else:
             username = default_username
-        logger.info(f"📁 Username: {username}")
+        logger.info(f"👤 Username: {username}")
     
     if not password:
         default_password = SeedConfig.DEFAULT_PASSWORD
@@ -96,7 +169,7 @@ def get_config_from_user(base_url: Optional[str] = None,
         else:
             password = default_password
         password = truncate_password(password)
-        logger.info(f"📁 Password: {'*' * len(password)}")
+        logger.info(f"🔒 Password: {'*' * len(password)}")
     
     return base_url, username, password
 
@@ -104,7 +177,7 @@ def get_config_from_user(base_url: Optional[str] = None,
 # ==================== FILE LOADERS ====================
 
 class ConfigLoader:
-    """Load configuration from text files"""
+    """Load configuration from text files with Docker support"""
     
     @staticmethod
     def load_permissions(file_path: Path) -> List[Dict[str, Any]]:
@@ -118,7 +191,6 @@ class ConfigLoader:
         with open(file_path, 'r') as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
-                # Skip empty lines and comments
                 if not line or line.startswith('#'):
                     continue
                 
@@ -155,7 +227,6 @@ class ConfigLoader:
         with open(file_path, 'r') as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
-                # Skip empty lines and comments
                 if not line or line.startswith('#'):
                     continue
                 
@@ -191,7 +262,6 @@ class ConfigLoader:
         with open(file_path, 'r') as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
-                # Skip empty lines and comments
                 if not line or line.startswith('#'):
                     continue
                 
@@ -233,7 +303,7 @@ class DatabaseType:
         db_url = (db_url or settings.DATABASE_URL).lower()
         if 'postgresql' in db_url or 'postgres' in db_url:
             return cls.POSTGRESQL
-        elif 'mysql' in db_url:
+        elif 'mysql' in db_url or 'mariadb' in db_url:
             return cls.MYSQL
         elif 'sqlite' in db_url:
             return cls.SQLITE
@@ -244,9 +314,12 @@ class DatabaseType:
 
 class DatabaseCreator:
     @staticmethod
+    @retry_on_failure(max_retries=10, delay=3)
     async def create_if_not_exists() -> None:
+        """Create database if it doesn't exist with retry logic"""
         db_type = DatabaseType.detect()
-        logger.info(f"🔍 Database type detected: {db_type}")
+        logger.info(f"🔍 Database type detected: {db_type} (Environment: {get_environment()})")
+        
         if db_type == DatabaseType.POSTGRESQL:
             await DatabaseCreator._create_postgresql(settings.DATABASE_URL)
         elif db_type == DatabaseType.MYSQL:
@@ -264,9 +337,11 @@ class DatabaseCreator:
         base_url = f"{parsed.scheme}://{parsed.netloc}/postgres"
         if parsed.query:
             base_url += f"?{parsed.query}"
+        
         logger.info(f"🐘 Checking PostgreSQL database '{db_name}'...")
+        
         try:
-            conn = await asyncpg.connect(base_url, timeout=5.0)
+            conn = await asyncpg.connect(base_url, timeout=10.0)
             exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", db_name)
             if not exists:
                 logger.info(f"Creating database '{db_name}'...")
@@ -288,12 +363,14 @@ class DatabaseCreator:
         port = parsed.port or 3306
         user = parsed.username or 'root'
         password = parsed.password or ''
+        
         logger.info(f"🐬 Checking MySQL database '{db_name}'...")
+        
         try:
             conn = await aiomysql.connect(
                 host=host, port=port, user=user, password=password,
                 db='information_schema', charset='utf8mb4',
-                autocommit=True, connect_timeout=5
+                autocommit=True, connect_timeout=10
             )
             async with conn.cursor() as cursor:
                 await cursor.execute(
@@ -333,7 +410,8 @@ class DatabaseCreator:
 
 class TableManager:
     @staticmethod
-    async def create_tables(drop_existing: bool = False) -> bool:
+    async def create_tables(drop_existing: bool = False, check_first: bool = True) -> bool:
+        """Create database tables"""
         logger.info("=" * 60)
         logger.info("🔨 CREATING DATABASE TABLES")
         logger.info("=" * 60)
@@ -356,17 +434,18 @@ class TableManager:
                     await asyncio.sleep(1)
                 
                 logger.info("🏗️ Creating new tables...")
-                await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
+                await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=check_first))
                 logger.info("✅ Table creation completed")
             
             await asyncio.sleep(1)
             created_tables = await TableManager._get_existing_tables()
             missing = [t for t in metadata_tables if t not in created_tables]
             if missing:
-                logger.error(f"❌ Missing tables after creation: {missing}")
-                return False
+                logger.warning(f"⚠️ Missing tables after creation: {missing}")
+                # Don't return False, as some tables might be created later
+            else:
+                logger.info("✅ All tables created successfully")
             
-            logger.info("✅ All tables created successfully")
             return True
         except SQLAlchemyError as e:
             logger.error(f"❌ SQLAlchemy error: {e}")
@@ -374,6 +453,30 @@ class TableManager:
         except Exception as e:
             logger.error(f"❌ Unexpected error: {e}")
             logger.error(traceback.format_exc())
+            return False
+    
+    @staticmethod
+    async def tables_exist() -> bool:
+        """Check if any tables exist in the database"""
+        try:
+            async with async_engine.connect() as conn:
+                db_type = DatabaseType.detect()
+                if db_type == DatabaseType.MYSQL:
+                    result = await conn.execute(text("SHOW TABLES"))
+                elif db_type == DatabaseType.POSTGRESQL:
+                    result = await conn.execute(text("""
+                        SELECT table_name FROM information_schema.tables 
+                        WHERE table_schema = 'public'
+                    """))
+                else:
+                    result = await conn.execute(text("""
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name NOT LIKE 'sqlite_%'
+                    """))
+                tables = result.fetchall()
+                return len(tables) > 0
+        except Exception as e:
+            logger.debug(f"Error checking tables: {e}")
             return False
     
     @staticmethod
@@ -431,7 +534,6 @@ class RoleSeeder:
         from app.models.role import Role, Permission
         from app.models.role import role_permissions
         
-        # Create permission lookup dict
         perm_lookup = {}
         for perm in permissions:
             result = await db.execute(select(Permission).where(Permission.code == perm["code"]))
@@ -452,7 +554,6 @@ class RoleSeeder:
                 db.add(role)
                 await db.flush()
                 
-                # Assign permissions
                 if role_data["permissions"] != ["*"]:
                     for perm_code in role_data["permissions"]:
                         if perm_code in perm_lookup:
@@ -494,7 +595,6 @@ class UserSeeder:
                 db.add(new_user)
                 await db.flush()
                 
-                # Assign roles
                 for role_name in user_data["roles"]:
                     role_result = await db.execute(select(Role).where(Role.code == role_name))
                     role_obj = role_result.scalar_one_or_none()
@@ -512,15 +612,14 @@ class UserSeeder:
         return created
 
 
-# ==================== SHELL SCRIPT RUNNER ====================
+# ==================== DOCKER-OPTIMIZED SCRIPT RUNNER ====================
 
 async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, password: str):
-    """Run all .sh scripts in the scripts directory"""
+    """Run all .sh scripts with Docker-optimized execution"""
     if not scripts_dir.exists():
         logger.warning(f"Scripts directory not found: {scripts_dir}")
         return
     
-    # Get all .sh files
     sh_scripts = sorted(scripts_dir.glob("*.sh"))
     
     if not sh_scripts:
@@ -536,14 +635,23 @@ async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, pas
         logger.info(f"{'='*60}")
         
         try:
-            # Make script executable
             os.chmod(script_path, 0o755)
             
-            # Run the script
+            # Set environment variables for scripts
+            env = os.environ.copy()
+            env.update({
+                'API_BASE_URL': base_url,
+                'ADMIN_USERNAME': username,
+                'ADMIN_PASSWORD': password,
+                'DOCKER_ENV': str(is_running_in_docker()),
+                'APP_ENV': get_environment()
+            })
+            
             process = await asyncio.create_subprocess_exec(
                 str(script_path), base_url, username, password,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
             )
             
             stdout, stderr = await process.communicate()
@@ -561,7 +669,6 @@ async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, pas
         except Exception as e:
             logger.error(f"❌ Error running {script_name}: {e}")
         
-        # Small delay between scripts
         await asyncio.sleep(1)
 
 
@@ -574,7 +681,6 @@ class SummaryReporter:
         role_count = await db.scalar(select(func.count()).select_from(Role))
         user_count = await db.scalar(select(func.count()).select_from(User))
         
-        # Get user count per role
         role_counts = await db.execute(
             select(Role.name, func.count(User.id))
             .join(Role.users)
@@ -584,6 +690,8 @@ class SummaryReporter:
         logger.info("\n" + "=" * 60)
         logger.info("📊 SEEDING SUMMARY")
         logger.info("=" * 60)
+        logger.info(f"  - Environment: {get_environment()}")
+        logger.info(f"  - Docker: {'Yes' if is_running_in_docker() else 'No'}")
         logger.info(f"  - Roles: {role_count}")
         logger.info(f"  - Users: {user_count}")
         
@@ -595,19 +703,39 @@ class SummaryReporter:
         logger.info("=" * 60)
 
 
+# ==================== HEALTH CHECK ====================
+
+async def health_check() -> bool:
+    """Perform health check on database"""
+    try:
+        async with async_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return False
+
+
 # ==================== MAIN INITIALIZATION ====================
 
-async def init_db(drop_existing: bool = False, base_url: str = None, username: str = None, password: str = None) -> None:
+async def init_db(drop_existing: bool = None, base_url: str = None, 
+                  username: str = None, password: str = None) -> None:
+    """Main database initialization with Docker optimizations"""
+    start_time = time.time()
+    
     logger.info("=" * 60)
     logger.info("🚀 Action Tracker - DATABASE INITIALIZATION")
+    logger.info(f"   Environment: {get_environment()}")
+    logger.info(f"   Docker: {'Yes' if is_running_in_docker() else 'No'}")
+    logger.info(f"   Skip Seed: {SeedConfig.SKIP_SEED}")
     logger.info("=" * 60)
     
-    # Get paths
+    drop_existing = drop_existing if drop_existing is not None else SeedConfig.DROP_EXISTING
+    
     current_project_root = Path(__file__).parent.parent.parent.parent
     seed_dir = Path(__file__).parent
     scripts_dir = seed_dir / "scripts"
     
-    # Configuration file paths
     permissions_file = seed_dir / "permissions.txt"
     roles_file = seed_dir / "roles.txt"
     users_file = seed_dir / "users.txt"
@@ -616,68 +744,95 @@ async def init_db(drop_existing: bool = False, base_url: str = None, username: s
         # Step 1: Create database if it doesn't exist
         await DatabaseCreator.create_if_not_exists()
         
-        # Step 2: Verify connection
-        async with async_engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
+        # Step 2: Verify connection with retry
+        logger.info("Verifying database connection...")
+        if not await health_check():
+            raise Exception("Database connection failed")
         logger.info("✅ Database connection verified")
         
-        # Step 3: Create tables
-        if not await TableManager.create_tables(drop_existing=drop_existing):
-            logger.error("❌ Failed to create tables")
-            return
+        # Step 3: Create tables FIRST (before checking for existing data)
+        logger.info("Creating database tables...")
+        tables_created = await TableManager.create_tables(drop_existing=drop_existing, check_first=True)
         
-        # Step 4: Load configuration from files
-        logger.info("\n📁 Loading configuration files...")
-        permissions = ConfigLoader.load_permissions(permissions_file)
-        roles = ConfigLoader.load_roles(roles_file)
-        users = ConfigLoader.load_users(users_file)
+        if not tables_created:
+            logger.warning("⚠️ Some tables may not have been created, continuing anyway...")
         
-        if not permissions:
-            logger.error("❌ No permissions loaded. Cannot proceed.")
-            return
-        if not roles:
-            logger.error("❌ No roles loaded. Cannot proceed.")
-            return
-        if not users:
-            logger.error("❌ No users loaded. Cannot proceed.")
-            return
+        # Step 4: Check if seeding is needed (now tables exist)
+        should_seed = not SeedConfig.SKIP_SEED
         
-        # Step 5: Seed permissions, roles, and users
-        async with AsyncSessionLocal() as db:
-            logger.info("\n📝 Seeding permissions...")
-            await PermissionSeeder.seed(db, permissions)
-            
-            logger.info("\n📝 Seeding roles...")
-            await RoleSeeder.seed(db, roles, permissions)
-            
-            logger.info("\n📝 Seeding users...")
-            await UserSeeder.seed(db, users)
-            
-            await db.commit()
-            
-            # Generate summary report
-            await SummaryReporter.report(db)
+        if should_seed and SeedConfig.SEED_ONLY_IF_EMPTY:
+            async with AsyncSessionLocal() as check_db:
+                # Check if users table exists and has data
+                try:
+                    user_count = await check_db.scalar(select(func.count()).select_from(User))
+                    if user_count > 0:
+                        logger.info(f"Database already has {user_count} users. Skipping seed.")
+                        should_seed = False
+                    else:
+                        logger.info("Database is empty, proceeding with seed...")
+                except Exception as e:
+                    logger.info(f"Users table may not exist yet: {e}")
+                    should_seed = True
         
-        # Step 6: Run all shell scripts in the scripts folder
+        # Step 5: Seed data if needed
+        if should_seed:
+            # Load configuration from files
+            logger.info("\n📁 Loading configuration files...")
+            permissions = ConfigLoader.load_permissions(permissions_file)
+            roles = ConfigLoader.load_roles(roles_file)
+            users = ConfigLoader.load_users(users_file)
+            
+            if not permissions:
+                logger.error("❌ No permissions loaded. Cannot proceed.")
+                return
+            if not roles:
+                logger.error("❌ No roles loaded. Cannot proceed.")
+                return
+            if not users:
+                logger.error("❌ No users loaded. Cannot proceed.")
+                return
+            
+            # Seed permissions, roles, and users
+            async with AsyncSessionLocal() as db:
+                logger.info("\n📝 Seeding permissions...")
+                await PermissionSeeder.seed(db, permissions)
+                
+                logger.info("\n📝 Seeding roles...")
+                await RoleSeeder.seed(db, roles, permissions)
+                
+                logger.info("\n📝 Seeding users...")
+                await UserSeeder.seed(db, users)
+                
+                await db.commit()
+                
+                await SummaryReporter.report(db)
+        else:
+            logger.info("Seeding skipped (database already has data or SKIP_SEED=true)")
+        
+        # Step 6: Run shell scripts (unless skipped)
+        if not SeedConfig.SKIP_SEED:
+            logger.info("\n" + "=" * 60)
+            logger.info("📜 RUNNING SHELL SCRIPTS")
+            logger.info("=" * 60)
+            
+            final_base_url = base_url or SeedConfig.DEFAULT_BASE_URL
+            final_username = username or SeedConfig.DEFAULT_USERNAME
+            final_password = password or SeedConfig.DEFAULT_PASSWORD
+            
+            await run_shell_scripts(scripts_dir, final_base_url, final_username, final_password)
+        else:
+            logger.info("Shell scripts skipped (SKIP_SEED=true)")
+        
+        elapsed_time = time.time() - start_time
         logger.info("\n" + "=" * 60)
-        logger.info("📜 RUNNING SHELL SCRIPTS")
+        logger.info(f"✨ DATABASE INITIALIZATION COMPLETED (took {elapsed_time:.2f}s)")
         logger.info("=" * 60)
         
-        # Use the base_url, username, password from config
-        final_base_url = base_url or SeedConfig.DEFAULT_BASE_URL
-        final_username = username or SeedConfig.DEFAULT_USERNAME
-        final_password = password or SeedConfig.DEFAULT_PASSWORD
-        
-        await run_shell_scripts(scripts_dir, final_base_url, final_username, final_password)
-        
-        logger.info("\n" + "=" * 60)
-        logger.info("✨ DATABASE INITIALIZATION COMPLETED")
-        logger.info("=" * 60)
-        logger.info("\n📝 Next Steps:")
-        logger.info("   1. Start the FastAPI server: uvicorn app.main:app --reload --host 0.0.0.0 --port 8001")
-        logger.info("   2. Visit API documentation: http://localhost:8001/docs")
-        logger.info("   3. Login with admin credentials to manage the system")
-        logger.info("=" * 60)
+        if get_environment() == 'docker':
+            logger.info("\n💡 Docker Tips:")
+            logger.info("   - To re-seed: docker-compose exec app python app/db/seed/seed_data.py --drop")
+            logger.info("   - To skip seeding: docker-compose run -e SKIP_SEED=true app")
+            logger.info("   - View logs: docker-compose logs -f app")
         
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
@@ -687,9 +842,22 @@ async def init_db(drop_existing: bool = False, base_url: str = None, username: s
         await async_engine.dispose()
 
 
-async def main(drop_existing: bool = False, base_url: str = None, username: str = None, password: str = None) -> None:
+async def main(drop_existing: bool = False, base_url: str = None, 
+               username: str = None, password: str = None) -> None:
+    """Main entry point with signal handling for Docker"""
+    
+    # Handle graceful shutdown in Docker
+    def signal_handler():
+        logger.info("Received shutdown signal, cleaning up...")
+        asyncio.create_task(async_engine.dispose())
+        sys.exit(0)
+    
+    signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
+    signal.signal(signal.SIGINT, lambda s, f: signal_handler())
+    
     base_url, username, password = get_config_from_user(base_url, username, password)
-    await init_db(drop_existing=drop_existing, base_url=base_url, username=username, password=password)
+    await init_db(drop_existing=drop_existing, base_url=base_url, 
+                  username=username, password=password)
 
 
 if __name__ == "__main__":
@@ -699,7 +867,15 @@ if __name__ == "__main__":
     parser.add_argument("--baseurl", type=str, help="API base URL for scripts")
     parser.add_argument("--username", type=str, help="Admin username for scripts")
     parser.add_argument("--password", type=str, help="Admin password for scripts")
+    parser.add_argument("--skip-seed", action="store_true", help="Skip database seeding")
+    parser.add_argument("--force", action="store_true", help="Force seeding even if data exists")
     args = parser.parse_args()
+    
+    if args.skip_seed:
+        os.environ['SKIP_SEED'] = 'true'
+    
+    if args.force:
+        os.environ['SEED_ONLY_IF_EMPTY'] = 'false'
     
     asyncio.run(main(
         drop_existing=args.drop,

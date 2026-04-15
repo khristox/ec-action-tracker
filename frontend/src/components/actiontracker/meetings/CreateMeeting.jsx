@@ -1,12 +1,13 @@
+// CreateMeeting.jsx - Complete Fixed Version
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import {
   Box,
   Typography,
   Button,
   Paper,
   TextField,
-  Grid,
   Stepper,
   Step,
   StepLabel,
@@ -40,11 +41,12 @@ import {
   Container,
   AppBar,
   Toolbar,
-  Slide,
-  Fab,
   Zoom,
-  BottomNavigation,
-  BottomNavigationAction,
+  InputAdornment,
+  Tooltip,
+  Switch,
+  FormGroup,
+  Fab,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -61,9 +63,12 @@ import {
   People as PeopleIcon,
   Description as DescriptionIcon,
   Save as SaveIcon,
-  Menu as MenuIcon,
-  Home as HomeIcon,
   Info as InfoIcon,
+  MyLocation as MyLocationIcon,
+  ContentCopy as ContentCopyIcon,
+  ContentPaste as PasteIcon,
+  GpsFixed as GpsFixedIcon,
+  GpsNotFixed as GpsNotFixedIcon,
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -71,15 +76,31 @@ import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { MobileDatePicker } from '@mui/x-date-pickers/MobileDatePicker';
 import { MobileTimePicker } from '@mui/x-date-pickers/MobileTimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import api from '../../../services/api';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+
+// Redux imports
+import {
+  fetchParticipantLists,
+  fetchParticipants,
+  addCustomParticipant,
+  removeLocalMeetingParticipant,
+  setMeetingChairperson,
+  addParticipantsFromListToMeeting,
+  clearMeetingParticipants,
+  setSelectedListForMeeting,
+  selectParticipantLists,
+  selectMeetingParticipantsAll,
+  selectMeetingChairperson,
+  selectParticipantsLoading,
+} from '../../../store/slices/actionTracker/participantSlice';
+import { createMeeting, clearMeetingState } from '../../../store/slices/actionTracker/meetingSlice';
 
 // Quill modules for mobile (simplified)
 const mobileModules = {
   toolbar: [
     ['bold', 'italic', 'underline'],
-    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
     ['clean'],
   ],
 };
@@ -88,37 +109,41 @@ const desktopModules = {
   toolbar: [
     [{ 'header': [1, 2, 3, false] }],
     ['bold', 'italic', 'underline', 'strike'],
-    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
     ['link', 'clean'],
   ],
 };
 
-const formats = [
-  'header', 'bold', 'italic', 'underline', 'strike',
-  'list', 'bullet', 'link',
-];
+// Fixed formats - removed 'bullet' to avoid warning
+const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'list', 'link'];
 
 // Step icons
 const steps = [
   { label: 'Details', icon: EventIcon },
   { label: 'Participants', icon: PeopleIcon },
-  { label: 'Review', icon: CheckCircleIcon }
+  { label: 'Review', icon: CheckCircleIcon },
 ];
 
 const CreateMeeting = () => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
-  
+
+  // Redux state
+  const participantLists = useSelector(selectParticipantLists);
+  const meetingParticipants = useSelector(selectMeetingParticipantsAll);
+  const chairperson = useSelector(selectMeetingChairperson);
+  const participantsLoading = useSelector(selectParticipantsLoading);
+  const { isLoading: meetingLoading, success, error: meetingError } = useSelector(
+    (state) => state.meetings
+  );
+
   const [activeStep, setActiveStep] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [apiLoading, setApiLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  
+  const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
+  const [selectedParticipantList, setSelectedParticipantList] = useState(null);
+
   // Form data
   const [formData, setFormData] = useState({
     title: '',
@@ -132,13 +157,13 @@ const CreateMeeting = () => {
     gps_latitude: '',
     gps_longitude: '',
   });
-  
-  // Participant related
-  const [participantLists, setParticipantLists] = useState([]);
-  const [selectedParticipantList, setSelectedParticipantList] = useState(null);
-  const [customParticipants, setCustomParticipants] = useState([]);
-  const [availableParticipants, setAvailableParticipants] = useState([]);
-  const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
+
+  // GPS State
+  const [gpsEnabled, setGpsEnabled] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsSupported, setGpsSupported] = useState(true);
+
+  // New participant form
   const [newParticipant, setNewParticipant] = useState({
     name: '',
     email: '',
@@ -148,27 +173,179 @@ const CreateMeeting = () => {
     is_chairperson: false,
   });
 
+  const apiLoading = meetingLoading || participantsLoading;
+
   // Fetch data on mount
   useEffect(() => {
-    fetchParticipantLists();
-    fetchAvailableParticipants();
-  }, []);
+    dispatch(fetchParticipantLists());
+    dispatch(fetchParticipants({ limit: 100 }));
 
-  const fetchParticipantLists = async () => {
+    if (!navigator.geolocation) {
+      setGpsSupported(false);
+      setSnackbar({
+        open: true,
+        message: 'Geolocation is not supported by your browser',
+        severity: 'warning',
+      });
+    }
+
+    return () => {
+      dispatch(clearMeetingState());
+      dispatch(clearMeetingParticipants());
+    };
+  }, [dispatch]);
+
+  // Handle meeting creation success
+  useEffect(() => {
+    if (success) {
+      setSnackbar({
+        open: true,
+        message: 'Meeting created successfully! Redirecting...',
+        severity: 'success',
+      });
+      setTimeout(() => {
+        navigate('/meetings');
+      }, 2000);
+    }
+  }, [success, navigate]);
+
+  // Handle errors
+  useEffect(() => {
+    if (meetingError) {
+      setSnackbar({
+        open: true,
+        message: typeof meetingError === 'string' ? meetingError : 'Failed to create meeting',
+        severity: 'error',
+      });
+    }
+  }, [meetingError]);
+
+  // GPS Functions
+  const getCurrentLocation = () => {
+    if (!gpsSupported) {
+      setSnackbar({
+        open: true,
+        message: 'Geolocation is not supported by your browser',
+        severity: 'error',
+      });
+      return;
+    }
+
+    setGpsLoading(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setFormData((prev) => ({
+          ...prev,
+          gps_latitude: latitude.toString(),
+          gps_longitude: longitude.toString(),
+        }));
+        setGpsEnabled(true);
+        setSnackbar({
+          open: true,
+          message: `Location captured: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+          severity: 'success',
+        });
+        setGpsLoading(false);
+      },
+      (error) => {
+        let errorMessage = 'Unable to get your location. ';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage += 'Please allow location access in your browser settings.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage += 'Location information is unavailable.';
+            break;
+          case error.TIMEOUT:
+            errorMessage += 'Location request timed out.';
+            break;
+          default:
+            errorMessage += 'Please check your GPS settings.';
+        }
+        setSnackbar({ open: true, message: errorMessage, severity: 'error' });
+        setGpsLoading(false);
+        setGpsEnabled(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const handleCopyCoordinates = () => {
+    const coordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
+    navigator.clipboard
+      .writeText(coordinates)
+      .then(() => {
+        setSnackbar({ open: true, message: 'Coordinates copied to clipboard!', severity: 'success' });
+      })
+      .catch(() => {
+        setSnackbar({ open: true, message: 'Failed to copy coordinates', severity: 'error' });
+      });
+  };
+
+  const handlePasteCoordinates = async () => {
     try {
-      const response = await api.get('/action-tracker/participant-lists');
-      setParticipantLists(response.data);
+      const text = await navigator.clipboard.readText();
+      let latitude = null;
+      let longitude = null;
+
+      const commaSeparated = text.match(/([-+]?\d*\.?\d+)\s*[,]\s*([-+]?\d*\.?\d+)/);
+      const spaceSeparated = text.match(/([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)/);
+      const latLonMatch = commaSeparated || spaceSeparated;
+
+      if (latLonMatch) {
+        latitude = latLonMatch[1];
+        longitude = latLonMatch[2];
+      } else {
+        try {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed) && parsed.length >= 2) {
+            latitude = parsed[0];
+            longitude = parsed[1];
+          }
+        } catch (e) {
+          // Not JSON
+          console.warn('Clipboard text is not in expected format:', e.message);
+        }
+      }
+
+      if (latitude && longitude) {
+        setFormData((prev) => ({
+          ...prev,
+          gps_latitude: latitude,
+          gps_longitude: longitude,
+        }));
+        setGpsEnabled(true);
+        setSnackbar({ open: true, message: 'Coordinates pasted successfully!', severity: 'success' });
+      } else {
+        setSnackbar({
+          open: true,
+          message: 'Invalid coordinate format. Expected: "lat, lon"',
+          severity: 'warning',
+        });
+      }
     } catch (err) {
-      console.error('Error fetching participant lists:', err);
+      setSnackbar({
+        open: true,
+        message: 'Unable to paste. Please allow clipboard access.' + err.message,
+        severity: 'error',
+      });
     }
   };
 
-  const fetchAvailableParticipants = async () => {
-    try {
-      const response = await api.get('/action-tracker/participants', { params: { limit: 100 } });
-      setAvailableParticipants(response.data);
-    } catch (err) {
-      console.error('Error fetching participants:', err);
+  const handleGpsToggle = (event) => {
+    const enabled = event.target.checked;
+    setGpsEnabled(enabled);
+
+    if (!enabled) {
+      setFormData((prev) => ({
+        ...prev,
+        gps_latitude: '',
+        gps_longitude: '',
+      }));
+    } else if (gpsSupported && !formData.gps_latitude && !formData.gps_longitude) {
+      getCurrentLocation();
     }
   };
 
@@ -194,70 +371,63 @@ const CreateMeeting = () => {
 
   const handleUseParticipantList = () => {
     if (selectedParticipantList) {
-      const list = participantLists.find(l => l.id === selectedParticipantList);
+      const list = participantLists.find((l) => l.id === selectedParticipantList);
       if (list && list.participants) {
-        const newParticipants = list.participants.map(p => ({
-          id: p.id,
-          name: p.name,
-          email: p.email,
-          telephone: p.telephone,
-          title: p.title,
-          organization: p.organization,
-          is_chairperson: false,
-        }));
-        setCustomParticipants(prev => [...prev, ...newParticipants]);
+        dispatch(
+          addParticipantsFromListToMeeting({
+            listId: selectedParticipantList,
+            participants: list.participants,
+          })
+        );
         setSnackbar({
           open: true,
-          message: `Added ${newParticipants.length} participants from ${list.name}`,
-          severity: 'success'
+          message: `Added ${list.participants.length} participants from ${list.name}`,
+          severity: 'success',
         });
       }
       setSelectedParticipantList(null);
+      dispatch(setSelectedListForMeeting(null));
     }
   };
 
-  const handleAddCustomParticipant = async () => {
+  const handleAddCustomParticipant = () => {
     if (!newParticipant.name.trim()) {
       setSnackbar({ open: true, message: 'Please enter participant name', severity: 'warning' });
       return;
     }
 
-    const exists = customParticipants.some(p => p.name === newParticipant.name);
+    const exists = meetingParticipants.some((p) => p.name === newParticipant.name);
     if (exists) {
       setSnackbar({ open: true, message: 'Participant already added', severity: 'warning' });
       return;
     }
 
-    setCustomParticipants([...customParticipants, { ...newParticipant, id: Date.now() }]);
-    setNewParticipant({ 
-      name: '', 
-      email: '', 
-      telephone: '', 
-      title: '', 
+    dispatch(addCustomParticipant(newParticipant));
+    setNewParticipant({
+      name: '',
+      email: '',
+      telephone: '',
+      title: '',
       organization: '',
-      is_chairperson: false 
+      is_chairperson: false,
     });
     setShowAddParticipantDialog(false);
     setSnackbar({ open: true, message: 'Participant added successfully', severity: 'success' });
   };
 
-  const handleRemoveCustomParticipant = (index) => {
-    setCustomParticipants(customParticipants.filter((_, i) => i !== index));
+  const handleRemoveParticipant = (participantId) => {
+    dispatch(removeLocalMeetingParticipant(participantId));
+    setSnackbar({ open: true, message: 'Participant removed', severity: 'info' });
   };
 
-  const handleSetChairperson = (index) => {
-    const updatedParticipants = customParticipants.map((p, i) => ({
-      ...p,
-      is_chairperson: i === index
-    }));
-    setCustomParticipants(updatedParticipants);
-    
-    const chairperson = updatedParticipants[index];
-    if (chairperson.is_chairperson) {
+  const handleSetChairperson = (participantId) => {
+    dispatch(setMeetingChairperson(participantId));
+    const participant = meetingParticipants.find((p) => p.id === participantId);
+    if (participant) {
       setSnackbar({
         open: true,
-        message: `${chairperson.name} is now the Chairperson`,
-        severity: 'info'
+        message: `${participant.name} is now the Chairperson`,
+        severity: 'info',
       });
     }
   };
@@ -302,52 +472,48 @@ const CreateMeeting = () => {
   };
 
   const handleSubmit = async () => {
-    setApiLoading(true);
-    setError(null);
-    
     try {
       const meetingDate = formData.meeting_date;
       if (!meetingDate) {
-        throw new Error("Meeting date is required");
+        throw new Error('Meeting date is required');
       }
       if (!formData.start_time) {
-        throw new Error("Start time is required");
+        throw new Error('Start time is required');
       }
-      
+
       const startDateTime = new Date(meetingDate);
       startDateTime.setHours(
         formData.start_time.getHours(),
         formData.start_time.getMinutes(),
-        0, 0
+        0,
+        0
       );
-      
+
       let endDateTime = null;
       if (formData.end_time) {
         endDateTime = new Date(meetingDate);
         endDateTime.setHours(
           formData.end_time.getHours(),
           formData.end_time.getMinutes(),
-          0, 0
+          0,
+          0
         );
-        
+
         if (endDateTime <= startDateTime) {
           setSnackbar({
             open: true,
-            message: "End time must be after start time",
-            severity: "warning"
+            message: 'End time must be after start time',
+            severity: 'warning',
           });
-          setApiLoading(false);
           return;
         }
       }
-      
+
       let gpsCoordinates = null;
-      if (formData.gps_latitude && formData.gps_longitude) {
+      if (gpsEnabled && formData.gps_latitude && formData.gps_longitude) {
         gpsCoordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
       }
-      
-      const chairperson = customParticipants.find(p => p.is_chairperson);
-      
+
       const meetingPayload = {
         title: formData.title,
         description: formData.description || null,
@@ -359,7 +525,7 @@ const CreateMeeting = () => {
         agenda: formData.agenda || null,
         facilitator: formData.facilitator || null,
         chairperson_name: chairperson?.name || null,
-        custom_participants: customParticipants.map(p => ({
+        custom_participants: meetingParticipants.map((p) => ({
           name: p.name,
           email: p.email || null,
           telephone: p.telephone || null,
@@ -368,28 +534,16 @@ const CreateMeeting = () => {
           is_chairperson: p.is_chairperson || false,
         })),
       };
-      
-      const response = await api.post("/action-tracker/meetings", meetingPayload);
-      
-      setSuccess(true);
-      setSnackbar({
-        open: true,
-        message: `Meeting "${response.data.title}" created successfully!`,
-        severity: "success",
-      });
-      
-      setTimeout(() => {
-        navigate(`/meetings/${response.data.id}`);
-      }, 2000);
+
+      await dispatch(createMeeting(meetingPayload)).unwrap();
     } catch (error) {
-      console.error("Error creating meeting:", error);
-      
-      let errorMessage = "Failed to create meeting. ";
+      console.error('Error creating meeting:', error);
+      let errorMessage = 'Failed to create meeting. ';
       if (error.response?.status === 422) {
         const details = error.response.data?.error?.details || error.response.data?.detail;
         if (Array.isArray(details)) {
-          errorMessage += details.map(d => d.message || d.msg).join(", ");
-        } else if (typeof details === "string") {
+          errorMessage += details.map((d) => d.message || d.msg).join(', ');
+        } else if (typeof details === 'string') {
           errorMessage = details;
         } else {
           errorMessage += JSON.stringify(details);
@@ -397,15 +551,11 @@ const CreateMeeting = () => {
       } else {
         errorMessage += error.response?.data?.message || error.message;
       }
-      
-      setError(errorMessage);
       setSnackbar({
         open: true,
         message: errorMessage,
-        severity: "error",
+        severity: 'error',
       });
-    } finally {
-      setApiLoading(false);
     }
   };
 
@@ -420,18 +570,20 @@ const CreateMeeting = () => {
     setSnackbar({ ...snackbar, open: false });
   };
 
-  const chairpersonName = customParticipants.find(p => p.is_chairperson)?.name || 'Not selected';
+  const chairpersonName = chairperson?.name || 'Not selected';
 
   const DatePickerComponent = isMobile ? MobileDatePicker : DatePicker;
   const TimePickerComponent = isMobile ? MobileTimePicker : TimePicker;
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box sx={{ 
-        minHeight: '100vh',
-        bgcolor: 'background.default',
-        pb: isMobile ? 8 : 4
-      }}>
+      <Box
+        sx={{
+          minHeight: '100vh',
+          bgcolor: 'background.default',
+          pb: isMobile ? 8 : 4,
+        }}
+      >
         {/* Mobile App Bar */}
         {isMobile && (
           <AppBar position="sticky" color="default" elevation={1} sx={{ bgcolor: 'background.paper' }}>
@@ -472,40 +624,31 @@ const CreateMeeting = () => {
             </Box>
           )}
 
-          {/* Error and Success Alerts */}
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-              {error}
-            </Alert>
-          )}
-
-          {success && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              Meeting created successfully! Redirecting...
-            </Alert>
-          )}
-
           {/* Main Form Card */}
-          <Paper sx={{ 
-            p: { xs: 2, sm: 3, md: 4 }, 
-            borderRadius: { xs: 2, md: 3 }, 
-            position: 'relative',
-            overflow: 'hidden'
-          }}>
+          <Paper
+            sx={{
+              p: { xs: 2, sm: 3, md: 4 },
+              borderRadius: { xs: 2, md: 3 },
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
             {/* Loading Overlay */}
             {apiLoading && (
-              <Box sx={{ 
-                position: 'absolute', 
-                top: 0, 
-                left: 0, 
-                right: 0, 
-                bottom: 0, 
-                bgcolor: 'rgba(255,255,255,0.9)', 
-                zIndex: 10, 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center'
-              }}>
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  bgcolor: 'rgba(255,255,255,0.9)',
+                  zIndex: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <CircularProgress />
               </Box>
             )}
@@ -539,9 +682,7 @@ const CreateMeeting = () => {
               <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
                 {steps.map((step, index) => (
                   <Step key={index}>
-                    <StepLabel StepIconComponent={step.icon}>
-                      {step.label}
-                    </StepLabel>
+                    <StepLabel StepIconComponent={step.icon}>{step.label}</StepLabel>
                   </Step>
                 ))}
               </Stepper>
@@ -561,7 +702,7 @@ const CreateMeeting = () => {
                   placeholder="e.g., Quarterly Planning Session"
                   size="medium"
                 />
-                
+
                 <TextField
                   fullWidth
                   label="Description"
@@ -574,31 +715,31 @@ const CreateMeeting = () => {
                   placeholder="Brief overview of the meeting purpose"
                   size="medium"
                 />
-                
+
                 <DatePickerComponent
                   label="Meeting Date *"
                   value={formData.meeting_date}
                   onChange={handleDateChange}
                   disabled={apiLoading}
-                  slotProps={{ textField: { fullWidth: true, required: true, size: "medium" } }}
+                  slotProps={{ textField: { fullWidth: true, required: true, size: 'medium' } }}
                 />
-                
+
                 <TimePickerComponent
                   label="Start Time *"
                   value={formData.start_time}
                   onChange={handleStartTimeChange}
                   disabled={apiLoading}
-                  slotProps={{ textField: { fullWidth: true, required: true, size: "medium" } }}
+                  slotProps={{ textField: { fullWidth: true, required: true, size: 'medium' } }}
                 />
-                
+
                 <TimePickerComponent
                   label="End Time"
                   value={formData.end_time}
                   onChange={handleEndTimeChange}
                   disabled={apiLoading}
-                  slotProps={{ textField: { fullWidth: true, size: "medium" } }}
+                  slotProps={{ textField: { fullWidth: true, size: 'medium' } }}
                 />
-                
+
                 <TextField
                   fullWidth
                   label="Location"
@@ -609,35 +750,135 @@ const CreateMeeting = () => {
                   placeholder="Conference Room A, Virtual Meeting, etc."
                   size="medium"
                   InputProps={{
-                    startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} />
+                    startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} />,
                   }}
                 />
-                
-                <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                  <TextField
-                    fullWidth
-                    label="GPS Latitude"
-                    name="gps_latitude"
-                    type="number"
-                    value={formData.gps_latitude}
-                    onChange={handleChange}
-                    disabled={apiLoading}
-                    placeholder="e.g., 0.3136"
-                    size="medium"
-                  />
-                  <TextField
-                    fullWidth
-                    label="GPS Longitude"
-                    name="gps_longitude"
-                    type="number"
-                    value={formData.gps_longitude}
-                    onChange={handleChange}
-                    disabled={apiLoading}
-                    placeholder="e.g., 32.5811"
-                    size="medium"
-                  />
-                </Box>
-                
+
+                {/* GPS Section with Toggle */}
+                <Card variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+                  <Box sx={{ p: 2, bgcolor: gpsEnabled ? '#e8f5e9' : '#fafafa' }}>
+                    <Box
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      flexWrap="wrap"
+                      gap={1}
+                    >
+                      <Box display="flex" alignItems="center" gap={1}>
+                        {gpsEnabled ? (
+                          <GpsFixedIcon color="success" />
+                        ) : (
+                          <GpsNotFixedIcon color="disabled" />
+                        )}
+                        <Typography variant="subtitle1" fontWeight="bold">
+                          GPS Coordinates
+                        </Typography>
+                      </Box>
+                      <FormGroup>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={gpsEnabled}
+                              onChange={handleGpsToggle}
+                              disabled={apiLoading || !gpsSupported}
+                              color="primary"
+                            />
+                          }
+                          label={gpsEnabled ? 'Enabled' : 'Disabled'}
+                        />
+                      </FormGroup>
+                    </Box>
+
+                    {!gpsSupported && (
+                      <Alert severity="warning" sx={{ mt: 1 }}>
+                        Geolocation is not supported by your browser
+                      </Alert>
+                    )}
+
+                    {gpsEnabled && gpsSupported && (
+                      <Stack spacing={2} sx={{ mt: 2 }}>
+                        <Box display="flex" gap={1}>
+                          <Button
+                            variant="contained"
+                            startIcon={gpsLoading ? <CircularProgress size={20} /> : <MyLocationIcon />}
+                            onClick={getCurrentLocation}
+                            disabled={apiLoading || gpsLoading}
+                            size="small"
+                          >
+                            {gpsLoading ? 'Getting Location...' : 'Get Current Location'}
+                          </Button>
+                          <Tooltip title="Copy coordinates">
+                            <IconButton
+                              onClick={handleCopyCoordinates}
+                              disabled={!formData.gps_latitude || !formData.gps_longitude}
+                              size="small"
+                            >
+                              <ContentCopyIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Paste coordinates">
+                            <IconButton onClick={handlePasteCoordinates} size="small">
+                              <PasteIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+
+                        <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
+                          <TextField
+                            fullWidth
+                            label="Latitude"
+                            name="gps_latitude"
+                            type="text"
+                            value={formData.gps_latitude}
+                            onChange={(e) =>
+                              setFormData({ ...formData, gps_latitude: e.target.value })
+                            }
+                            disabled={apiLoading}
+                            placeholder="e.g., 0.3136"
+                            size="small"
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <Typography color="textSecondary">🌐</Typography>
+                                </InputAdornment>
+                              ),
+                            }}
+                          />
+                          <TextField
+                            fullWidth
+                            label="Longitude"
+                            name="gps_longitude"
+                            type="text"
+                            value={formData.gps_longitude}
+                            onChange={(e) =>
+                              setFormData({ ...formData, gps_longitude: e.target.value })
+                            }
+                            disabled={apiLoading}
+                            placeholder="e.g., 32.5811"
+                            size="small"
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <Typography color="textSecondary">🌐</Typography>
+                                </InputAdornment>
+                              ),
+                            }}
+                          />
+                        </Box>
+
+                        {(formData.gps_latitude || formData.gps_longitude) && (
+                          <Alert severity="info" icon={<InfoIcon />} sx={{ py: 0 }}>
+                            <Typography variant="caption">
+                              Coordinates: {formData.gps_latitude || '?'},{' '}
+                              {formData.gps_longitude || '?'}
+                            </Typography>
+                          </Alert>
+                        )}
+                      </Stack>
+                    )}
+                  </Box>
+                </Card>
+
                 <Box>
                   <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
                     Agenda
@@ -710,8 +951,8 @@ const CreateMeeting = () => {
                         Add
                       </Button>
                     </Box>
-                    
-                    {customParticipants.length === 0 ? (
+
+                    {meetingParticipants.length === 0 ? (
                       <Box textAlign="center" py={4}>
                         <PeopleIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
                         <Typography variant="body2" color="text.secondary">
@@ -724,18 +965,26 @@ const CreateMeeting = () => {
                     ) : (
                       <>
                         <List sx={{ maxHeight: 400, overflow: 'auto' }}>
-                          {customParticipants.map((participant, index) => (
-                            <React.Fragment key={participant.id || index}>
+                          {meetingParticipants.map((participant) => (
+                            <React.Fragment key={participant.id}>
                               <ListItem
                                 sx={{ px: 0, py: 1.5 }}
                                 secondaryAction={
-                                  <IconButton edge="end" onClick={() => handleRemoveCustomParticipant(index)} disabled={apiLoading}>
+                                  <IconButton
+                                    edge="end"
+                                    onClick={() => handleRemoveParticipant(participant.id)}
+                                    disabled={apiLoading}
+                                  >
                                     <DeleteIcon />
                                   </IconButton>
                                 }
                               >
                                 <ListItemAvatar>
-                                  <Avatar sx={{ bgcolor: participant.is_chairperson ? '#1976d2' : '#4caf50' }}>
+                                  <Avatar
+                                    sx={{
+                                      bgcolor: participant.is_chairperson ? '#1976d2' : '#4caf50',
+                                    }}
+                                  >
                                     {participant.name.charAt(0).toUpperCase()}
                                   </Avatar>
                                 </ListItemAvatar>
@@ -749,10 +998,18 @@ const CreateMeeting = () => {
                                     </Box>
                                   }
                                   secondary={
-                                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
-                                      {participant.email && <Typography variant="caption">{participant.email}</Typography>}
-                                      {participant.telephone && <Typography variant="caption">{participant.telephone}</Typography>}
-                                    </Stack>
+                                    <Box component="div" sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+                                      {participant.email && (
+                                        <Typography variant="caption" component="span" color="text.secondary">
+                                          {participant.email}
+                                        </Typography>
+                                      )}
+                                      {participant.telephone && (
+                                        <Typography variant="caption" component="span" color="text.secondary">
+                                          {participant.telephone}
+                                        </Typography>
+                                      )}
+                                    </Box>
                                   }
                                 />
                               </ListItem>
@@ -762,7 +1019,7 @@ const CreateMeeting = () => {
                                     size="small"
                                     variant="outlined"
                                     startIcon={<PersonIcon />}
-                                    onClick={() => handleSetChairperson(index)}
+                                    onClick={() => handleSetChairperson(participant.id)}
                                     disabled={apiLoading}
                                   >
                                     Make Chairperson
@@ -773,7 +1030,7 @@ const CreateMeeting = () => {
                             </React.Fragment>
                           ))}
                         </List>
-                        
+
                         <Box mt={2} p={2} bgcolor="#e3f2fd" borderRadius={2}>
                           <Typography variant="body2" fontWeight="bold">
                             👑 Chairperson: {chairpersonName}
@@ -808,10 +1065,8 @@ const CreateMeeting = () => {
             {/* ==================== STEP 3: REVIEW & CREATE ==================== */}
             {activeStep === 2 && (
               <Stack spacing={2}>
-                <Alert severity="info">
-                  Please review your meeting details before creating
-                </Alert>
-                
+                <Alert severity="info">Please review your meeting details before creating</Alert>
+
                 <Card variant="outlined" sx={{ bgcolor: '#fafafa', borderRadius: 2 }}>
                   <CardContent>
                     <Stack spacing={2}>
@@ -829,17 +1084,19 @@ const CreateMeeting = () => {
                           </Typography>
                         )}
                       </Box>
-                      
+
                       <Box>
                         <Typography variant="subtitle2" fontWeight="bold" color="primary">
                           Date & Time
                         </Typography>
                         <Divider sx={{ my: 1 }} />
                         <Typography variant="body2">
-                          <strong>Date:</strong> {formData.meeting_date?.toLocaleDateString() || 'Not set'}
+                          <strong>Date:</strong>{' '}
+                          {formData.meeting_date?.toLocaleDateString() || 'Not set'}
                         </Typography>
                         <Typography variant="body2">
-                          <strong>Start:</strong> {formData.start_time?.toLocaleTimeString() || 'Not set'}
+                          <strong>Start:</strong>{' '}
+                          {formData.start_time?.toLocaleTimeString() || 'Not set'}
                         </Typography>
                         {formData.end_time && (
                           <Typography variant="body2">
@@ -847,7 +1104,7 @@ const CreateMeeting = () => {
                           </Typography>
                         )}
                       </Box>
-                      
+
                       {formData.location_text && (
                         <Box>
                           <Typography variant="subtitle2" fontWeight="bold" color="primary">
@@ -857,10 +1114,22 @@ const CreateMeeting = () => {
                           <Typography variant="body2">{formData.location_text}</Typography>
                         </Box>
                       )}
-                      
+
+                      {gpsEnabled && formData.gps_latitude && formData.gps_longitude && (
+                        <Box>
+                          <Typography variant="subtitle2" fontWeight="bold" color="primary">
+                            GPS Coordinates
+                          </Typography>
+                          <Divider sx={{ my: 1 }} />
+                          <Typography variant="body2">
+                            {formData.gps_latitude}, {formData.gps_longitude}
+                          </Typography>
+                        </Box>
+                      )}
+
                       <Box>
                         <Typography variant="subtitle2" fontWeight="bold" color="primary">
-                          Participants ({customParticipants.length})
+                          Participants ({meetingParticipants.length})
                         </Typography>
                         <Divider sx={{ my: 1 }} />
                         <Typography variant="body2">
@@ -871,17 +1140,21 @@ const CreateMeeting = () => {
                             <strong>Facilitator:</strong> {formData.facilitator}
                           </Typography>
                         )}
-                        {customParticipants.length > 0 && (
+                        {meetingParticipants.length > 0 && (
                           <Box component="ul" sx={{ mt: 1, pl: 2 }}>
-                            {customParticipants.slice(0, 5).map((p, i) => (
-                              <li key={i}>
+                            {meetingParticipants.slice(0, 5).map((p) => (
+                              <li key={p.id}>
                                 <Typography variant="body2">
                                   {p.name} {p.is_chairperson && '(Chairperson)'}
                                 </Typography>
                               </li>
                             ))}
-                            {customParticipants.length > 5 && (
-                              <li><Typography variant="caption">...and {customParticipants.length - 5} more</Typography></li>
+                            {meetingParticipants.length > 5 && (
+                              <li>
+                                <Typography variant="caption">
+                                  ...and {meetingParticipants.length - 5} more
+                                </Typography>
+                              </li>
                             )}
                           </Box>
                         )}
@@ -892,15 +1165,17 @@ const CreateMeeting = () => {
               </Stack>
             )}
 
-            {/* Navigation Buttons - Full width on mobile */}
-            <Box sx={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              gap: 2,
-              mt: 4,
-              flexDirection: isMobile ? 'column' : 'row'
-            }}>
-              <Button 
+            {/* Navigation Buttons */}
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 2,
+                mt: 4,
+                flexDirection: isMobile ? 'column' : 'row',
+              }}
+            >
+              <Button
                 onClick={handleBack}
                 disabled={apiLoading}
                 startIcon={activeStep === 0 ? <CancelIcon /> : <ArrowBackIcon />}
@@ -911,8 +1186,8 @@ const CreateMeeting = () => {
                 {activeStep === 0 ? 'Cancel' : 'Back'}
               </Button>
               {activeStep === 2 ? (
-                <Button 
-                  variant="contained" 
+                <Button
+                  variant="contained"
                   onClick={handleSubmit}
                   disabled={apiLoading || success}
                   startIcon={apiLoading ? <CircularProgress size={20} /> : <SaveIcon />}
@@ -922,8 +1197,8 @@ const CreateMeeting = () => {
                   {apiLoading ? 'Creating...' : 'Create Meeting'}
                 </Button>
               ) : (
-                <Button 
-                  variant="contained" 
+                <Button
+                  variant="contained"
                   onClick={handleNext}
                   disabled={!isStepValid() || apiLoading}
                   endIcon={<ArrowForwardIcon />}
@@ -937,7 +1212,7 @@ const CreateMeeting = () => {
           </Paper>
         </Container>
 
-        {/* Mobile FAB for quick navigation */}
+        {/* Mobile FAB */}
         {isMobile && !apiLoading && (
           <Zoom in>
             <Fab
@@ -956,11 +1231,11 @@ const CreateMeeting = () => {
           </Zoom>
         )}
 
-        {/* Add Participant Dialog - Full screen on mobile */}
-        <Dialog 
-          open={showAddParticipantDialog} 
-          onClose={() => setShowAddParticipantDialog(false)} 
-          maxWidth="sm" 
+        {/* Add Participant Dialog */}
+        <Dialog
+          open={showAddParticipantDialog}
+          onClose={() => setShowAddParticipantDialog(false)}
+          maxWidth="sm"
           fullWidth
           fullScreen={isMobile}
         >
@@ -1010,7 +1285,9 @@ const CreateMeeting = () => {
                   fullWidth
                   label="Organization"
                   value={newParticipant.organization}
-                  onChange={(e) => setNewParticipant({ ...newParticipant, organization: e.target.value })}
+                  onChange={(e) =>
+                    setNewParticipant({ ...newParticipant, organization: e.target.value })
+                  }
                   size="medium"
                 />
               </Box>
@@ -1018,7 +1295,9 @@ const CreateMeeting = () => {
                 control={
                   <Checkbox
                     checked={newParticipant.is_chairperson}
-                    onChange={(e) => setNewParticipant({ ...newParticipant, is_chairperson: e.target.checked })}
+                    onChange={(e) =>
+                      setNewParticipant({ ...newParticipant, is_chairperson: e.target.checked })
+                    }
                   />
                 }
                 label="Set as Chairperson"
@@ -1029,9 +1308,9 @@ const CreateMeeting = () => {
             <Button onClick={() => setShowAddParticipantDialog(false)} fullWidth={isMobile}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleAddCustomParticipant} 
-              variant="contained" 
+            <Button
+              onClick={handleAddCustomParticipant}
+              variant="contained"
               disabled={!newParticipant.name}
               fullWidth={isMobile}
             >

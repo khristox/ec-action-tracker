@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
@@ -21,6 +21,10 @@ import {
   Snackbar,
   Slide,
   Fade,
+  Backdrop,
+  LinearProgress,
+  Tooltip,
+  Chip,
 } from '@mui/material';
 import {
   Visibility,
@@ -33,6 +37,8 @@ import {
   CheckCircleOutline,
   ErrorOutline,
   InfoOutlined,
+  HourglassEmpty,
+  Refresh,
 } from '@mui/icons-material';
 import { register, clearError, resetRegistrationSuccess } from '../../store/slices/authSlice';
 
@@ -48,8 +54,8 @@ const SignUpCard = () => {
   // Form state
   const [activeStep, setActiveStep] = useState(0);
   const [formData, setFormData] = useState({
-    username: '',
     email: '',
+    username: '',
     password: '',
     confirmPassword: '',
     full_name: '',
@@ -59,35 +65,134 @@ const SignUpCard = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [localFieldErrors, setLocalFieldErrors] = useState({});
   const [successSnackbarOpen, setSuccessSnackbarOpen] = useState(false);
+  const [waitTimeRemaining, setWaitTimeRemaining] = useState(0);
+  const [waitMessage, setWaitMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false); // Add this to prevent double submission
 
-  const errorMessage = error?.message || (typeof error === 'string' ? error : '');
+  // Generate username from email
+  const generateUsernameFromEmail = useCallback((email) => {
+    if (!email) return '';
+    let username = email.split('@')[0];
+    username = username.toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
+    if (username.length > 30) username = username.substring(0, 30);
+    return username;
+  }, []);
+
+  // Generate alternative username suggestions
+  const generateUsernameSuggestions = useCallback((baseUsername) => {
+    const suggestions = [];
+    suggestions.push(`${baseUsername}${Math.floor(Math.random() * 1000)}`);
+    suggestions.push(`${baseUsername}_${Math.floor(Math.random() * 100)}`);
+    suggestions.push(`${baseUsername}${new Date().getFullYear()}`);
+    suggestions.push(`${baseUsername}_user`);
+    suggestions.push(`${baseUsername}${Math.floor(Math.random() * 10000)}`);
+    return suggestions.slice(0, 5);
+  }, []);
+
+  // Auto-generate username when email changes
+  useEffect(() => {
+    if (formData.email && !formData.username) {
+      const generatedUsername = generateUsernameFromEmail(formData.email);
+      setFormData(prev => ({ ...prev, username: generatedUsername }));
+    }
+  }, [formData.email, formData.username, generateUsernameFromEmail]);
+
+  // Helper function to extract error message from various response formats
+  const getErrorMessage = (error) => {
+    if (!error) return '';
+    
+    if (error.detail) {
+      if (typeof error.detail === 'object') {
+        return error.detail.message || error.detail.error || 'Registration failed';
+      }
+      if (typeof error.detail === 'string') {
+        return error.detail;
+      }
+    }
+    
+    if (error.message) return error.message;
+    if (typeof error === 'string') return error;
+    
+    return 'Registration failed. Please try again.';
+  };
+
+  // Helper function to extract field-specific errors
+  const getFieldErrorFromResponse = (error) => {
+    const fieldErrors = {};
+    
+    if (error?.detail && typeof error.detail === 'object' && error.detail.field) {
+      fieldErrors[error.detail.field] = error.detail.message;
+    }
+    
+    // Extract wait time if present
+    if (error?.detail?.wait_minutes) {
+      setWaitTimeRemaining(error.detail.wait_minutes * 60);
+      setWaitMessage(error.detail.message);
+    }
+    
+    if (error?.errors && Array.isArray(error.errors)) {
+      error.errors.forEach(err => {
+        if (err.field) {
+          fieldErrors[err.field] = err.message;
+        }
+      });
+    }
+    
+    return fieldErrors;
+  };
+
+  const errorMessage = getErrorMessage(error);
+  const responseFieldErrors = getFieldErrorFromResponse(error);
   
-  // Merge local and Redux field errors
-  const fieldErrors = { ...localFieldErrors, ...reduxFieldErrors };
+  // Merge local, Redux, and response field errors
+  const fieldErrors = { ...localFieldErrors, ...reduxFieldErrors, ...responseFieldErrors };
+
+  // Countdown timer for wait period
+  useEffect(() => {
+    let timer;
+    if (waitTimeRemaining > 0) {
+      timer = setInterval(() => {
+        setWaitTimeRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            setWaitMessage('');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [waitTimeRemaining]);
 
   // Show error snackbar when error occurs
   useEffect(() => {
     if (errorMessage) {
       setSnackbarOpen(true);
-      // If there's a conflict error (409), show it prominently
-      if (error?.status === 409) {
-        setSnackbarOpen(true);
-      }
     }
-  }, [errorMessage, error]);
+  }, [errorMessage]);
+
+  // Reset submitting state when registration completes or fails
+  useEffect(() => {
+    if (!isRegistering) {
+      setIsSubmitting(false);
+    }
+  }, [isRegistering]);
 
   // Handle registration success
   useEffect(() => {
     if (registrationSuccess) {
       setSuccessSnackbarOpen(true);
-      // Clear any existing errors
       dispatch(clearError());
+      setIsSubmitting(false);
       
-      // Redirect to login after 2 seconds
       const timer = setTimeout(() => {
         navigate('/login', { replace: true });
         dispatch(resetRegistrationSuccess());
-      }, 2000);
+      }, 3000);
       
       return () => clearTimeout(timer);
     }
@@ -96,13 +201,23 @@ const SignUpCard = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    // Clear field error when user starts typing
+    
     if (fieldErrors[name]) {
       setLocalFieldErrors(prev => ({ ...prev, [name]: '' }));
     }
-    // Also clear Redux field errors if any
-    if (reduxFieldErrors[name]) {
-      dispatch(clearError());
+    
+    dispatch(clearError());
+  };
+
+  const handleRegenerateUsername = () => {
+    if (formData.email) {
+      const baseUsername = generateUsernameFromEmail(formData.email);
+      const suggestions = generateUsernameSuggestions(baseUsername);
+      const newUsername = suggestions[0];
+      setFormData(prev => ({ ...prev, username: newUsername }));
+      if (fieldErrors.username) {
+        setLocalFieldErrors(prev => ({ ...prev, username: '' }));
+      }
     }
   };
 
@@ -110,12 +225,14 @@ const SignUpCard = () => {
     const errors = {};
     
     if (activeStep === 0) {
-      if (!formData.full_name.trim()) {
-        errors.full_name = 'Full name is required';
-      } else if (formData.full_name.trim().length < 2) {
-        errors.full_name = 'Full name must be at least 2 characters';
+      // Email validation first
+      if (!formData.email.trim()) {
+        errors.email = 'Email is required';
+      } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+        errors.email = 'Please enter a valid email address';
       }
       
+      // Username validation
       if (!formData.username.trim()) {
         errors.username = 'Username is required';
       } else if (formData.username.length < 3) {
@@ -124,10 +241,11 @@ const SignUpCard = () => {
         errors.username = 'Username can only contain letters, numbers, and underscores';
       }
       
-      if (!formData.email.trim()) {
-        errors.email = 'Email is required';
-      } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-        errors.email = 'Please enter a valid email address';
+      // Full name validation
+      if (!formData.full_name.trim()) {
+        errors.full_name = 'Full name is required';
+      } else if (formData.full_name.trim().length < 2) {
+        errors.full_name = 'Full name must be at least 2 characters';
       }
     } else if (activeStep === 1) {
       if (!formData.password) {
@@ -158,7 +276,6 @@ const SignUpCard = () => {
   const handleNext = () => {
     if (validateStep()) {
       setActiveStep((prev) => prev + 1);
-      // Clear any errors when moving to next step
       dispatch(clearError());
       setLocalFieldErrors({});
     }
@@ -166,7 +283,6 @@ const SignUpCard = () => {
 
   const handleBack = () => {
     setActiveStep((prev) => prev - 1);
-    // Clear errors when going back
     dispatch(clearError());
     setLocalFieldErrors({});
   };
@@ -174,9 +290,12 @@ const SignUpCard = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Validate all steps before submission
+    // Prevent double submission
+    if (isSubmitting || isRegistering || registrationSuccess || waitTimeRemaining > 0) {
+      return;
+    }
+    
     if (!validateStep()) {
-      // If validation fails, go to the step with errors
       if (localFieldErrors.password || localFieldErrors.confirmPassword) {
         setActiveStep(1);
       } else if (localFieldErrors.full_name || localFieldErrors.username || localFieldErrors.email) {
@@ -185,9 +304,11 @@ const SignUpCard = () => {
       return;
     }
     
-    // Clear any previous errors
     dispatch(clearError());
     setLocalFieldErrors({});
+    
+    // Set submitting flag to prevent double submission
+    setIsSubmitting(true);
     
     try {
       const result = await dispatch(register({
@@ -198,14 +319,14 @@ const SignUpCard = () => {
       })).unwrap();
       
       console.log('Registration successful:', result);
-      // Success is handled by useEffect
       
     } catch (err) {
       console.error('Registration failed:', err);
-      // Error will be shown via snackbar
+      setIsSubmitting(false); // Reset on error so user can try again
       
-      // If it's a conflict error (user exists), go back to step 0 so user can change email/username
-      if (error?.status === 409) {
+      if (err?.detail?.field) {
+        setActiveStep(0);
+      } else if (err?.status === 409) {
         setActiveStep(0);
       }
     }
@@ -222,17 +343,14 @@ const SignUpCard = () => {
 
   const steps = ['Personal Information', 'Create Password', 'Review'];
 
-  // Helper to check if a field has an error
   const hasFieldError = (fieldName) => {
     return !!fieldErrors[fieldName];
   };
 
-  // Helper to get field error message
   const getFieldError = (fieldName) => {
     return fieldErrors[fieldName] || '';
   };
 
-  // Get password strength indicator
   const getPasswordStrength = () => {
     const password = formData.password;
     if (!password) return { score: 0, label: '', color: '' };
@@ -252,8 +370,46 @@ const SignUpCard = () => {
 
   const passwordStrength = getPasswordStrength();
 
+  const formatWaitTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Determine if any action is in progress that should disable the form
+  const isFormDisabled = isRegistering || registrationSuccess || waitTimeRemaining > 0 || isSubmitting;
+
   return (
     <>
+      {/* Fullscreen Backdrop during registration */}
+      <Backdrop
+        sx={{ 
+          color: '#fff', 
+          zIndex: (theme) => theme.zIndex.drawer + 1,
+          flexDirection: 'column',
+          gap: 2
+        }}
+        open={isRegistering || isSubmitting}
+      >
+        <CircularProgress color="primary" size={60} />
+        <Typography variant="h6" sx={{ mt: 2, color: 'white' }}>
+          {isSubmitting ? 'Processing...' : 'Creating your account...'}
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
+          Please do not close this window
+        </Typography>
+        <LinearProgress 
+          sx={{ 
+            width: '200px', 
+            mt: 2,
+            backgroundColor: 'rgba(255,255,255,0.2)',
+            '& .MuiLinearProgress-bar': {
+              backgroundColor: 'white'
+            }
+          }} 
+        />
+      </Backdrop>
+
       <Card
         sx={{
           width: { xs: '100%', sm: 500, md: 550 },
@@ -263,6 +419,9 @@ const SignUpCard = () => {
           mx: 'auto',
           position: 'relative',
           overflow: 'visible',
+          opacity: isFormDisabled ? 0.5 : 1,
+          pointerEvents: isFormDisabled ? 'none' : 'auto',
+          transition: 'opacity 0.3s ease',
         }}
       >
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
@@ -277,6 +436,31 @@ const SignUpCard = () => {
             </Typography>
           </Box>
 
+          {/* Wait Timer Alert */}
+          {waitTimeRemaining > 0 && waitMessage && (
+            <Fade in>
+              <Alert 
+                severity="info" 
+                icon={<HourglassEmpty />}
+                sx={{ mb: 3 }}
+                onClose={() => {
+                  setWaitTimeRemaining(0);
+                  setWaitMessage('');
+                }}
+              >
+                <Typography variant="body2" fontWeight={500}>
+                  {waitMessage}
+                </Typography>
+                <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CircularProgress size={20} variant="determinate" value={(waitTimeRemaining / 600) * 100} />
+                  <Typography variant="caption">
+                    Please wait {formatWaitTime(waitTimeRemaining)} before trying again
+                  </Typography>
+                </Box>
+              </Alert>
+            </Fade>
+          )}
+
           {/* Stepper */}
           <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
             {steps.map((label) => (
@@ -287,7 +471,7 @@ const SignUpCard = () => {
           </Stepper>
 
           {/* Error Alert - Inline for immediate feedback */}
-          {errorMessage && !snackbarOpen && (
+          {errorMessage && !snackbarOpen && !waitMessage && (
             <Fade in>
               <Alert 
                 severity="error" 
@@ -314,8 +498,18 @@ const SignUpCard = () => {
               severity="success" 
               icon={<CheckCircleOutline />} 
               sx={{ mb: 3 }}
+              action={
+                <Button color="inherit" size="small" onClick={() => navigate('/login')}>
+                  Login Now
+                </Button>
+              }
             >
-              Registration successful! Redirecting to login...
+              <Typography variant="body2" fontWeight={500}>
+                Registration successful!
+              </Typography>
+              <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                Redirecting to login in 3 seconds...
+              </Typography>
             </Alert>
           )}
 
@@ -323,46 +517,7 @@ const SignUpCard = () => {
           <form onSubmit={handleSubmit}>
             {activeStep === 0 && (
               <Box>
-                <TextField
-                  fullWidth
-                  label="Full Name"
-                  name="full_name"
-                  value={formData.full_name}
-                  onChange={handleChange}
-                  margin="normal"
-                  required
-                  error={hasFieldError('full_name')}
-                  helperText={getFieldError('full_name')}
-                  disabled={isRegistering || registrationSuccess}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <BadgeOutlined color="action" />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                
-                <TextField
-                  fullWidth
-                  label="Username"
-                  name="username"
-                  value={formData.username}
-                  onChange={handleChange}
-                  margin="normal"
-                  required
-                  error={hasFieldError('username')}
-                  helperText={getFieldError('username') || 'Letters, numbers, and underscores only'}
-                  disabled={isRegistering || registrationSuccess}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <PersonOutline color="action" />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                
+                {/* Email Field - First */}
                 <TextField
                   fullWidth
                   label="Email Address"
@@ -374,11 +529,94 @@ const SignUpCard = () => {
                   required
                   error={hasFieldError('email')}
                   helperText={getFieldError('email')}
-                  disabled={isRegistering || registrationSuccess}
+                  disabled={isFormDisabled}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
                         <EmailOutlined color="action" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+                
+                {/* Username Field with Regenerate Icon */}
+                <TextField
+                  fullWidth
+                  label="Username"
+                  name="username"
+                  value={formData.username}
+                  onChange={handleChange}
+                  margin="normal"
+                  required
+                  error={hasFieldError('username')}
+                  helperText={getFieldError('username') || 'Letters, numbers, and underscores only'}
+                  disabled={isFormDisabled}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <PersonOutline color="action" />
+                      </InputAdornment>
+                    ),
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        {/* Wrap disabled button in a span for Tooltip */}
+                        <Tooltip title="Generate new username">
+                          <span>
+                            <IconButton 
+                              onClick={handleRegenerateUsername}
+                              size="small"
+                              disabled={isFormDisabled || !formData.email}
+                              sx={{ ml: 0.5 }}
+                            >
+                              <Refresh fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+                
+                {/* Username Suggestions */}
+                {fieldErrors.username === 'This username is already taken. Please choose another.' && (
+                  <Box sx={{ mt: 1, mb: 2 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Suggestions:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
+                      {generateUsernameSuggestions(formData.username).map((suggestion, index) => (
+                        <Chip
+                          key={index}
+                          label={suggestion}
+                          size="small"
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, username: suggestion }));
+                            setLocalFieldErrors(prev => ({ ...prev, username: '' }));
+                          }}
+                          sx={{ cursor: 'pointer' }}
+                          disabled={isFormDisabled}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+                
+                {/* Full Name Field */}
+                <TextField
+                  fullWidth
+                  label="Full Name"
+                  name="full_name"
+                  value={formData.full_name}
+                  onChange={handleChange}
+                  margin="normal"
+                  required
+                  error={hasFieldError('full_name')}
+                  helperText={getFieldError('full_name')}
+                  disabled={isFormDisabled}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <BadgeOutlined color="action" />
                       </InputAdornment>
                     ),
                   }}
@@ -399,7 +637,7 @@ const SignUpCard = () => {
                   required
                   error={hasFieldError('password')}
                   helperText={getFieldError('password')}
-                  disabled={isRegistering || registrationSuccess}
+                  disabled={isFormDisabled}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -411,7 +649,7 @@ const SignUpCard = () => {
                         <IconButton 
                           onClick={() => setShowPassword(!showPassword)} 
                           type="button"
-                          disabled={isRegistering || registrationSuccess}
+                          disabled={isFormDisabled}
                         >
                           {showPassword ? <VisibilityOff /> : <Visibility />}
                         </IconButton>
@@ -456,7 +694,7 @@ const SignUpCard = () => {
                   required
                   error={hasFieldError('confirmPassword')}
                   helperText={getFieldError('confirmPassword')}
-                  disabled={isRegistering || registrationSuccess}
+                  disabled={isFormDisabled}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -468,7 +706,7 @@ const SignUpCard = () => {
                         <IconButton 
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)} 
                           type="button"
-                          disabled={isRegistering || registrationSuccess}
+                          disabled={isFormDisabled}
                         >
                           {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
                         </IconButton>
@@ -486,13 +724,13 @@ const SignUpCard = () => {
                 </Typography>
                 <Box sx={{ mt: 2 }}>
                   <Typography variant="body2">
-                    <strong>Full Name:</strong> {formData.full_name}
+                    <strong>Email:</strong> {formData.email}
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>Username:</strong> {formData.username}
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1 }}>
-                    <strong>Email:</strong> {formData.email}
+                    <strong>Full Name:</strong> {formData.full_name}
                   </Typography>
                 </Box>
               </Paper>
@@ -501,7 +739,7 @@ const SignUpCard = () => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
               <Button
                 onClick={handleBack}
-                disabled={activeStep === 0 || isRegistering || registrationSuccess}
+                disabled={activeStep === 0 || isFormDisabled}
                 variant="outlined"
               >
                 Back
@@ -511,13 +749,13 @@ const SignUpCard = () => {
                 <Button
                   type="submit"
                   variant="contained"
-                  disabled={isRegistering || registrationSuccess}
-                  sx={{ minWidth: 120 }}
+                  disabled={isFormDisabled}
+                  sx={{ minWidth: 120, position: 'relative' }}
                 >
-                  {isRegistering ? (
+                  {isSubmitting || isRegistering ? (
                     <>
                       <CircularProgress size={20} sx={{ mr: 1 }} />
-                      Creating...
+                      {isSubmitting ? 'Processing...' : 'Creating...'}
                     </>
                   ) : (
                     'Sign Up'
@@ -527,7 +765,7 @@ const SignUpCard = () => {
                 <Button
                   onClick={handleNext}
                   variant="contained"
-                  disabled={isRegistering || registrationSuccess}
+                  disabled={isFormDisabled}
                 >
                   Next
                 </Button>
@@ -547,7 +785,7 @@ const SignUpCard = () => {
               to="/login"
               variant="text"
               fullWidth
-              disabled={isRegistering}
+              disabled={isFormDisabled}
             >
               Sign In Instead
             </Button>
@@ -594,7 +832,7 @@ const SignUpCard = () => {
       {/* Success Snackbar */}
       <Snackbar
         open={successSnackbarOpen}
-        autoHideDuration={2000}
+        autoHideDuration={3000}
         onClose={handleCloseSuccessSnackbar}
         TransitionComponent={SlideTransition}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
@@ -606,7 +844,12 @@ const SignUpCard = () => {
           icon={<CheckCircleOutline />}
           sx={{ width: '100%', boxShadow: 3 }}
         >
-          Registration successful! Redirecting to login...
+          <Typography variant="body2" fontWeight={500}>
+            Registration successful!
+          </Typography>
+          <Typography variant="caption" display="block">
+            Redirecting to login...
+          </Typography>
         </Alert>
       </Snackbar>
     </>

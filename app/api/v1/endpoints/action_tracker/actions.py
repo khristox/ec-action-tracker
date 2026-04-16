@@ -15,6 +15,8 @@ from app.schemas.action_tracker import (
     ActionStatusHistoryResponse, MyTaskResponse
 )
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status  # ✅ Make sure status is imported
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -66,34 +68,52 @@ async def check_action_permission(action, current_user: User, require_ownership:
 
 # ==================== STATIC ROUTES (no path parameters) ====================
 
+# In app/api/v1/endpoints/action_tracker/actions.py
+
 @router.get("/my-tasks", response_model=List[MyTaskResponse])
 async def get_my_tasks(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum number of records to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, description="Search in description"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    priority: Optional[int] = Query(None, ge=1, le=4),
+    is_overdue: Optional[bool] = Query(None),
     include_completed: bool = Query(False, description="Include completed tasks"),
 ):
-    """Get actions assigned to current user"""
+    """Get my tasks with filtering support"""
     try:
-        actions = await meeting_action.get_actions_assigned_to_user(db, current_user.id, skip, limit)
-        
+        actions = await meeting_action.get_actions_assigned_to_user(
+            db=db,
+            user_id=current_user.id,
+            skip=skip,
+            limit=limit,
+            search=search,
+            status=status,
+            priority=priority,
+            is_overdue=is_overdue,
+            include_completed=include_completed,
+        )
+
         result = []
         for action in actions:
-            # Skip completed tasks if not requested
-            if not include_completed and action.completed_at:
-                continue
-            
-            # Calculate overdue status
-            is_overdue = calculate_is_overdue(action.due_date, action.completed_at)
-            
-            # Get meeting info safely
             meeting_title = ""
             meeting_date = None
+            
             if action.minutes and action.minutes.meeting:
                 meeting_title = action.minutes.meeting.title or ""
                 meeting_date = action.minutes.meeting.meeting_date
             
+            is_overdue_flag = False
+            if action.due_date and not action.completed_at:
+                now = datetime.now()
+                if action.due_date.tzinfo:
+                    due_date = action.due_date.replace(tzinfo=None)
+                else:
+                    due_date = action.due_date
+                is_overdue_flag = due_date < now
+
             result.append(MyTaskResponse(
                 id=action.id,
                 description=action.description,
@@ -103,23 +123,20 @@ async def get_my_tasks(
                 overall_progress_percentage=action.overall_progress_percentage or 0,
                 overall_status_name=action.overall_status_name,
                 priority=action.priority,
-                is_overdue=is_overdue,
+                is_overdue=is_overdue_flag,
                 completed_at=action.completed_at,
-                created_at=action.created_at
+                created_at=action.created_at,
             ))
-        
-        logger.info(f"Retrieved {len(result)} tasks for user {current_user.id}")
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Error fetching my tasks for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch tasks"
+            detail=f"Failed to fetch my tasks: {str(e)}"
         )
     
-
-
 @router.get(
     "/overdue",
     response_model=List[MyTaskResponse],

@@ -544,7 +544,7 @@ class MyTaskResponse(ORMBase):
     id: UUID
     description: str
     meeting_title: str
-    meeting_date: datetime
+    meeting_date: Optional[datetime] = None  # ✅ Make it optional
     due_date: Optional[datetime] = None
     overall_progress_percentage: int = 0
     overall_status_name: Optional[str] = None

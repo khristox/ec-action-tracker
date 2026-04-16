@@ -56,52 +56,41 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const showBackButton = pathSegments.length > 1 && location.pathname !== '/dashboard';
 
-  // Fetch notifications count and list
-  const fetchNotifications = async () => {
+  // Fetch tasks from the correct endpoint with proper parameters
+  const fetchAllTasks = async () => {
     setLoadingNotifications(true);
     try {
-      // Fetch user's tasks
-      const response = await api.get('/action-tracker/actions/my-tasks');
-      const tasks = response.data.data || response.data || [];
-      
-      // Filter for pending and overdue tasks (IGNORE COMPLETED)
-      const now = new Date();
-      const pendingTasks = tasks.filter(task => {
-        // Skip if completed
-        const isCompleted = task.completed_at !== null && task.completed_at !== undefined;
-        const statusCompleted = task.status === 'completed' || task.status === 'COMPLETED';
-        const progressCompleted = task.overall_progress_percentage === 100;
-        
-        // IGNORE COMPLETED TASKS
-        if (isCompleted || statusCompleted || progressCompleted) {
-          return false;
+      // Use the correct endpoint with parameters
+      const response = await api.get('/action-tracker/actions/my-tasks', {
+        params: {
+          skip: 0,
+          limit: 100,
+          include_completed: false  // This excludes completed tasks
         }
-        
-        // Include pending, in-progress, and overdue tasks
-        const isOverdue = task.is_overdue === true;
-        const isInProgress = task.overall_progress_percentage > 0 && task.overall_progress_percentage < 100;
-        const isPending = task.status === 'pending' || task.status === 'PENDING' || task.status === 'assigned';
-        
-        return isOverdue || isInProgress || isPending;
       });
       
-      // Create notifications array sorted by overdue first, then due date
-      const notificationItems = pendingTasks.map(task => ({
+      // Handle different response structures
+      const tasks = response.data.data || response.data || [];
+      
+      // Create notifications array
+      const notificationItems = tasks.map(task => ({
         id: task.id,
-        title: task.title || task.description,
+        title: task.title || task.description || 'Untitled Task',
         description: task.description,
         type: task.is_overdue ? 'overdue' : 'pending',
         due_date: task.due_date,
         progress: task.overall_progress_percentage || 0,
         meeting_title: task.meeting_title,
         created_at: task.created_at,
-        status: task.status
+        status: task.status,
+        priority: task.priority,
+        is_overdue: task.is_overdue
       }));
       
       // Sort: Overdue first, then by due date (closest first)
       notificationItems.sort((a, b) => {
-        if (a.type === 'overdue' && b.type !== 'overdue') return -1;
-        if (a.type !== 'overdue' && b.type === 'overdue') return 1;
+        if (a.is_overdue && !b.is_overdue) return -1;
+        if (!a.is_overdue && b.is_overdue) return 1;
         if (a.due_date && b.due_date) {
           return new Date(a.due_date) - new Date(b.due_date);
         }
@@ -112,7 +101,7 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
       setNotificationCount(notificationItems.length);
       
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      console.error('Error fetching tasks:', error);
     } finally {
       setLoadingNotifications(false);
     }
@@ -120,10 +109,10 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
 
   // Fetch notifications on component mount and periodically
   useEffect(() => {
-    fetchNotifications();
+    fetchAllTasks();
     
-    // Refresh notifications every 30 seconds
-    const interval = setInterval(fetchNotifications, 30000);
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchAllTasks, 30000);
     
     return () => clearInterval(interval);
   }, []);
@@ -141,7 +130,7 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
   const handleNotificationsOpen = (event) => {
     setNotificationsAnchor(event.currentTarget);
     // Refresh when opening
-    fetchNotifications();
+    fetchAllTasks();
   };
 
   const handleNotificationsClose = () => {
@@ -159,25 +148,14 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
   };
 
   const getNotificationIcon = (type) => {
-    switch(type) {
-      case 'overdue':
-        return <WarningIcon sx={{ color: '#f44336', fontSize: 20 }} />;
-      case 'pending':
-        return <AssignmentIcon sx={{ color: '#ff9800', fontSize: 20 }} />;
-      default:
-        return <ScheduleIcon sx={{ color: '#2196f3', fontSize: 20 }} />;
+    if (type === 'overdue') {
+      return <WarningIcon sx={{ color: '#f44336', fontSize: 20 }} />;
     }
+    return <AssignmentIcon sx={{ color: '#ff9800', fontSize: 20 }} />;
   };
 
   const getNotificationColor = (type) => {
-    switch(type) {
-      case 'overdue':
-        return 'error';
-      case 'pending':
-        return 'warning';
-      default:
-        return 'info';
-    }
+    return type === 'overdue' ? 'error' : 'warning';
   };
 
   const formatDueDate = (dueDate) => {

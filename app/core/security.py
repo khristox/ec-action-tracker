@@ -207,6 +207,26 @@ def verify_password_reset_token(token: str) -> Optional[str]:
         return None
 
 
+# Add to security.py if you want a complete security module
+async def authenticate_user(db: AsyncSession, username: str, password: str) -> Optional[User]:
+    """Authenticate a user by username/email"""
+    from sqlalchemy import select
+    from app.models.user import User
+    
+    result = await db.execute(
+        select(User).where(
+            (User.username == username) | (User.email == username)
+        )
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        return None
+    
+    if not verify_password(password, user.hashed_password):
+        return None
+    
+    return user
 # ---------------------------------------------------------------------------
 # FastAPI dependencies
 # ---------------------------------------------------------------------------
@@ -215,28 +235,57 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    """
+    Validates the JWT and returns the current user.
+    Prioritizes UUID lookup for performance and consistency.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    # 1. Decode and Validate Payload
+    payload = decode_token(token, token_type="access")
+    if not payload:
+        raise credentials_exception
+
+    # 2. Extract Identifiers
+    # Using 'user_id' as the primary lookup is faster with UUIDs
+    user_id: Optional[str] = payload.get("user_id")
+    username: Optional[str] = payload.get("sub")
+
+    if not user_id and not username:
+        raise credentials_exception
+
     try:
-        payload = decode_token(token, token_type="access")
-        if not payload:
-            raise credentials_exception
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
+        # 3. Optimized Database Lookup
+        # We use a single query to find the user by ID (preferred) or username
+        query = select(User)
+        if user_id:
+            query = query.where(User.id == user_id)
+        else:
+            query = query.where(User.username == username)
+        
+        # Load roles eagerly if your logic needs them immediately
+        # from sqlalchemy.orm import selectinload
+        # query = query.options(selectinload(User.roles))
+
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+        
     except Exception as e:
-        logger.error(f"Token validation error: {e}")
+        logger.error(f"Database error during user injection: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Internal authentication service error"
+        )
+
+    if not user:
+        logger.warning(f"User in token not found in DB: ID={user_id}, Sub={username}")
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise credentials_exception
     return user
-
 
 async def get_current_active_user(
     current_user: User = Depends(get_current_user),

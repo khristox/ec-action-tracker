@@ -209,6 +209,7 @@ const handleFormChange = (e) => {
     setFormErrors(prev => ({ ...prev, [name]: '' }));
   }
 };
+
   const handlePasswordChange = (e) => {
     const { name, value } = e.target;
     setPasswordData(prev => ({ ...prev, [name]: value }));

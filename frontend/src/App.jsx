@@ -1,3 +1,5 @@
+// App.jsx - Improved Solution 2
+
 import React, { 
   useEffect, 
   useState, 
@@ -21,7 +23,8 @@ import { ThemeContextProvider } from './context/ThemeProvider';
 // Components
 import Layout from './components/common/Layout';
 
-// Error Boundary Component
+// Error Boundary Component (same as before)
+// Error Boundary Component - Fixed
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -41,12 +44,26 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', p: 3, textAlign: 'center' }}>
-          <Typography variant="h5" color="error" gutterBottom>Something went wrong</Typography>
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '100vh', 
+          flexDirection: 'column', 
+          p: 3, 
+          textAlign: 'center' 
+        }}>
+          <Typography variant="h5" color="error" gutterBottom>
+            Something went wrong
+          </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {this.state.error?.message || 'An unexpected error occurred'}
           </Typography>
-          <Button variant="contained" onClick={() => window.location.reload()}>
+          <Button 
+            variant="contained" 
+            onClick={() => window.location.reload()}
+            startIcon={<span>🔄</span>}
+          >
             Reload Page
           </Button>
         </Box>
@@ -56,164 +73,259 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// Debug component to identify which lazy import is failing
-const DebugLazy = ({ componentImport, componentName, fallback }) => {
-  const [Component, setComponent] = useState(null);
-  const [error, setError] = useState(null);
+// ========== IMPROVED STATIC IMPORT MAP ==========
 
-  useEffect(() => {
-    let mounted = true;
-    componentImport()
-      .then(module => {
-        if (mounted) {
-          setComponent(() => module.default || module);
-        }
-      })
-      .catch(err => {
-        console.error(`[DebugLazy] Failed to load ${componentName}:`, err);
-        if (mounted) {
-          setError(err);
-        }
-      });
-    return () => { mounted = false; };
-  }, [componentImport, componentName]);
+/**
+ * Static import map for all lazy-loaded components
+ * This eliminates Vite warnings and provides better bundling
+ */
+const COMPONENT_IMPORTS = {
+  // Auth Pages
+  'SignInSide': () => import('./pages/SignInSide'),
+  'SignUp': () => import('./pages/SignUp'),
+  
+  // Action Tracker - Dashboard
+  'Dashboard': () => import('./components/actiontracker/dashboard/Dashboard'),
+  
+  // Action Tracker - Meetings
+  'Meetings': () => import('./components/actiontracker/meetings/Meetings'),
+  'CreateMeeting': () => import('./components/actiontracker/meetings/CreateMeeting'),
+  'MeetingDetail': () => import('./components/actiontracker/meetings/MeetingDetail'),
+  'EditMeeting': () => import('./components/actiontracker/meetings/EditMeeting'),
+  
+  // Action Tracker - Actions
+  'ActionsList': () => import('./components/actiontracker/actions/ActionsList'),
+  'MyTasks': () => import('./components/actiontracker/actions/MyTasks'),
+  'AllActions': () => import('./components/actiontracker/actions/AllActions'),
+  'ActionDetail': () => import('./components/actiontracker/actions/ActionDetail'),
+  'OverdueActions': () => import('./components/actiontracker/actions/OverdueActions'),
+  'AssignAction': () => import('./components/actiontracker/actions/AssignAction'),
+  'UpdateProgress': () => import('./components/actiontracker/actions/UpdateProgress'),
+  
+  // Action Tracker - Participants
+  'ParticipantsLists': () => import('./components/actiontracker/participants/ParticipantsLists'),
+  'ParticipantListsManager': () => import('./components/actiontracker/participants/ParticipantListsManager'),
+  'CreateParticipant': () => import('./components/actiontracker/participants/CreateParticipant'),
+  'ParticipantDetail': () => import('./components/actiontracker/participants/ParticipantDetail'),
+  'BulkImportPage': () => import('./components/actiontracker/participants/BulkImportPage'),
+  
+  // Action Tracker - Documents & Reports
+  'DocumentsList': () => import('./components/actiontracker/documents/DocumentsList'),
+  'ReportsList': () => import('./components/actiontracker/reports/ReportsList'),
+  
+  // Action Tracker - Calendar & Settings
+  'CalendarView': () => import('./components/actiontracker/calendar/CalendarView'),
+  'Settings': () => import('./components/actiontracker/settings/Settings'),
+  
+  // Profile Components
+  'Profile': () => import('./components/profile/Profile'),
+  'ProfileSettings': () => import('./components/profile/ProfileSettings'),
+  'SecuritySettings': () => import('./components/profile/SecuritySettings'),
+  'NotificationSettings': () => import('./components/profile/NotificationSettings'),
+  'PreferenceSettings': () => import('./components/profile/PreferenceSettings'),
+  
+  // Admin Components
+  'UserManagement': () => import('./components/admin/UserManagement'),
+  'RoleManagement': () => import('./components/admin/RoleManagement'),
+  'AuditLogs': () => import('./components/admin/AuditLogs'),
+  
+  // Error Pages
+  'NotFound': () => import('./pages/NotFound'),
+  'Forbidden': () => import('./pages/Forbidden'),
+};
 
-  if (error) {
-    return fallback || (
-      <Box sx={{ p: 3, textAlign: 'center' }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load component: {componentName}
-        </Alert>
-        <Button variant="contained" onClick={() => window.location.reload()}>
-          Retry
-        </Button>
-      </Box>
+// Component cache for already loaded components
+const componentCache = new Map();
+
+// Preload queue for components that will likely be needed
+const preloadQueue = new Set();
+
+/**
+ * Enhanced lazy loading with retry and preloading capabilities
+ */
+const createLazyComponent = (componentName, options = {}) => {
+  const { preload = false, retries = 2, retryDelay = 1000 } = options;
+  
+  // Get the import function
+  const importFn = COMPONENT_IMPORTS[componentName];
+  
+  if (!importFn) {
+    console.error(`Component "${componentName}" not found in import map`);
+    return () => <div>Component "{componentName}" not found</div>;
+  }
+  
+  // Preload if requested
+  if (preload && !componentCache.has(componentName)) {
+    preloadQueue.add(componentName);
+    // Don't await, just start loading in background
+    loadComponent(componentName, retries, retryDelay).catch(err => {
+      console.warn(`Preload failed for ${componentName}:`, err);
+    });
+  }
+  
+  // Return lazy component
+  return lazy(() => loadComponent(componentName, retries, retryDelay));
+};
+
+/**
+ * Load component with retry logic and caching
+ */
+const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
+  // Check cache first
+  if (componentCache.has(componentName)) {
+    return componentCache.get(componentName);
+  }
+  
+  const importFn = COMPONENT_IMPORTS[componentName];
+  if (!importFn) {
+    throw new Error(`Component "${componentName}" not found in import map`);
+  }
+  
+  let lastError;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      console.log(`[Load] Loading ${componentName}${attempt > 0 ? ` (retry ${attempt})` : ''}`);
+      
+      const module = await importFn();
+      const Component = module.default || module;
+      
+      // Cache the component
+      componentCache.set(componentName, Promise.resolve(module));
+      
+      console.log(`[Success] Loaded ${componentName}`);
+      return module;
+      
+    } catch (error) {
+      lastError = error;
+      console.error(`[Failed] Attempt ${attempt + 1} for ${componentName}:`, error);
+      
+      // Check if it's a chunk loading error
+      const isChunkError = error?.message?.includes('chunk') || 
+                          error?.message?.includes('loading') ||
+                          error?.code === 'CHUNK_LOAD_ERROR';
+      
+      if (isChunkError && attempt < retries) {
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+        continue;
+      }
+      
+      break;
+    }
+  }
+  
+  // All retries failed
+  const errorMessage = `Failed to load ${componentName} after ${retries + 1} attempts: ${lastError?.message}`;
+  console.error(errorMessage);
+  throw new Error(errorMessage);
+};
+
+/**
+ * Preload critical components after initial load
+ */
+const preloadCriticalComponents = async () => {
+  const criticalComponents = ['Dashboard', 'MyTasks', 'ActionsList'];
+  
+  console.log('[Preload] Starting preload of critical components');
+  
+  const preloadPromises = criticalComponents.map(componentName => 
+    loadComponent(componentName, 1, 500).catch(err => 
+      console.warn(`[Preload] Failed to preload ${componentName}:`, err)
+    )
+  );
+  
+  await Promise.allSettled(preloadPromises);
+  console.log('[Preload] Critical components preloaded');
+};
+
+/**
+ * Preload components based on user role
+ */
+const preloadRoleBasedComponents = async (userRoles) => {
+  const roleComponents = {
+    admin: ['UserManagement', 'RoleManagement', 'AuditLogs'],
+    user: ['Profile', 'ProfileSettings'],
+    manager: ['ReportsList', 'CalendarView']
+  };
+  
+  const componentsToPreload = [];
+  
+  for (const role of userRoles) {
+    if (roleComponents[role]) {
+      componentsToPreload.push(...roleComponents[role]);
+    }
+  }
+  
+  if (componentsToPreload.length > 0) {
+    console.log('[Preload] Preloading role-based components:', componentsToPreload);
+    
+    const preloadPromises = componentsToPreload.map(componentName =>
+      loadComponent(componentName, 1, 500).catch(err =>
+        console.warn(`[Preload] Failed to preload ${componentName}:`, err)
+      )
     );
-  }
-
-  if (!Component) {
-    return <LoadingScreen message={`Loading ${componentName}...`} fullScreen={false} />;
-  }
-
-  return <Component />;
-};
-
-// Improved lazy loading wrapper with better error handling
-const lazyWithRetry = (componentImport, componentName) => {
-  return lazy(() => 
-    componentImport()
-      .then(module => {
-        console.log(`[Success] Loaded ${componentName}`);
-        return module;
-      })
-      .catch((error) => {
-        console.error(`[Failed] Could not load ${componentName}:`, error);
-        // Log more details about the error
-        console.error(`Error details:`, {
-          message: error?.message,
-          name: error?.name,
-          code: error?.code,
-          stack: error?.stack
-        });
-        
-        // Try to reload the page once on chunk load failure
-        if (error?.message?.includes('chunk') || 
-            error?.message?.includes('loading') ||
-            error?.code === 'CHUNK_LOAD_ERROR') {
-          console.log(`[Retry] Reloading page for ${componentName}`);
-          window.location.reload();
-        }
-        
-        // Throw a more user-friendly error
-        throw new Error(`Failed to load ${componentName}. Please refresh the page.`);
-      })
-  );
-};
-
-// Fallback component for when lazy loading fails
-const FallbackComponent = ({ componentName }) => {
-  return (
-    <Box sx={{ p: 3, textAlign: 'center' }}>
-      <Typography color="error" gutterBottom>
-        Failed to load {componentName}
-      </Typography>
-      <Button variant="contained" onClick={() => window.location.reload()}>
-        Retry
-      </Button>
-    </Box>
-  );
-};
-
-// Lazy Loaded Pages with retry capability - TEST EACH ONE
-// Start with a test to see which component is failing
-const testImport = async (path, name) => {
-  try {
-    console.log(`Testing import: ${name}`);
-    const module = await import(path);
-    console.log(`✓ ${name} loaded successfully`);
-    return module;
-  } catch (error) {
-    console.error(`✗ ${name} failed to load:`, error);
-    throw error;
+    
+    await Promise.allSettled(preloadPromises);
   }
 };
+
+// ========== Create Lazy Components ==========
 
 // Auth Pages
-const SignInSide = lazyWithRetry(() => testImport('./pages/SignInSide', 'SignInSide'), 'SignInSide');
-const SignUp = lazyWithRetry(() => testImport('./pages/SignUp', 'SignUp'), 'SignUp');
+const SignInSide = createLazyComponent('SignInSide');
+const SignUp = createLazyComponent('SignUp');
 
 // Action Tracker - Dashboard
-const Dashboard = lazyWithRetry(() => testImport('./components/actiontracker/dashboard/Dashboard', 'Dashboard'), 'Dashboard');
+const Dashboard = createLazyComponent('Dashboard', { preload: true });
 
 // Action Tracker - Meetings
-const Meetings = lazyWithRetry(() => testImport('./components/actiontracker/meetings/Meetings', 'Meetings'), 'Meetings');
-const CreateMeeting = lazyWithRetry(() => testImport('./components/actiontracker/meetings/CreateMeeting', 'CreateMeeting'), 'CreateMeeting');
-const MeetingDetail = lazyWithRetry(() => testImport('./components/actiontracker/meetings/MeetingDetail', 'MeetingDetail'), 'MeetingDetail');
-const EditMeeting = lazyWithRetry(() => testImport('./components/actiontracker/meetings/EditMeeting', 'EditMeeting'), 'EditMeeting');
+const Meetings = createLazyComponent('Meetings');
+const CreateMeeting = createLazyComponent('CreateMeeting');
+const MeetingDetail = createLazyComponent('MeetingDetail');
+const EditMeeting = createLazyComponent('EditMeeting');
 
 // Action Tracker - Actions
-const ActionsList = lazyWithRetry(() => testImport('./components/actiontracker/actions/ActionsList', 'ActionsList'), 'ActionsList');
-const MyTasks = lazyWithRetry(() => testImport('./components/actiontracker/actions/MyTasks', 'MyTasks'), 'MyTasks');
-const AllActions = lazyWithRetry(() => testImport('./components/actiontracker/actions/AllActions', 'AllActions'), 'AllActions');
-const ActionDetail = lazyWithRetry(() => testImport('./components/actiontracker/actions/ActionDetail', 'ActionDetail'), 'ActionDetail');
-const OverdueActions = lazyWithRetry(() => testImport('./components/actiontracker/actions/OverdueActions', 'OverdueActions'), 'OverdueActions');
-const AssignAction = lazyWithRetry(() => testImport('./components/actiontracker/actions/AssignAction', 'AssignAction'), 'AssignAction');
-const UpdateProgress = lazyWithRetry(() => testImport('./components/actiontracker/actions/UpdateProgress', 'UpdateProgress'), 'UpdateProgress');
+const ActionsList = createLazyComponent('ActionsList', { preload: true });
+const MyTasks = createLazyComponent('MyTasks', { preload: true });
+const AllActions = createLazyComponent('AllActions');
+const ActionDetail = createLazyComponent('ActionDetail');
+const OverdueActions = createLazyComponent('OverdueActions');
+const AssignAction = createLazyComponent('AssignAction');
+const UpdateProgress = createLazyComponent('UpdateProgress');
 
 // Action Tracker - Participants
-const ParticipantsLists = lazyWithRetry(() => testImport('./components/actiontracker/participants/ParticipantsLists', 'ParticipantsLists'), 'ParticipantsLists');
-const ParticipantListsManager = lazyWithRetry(() => testImport('./components/actiontracker/participants/ParticipantListsManager', 'ParticipantListsManager'), 'ParticipantListsManager');
-const CreateParticipant = lazyWithRetry(() => testImport('./components/actiontracker/participants/CreateParticipant', 'CreateParticipant'), 'CreateParticipant');
-const ParticipantDetail = lazyWithRetry(() => testImport('./components/actiontracker/participants/ParticipantDetail', 'ParticipantDetail'), 'ParticipantDetail');
-
-// Action Tracker - Bulk Import
-const BulkImportPage = lazyWithRetry(() => testImport('./components/actiontracker/participants/BulkImportPage', 'BulkImportPage'), 'BulkImportPage');
+const ParticipantsLists = createLazyComponent('ParticipantsLists');
+const ParticipantListsManager = createLazyComponent('ParticipantListsManager');
+const CreateParticipant = createLazyComponent('CreateParticipant');
+const ParticipantDetail = createLazyComponent('ParticipantDetail');
+const BulkImportPage = createLazyComponent('BulkImportPage');
 
 // Action Tracker - Documents & Reports
-const DocumentsList = lazyWithRetry(() => testImport('./components/actiontracker/documents/DocumentsList', 'DocumentsList'), 'DocumentsList');
-const ReportsList = lazyWithRetry(() => testImport('./components/actiontracker/reports/ReportsList', 'ReportsList'), 'ReportsList');
+const DocumentsList = createLazyComponent('DocumentsList');
+const ReportsList = createLazyComponent('ReportsList');
 
 // Action Tracker - Calendar & Settings
-const CalendarView = lazyWithRetry(() => testImport('./components/actiontracker/calendar/CalendarView', 'CalendarView'), 'CalendarView');
-const Settings = lazyWithRetry(() => testImport('./components/actiontracker/settings/Settings', 'Settings'), 'Settings');
+const CalendarView = createLazyComponent('CalendarView');
+const Settings = createLazyComponent('Settings');
 
 // Profile Components
-const Profile = lazyWithRetry(() => testImport('./components/profile/Profile', 'Profile'), 'Profile');
-const ProfileSettings = lazyWithRetry(() => testImport('./components/profile/ProfileSettings', 'ProfileSettings'), 'ProfileSettings');
-const SecuritySettings = lazyWithRetry(() => testImport('./components/profile/SecuritySettings', 'SecuritySettings'), 'SecuritySettings');
-const NotificationSettings = lazyWithRetry(() => testImport('./components/profile/NotificationSettings', 'NotificationSettings'), 'NotificationSettings');
-const PreferenceSettings = lazyWithRetry(() => testImport('./components/profile/PreferenceSettings', 'PreferenceSettings'), 'PreferenceSettings');
+const Profile = createLazyComponent('Profile');
+const ProfileSettings = createLazyComponent('ProfileSettings');
+const SecuritySettings = createLazyComponent('SecuritySettings');
+const NotificationSettings = createLazyComponent('NotificationSettings');
+const PreferenceSettings = createLazyComponent('PreferenceSettings');
 
 // Admin Components
-const UserManagement = lazyWithRetry(() => testImport('./components/admin/UserManagement', 'UserManagement'), 'UserManagement');
-const RoleManagement = lazyWithRetry(() => testImport('./components/admin/RoleManagement', 'RoleManagement'), 'RoleManagement');
-const AuditLogs = lazyWithRetry(() => testImport('./components/admin/AuditLogs', 'AuditLogs'), 'AuditLogs');
+const UserManagement = createLazyComponent('UserManagement');
+const RoleManagement = createLazyComponent('RoleManagement');
+const AuditLogs = createLazyComponent('AuditLogs');
 
 // Error Pages
-const NotFound = lazyWithRetry(() => testImport('./pages/NotFound', 'NotFound'), 'NotFound');
-const Forbidden = lazyWithRetry(() => testImport('./pages/Forbidden', 'Forbidden'), 'Forbidden');
+const NotFound = createLazyComponent('NotFound');
+const Forbidden = createLazyComponent('Forbidden');
 
-// Animations
+// Animations (keep your existing animations)
 const pulse = keyframes`
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.05); opacity: 0.8; }
@@ -225,7 +337,7 @@ const fadeInOut = keyframes`
 `;
 
 /**
- * Enhanced Loading Screen
+ * Enhanced Loading Screen with progress indication
  */
 const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, progress = null }) => {
   return (
@@ -268,11 +380,18 @@ const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, 
 };
 
 /**
- * Role-Based Protected Route
+ * Role-Based Protected Route with preloading
  */
 const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = [] }) => {
   const { isAuthenticated, isAuthChecking, user } = useSelector(selectAuth);
   const location = useLocation();
+  
+  // Preload role-based components when user is loaded
+  useEffect(() => {
+    if (user?.roles && user.roles.length > 0) {
+      preloadRoleBasedComponents(user.roles);
+    }
+  }, [user]);
 
   if (isAuthChecking) {
     return <LoadingScreen message="Verifying access..." fullScreen={false} />;
@@ -291,7 +410,7 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
     }
   }
 
-  // Check permissions (if needed)
+  // Check permissions
   if (requiredPermissions.length > 0) {
     const userPermissions = user?.permissions || [];
     const hasPermission = requiredPermissions.some(permission => userPermissions.includes(permission));
@@ -304,7 +423,7 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
 };
 
 /**
- * Public Only Route (Redirects to dashboard if logged in)
+ * Public Only Route
  */
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, isAuthChecking } = useSelector(selectAuth);
@@ -319,7 +438,7 @@ const PublicRoute = ({ children }) => {
 };
 
 /**
- * Route configuration for better organization
+ * Route configuration
  */
 const routeConfig = {
   publicRoutes: [
@@ -367,16 +486,14 @@ const routeConfig = {
     { path: "settings/preferences", element: <PreferenceSettings /> },
     { path: "settings/status", element: <Settings /> },
     { path: "settings/document-types", element: <Settings /> },
-    // REMOVE these from here since they're in adminRoutes
-     { path: "settings/users", element: <UserManagement /> },
-    // { path: "settings/roles", element: <RoleManagement /> },
-    // { path: "settings/audit", element: <AuditLogs /> },
+    { path: "settings/users", element: <UserManagement /> },
+    { path: "settings/roles", element: <RoleManagement /> },
+    { path: "settings/audit", element: <AuditLogs /> },
   ],
   adminRoutes: [
     { path: "admin/users", element: <UserManagement />, roles: ['admin'] },
     { path: "admin/roles", element: <RoleManagement />, roles: ['admin'] },
     { path: "admin/audit", element: <AuditLogs />, roles: ['admin', 'auditor'] },
-    // Add settings paths here with roles
     { path: "settings/users", element: <UserManagement />, roles: ['admin'] },
     { path: "settings/roles", element: <RoleManagement />, roles: ['admin'] },
     { path: "settings/audit", element: <AuditLogs />, roles: ['admin', 'auditor'] },
@@ -384,11 +501,11 @@ const routeConfig = {
 };
 
 /**
- * Main Application Routing and Initialization
+ * AppContent Component with preloading on initialization
  */
 const AppContent = () => {
   const dispatch = useDispatch();
-  const { isAuthenticated } = useSelector(selectAuth);
+  const { isAuthenticated, user } = useSelector(selectAuth);
   const [initialized, setInitialized] = useState(false);
   const [initError, setInitError] = useState(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -405,16 +522,19 @@ const AppContent = () => {
         // Attempt to restore session from token
         setLoadingProgress(60);
         await dispatch(checkAuth()).unwrap();
+        setLoadingProgress(80);
+        
+        // Preload critical components after auth check
+        await preloadCriticalComponents();
         setLoadingProgress(100);
+        
       } catch (err) {
         console.error('Initialization error:', err?.message || err);
-        // Only set error for network issues, not for 401/403
         if (err?.status === 0 || err?.code === 'ERR_NETWORK') {
           setInitError('Unable to connect to the server. Please check your connection.');
         } else if (err?.status === 500) {
           setInitError('Server error. Please try again later.');
         }
-        // Don't set error for auth failures - just continue
       } finally {
         setInitialized(true);
       }
@@ -422,6 +542,13 @@ const AppContent = () => {
 
     initialize();
   }, [dispatch]);
+
+  // Preload role-based components when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && user?.roles) {
+      preloadRoleBasedComponents(user.roles);
+    }
+  }, [isAuthenticated, user]);
 
   // Fatal Error UI
   if (initError) {
@@ -521,9 +648,10 @@ const AppContent = () => {
 export default function App() {
   const baseUrl = import.meta.env.BASE_URL;
   
-  // Log all imports on startup to see which ones fail
   useEffect(() => {
     console.log('App initializing...');
+    console.log(`[Config] Environment: ${import.meta.env.MODE}`);
+    console.log(`[Config] Base URL: ${baseUrl}`);
   }, []);
   
   return (

@@ -92,32 +92,47 @@ print_success "Authenticated"
 # ==================== GET OR CREATE ATTRIBUTE GROUP ====================
 print_info "Fetching Action Tracker attribute group..."
 
-# Try to get existing group
-GROUP_RESPONSE=$(curl -s -X GET "${API_URL}/attribute-groups/by-code/ACTION_TRACKER" \
+# Try to get existing group using the same method as seed_gender.sh
+GROUP_RESPONSE=$(curl -s -X GET "${API_URL}/attribute-groups/?code=ACTION_TRACKER" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
 
-GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
-
-if [ -z "$GROUP_ID" ]; then
+# Handle paginated response
+if echo "$GROUP_RESPONSE" | jq -e '.items[0].id' > /dev/null 2>&1; then
+    GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r '.items[0].id')
+    print_success "Found existing Action Tracker group (ID: ${GROUP_ID:0:8}...)"
+else
     print_info "Creating Action Tracker attribute group..."
-    GROUP_RESPONSE=$(curl -s -X POST "${API_URL}/attribute-groups" \
+    GROUP_CREATE_JSON=$(cat <<EOF
+{
+    "code": "ACTION_TRACKER",
+    "name": "Action Tracker",
+    "description": "Action Tracker application attributes",
+    "allow_multiple": false,
+    "is_required": false,
+    "display_order": 10,
+    "extra_metadata": {
+        "icon": "track_changes",
+        "color": "#3B82F6",
+        "category": "application",
+        "is_system": true
+    }
+}
+EOF
+)
+    
+    GROUP_CREATE_RESPONSE=$(curl -s -X POST "${API_URL}/attribute-groups/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
-        -d '{
-            "code": "ACTION_TRACKER",
-            "name": "Action Tracker",
-            "description": "Action Tracker application attributes",
-            "is_system": true
-        }')
-    GROUP_ID=$(echo "$GROUP_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+        -d "$GROUP_CREATE_JSON")
+    
+    GROUP_ID=$(echo "$GROUP_CREATE_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+    
+    if [ -z "$GROUP_ID" ] || [ "$GROUP_ID" == "null" ]; then
+        print_error "Failed to create attribute group"
+        exit 1
+    fi
+    print_success "Action Tracker group created (ID: ${GROUP_ID:0:8}...)"
 fi
-
-if [ -z "$GROUP_ID" ]; then
-    print_error "Failed to get or create attribute group"
-    exit 1
-fi
-
-print_success "Attribute Group ID: ${GROUP_ID:0:8}..."
 
 # ==================== FUNCTION TO CREATE ATTRIBUTE ====================
 create_attribute() {
@@ -128,63 +143,47 @@ create_attribute() {
     local options_json=$5
     local extra_metadata_json=$6
     local is_required=${7:-false}
-    local is_system=${8:-false}
     
     print_info "Creating attribute: ${name} (${code})..."
     
-    # Build JSON payload
-    JSON_PAYLOAD=$(jq -n \
-        --arg group_id "$GROUP_ID" \
-        --arg code "$code" \
-        --arg name "$name" \
-        --arg description "$description" \
-        --arg data_type "$data_type" \
-        --argjson options "$options_json" \
-        --argjson extra_metadata "$extra_metadata_json" \
-        --argjson is_required "$is_required" \
-        --argjson is_system "$is_system" \
-        '{
-            group_id: $group_id,
-            code: $code,
-            name: $name,
-            description: $description,
-            data_type: $data_type,
-            options: $options,
-            extra_metadata: $extra_metadata,
-            is_required: $is_required,
-            is_system: $is_system
-        }')
+    # Check if attribute already exists
+    EXISTING=$(curl -s -X GET "${API_URL}/attributes/?group_code=ACTION_TRACKER&code=${code}" \
+        -H "Authorization: Bearer $ADMIN_TOKEN")
     
-    RESPONSE=$(curl -s -X POST "${API_URL}/attributes" \
+    if echo "$EXISTING" | jq -e '.items[0].id' > /dev/null 2>&1; then
+        print_warning "  ⏭️  Already exists, skipping"
+        return 0
+    fi
+    
+    # Build JSON payload
+    ATTRIBUTE_JSON=$(cat <<EOF
+{
+    "group_code": "ACTION_TRACKER",
+    "code": "${code}",
+    "name": "${name}",
+    "description": "${description}",
+    "data_type": "${data_type}",
+    "options": ${options_json},
+    "extra_metadata": ${extra_metadata_json},
+    "is_required": ${is_required},
+    "display_order": 1
+}
+EOF
+)
+    
+    RESPONSE=$(curl -s -X POST "${API_URL}/attributes/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
-        -d "$JSON_PAYLOAD")
+        -d "$ATTRIBUTE_JSON")
     
     ATTRIBUTE_ID=$(echo "$RESPONSE" | jq -r '.id // empty' 2>/dev/null)
     
     if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "null" ]; then
-        print_success "    ✅ Attribute created (ID: ${ATTRIBUTE_ID:0:8}...)"
-        echo "$ATTRIBUTE_ID"
+        print_success "    ✅ Created (ID: ${ATTRIBUTE_ID:0:8}...)"
         return 0
     else
         ERROR_MSG=$(echo "$RESPONSE" | jq -r '.detail // .message // "Unknown error"' 2>/dev/null)
-        
-        # Check if attribute already exists
-        if [[ "$ERROR_MSG" == *"already exists"* ]]; then
-            print_warning "    ⏭️  Attribute already exists"
-            # Try to get existing attribute ID
-            GET_RESPONSE=$(curl -s -X GET "${API_URL}/attributes/by-code/${code}" \
-                -H "Authorization: Bearer $ADMIN_TOKEN")
-            ATTRIBUTE_ID=$(echo "$GET_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
-            if [ -n "$ATTRIBUTE_ID" ] && [ "$ATTRIBUTE_ID" != "null" ]; then
-                print_success "    ✅ Found existing attribute (ID: ${ATTRIBUTE_ID:0:8}...)"
-                echo "$ATTRIBUTE_ID"
-                return 0
-            fi
-        fi
-        
-        print_error "    ❌ Failed to create attribute: ${ERROR_MSG}"
-        echo ""
+        print_error "    ❌ Failed: ${ERROR_MSG}"
         return 1
     fi
 }
@@ -219,7 +218,7 @@ EXTRA_METADATA='{
     "default": "scheduled"
 }'
 
-create_attribute "MEETING_STATUS" "Meeting Status" "Status of meetings from scheduling to completion" "select" "$OPTIONS" "$EXTRA_METADATA" true true && ((SUCCESS_COUNT++))
+create_attribute "MEETING_STATUS" "Meeting Status" "Status of meetings from scheduling to completion" "select" "$OPTIONS" "$EXTRA_METADATA" true && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 2. ACTION STATUS ====================
@@ -252,7 +251,7 @@ EXTRA_METADATA='{
     }
 }'
 
-create_attribute "ACTION_STATUS" "Action Status" "Overall status of action items" "select" "$OPTIONS" "$EXTRA_METADATA" true true && ((SUCCESS_COUNT++))
+create_attribute "ACTION_STATUS" "Action Status" "Overall status of action items" "select" "$OPTIONS" "$EXTRA_METADATA" true && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 3. INDIVIDUAL STATUS ====================
@@ -283,7 +282,7 @@ EXTRA_METADATA='{
     }
 }'
 
-create_attribute "INDIVIDUAL_STATUS" "Individual Status" "User's self-reported status for assigned actions" "select" "$OPTIONS" "$EXTRA_METADATA" false true && ((SUCCESS_COUNT++))
+create_attribute "INDIVIDUAL_STATUS" "Individual Status" "User's self-reported status for assigned actions" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 4. DOCUMENT TYPE ====================
@@ -308,7 +307,7 @@ EXTRA_METADATA='{
     "allowed_extensions": ["pdf", "doc", "docx", "xlsx", "pptx", "jpg", "png", "txt"]
 }'
 
-create_attribute "DOCUMENT_TYPE" "Document Type" "Types of documents attached to meetings and actions" "select" "$OPTIONS" "$EXTRA_METADATA" false false && ((SUCCESS_COUNT++))
+create_attribute "DOCUMENT_TYPE" "Document Type" "Types of documents attached to meetings and actions" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 5. ACTION PRIORITY ====================
@@ -331,7 +330,7 @@ EXTRA_METADATA='{
     "default": "medium"
 }'
 
-create_attribute "ACTION_PRIORITY" "Action Priority" "Priority levels for action items" "select" "$OPTIONS" "$EXTRA_METADATA" true true && ((SUCCESS_COUNT++))
+create_attribute "ACTION_PRIORITY" "Action Priority" "Priority levels for action items" "select" "$OPTIONS" "$EXTRA_METADATA" true && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 6. PARTICIPANT LIST VISIBILITY ====================
@@ -352,7 +351,7 @@ EXTRA_METADATA='{
     "default": "private"
 }'
 
-create_attribute "PARTICIPANT_LIST_VISIBILITY" "Participant List Visibility" "Visibility levels for participant lists" "select" "$OPTIONS" "$EXTRA_METADATA" true true && ((SUCCESS_COUNT++))
+create_attribute "PARTICIPANT_LIST_VISIBILITY" "Participant List Visibility" "Visibility levels for participant lists" "select" "$OPTIONS" "$EXTRA_METADATA" true && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 7. NOTIFICATION TYPE ====================
@@ -374,7 +373,7 @@ EXTRA_METADATA='{
     "default": "email"
 }'
 
-create_attribute "NOTIFICATION_TYPE" "Notification Type" "Types of notifications sent to users" "select" "$OPTIONS" "$EXTRA_METADATA" false false && ((SUCCESS_COUNT++))
+create_attribute "NOTIFICATION_TYPE" "Notification Type" "Types of notifications sent to users" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== 8. RECURRENCE PATTERN ====================
@@ -397,7 +396,7 @@ EXTRA_METADATA='{
     "default": "none"
 }'
 
-create_attribute "RECURRENCE_PATTERN" "Recurrence Pattern" "Recurrence pattern for recurring meetings" "select" "$OPTIONS" "$EXTRA_METADATA" false false && ((SUCCESS_COUNT++))
+create_attribute "RECURRENCE_PATTERN" "Recurrence Pattern" "Recurrence pattern for recurring meetings" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
 # ==================== SUMMARY ====================
@@ -408,18 +407,18 @@ print_separator
 echo ""
 
 echo -e "${CYAN}📊 Summary:${NC}"
-echo "  • Attributes created: ${SUCCESS_COUNT}/${TOTAL_COUNT}"
+echo "  • Attributes processed: ${SUCCESS_COUNT}/${TOTAL_COUNT}"
 echo ""
 
 echo -e "${CYAN}📋 Attributes Created:${NC}"
-echo "  ✅ MEETING_STATUS - Meeting Status (select)"
-echo "  ✅ ACTION_STATUS - Action Status (select)"
-echo "  ✅ INDIVIDUAL_STATUS - Individual Status (select)"
-echo "  ✅ DOCUMENT_TYPE - Document Type (select)"
-echo "  ✅ ACTION_PRIORITY - Action Priority (select)"
-echo "  ✅ PARTICIPANT_LIST_VISIBILITY - Participant List Visibility (select)"
-echo "  ✅ NOTIFICATION_TYPE - Notification Type (select)"
-echo "  ✅ RECURRENCE_PATTERN - Recurrence Pattern (select)"
+echo "  ✅ MEETING_STATUS - Meeting Status"
+echo "  ✅ ACTION_STATUS - Action Status"
+echo "  ✅ INDIVIDUAL_STATUS - Individual Status"
+echo "  ✅ DOCUMENT_TYPE - Document Type"
+echo "  ✅ ACTION_PRIORITY - Action Priority"
+echo "  ✅ PARTICIPANT_LIST_VISIBILITY - Participant List Visibility"
+echo "  ✅ NOTIFICATION_TYPE - Notification Type"
+echo "  ✅ RECURRENCE_PATTERN - Recurrence Pattern"
 echo ""
 
 if [ $SUCCESS_COUNT -eq $TOTAL_COUNT ]; then

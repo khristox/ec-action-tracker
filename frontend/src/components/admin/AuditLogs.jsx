@@ -1,17 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Box,
   Container,
   Typography,
   Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TablePagination,
   TextField,
   Button,
   IconButton,
@@ -28,7 +21,6 @@ import {
   MenuItem,
   Alert,
   Snackbar,
-  CircularProgress,
   InputAdornment,
   Tooltip,
   Card,
@@ -36,8 +28,14 @@ import {
   Tabs,
   Tab,
   Stack,
-  Badge,
   useTheme,
+  Skeleton,
+  Divider,
+  Badge,
+  Zoom,
+  Fade,
+  Grow,
+  CircularProgress,
 } from '@mui/material';
 import {
   SearchOutlined,
@@ -51,27 +49,46 @@ import {
   DeleteOutlined,
   EditOutlined,
   SecurityOutlined,
-  AdminPanelSettingsOutlined,
-  FilterListOutlined,
   ClearOutlined,
   InfoOutlined,
-  WarningAmberOutlined,
   ErrorOutline,
   CheckCircleOutline,
+  FilterListOutlined,
+  CalendarTodayOutlined,
+  ComputerOutlined,
+  StorageOutlined,
+  TrendingUpOutlined,
   CloseOutlined,
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
+import { motion, AnimatePresence } from 'framer-motion';
 import { fetchAuditLogs, getAuditStats, exportAuditLogs } from '../../store/slices/auditSlice';
-import { format } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
+
+// Animation variants
+const fadeInUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
+};
+
+const staggerContainer = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.1 }
+  }
+};
 
 const AuditLogs = () => {
   const theme = useTheme();
   const dispatch = useDispatch();
-  const { logs, stats, isLoading, total, error } = useSelector((state) => state.audit);
+  const { logs, stats, isLoading, total, error } = useSelector((state) => state.audit || { logs: [], stats: {}, isLoading: false, total: 0, error: null });
 
+  // State management
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateRange, setDateRange] = useState({
@@ -81,52 +98,94 @@ const AuditLogs = () => {
   const [selectedLog, setSelectedLog] = useState(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
-  const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
+  const [exportLoading, setExportLoading] = useState(false);
+  const [quickDateRange, setQuickDateRange] = useState('7d');
 
-  // Load logs on mount and when filters change
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setPage(0);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Load data on filter changes
   useEffect(() => {
     loadLogs();
     loadStats();
-  }, [page, rowsPerPage, searchTerm, actionFilter, statusFilter, dateRange]);
+  }, [page, rowsPerPage, debouncedSearch, actionFilter, statusFilter, dateRange, activeTab]);
 
-  const loadLogs = () => {
+  const loadLogs = useCallback(() => {
+    // Map tab to action filter
+    let tabActionFilter = actionFilter;
+    if (activeTab === 1) tabActionFilter = 'login';
+    if (activeTab === 2) tabActionFilter = 'create,update,delete';
+    if (activeTab === 3) tabActionFilter = 'admin';
+
     dispatch(fetchAuditLogs({
       page: page + 1,
       limit: rowsPerPage,
-      search: searchTerm,
-      action: actionFilter !== 'all' ? actionFilter : undefined,
+      search: debouncedSearch || undefined,
+      action: tabActionFilter !== 'all' ? tabActionFilter : undefined,
       status: statusFilter !== 'all' ? statusFilter : undefined,
       start_date: dateRange.startDate || undefined,
       end_date: dateRange.endDate || undefined,
     }));
-  };
+  }, [dispatch, page, rowsPerPage, debouncedSearch, actionFilter, statusFilter, dateRange, activeTab]);
 
-  const loadStats = () => {
-    dispatch(getAuditStats());
-  };
-
-  const handlePageChange = (event, newPage) => {
-    setPage(newPage);
-  };
-
-  const handleRowsPerPageChange = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
+  const loadStats = useCallback(() => {
+    dispatch(getAuditStats({ days: 30 }));
+  }, [dispatch]);
 
   const handleSearch = (event) => {
     setSearchTerm(event.target.value);
     setPage(0);
   };
 
+  const handleQuickDateRange = (range) => {
+    setQuickDateRange(range);
+    const endDate = new Date();
+    let startDate = new Date();
+    
+    switch(range) {
+      case '24h':
+        startDate = subDays(endDate, 1);
+        break;
+      case '7d':
+        startDate = subDays(endDate, 7);
+        break;
+      case '30d':
+        startDate = subDays(endDate, 30);
+        break;
+      case '90d':
+        startDate = subDays(endDate, 90);
+        break;
+      default:
+        return;
+    }
+    
+    setDateRange({
+      startDate: format(startDate, 'yyyy-MM-dd'),
+      endDate: format(endDate, 'yyyy-MM-dd')
+    });
+    setPage(0);
+  };
+
   const handleClearFilters = () => {
     setSearchTerm('');
+    setDebouncedSearch('');
     setActionFilter('all');
     setStatusFilter('all');
     setDateRange({ startDate: '', endDate: '' });
+    setQuickDateRange('7d');
     setPage(0);
+    setActiveTab(0);
   };
 
   const handleViewDetails = (log) => {
@@ -134,63 +193,70 @@ const AuditLogs = () => {
     setDetailsDialogOpen(true);
   };
 
-  const handleExport = async () => {
-    try {
-      await dispatch(exportAuditLogs({
-        search: searchTerm,
-        action: actionFilter !== 'all' ? actionFilter : undefined,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        start_date: dateRange.startDate || undefined,
-        end_date: dateRange.endDate || undefined,
-      }));
-      setSnackbarMessage('Export started. You will receive an email when ready.');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
-    } catch (error) {
-      setSnackbarMessage('Failed to export logs');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    }
-  };
-
   const handleRefresh = () => {
     loadLogs();
     loadStats();
   };
 
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
+  const handleExport = async () => {
+    setExportLoading(true);
+    try {
+      const result = await dispatch(exportAuditLogs({
+        search: debouncedSearch || undefined,
+        action: actionFilter !== 'all' ? actionFilter : undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        start_date: dateRange.startDate || undefined,
+        end_date: dateRange.endDate || undefined,
+      })).unwrap();
+      
+      showSnackbar('Export completed successfully', 'success');
+    } catch (error) {
+      showSnackbar(error.message || 'Failed to export logs', 'error');
+    } finally {
+      setExportLoading(false);
+    }
   };
 
-  // Get icon for action type
+  const showSnackbar = (message, severity) => {
+    setSnackbar({ open: true, message, severity });
+  };
+
   const getActionIcon = (action) => {
     const actionLower = action?.toLowerCase() || '';
-    if (actionLower.includes('login')) return <LoginOutlined fontSize="small" color="info" />;
-    if (actionLower.includes('logout')) return <LogoutOutlined fontSize="small" color="warning" />;
-    if (actionLower.includes('create')) return <CreateOutlined fontSize="small" color="success" />;
-    if (actionLower.includes('update') || actionLower.includes('edit')) return <EditOutlined fontSize="small" color="primary" />;
-    if (actionLower.includes('delete')) return <DeleteOutlined fontSize="small" color="error" />;
-    return <InfoOutlined fontSize="small" color="action" />;
+    if (actionLower.includes('login')) return <LoginOutlined fontSize="small" />;
+    if (actionLower.includes('logout')) return <LogoutOutlined fontSize="small" />;
+    if (actionLower.includes('create')) return <CreateOutlined fontSize="small" />;
+    if (actionLower.includes('update') || actionLower.includes('edit')) return <EditOutlined fontSize="small" />;
+    if (actionLower.includes('delete')) return <DeleteOutlined fontSize="small" />;
+    return <InfoOutlined fontSize="small" />;
   };
 
-  // Get color for status
+  const getActionColor = (action) => {
+    const actionLower = action?.toLowerCase() || '';
+    if (actionLower.includes('login')) return 'info';
+    if (actionLower.includes('logout')) return 'warning';
+    if (actionLower.includes('create')) return 'success';
+    if (actionLower.includes('update')) return 'primary';
+    if (actionLower.includes('delete')) return 'error';
+    return 'default';
+  };
+
   const getStatusColor = (status) => {
     if (status === 'success') return 'success';
     if (status === 'failure') return 'error';
     return 'default';
   };
 
-  // Table columns
-  const columns = [
+  // Memoized columns definition
+  const columns = useMemo(() => [
     {
       field: 'timestamp',
       headerName: 'Timestamp',
       width: 180,
-      valueGetter: (params) => params.row.timestamp ? new Date(params.row.timestamp).toLocaleString() : '—',
       renderCell: (params) => (
-        <Tooltip title={params.row.timestamp ? new Date(params.row.timestamp).toLocaleString() : '—'}>
-          <Typography variant="body2">
-            {params.row.timestamp ? format(new Date(params.row.timestamp), 'MMM dd, HH:mm:ss') : '—'}
+        <Tooltip title={params.row.timestamp ? format(parseISO(params.row.timestamp), 'PPpp') : '—'}>
+          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+            {params.row.timestamp ? format(parseISO(params.row.timestamp), 'MMM dd, HH:mm:ss') : '—'}
           </Typography>
         </Tooltip>
       ),
@@ -198,18 +264,18 @@ const AuditLogs = () => {
     {
       field: 'user',
       headerName: 'User',
-      width: 200,
+      width: 220,
       renderCell: (params) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-            {params.row.username?.[0]?.toUpperCase() || 'U'}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: '0.875rem' }}>
+            {params.row.user_email?.[0]?.toUpperCase() || params.row.username?.[0]?.toUpperCase() || 'U'}
           </Avatar>
           <Box>
             <Typography variant="body2" fontWeight={500}>
-              {params.row.username || 'System'}
+              {params.row.user_email || params.row.username || 'System'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {params.row.user_email || params.row.username}
+              {params.row.user_id ? `ID: ${params.row.user_id.slice(0, 8)}` : 'System Action'}
             </Typography>
           </Box>
         </Box>
@@ -218,56 +284,66 @@ const AuditLogs = () => {
     {
       field: 'action',
       headerName: 'Action',
-      width: 150,
+      width: 160,
       renderCell: (params) => (
         <Chip
           icon={getActionIcon(params.row.action)}
           label={params.row.action?.replace(/_/g, ' ') || '—'}
           size="small"
+          color={getActionColor(params.row.action)}
           variant="outlined"
+          sx={{ textTransform: 'capitalize' }}
         />
       ),
     },
     {
-      field: 'resource_type',
+      field: 'table_name',
       headerName: 'Resource',
       width: 150,
       renderCell: (params) => (
-        <Typography variant="body2" color="text.secondary">
-          {params.row.resource_type?.replace(/_/g, ' ') || '—'}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <StorageOutlined fontSize="small" color="action" />
+          <Typography variant="body2" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
+            {params.row.table_name?.replace(/_/g, ' ') || '—'}
+          </Typography>
+        </Box>
       ),
     },
     {
-      field: 'resource_id',
-      headerName: 'Resource ID',
-      width: 120,
+      field: 'record_id',
+      headerName: 'Record ID',
+      width: 130,
       renderCell: (params) => (
-        <Typography variant="caption" fontFamily="monospace">
-          {params.row.resource_id?.slice(0, 8) || '—'}
+        <Typography variant="caption" fontFamily="monospace" sx={{ opacity: 0.7 }}>
+          {params.row.record_id?.slice(0, 12) || '—'}
+          {params.row.record_id?.length > 12 && '...'}
         </Typography>
       ),
     },
     {
       field: 'ip_address',
       headerName: 'IP Address',
-      width: 130,
+      width: 140,
       renderCell: (params) => (
-        <Typography variant="body2" fontFamily="monospace">
-          {params.row.ip_address || '—'}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <ComputerOutlined fontSize="small" color="action" />
+          <Typography variant="body2" fontFamily="monospace">
+            {params.row.ip_address || '—'}
+          </Typography>
+        </Box>
       ),
     },
     {
       field: 'status',
       headerName: 'Status',
-      width: 100,
+      width: 110,
       renderCell: (params) => (
         <Chip
           label={params.row.status || 'success'}
           size="small"
           color={getStatusColor(params.row.status)}
-          variant="outlined"
+          variant="filled"
+          sx={{ fontWeight: 500 }}
         />
       ),
     },
@@ -278,23 +354,46 @@ const AuditLogs = () => {
       sortable: false,
       renderCell: (params) => (
         <Tooltip title="View Details">
-          <IconButton size="small" onClick={() => handleViewDetails(params.row)}>
+          <IconButton 
+            size="small" 
+            onClick={() => handleViewDetails(params.row)}
+            sx={{ '&:hover': { transform: 'scale(1.1)' } }}
+          >
             <VisibilityOutlined fontSize="small" />
           </IconButton>
         </Tooltip>
       ),
     },
-  ];
+  ], []);
 
-  // Stats cards
-  const statCards = [
-    { title: 'Total Events', value: stats?.total || 0, icon: <InfoOutlined />, color: 'primary.main' },
-    { title: 'Successful', value: stats?.successful || 0, icon: <CheckCircleOutline />, color: 'success.main' },
-    { title: 'Failed', value: stats?.failed || 0, icon: <ErrorOutline />, color: 'error.main' },
-    { title: 'Unique Users', value: stats?.unique_users || 0, icon: <PersonOutline />, color: 'warning.main' },
-  ];
+  // Stats cards configuration
+  const statCards = useMemo(() => [
+    { 
+      title: 'Total Events', 
+      value: stats?.total_events || stats?.total || 0, 
+      icon: <TrendingUpOutlined />, 
+      color: theme.palette.primary.main,
+    },
+    { 
+      title: 'Successful', 
+      value: stats?.successful || 0, 
+      icon: <CheckCircleOutline />, 
+      color: theme.palette.success.main,
+    },
+    { 
+      title: 'Failed', 
+      value: stats?.failed || 0, 
+      icon: <ErrorOutline />, 
+      color: theme.palette.error.main,
+    },
+    { 
+      title: 'Unique Users', 
+      value: stats?.unique_users || 0, 
+      icon: <PersonOutline />, 
+      color: theme.palette.warning.main,
+    },
+  ], [stats, theme]);
 
-  // Action types for filter
   const actionTypes = [
     { value: 'all', label: 'All Actions' },
     { value: 'login', label: 'Login' },
@@ -303,170 +402,243 @@ const AuditLogs = () => {
     { value: 'update', label: 'Update' },
     { value: 'delete', label: 'Delete' },
     { value: 'export', label: 'Export' },
-    { value: 'import', label: 'Import' },
   ];
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" fontWeight={700} gutterBottom>
-          Audit Logs
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Track system activity and user actions
-        </Typography>
-      </Box>
+      <AnimatePresence mode="wait">
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={staggerContainer}
+        >
+          {/* Header */}
+          <motion.div variants={fadeInUp}>
+            <Box sx={{ mb: 4 }}>
+              <Typography variant="h4" fontWeight={700} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <SecurityOutlined sx={{ fontSize: 40, color: 'primary.main' }} />
+                Audit Logs
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Track and monitor all system activities, user actions, and security events
+              </Typography>
+            </Box>
+          </motion.div>
 
-      {/* Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {statCards.map((stat, index) => (
-          <Grid item xs={12} sm={6} md={3} key={index}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography color="text.secondary" gutterBottom>
-                      {stat.title}
-                    </Typography>
-                    <Typography variant="h4">{stat.value}</Typography>
-                  </Box>
-                  <Avatar sx={{ bgcolor: stat.color, width: 48, height: 48 }}>
-                    {stat.icon}
-                  </Avatar>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+          {/* Stats Cards */}
+          <motion.div variants={fadeInUp}>
+            <Grid container spacing={3} sx={{ mb: 4 }}>
+              {statCards.map((stat, index) => (
+                <Grid size={{ xs: 12, sm: 6, md: 3 }} key={index}>
+                  <Zoom in={true} style={{ transitionDelay: `${index * 100}ms` }}>
+                    <Card sx={{ height: '100%', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
+                      <CardContent>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Typography color="text.secondary" gutterBottom variant="body2">
+                              {stat.title}
+                            </Typography>
+                            <Typography variant="h3" fontWeight={700}>
+                              {stat.value.toLocaleString()}
+                            </Typography>
+                          </Box>
+                          <Avatar sx={{ bgcolor: stat.color, width: 56, height: 56 }}>
+                            {stat.icon}
+                          </Avatar>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Zoom>
+                </Grid>
+              ))}
+            </Grid>
+          </motion.div>
 
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={3}>
-            <TextField
-              fullWidth
-              placeholder="Search users, actions, resources..."
-              value={searchTerm}
-              onChange={handleSearch}
-              size="small"
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchOutlined />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Action</InputLabel>
-              <Select
-                value={actionFilter}
-                onChange={(e) => setActionFilter(e.target.value)}
-                label="Action"
-              >
-                {actionTypes.map((action) => (
-                  <MenuItem key={action.value} value={action.value}>
-                    {action.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                label="Status"
-              >
-                <MenuItem value="all">All Status</MenuItem>
-                <MenuItem value="success">Success</MenuItem>
-                <MenuItem value="failure">Failure</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={2}>
-            <TextField
-              fullWidth
-              type="date"
-              label="Start Date"
-              size="small"
-              value={dateRange.startDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={2}>
-            <TextField
-              fullWidth
-              type="date"
-              label="End Date"
-              size="small"
-              value={dateRange.endDate}
-              onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={1}>
-            <Stack direction="row" spacing={1}>
-              <Tooltip title="Clear Filters">
-                <IconButton onClick={handleClearFilters} size="small">
-                  <ClearOutlined />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Refresh">
-                <IconButton onClick={handleRefresh} size="small">
-                  <RefreshOutlined />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Export">
-                <IconButton onClick={handleExport} size="small">
-                  <DownloadOutlined />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-          </Grid>
-        </Grid>
-      </Paper>
+          {/* Filters */}
+          <motion.div variants={fadeInUp}>
+            <Paper sx={{ p: 3, mb: 3 }}>
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+                <FilterListOutlined color="action" />
+                <Typography variant="h6">Filters</Typography>
+                <Box sx={{ flex: 1 }} />
+                {(searchTerm || actionFilter !== 'all' || statusFilter !== 'all' || dateRange.startDate) && (
+                  <Button
+                    size="small"
+                    onClick={handleClearFilters}
+                    startIcon={<ClearOutlined />}
+                  >
+                    Clear All
+                  </Button>
+                )}
+              </Stack>
+              
+              <Divider sx={{ mb: 2 }} />
+              
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <TextField
+                    fullWidth
+                    placeholder="Search users, actions, resources..."
+                    value={searchTerm}
+                    onChange={handleSearch}
+                    size="small"
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchOutlined />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Action</InputLabel>
+                    <Select
+                      value={actionFilter}
+                      onChange={(e) => setActionFilter(e.target.value)}
+                      label="Action"
+                    >
+                      {actionTypes.map((action) => (
+                        <MenuItem key={action.value} value={action.value}>
+                          {action.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Status</InputLabel>
+                    <Select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      label="Status"
+                    >
+                      <MenuItem value="all">All Status</MenuItem>
+                      <MenuItem value="success">Success</MenuItem>
+                      <MenuItem value="failure">Failure</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Quick Range</InputLabel>
+                    <Select
+                      value={quickDateRange}
+                      onChange={(e) => handleQuickDateRange(e.target.value)}
+                      label="Quick Range"
+                    >
+                      <MenuItem value="24h">Last 24 Hours</MenuItem>
+                      <MenuItem value="7d">Last 7 Days</MenuItem>
+                      <MenuItem value="30d">Last 30 Days</MenuItem>
+                      <MenuItem value="90d">Last 90 Days</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid size={{ xs: 6, sm: 6, md: 1.5 }}>
+                  <TextField
+                    fullWidth
+                    type="date"
+                    label="Start Date"
+                    size="small"
+                    value={dateRange.startDate}
+                    onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid size={{ xs: 6, sm: 6, md: 1.5 }}>
+                  <TextField
+                    fullWidth
+                    type="date"
+                    label="End Date"
+                    size="small"
+                    value={dateRange.endDate}
+                    onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+              </Grid>
+              
+              <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 2 }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<RefreshOutlined />}
+                  onClick={handleRefresh}
+                  size="small"
+                >
+                  Refresh
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={exportLoading ? <CircularProgress size={20} /> : <DownloadOutlined />}
+                  onClick={handleExport}
+                  size="small"
+                  disabled={exportLoading}
+                >
+                  Export
+                </Button>
+              </Stack>
+            </Paper>
+          </motion.div>
 
-      {/* Tabs for different views */}
-      <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ mb: 2 }}>
-        <Tab label="All Events" />
-        <Tab label="Login Activity" />
-        <Tab label="Data Modifications" />
-        <Tab label="Admin Actions" />
-      </Tabs>
+          {/* Tabs */}
+          <motion.div variants={fadeInUp}>
+            <Tabs 
+              value={activeTab} 
+              onChange={(e, v) => setActiveTab(v)} 
+              sx={{ mb: 2 }}
+              indicatorColor="primary"
+              textColor="primary"
+            >
+              <Tab label="All Events" />
+              <Tab label="Login Activity" />
+              <Tab label="Data Modifications" />
+              <Tab label="Admin Actions" />
+            </Tabs>
+          </motion.div>
 
-      {/* Audit Logs Table */}
-      <Paper sx={{ width: '100%', overflow: 'hidden' }}>
-        <Box sx={{ height: 600, width: '100%' }}>
-          <DataGrid
-            rows={logs || []}
-            columns={columns}
-            loading={isLoading}
-            rowCount={total}
-            paginationMode="server"
-            pageSizeOptions={[25, 50, 100]}
-            paginationModel={{ page, pageSize: rowsPerPage }}
-            onPaginationModelChange={(model) => {
-              setPage(model.page);
-              setRowsPerPage(model.pageSize);
-            }}
-            disableRowSelectionOnClick
-            sx={{
-              '& .MuiDataGrid-cell': {
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-              },
-            }}
-          />
-        </Box>
-      </Paper>
+          {/* Audit Logs Table */}
+          <motion.div variants={fadeInUp}>
+            <Paper sx={{ width: '100%', overflow: 'hidden', position: 'relative' }}>
+              {error && (
+                <Alert severity="error" sx={{ m: 2 }}>
+                  {typeof error === 'string' ? error : error?.message || 'Failed to load audit logs'}
+                </Alert>
+              )}
+              
+              <Box sx={{ height: 600, width: '100%' }}>
+                <DataGrid
+                  rows={logs || []}
+                  columns={columns}
+                  loading={isLoading}
+                  rowCount={total || 0}
+                  paginationMode="server"
+                  pageSizeOptions={[25, 50, 100]}
+                  paginationModel={{ page, pageSize: rowsPerPage }}
+                  onPaginationModelChange={(model) => {
+                    setPage(model.page);
+                    setRowsPerPage(model.pageSize);
+                  }}
+                  disableRowSelectionOnClick
+                  getRowId={(row) => row.id || `${row.timestamp}-${row.action}`}
+                  sx={{
+                    '& .MuiDataGrid-cell': {
+                      borderBottom: '1px solid',
+                      borderColor: 'divider',
+                    },
+                    '& .MuiDataGrid-row:hover': {
+                      backgroundColor: 'action.hover',
+                      cursor: 'pointer',
+                    },
+                  }}
+                  onRowClick={(params) => handleViewDetails(params.row)}
+                />
+              </Box>
+            </Paper>
+          </motion.div>
+        </motion.div>
+      </AnimatePresence>
 
       {/* Details Dialog */}
       <Dialog
@@ -474,81 +646,99 @@ const AuditLogs = () => {
         onClose={() => setDetailsDialogOpen(false)}
         maxWidth="md"
         fullWidth
+        TransitionComponent={Grow}
       >
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <SecurityOutlined />
+            <SecurityOutlined color="primary" />
             <Typography variant="h6">Audit Log Details</Typography>
+            <Box sx={{ flex: 1 }} />
+            <IconButton size="small" onClick={() => setDetailsDialogOpen(false)}>
+              <CloseOutlined />
+            </IconButton>
           </Box>
         </DialogTitle>
+        <Divider />
         <DialogContent dividers>
           {selectedLog && (
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">Timestamp</Typography>
+            <Grid container spacing={2.5}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  <CalendarTodayOutlined fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
+                  Timestamp
+                </Typography>
                 <Typography variant="body1">
-                  {selectedLog.timestamp ? new Date(selectedLog.timestamp).toLocaleString() : '—'}
+                  {selectedLog.timestamp ? format(parseISO(selectedLog.timestamp), 'PPpp') : '—'}
                 </Typography>
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">User</Typography>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  <PersonOutline fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
+                  User
+                </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Avatar sx={{ width: 24, height: 24 }}>
-                    {selectedLog.username?.[0]?.toUpperCase() || 'U'}
+                  <Avatar sx={{ width: 28, height: 28 }}>
+                    {selectedLog.user_email?.[0]?.toUpperCase() || selectedLog.username?.[0]?.toUpperCase() || 'U'}
                   </Avatar>
                   <Typography variant="body1">
-                    {selectedLog.username || 'System'} ({selectedLog.user_email || selectedLog.username})
+                    {selectedLog.user_email || selectedLog.username || 'System'}
                   </Typography>
                 </Box>
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">Action</Typography>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>Action</Typography>
                 <Chip
                   icon={getActionIcon(selectedLog.action)}
-                  label={selectedLog.action}
-                  size="small"
+                  label={selectedLog.action?.replace(/_/g, ' ') || '—'}
+                  color={getActionColor(selectedLog.action)}
+                  size="medium"
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">Status</Typography>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>Status</Typography>
                 <Chip
                   label={selectedLog.status || 'success'}
-                  size="small"
                   color={getStatusColor(selectedLog.status)}
+                  size="medium"
+                  variant="filled"
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">Resource Type</Typography>
-                <Typography variant="body1">{selectedLog.resource_type || '—'}</Typography>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">Resource ID</Typography>
-                <Typography variant="body1" fontFamily="monospace">
-                  {selectedLog.resource_id || '—'}
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>Resource Type</Typography>
+                <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
+                  {selectedLog.table_name?.replace(/_/g, ' ') || '—'}
                 </Typography>
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">IP Address</Typography>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>Record ID</Typography>
+                <Typography variant="body1" fontFamily="monospace">
+                  {selectedLog.record_id || '—'}
+                </Typography>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>IP Address</Typography>
                 <Typography variant="body1" fontFamily="monospace">
                   {selectedLog.ip_address || '—'}
                 </Typography>
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <Typography variant="subtitle2" color="text.secondary">User Agent</Typography>
-                <Typography variant="body2">{selectedLog.user_agent || '—'}</Typography>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>User Agent</Typography>
+                <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
+                  {selectedLog.user_agent || '—'}
+                </Typography>
               </Grid>
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" color="text.secondary">Details</Typography>
-                <Paper sx={{ p: 2, bgcolor: 'background.default', mt: 1 }}>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {JSON.stringify(selectedLog.details || selectedLog.metadata || {}, null, 2)}
+              <Grid size={12}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>Changes</Typography>
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default', maxHeight: 300, overflow: 'auto' }}>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.75rem' }}>
+                    {JSON.stringify(selectedLog.old_data || selectedLog.new_data || selectedLog.details || {}, null, 2)}
                   </pre>
                 </Paper>
               </Grid>
               {selectedLog.error_message && (
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <Alert severity="error" icon={<ErrorOutline />}>
-                    <Typography variant="subtitle2">Error Message</Typography>
+                    <Typography variant="subtitle2" gutterBottom>Error Message</Typography>
                     <Typography variant="body2">{selectedLog.error_message}</Typography>
                   </Alert>
                 </Grid>
@@ -557,19 +747,27 @@ const AuditLogs = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDetailsDialogOpen(false)}>Close</Button>
+          <Button onClick={() => setDetailsDialogOpen(false)} variant="outlined">
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Snackbar for notifications */}
+      {/* Snackbar */}
       <Snackbar
-        open={snackbarOpen}
+        open={snackbar.open}
         autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        TransitionComponent={Fade}
       >
-        <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} variant="filled">
-          {snackbarMessage}
+        <Alert 
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} 
+          severity={snackbar.severity} 
+          variant="filled"
+          sx={{ minWidth: 300 }}
+        >
+          {snackbar.message}
         </Alert>
       </Snackbar>
     </Container>

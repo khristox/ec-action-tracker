@@ -1,39 +1,51 @@
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index, Text
-from app.db.types import UUID
-from sqlalchemy.sql import func
+# app/models/audit.py
 import uuid
+
+from pygments.lexer import default
+from sqlalchemy import Column, String, DateTime, Text, JSON, Enum, Index
+from sqlalchemy.dialects.postgresql import UUID
+from datetime import datetime
+import enum
+from app.db.types import UUID as CustomUUID
+
+
 from app.db.base import Base
 
+
+class AuditStatus(str, enum.Enum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    PENDING = "pending"
+
+
 class AuditLog(Base):
-    """
-    Audit log model to track all changes to the database.
-    Records who did what, when, and what data changed.
-    """
     __tablename__ = "audit_logs"
     
-    id = Column(UUID, primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    username = Column(String(100), nullable=True)  # Denormalized for when user is deleted
-    action = Column(String(50), nullable=False, index=True)  # CREATE, UPDATE, DELETE, LOGIN, LOGOUT, etc.
-    table_name = Column(String(100), nullable=False, index=True)  # The table affected
-    record_id = Column(String(100), nullable=True, index=True)  # The ID of the affected record
-    old_values = Column(JSON, nullable=True)  # Previous state (for UPDATE/DELETE)
-    new_values = Column(JSON, nullable=True)  # New state (for CREATE/UPDATE)
-    ip_address = Column(String(45), nullable=True)  # IPv6 ready
+    id = Column(CustomUUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(CustomUUID, nullable=True)
+    username = Column(String(255), nullable=True)
+    user_email = Column(String(255), nullable=True)
+    action = Column(String(100), nullable=False)
+    table_name = Column(String(100), nullable=True)
+    record_id = Column(String(255), nullable=True)
+    old_data = Column(JSON, nullable=True)
+    new_data = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
-    endpoint = Column(String(255), nullable=True)  # API endpoint called
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    endpoint = Column(String(500), nullable=True)
+    request_id = Column(String(255), nullable=True)
+    changes_summary = Column(Text, nullable=True)
+    status = Column(Enum(AuditStatus), default=AuditStatus.SUCCESS, nullable=False)
+    error_message = Column(Text, nullable=True)
+    extra_data = Column(JSON, nullable=True)  # Changed from 'metadata' to 'extra_data'
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     
-    # Additional context
-    request_id = Column(String(100), nullable=True)  # To group related changes in a single request
-    changes_summary = Column(String(500), nullable=True)  # Human-readable summary
-    
+    # Indexes for better performance
     __table_args__ = (
-        # Composite indexes for common queries
-        Index('ix_audit_logs_user_timestamp', user_id, timestamp),
-        Index('ix_audit_logs_table_record', table_name, record_id),
-        Index('ix_audit_logs_action_timestamp', action, timestamp),
+        Index('idx_audit_logs_user_id', 'user_id'),
+        Index('idx_audit_logs_action', 'action'),
+        Index('idx_audit_logs_table_name', 'table_name'),
+        Index('idx_audit_logs_timestamp', 'timestamp'),
+        Index('idx_audit_logs_record_id', 'record_id'),
+        Index('idx_audit_logs_status', 'status'),
     )
-    
-    def __repr__(self):
-        return f"<AuditLog {self.action} on {self.table_name} at {self.timestamp}>"

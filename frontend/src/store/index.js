@@ -10,6 +10,8 @@ import {
 import adminReducer from './slices/adminSlice';
 import roleReducer from './slices/roleSlice';
 import profileReducer from './slices/profileSlice';
+import auditReducer from './slices/auditSlice'; // Add this import
+
 
 export const store = configureStore({
   reducer: {
@@ -22,6 +24,8 @@ export const store = configureStore({
     profile: profileReducer,
     roles: roleReducer,
     dashboard: dashboardReducer,
+    audit: auditReducer, // Add this line
+
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

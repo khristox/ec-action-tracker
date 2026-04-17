@@ -887,3 +887,70 @@ async def get_mobile_bottom_config(
         "config": {k: list(v) for k, v in MOBILE_BOTTOM_NAV_CONFIG.items()},
         "never_show": list(NEVER_MOBILE_BOTTOM)
     }   
+
+# app/api/v1/endpoints/menus.py
+
+@router.get("/mobile")
+async def get_mobile_menus(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get menus configured for mobile bottom navigation"""
+    try:
+        # Get user roles
+        user_roles = [role.id for role in current_user.roles]
+        
+        if not user_roles:
+            return {"success": True, "data": []}
+        
+        # Query for menus with mobile bottom navigation enabled
+        from sqlalchemy import and_, or_
+        
+        query = select(
+            Menu.id,
+            Menu.code,
+            Menu.title,
+            Menu.icon,
+            Menu.icon_type,
+            Menu.icon_library,
+            Menu.icon_color,
+            Menu.path,
+            Menu.sort_order,
+            Menu.is_active,
+            RoleMenuPermission.can_show_mb_bottom
+        ).join(
+            RoleMenuPermission,
+            RoleMenuPermission.menu_id == Menu.id
+        ).where(
+            and_(
+                RoleMenuPermission.role_id.in_(user_roles),
+                RoleMenuPermission.can_show_mb_bottom == True,
+                Menu.is_active == True
+            )
+        ).order_by(Menu.sort_order).limit(5)
+        
+        result = await db.execute(query)
+        menus = result.all()
+        
+        # Format response
+        menu_list = []
+        for menu in menus:
+            menu_list.append({
+                "id": str(menu.id),
+                "code": menu.code,
+                "title": menu.title,
+                "icon": menu.icon,
+                "icon_type": menu.icon_type or "mui",
+                "icon_library": menu.icon_library or "mui",
+                "icon_color": menu.icon_color,
+                "path": menu.path,
+                "sort_order": menu.sort_order,
+                "is_active": menu.is_active,
+                "can_show_mb_bottom": menu.can_show_mb_bottom
+            })
+        
+        return {"success": True, "data": menu_list}
+        
+    except Exception as e:
+        logger.error(f"Error fetching mobile menus: {str(e)}")
+        return {"success": False, "data": [], "error": str(e)}

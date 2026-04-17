@@ -1,4 +1,5 @@
 # app/api/v1/endpoints/action_tracker/meetings.py
+import json
 import uuid
 from datetime import datetime
 from typing import List, Optional
@@ -16,16 +17,15 @@ from app.crud.action_tracker import meeting, meeting_action, meeting_minutes, me
 from app.models.general.dynamic_attribute import Attribute
 from app.models.user import User
 from app.models.action_tracker import Meeting, MeetingAction, MeetingDocument, MeetingParticipant, MeetingQuery, MeetingStatus, MeetingStatusHistory, MeetingMinutes
-from app.schemas.action_tracker import (
-    MeetingActionCreate, MeetingActionResponse, MeetingCreateResponse, MeetingMinutesCreate, MeetingMinutesResponse, MeetingPaginationResponse, MeetingCreate, MeetingParticipantResponse, MeetingParticipantUpdate, 
-    MeetingStatusHistoryResponse, MeetingUpdate, MeetingResponse, MeetingListResponse
-)
+from app.schemas.action_tracker import MeetingCreate, MeetingCreateResponse, MeetingListResponse, MeetingPaginationResponse, MeetingParticipantResponse, MeetingParticipantUpdate, MeetingResponse, MeetingStatusHistoryResponse, MeetingUpdate
+from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesCreate, MeetingMinutesResponse
+
 from .status_utils import get_status_id_by_short_name, get_status_by_short_name, get_valid_status_short_names
 from .utils import build_meeting_response
 
 router = APIRouter()
 
-# ==================== CREATE MEETING ====================
+# ==================== CREATE MEET`ING ====================
 @router.post("/", response_model=MeetingCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_meeting(
     meeting_in: MeetingCreate,
@@ -387,17 +387,29 @@ async def get_meeting_minutes(
     limit: int = Query(100, ge=1, le=500),
 ):
     """Get all minutes for a meeting with audit info"""
-    minutes_list = await meeting_minutes.get_meeting_minutes(db, meeting_id, skip, limit)
+    # Eager load all relationships
+    result = await db.execute(
+        select(MeetingMinutes)
+        .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
+        .options(
+            selectinload(MeetingMinutes.recorded_by),
+            selectinload(MeetingMinutes.created_by),
+            selectinload(MeetingMinutes.updated_by),
+            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_to),
+            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_by),
+            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.created_by),
+            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.updated_by),
+        )
+        .offset(skip)
+        .limit(limit)
+        .order_by(MeetingMinutes.timestamp.desc())
+    )
+    minutes_list = result.scalars().all()
+    #print(json.dumps([minute.__dict__ for minute in minutes_list], default=str, indent=2))
+
     
-    # Enhance with creator names
-    for minute in minutes_list:
-        if minute.created_by:
-            minute.created_by_name = minute.created_by.username
-        if minute.updated_by:
-            minute.updated_by_name = minute.updated_by.username
-        if minute.recorded_by:
-            minute.recorded_by_name = minute.recorded_by.username
-    
+    # Simply return the ORM objects - Pydantic will use from_attributes=True
+    # and automatically call the properties for the response
     return minutes_list
 
 

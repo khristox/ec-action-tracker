@@ -4,9 +4,10 @@ from typing import List, Optional
 from uuid import UUID
 
 from app.api import deps
+from app.crud.action_tracker import meeting
 from app.models.user import User
-from app.crud.action_tracker import meeting, meeting_document
-from app.schemas.action_tracker import MeetingDocumentCreate, MeetingDocumentResponse
+from app.schemas.action_tracker import MeetingDocumentResponse
+
 
 router = APIRouter()
 

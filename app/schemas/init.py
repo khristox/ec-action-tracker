@@ -22,7 +22,7 @@ from app.schemas.permission import (
 )
 
 # Action Tracker Schemas
-from app.schemas.action_tracker import (
+from app.schemas.meeting_minutes import (
     # Participant Schemas
     ParticipantBase,
     ParticipantCreate,

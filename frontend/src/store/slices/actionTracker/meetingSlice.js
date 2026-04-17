@@ -1,5 +1,5 @@
 // src/store/slices/actionTracker/meetingSlice.js
-import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, createSelector, createAction } from '@reduxjs/toolkit';
 import api from '../../../services/api';
 
 // ==================== Types & Constants ====================
@@ -24,23 +24,35 @@ const DEFAULT_FILTERS = {
 const CACHE_CONFIG = {
   TTL: 5 * 60 * 1000, // 5 minutes
   MAX_ITEMS: 100,
+  ENABLED: true,
 };
 
 const STATUS_COLOR_MAP = {
+  // Meeting Statuses
   PENDING: '#F59E0B',
   STARTED: '#3B82F6',
   ENDED: '#10B981',
   AWAITING: '#8B5CF6',
   CLOSED: '#6B7280',
   CANCELLED: '#EF4444',
+  
+  // Action Statuses
   scheduled: '#3B82F6',
   ongoing: '#F59E0B',
+  in_progress: '#3B82F6',
   completed: '#10B981',
   cancelled: '#EF4444',
   postponed: '#8B5CF6',
-  in_progress: '#3B82F6',
   overdue: '#EF4444',
   blocked: '#6B7280',
+  not_started: '#9CA3AF',
+};
+
+const PRIORITY_COLORS = {
+  1: { bg: '#FEE2E2', text: '#EF4444', label: 'High' },
+  2: { bg: '#FEF3C7', text: '#F59E0B', label: 'Medium' },
+  3: { bg: '#D1FAE5', text: '#10B981', label: 'Low' },
+  4: { bg: '#E0E7FF', text: '#6366F1', label: 'Lowest' },
 };
 
 const INITIAL_STATE = {
@@ -48,6 +60,7 @@ const INITIAL_STATE = {
   currentMeeting: null,
   currentMinutes: { items: [], total: 0 },
   currentParticipants: { items: [], total: 0 },
+  currentActions: { items: [], total: 0 },
   statusOptions: [],
   priorityOptions: [],
   filters: { ...DEFAULT_FILTERS },
@@ -55,11 +68,14 @@ const INITIAL_STATE = {
     isLoading: false,
     isSubmitting: false,
     error: null,
+    minutesError: null,
     success: false,
     updateSuccess: false,
+    deleteSuccess: false,
   },
   cache: {
     meetings: new Map(),
+    attributes: null,
     timestamp: null,
   },
   statusHistory: [],
@@ -68,7 +84,11 @@ const INITIAL_STATE = {
 // ==================== Helper Functions ====================
 
 const handleApiError = (error) => {
-  if (error.response?.data?.detail) return error.response.data.detail;
+  if (error.response?.data?.detail) {
+    return typeof error.response.data.detail === 'string' 
+      ? error.response.data.detail 
+      : error.response.data.detail.join(', ');
+  }
   if (error.response?.data?.message) return error.response.data.message;
   if (error.message) return error.message;
   return 'An unexpected error occurred';
@@ -84,8 +104,7 @@ const updateMeetingInList = (items, updatedMeeting) => {
 };
 
 const addMeetingToList = (items, newMeeting, maxItems = CACHE_CONFIG.MAX_ITEMS) => {
-  const newItems = [newMeeting, ...items];
-  return newItems.slice(0, maxItems);
+  return [newMeeting, ...items].slice(0, maxItems);
 };
 
 const removeMeetingFromList = (items, meetingId) => {
@@ -103,12 +122,26 @@ const validateMeetingData = (meetingData) => {
 };
 
 const processStatusOptions = (attributes) => {
+  const meetingStatusAttr = attributes.find(attr => attr.code === 'MEETING_STATUS');
+  if (meetingStatusAttr?.options) {
+    return meetingStatusAttr.options.map(opt => ({
+      id: opt.value,
+      value: opt.value,
+      label: opt.label,
+      code: opt.code,
+      shortName: opt.short_name,
+      sortOrder: opt.sort_order,
+      color: STATUS_COLOR_MAP[opt.value] || STATUS_COLOR_MAP[opt.code] || '#6B7280',
+    })).sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+  
+  // Fallback: filter attributes that start with MEETING_STATUS_
   return attributes
-    .filter(attr => attr.code !== 'MEETING_STATUS' && attr.code.startsWith('MEETING_STATUS_'))
+    .filter(attr => attr.code?.startsWith('MEETING_STATUS_'))
     .map(attr => ({
       id: attr.id,
       value: attr.short_name || attr.code,
-      label: attr.name.replace('Meeting Status - ', ''),
+      label: attr.name?.replace('Meeting Status - ', '') || attr.name,
       code: attr.code,
       shortName: attr.short_name,
       sortOrder: attr.sort_order,
@@ -122,12 +155,12 @@ const processPriorityOptions = (attributes) => {
   if (!priorityAttr?.options) return [];
   
   return priorityAttr.options.map(opt => ({
-    value: opt.value,
+    value: parseInt(opt.value) || opt.value,
     label: opt.label,
-    color: opt.color,
+    color: PRIORITY_COLORS[opt.value] || PRIORITY_COLORS[2],
     daysToComplete: opt.days_to_complete,
     sortOrder: opt.sort_order,
-  }));
+  })).sort((a, b) => a.sortOrder - b.sortOrder);
 };
 
 // ==================== Async Thunks ====================
@@ -141,7 +174,8 @@ export const fetchActionTrackerAttributes = createAsyncThunk(
       const now = Date.now();
       
       // Check cache
-      if (meetings.cache.timestamp && (now - meetings.cache.timestamp) < CACHE_CONFIG.TTL) {
+      if (CACHE_CONFIG.ENABLED && meetings.cache.timestamp && 
+          (now - meetings.cache.timestamp) < CACHE_CONFIG.TTL) {
         return { fromCache: true };
       }
       
@@ -299,13 +333,68 @@ export const addMeetingMinutes = createAsyncThunk(
 // Fetch meeting minutes
 export const fetchMeetingMinutes = createAsyncThunk(
   'meetings/fetchMeetingMinutes',
-  async ({ id, params = {} }, { rejectWithValue }) => {
+  async (meetingId, { rejectWithValue }) => {
     try {
-      const response = await api.get(`/action-tracker/meetings/${id}/minutes`, { params });
+      const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
+      
+      let minutesData = [];
+      const data = response.data;
+      
+      if (Array.isArray(data)) {
+        minutesData = data;
+      } else if (data && typeof data === 'object') {
+        if (data.id && (data.topic || data.title)) {
+          minutesData = [data];
+        } else if (data.items) {
+          minutesData = data.items;
+        } else if (data.data) {
+          minutesData = Array.isArray(data.data) ? data.data : [data.data];
+        }
+      }
+      
       return {
-        items: response.data.items || response.data || [],
-        total: response.data.total || 0,
+        items: minutesData,
+        total: minutesData.length
       };
+    } catch (error) {
+      return rejectWithValue(handleApiError(error));
+    }
+  }
+);
+
+// Create meeting minutes
+export const createMeetingMinutes = createAsyncThunk(
+  'meetings/createMeetingMinutes',
+  async ({ meetingId, data }, { rejectWithValue }) => {
+    try {
+      const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, data);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(handleApiError(error));
+    }
+  }
+);
+
+// Delete meeting minutes
+export const deleteMeetingMinutes = createAsyncThunk(
+  'meetings/deleteMeetingMinutes',
+  async ({ meetingId, minutesId }, { rejectWithValue }) => {
+    try {
+      await api.delete(`/action-tracker/meetings/${meetingId}/minutes/${minutesId}`);
+      return minutesId;
+    } catch (error) {
+      return rejectWithValue(handleApiError(error));
+    }
+  }
+);
+
+// Update meeting minutes
+export const updateMeetingMinutes = createAsyncThunk(
+  'meetings/updateMeetingMinutes',
+  async ({ meetingId, minutesId, data }, { rejectWithValue }) => {
+    try {
+      const response = await api.put(`/action-tracker/meetings/${meetingId}/minutes/${minutesId}`, data);
+      return response.data;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
     }
@@ -318,9 +407,31 @@ export const fetchMeetingParticipants = createAsyncThunk(
   async (id, { rejectWithValue }) => {
     try {
       const response = await api.get(`/action-tracker/meetings/${id}/participants`);
+      const items = response.data.items || response.data.data || response.data || [];
+      const total = response.data.total || items.length;
+      
       return {
-        items: response.data.items || response.data || [],
-        total: response.data.total || 0,
+        items: Array.isArray(items) ? items : [],
+        total: total,
+      };
+    } catch (error) {
+      return rejectWithValue(handleApiError(error));
+    }
+  }
+);
+
+// Fetch meeting actions
+export const fetchMeetingActions = createAsyncThunk(
+  'meetings/fetchMeetingActions',
+  async (id, { rejectWithValue }) => {
+    try {
+      const response = await api.get(`/action-tracker/meetings/${id}/actions`);
+      const items = response.data.items || response.data.data || response.data || [];
+      const total = response.data.total || items.length;
+      
+      return {
+        items: Array.isArray(items) ? items : [],
+        total: total,
       };
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -344,7 +455,6 @@ export const exportMeetings = createAsyncThunk(
         responseType: 'blob',
       });
       
-      // Create download link
       const url = window.URL.createObjectURL(response.data);
       const link = document.createElement('a');
       link.href = url;
@@ -371,6 +481,9 @@ const meetingSlice = createSlice({
     clearUpdateSuccess: (state) => {
       state.ui.updateSuccess = false;
     },
+    clearDeleteSuccess: (state) => {
+      state.ui.deleteSuccess = false;
+    },
     clearError: (state) => {
       state.ui.error = null;
     },
@@ -381,14 +494,21 @@ const meetingSlice = createSlice({
       state.ui = INITIAL_STATE.ui;
     },
     
+    // Clear minutes error
+    clearMinutesError: (state) => {
+      state.ui.minutesError = null;
+    },
+    
     // Meeting Management
     clearMeetingState: (state) => {
       state.currentMeeting = null;
       state.currentMinutes = { items: [], total: 0 };
       state.currentParticipants = { items: [], total: 0 };
+      state.currentActions = { items: [], total: 0 };
       state.ui.isLoading = false;
       state.ui.error = null;
       state.ui.success = false;
+      state.ui.minutesError = null;
     },
     clearMeetings: (state) => {
       state.meetings = { ...DEFAULT_PAGINATION };
@@ -438,6 +558,7 @@ const meetingSlice = createSlice({
     // Cache Management
     clearCache: (state) => {
       state.cache.meetings.clear();
+      state.cache.attributes = null;
       state.cache.timestamp = null;
     },
     
@@ -450,6 +571,25 @@ const meetingSlice = createSlice({
       }
       if (state.currentMeeting?.id === id) {
         state.currentMeeting = { ...state.currentMeeting, ...updates };
+      }
+    },
+    
+    // Local minutes management
+    addMinutesLocally: (state, action) => {
+      const newMinutes = action.payload;
+      state.currentMinutes.items = [newMinutes, ...state.currentMinutes.items];
+      state.currentMinutes.total += 1;
+    },
+    removeMinutesLocally: (state, action) => {
+      const minutesId = action.payload;
+      state.currentMinutes.items = state.currentMinutes.items.filter(m => m.id !== minutesId);
+      state.currentMinutes.total = Math.max(0, state.currentMinutes.total - 1);
+    },
+    updateMinutesLocally: (state, action) => {
+      const { id, data } = action.payload;
+      const index = state.currentMinutes.items.findIndex(m => m.id === id);
+      if (index !== -1) {
+        state.currentMinutes.items[index] = { ...state.currentMinutes.items[index], ...data };
       }
     },
   },
@@ -474,9 +614,9 @@ const meetingSlice = createSlice({
         state.ui.error = action.payload;
       })
 
-      // ========== Fetch Meeting Status Options (Legacy) ==========
+      // ========== Fetch Meeting Status Options ==========
       .addCase(fetchMeetingStatusOptions.fulfilled, (state, action) => {
-        if (action.payload.length) {
+        if (action.payload?.length) {
           state.statusOptions = action.payload;
         }
       })
@@ -551,12 +691,21 @@ const meetingSlice = createSlice({
       })
 
       // ========== Delete Meeting ==========
+      .addCase(deleteMeeting.pending, (state) => {
+        state.ui.isSubmitting = true;
+      })
       .addCase(deleteMeeting.fulfilled, (state, action) => {
+        state.ui.isSubmitting = false;
         state.meetings.items = removeMeetingFromList(state.meetings.items, action.payload);
         state.meetings.total = Math.max(0, state.meetings.total - 1);
+        state.ui.deleteSuccess = true;
         if (state.currentMeeting?.id === action.payload) {
           state.currentMeeting = null;
         }
+      })
+      .addCase(deleteMeeting.rejected, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.ui.error = action.payload;
       })
 
       // ========== Update Meeting Status ==========
@@ -575,17 +724,107 @@ const meetingSlice = createSlice({
       })
 
       // ========== Meeting Minutes ==========
+      .addCase(addMeetingMinutes.pending, (state) => {
+        state.ui.isSubmitting = true;
+      })
       .addCase(addMeetingMinutes.fulfilled, (state, action) => {
+        state.ui.isSubmitting = false;
         state.currentMinutes.items = [action.payload, ...state.currentMinutes.items];
         state.currentMinutes.total += 1;
+        state.ui.success = true;
+      })
+      .addCase(addMeetingMinutes.rejected, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.ui.error = action.payload;
+      })
+      
+      .addCase(fetchMeetingMinutes.pending, (state) => {
+        state.ui.isLoading = true;
+        state.ui.minutesError = null;
       })
       .addCase(fetchMeetingMinutes.fulfilled, (state, action) => {
+        state.ui.isLoading = false;
         state.currentMinutes = action.payload;
+      })
+      .addCase(fetchMeetingMinutes.rejected, (state, action) => {
+        state.ui.isLoading = false;
+        state.ui.minutesError = action.payload;
+        state.ui.error = action.payload;
+      })
+
+      // ========== Create Meeting Minutes ==========
+      .addCase(createMeetingMinutes.pending, (state) => {
+        state.ui.isSubmitting = true;
+        state.ui.minutesError = null;
+      })
+      .addCase(createMeetingMinutes.fulfilled, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.currentMinutes.items = [action.payload, ...state.currentMinutes.items];
+        state.currentMinutes.total += 1;
+        state.ui.success = true;
+      })
+      .addCase(createMeetingMinutes.rejected, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.ui.minutesError = action.payload;
+        state.ui.error = action.payload;
+      })
+
+      // ========== Delete Meeting Minutes ==========
+      .addCase(deleteMeetingMinutes.pending, (state) => {
+        state.ui.isSubmitting = true;
+      })
+      .addCase(deleteMeetingMinutes.fulfilled, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.currentMinutes.items = state.currentMinutes.items.filter(m => m.id !== action.payload);
+        state.currentMinutes.total = Math.max(0, state.currentMinutes.total - 1);
+        state.ui.deleteSuccess = true;
+      })
+      .addCase(deleteMeetingMinutes.rejected, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.ui.error = action.payload;
+      })
+
+      // ========== Update Meeting Minutes ==========
+      .addCase(updateMeetingMinutes.pending, (state) => {
+        state.ui.isSubmitting = true;
+      })
+      .addCase(updateMeetingMinutes.fulfilled, (state, action) => {
+        state.ui.isSubmitting = false;
+        const index = state.currentMinutes.items.findIndex(m => m.id === action.payload.id);
+        if (index !== -1) {
+          state.currentMinutes.items[index] = action.payload;
+        }
+        state.ui.updateSuccess = true;
+      })
+      .addCase(updateMeetingMinutes.rejected, (state, action) => {
+        state.ui.isSubmitting = false;
+        state.ui.error = action.payload;
       })
 
       // ========== Meeting Participants ==========
+      .addCase(fetchMeetingParticipants.pending, (state) => {
+        state.ui.isLoading = true;
+      })
       .addCase(fetchMeetingParticipants.fulfilled, (state, action) => {
+        state.ui.isLoading = false;
         state.currentParticipants = action.payload;
+      })
+      .addCase(fetchMeetingParticipants.rejected, (state, action) => {
+        state.ui.isLoading = false;
+        state.ui.error = action.payload;
+      })
+
+      // ========== Meeting Actions ==========
+      .addCase(fetchMeetingActions.pending, (state) => {
+        state.ui.isLoading = true;
+      })
+      .addCase(fetchMeetingActions.fulfilled, (state, action) => {
+        state.ui.isLoading = false;
+        state.currentActions = action.payload;
+      })
+      .addCase(fetchMeetingActions.rejected, (state, action) => {
+        state.ui.isLoading = false;
+        state.ui.error = action.payload;
       });
   },
 });
@@ -599,11 +838,12 @@ export const selectCurrentMeeting = (state) => state.meetings.currentMeeting;
 export const selectMeetingsLoading = (state) => state.meetings.ui.isLoading;
 export const selectMeetingsSubmitting = (state) => state.meetings.ui.isSubmitting;
 export const selectMeetingsError = (state) => state.meetings.ui.error;
-export const selectMeetingError = (state) => state.meetings.ui.error; // Alias
+export const selectMeetingError = (state) => state.meetings.ui.error;
 export const selectMeetingSuccess = (state) => state.meetings.ui.success;
 export const selectUpdateSuccess = (state) => state.meetings.ui.updateSuccess;
+export const selectDeleteSuccess = (state) => state.meetings.ui.deleteSuccess;
 export const selectMeetingStatusOptions = (state) => state.meetings.statusOptions;
-export const selectStatusOptions = (state) => state.meetings.statusOptions; // Alias
+export const selectStatusOptions = (state) => state.meetings.statusOptions;
 export const selectMeetingPriorityOptions = (state) => state.meetings.priorityOptions;
 export const selectMeetingsFilters = (state) => state.meetings.filters;
 export const selectMeetingPagination = (state) => ({
@@ -613,6 +853,20 @@ export const selectMeetingPagination = (state) => ({
   limit: state.meetings.meetings.limit,
 });
 export const selectMeetingsTotal = (state) => state.meetings.meetings.total;
+
+// Minutes Selectors
+export const selectMeetingMinutes = (state) => state.meetings.currentMinutes.items;
+export const selectMeetingMinutesTotal = (state) => state.meetings.currentMinutes.total;
+export const selectMinutesLoading = (state) => state.meetings.ui.isLoading;
+export const selectMinutesError = (state) => state.meetings.ui.minutesError;
+
+// Participants Selectors
+export const selectMeetingParticipants = (state) => state.meetings.currentParticipants.items;
+export const selectMeetingParticipantsTotal = (state) => state.meetings.currentParticipants.total;
+
+// Actions Selectors
+export const selectMeetingActions = (state) => state.meetings.currentActions.items;
+export const selectMeetingActionsTotal = (state) => state.meetings.currentActions.total;
 
 // Derived Selectors
 export const selectFilteredMeetings = createSelector(
@@ -828,13 +1082,18 @@ export const selectStatusColor = createSelector(
 );
 
 export const selectMinutesForMeeting = createSelector(
-  [(state) => state.meetings.currentMinutes],
-  (minutes) => minutes.items || []
+  [selectMeetingMinutes],
+  (minutes) => minutes || []
 );
 
 export const selectParticipantsForMeeting = createSelector(
-  [(state) => state.meetings.currentParticipants],
-  (participants) => participants.items || []
+  [selectMeetingParticipants],
+  (participants) => participants || []
+);
+
+export const selectActionsForMeeting = createSelector(
+  [selectMeetingActions],
+  (actions) => actions || []
 );
 
 // ==================== Exports ====================
@@ -844,6 +1103,7 @@ export const {
   clearError, 
   clearSuccess,
   clearUpdateSuccess,
+  clearDeleteSuccess,
   resetUiState,
   setMeetingPage,
   setMeetingLimit,
@@ -856,6 +1116,10 @@ export const {
   setDateRangeFilter,
   clearCache,
   optimisticUpdateMeeting,
+  addMinutesLocally,
+  removeMinutesLocally,
+  updateMinutesLocally,
+  clearMinutesError,
 } = meetingSlice.actions;
 
 export default meetingSlice.reducer;

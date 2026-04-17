@@ -4,7 +4,7 @@ Handles CRUD operations for meeting minutes and their associated actions
 """
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,12 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.crud.action_tracker import meeting, meeting_action, meeting_minutes
 from app.models.user import User
-from app.schemas.action_tracker import (
+from app.schemas.meeting_minutes.meeting_minutes import (
     MeetingActionCreate,
     MeetingActionResponse,
     MeetingMinutesCreate,
     MeetingMinutesResponse,
     MeetingMinutesUpdate,
+    PaginatedMinutesResponse
 )
 
 router = APIRouter()
@@ -64,43 +65,6 @@ async def add_meeting_minutes(
     # Create minutes
     minutes = await meeting.add_minutes(db, meeting_id, minutes_in, current_user.id)
     return minutes
-
-
-@router.get(
-    "/meetings/{meeting_id}/minutes",
-    response_model=List[MeetingMinutesResponse],
-    summary="Get all minutes for a meeting",
-    description="Retrieve all minutes entries for a specific meeting"
-)
-async def get_meeting_minutes(
-    meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum records to return"),
-) -> List[MeetingMinutesResponse]:
-    """
-    Get all minutes for a meeting with pagination.
-    
-    Args:
-        meeting_id: UUID of the meeting
-        db: Database session
-        current_user: Authenticated user
-        skip: Number of records to skip (pagination)
-        limit: Maximum records to return (pagination)
-    
-    Returns:
-        List of minutes objects
-    """
-    # Verify meeting exists
-    meeting_obj = await meeting.get(db, meeting_id)
-    if not meeting_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Meeting {meeting_id} not found"
-        )
-    
-    return await meeting_minutes.get_meeting_minutes(db, meeting_id, skip, limit)
 
 
 # ============================================================================

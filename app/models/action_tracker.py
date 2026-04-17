@@ -3,6 +3,7 @@ Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
 
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table

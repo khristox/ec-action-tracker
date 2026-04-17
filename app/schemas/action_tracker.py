@@ -3,6 +3,9 @@ from typing import Optional, List, Any, Dict, Union
 from uuid import UUID
 from datetime import datetime
 
+from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesResponse
+
+
 
 # ==================== Shared Config ====================
 
@@ -256,139 +259,7 @@ class MeetingPaginationResponse(ORMBase):
     pages: int = 0
 
 
-# ==================== Meeting Minutes Schemas ====================
 
-class MeetingMinutesBase(ORMBase):
-    topic: str = Field(..., min_length=1, max_length=500)
-    discussion: Optional[str] = None
-    decisions: Optional[str] = None
-
-
-class MeetingMinutesCreate(MeetingMinutesBase):
-    pass
-
-
-class MeetingMinutesUpdate(ORMBase):
-    topic: Optional[str] = None
-    discussion: Optional[str] = None
-    decisions: Optional[str] = None
-
-
-class MeetingMinutesResponse(MeetingMinutesBase):
-    id: UUID
-    meeting_id: UUID
-    timestamp: datetime
-    recorded_by_id: Optional[UUID] = None
-    recorded_by_name: Optional[str] = None
-    created_by_id: Optional[UUID] = None
-    created_by_name: Optional[str] = None
-    created_at: datetime
-    updated_by_id: Optional[UUID] = None
-    updated_by_name: Optional[str] = None
-    updated_at: Optional[datetime] = None
-    is_active: bool = True
-    actions: List['MeetingActionResponse'] = Field(default_factory=list)
-
-
-# ==================== Meeting Action Schemas ====================
-
-class MeetingActionBase(ORMBase):
-    description: str = Field(..., min_length=1)
-    assigned_to_id: Optional[UUID] = None
-    # This stores the Dict/JSON from the DB
-    assigned_to_name: Optional[Union[str, Dict, Any]] = Field(None)
-    due_date: Optional[datetime] = None
-    priority: int = Field(2, ge=1, le=4)
-    remarks: Optional[str] = None
-
-    @field_validator('assigned_to_name', mode='before')
-    @classmethod
-    def validate_assigned_to_name(cls, v: Any) -> Any:
-        if v is None: return None
-        # Ensure it's handled as a dict internally if it's a string
-        if isinstance(v, str): return {"name": v, "type": "manual"}
-        return v
-
-class MeetingActionResponse(MeetingActionBase):
-    id: UUID
-    minute_id: UUID
-    overall_progress_percentage: int = 0
-    created_at: datetime
-    is_active: bool = True
-    
-    # This is the "Magic Field" for React
-    assigned_to_name_display: str = "Unassigned"
-
-    @model_validator(mode="after")
-    def set_display_name(self) -> "MeetingActionResponse":
-        # Look at the field inherited from the base class
-        assigned = self.assigned_to_name
-        
-        if isinstance(assigned, dict):
-            self.assigned_to_name_display = assigned.get('name', 'Unassigned')
-        elif isinstance(assigned, str):
-            self.assigned_to_name_display = assigned
-        else:
-            self.assigned_to_name_display = 'Unassigned'
-        return self
-    
-class MeetingActionCreate(MeetingActionBase):
-    pass
-
-
-class MeetingActionUpdate(ORMBase):
-    description: Optional[str] = None
-    assigned_to_id: Optional[UUID] = None
-    assigned_to_name: Optional[Union[str, Dict, AssignedToInfo]] = None
-    due_date: Optional[datetime] = None
-    priority: Optional[int] = Field(None, ge=1, le=4)
-    estimated_hours: Optional[float] = None
-    overall_status_id: Optional[UUID] = None
-    overall_progress_percentage: Optional[int] = Field(None, ge=0, le=100)
-    remarks: Optional[str] = None
-
-
-class MeetingActionResponse(MeetingActionBase):
-    id: UUID
-    minute_id: UUID
-    assigned_by_id: Optional[UUID] = None
-    assigned_by_name: Optional[str] = None
-    assigned_at: datetime
-    start_date: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    overall_status_id: Optional[UUID] = None
-    overall_status_name: Optional[str] = None
-    overall_progress_percentage: int = 0
-    actual_hours: Optional[float] = None
-    created_by_id: Optional[UUID] = None
-    created_by_name: Optional[str] = None
-    created_at: datetime
-    updated_by_id: Optional[UUID] = None
-    updated_by_name: Optional[str] = None
-    updated_at: Optional[datetime] = None
-    is_active: bool = True
-    
-    # This is the dedicated string field for the Frontend
-    assigned_to_name_display: Optional[str] = "Unassigned"
-
-    @model_validator(mode="after")
-    def set_display_name(self) -> "MeetingActionResponse":
-        """
-        Extracts a clean string from the assigned_to_name dictionary 
-        to prevent [object Object] on the frontend.
-        """
-        # Access the dictionary created by the field_validator in the Base class
-        assigned = self.assigned_to_name
-        
-        if isinstance(assigned, dict):
-            self.assigned_to_name_display = assigned.get('name', 'Unassigned')
-        elif isinstance(assigned, str):
-            self.assigned_to_name_display = assigned
-        else:
-            self.assigned_to_name_display = 'Unassigned'
-            
-        return self
-    
 
 # ==================== Action Status History Schemas ====================
 

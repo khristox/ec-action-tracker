@@ -64,6 +64,21 @@ export const fetchActionById = createAsyncThunk(
   }
 );
 
+
+export const updateAction = createAsyncThunk(
+  'actions/updateAction',
+  async ({ id, data }, { rejectWithValue }) => {
+    if (!isValidUUID(id)) return rejectWithValue('Invalid task ID format');
+    
+    try {
+      const response = await api.put(`/action-tracker/actions/${id}`, data);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.detail || 'Failed to update action');
+    }
+  }
+);
+
 export const updateActionProgress = createAsyncThunk(
   'actions/updateActionProgress',
   async ({ id, progressData }, { rejectWithValue }) => {
@@ -205,6 +220,25 @@ const actionSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(updateAction.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updateAction.fulfilled, (state, action) => {
+        state.loading = false;
+        state.success = true;
+        state.currentAction = action.payload;
+        // Update in list if exists
+        const index = state.myTasks.items.findIndex(t => t.id === action.payload.id);
+        if (index !== -1) {
+          state.myTasks.items[index] = action.payload;
+        }
+      })
+      .addCase(updateAction.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
       // Fetch My Tasks
       .addCase(fetchMyTasks.pending, (state) => { 
         state.loading = true; 

@@ -6,16 +6,15 @@ from datetime import datetime
 import logging
 
 from app.api import deps
+from app.crud.action_tracker import meeting_action, meeting_minutes
 from app.models.action_tracker import MeetingAction
 from app.models.user import User
-from app.crud.action_tracker import meeting_action, meeting_minutes
-from app.schemas.action_tracker import (
-    MeetingActionCreate, MeetingActionUpdate, MeetingActionResponse,
-    ActionProgressUpdate, ActionCommentCreate, ActionCommentResponse,
-    ActionStatusHistoryResponse, MyTaskResponse
-)
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status  # ✅ Make sure status is imported
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from app.schemas.action_tracker import ActionCommentCreate, ActionCommentResponse, ActionProgressUpdate, ActionStatusHistoryResponse, MyTaskResponse
+from app.schemas.meeting_minutes.meeting_minutes import MeetingActionCreate, MeetingActionResponse, MeetingActionUpdate  # ✅ Make sure status is imported
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

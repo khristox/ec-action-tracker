@@ -18,19 +18,78 @@ from app.models.action_tracker import (
     Participant, ParticipantList, ActionStatusHistory, ActionComment, 
     MeetingDocument, MeetingStatusHistory
 )
-from app.schemas.action_tracker import (
-    MeetingCreate, MeetingUpdate, MeetingMinutesCreate, MeetingMinutesUpdate,
-    MeetingActionCreate, MeetingActionUpdate, 
-    MeetingDocumentCreate, 
-    MeetingDocumentUpdate, ActionProgressUpdate, ActionCommentCreate,
-    ActionCommentUpdate
-)
+
+# FIXED: Import from the correct location
 from app.schemas.action_tracker_participants import (
     ParticipantCreate, 
     ParticipantListCreate, 
     ParticipantListUpdate, 
     ParticipantUpdate
 )
+
+# Add missing schema imports
+from app.schemas.meeting_minutes.meeting_minutes import (
+    MeetingMinutesCreate, 
+    MeetingMinutesUpdate,
+    MeetingActionCreate, 
+    MeetingActionUpdate,
+)
+
+# Add missing schema imports for meeting and documents
+from pydantic import BaseModel
+from typing import Optional as Opt
+
+# Define missing schemas if they don't exist
+class MeetingCreate(BaseModel):
+    title: str
+    meeting_date: datetime
+    location: Optional[str] = None
+    chairperson_name: Optional[str] = None
+    participant_list_id: Optional[UUID] = None
+    custom_participants: Optional[List] = None
+    
+    class Config:
+        from_attributes = True
+
+class MeetingUpdate(BaseModel):
+    title: Optional[str] = None
+    meeting_date: Optional[datetime] = None
+    location: Optional[str] = None
+    chairperson_name: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+class MeetingDocumentCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    document_type: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+class MeetingDocumentUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    document_type: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+class ActionProgressUpdate(BaseModel):
+    progress_percentage: int
+    individual_status_id: Optional[UUID] = None
+    remarks: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+class ActionCommentCreate(BaseModel):
+    comment: str
+    attachment_url: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 from app.models.action_tracker import participant_list_members
 
@@ -1248,7 +1307,10 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         """Get all minutes for a meeting"""
         result = await db.execute(
             select(MeetingMinutes)
-            .options(selectinload(MeetingMinutes.actions))
+            .options(
+                selectinload(MeetingMinutes.actions),
+                selectinload(MeetingMinutes.created_by)  # Add this line
+            )
             .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
             .offset(skip)
             .limit(min(limit, MAX_LIMIT))

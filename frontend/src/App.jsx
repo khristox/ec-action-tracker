@@ -636,6 +636,9 @@ const AppContent = () => {
           
           {/* Catch-all Route */}
           <Route path="*" element={<Navigate to="/404" replace />} />
+          // In your App.jsx or router configuration
+          <Route path="/actions/assign/minute/:minuteId" element={<AssignAction />} />
+          <Route path="/actions/edit/:id" element={<AssignAction />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

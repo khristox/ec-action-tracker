@@ -1,501 +1,741 @@
-// MinutesList.jsx - Improved version
-import React, { useState, useCallback, useMemo } from 'react';
+// src/components/actiontracker/meetings/MeetingActionsList.jsx
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import {
-  Card, CardContent, Typography, Box, Button, Stack, Chip,
-  Divider, IconButton, Tooltip, Collapse, Alert, Skeleton,
-  Badge, SpeedDial, SpeedDialAction, SpeedDialIcon
+  Paper, Typography, Box, Stack, Button, IconButton,
+  Chip, Alert, CircularProgress, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow,
+  Avatar, Tooltip, LinearProgress, Menu, MenuItem,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, FormControl, InputLabel, Select, Slider,
+  Grid, Divider, Card, CardContent, Fade, Grow,
+  Autocomplete, Skeleton, Badge
 } from '@mui/material';
-import { 
-  Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon, 
-  Person as PersonIcon, Schedule as ScheduleIcon, MoreVert as MoreVertIcon,
-  KeyboardArrowDown as ExpandMoreIcon, CheckCircle as CheckCircleIcon,
-  KeyboardArrowRight as ExpandLessIcon, ContentCopy as CopyIcon,
-  Comment as CommentIcon, Assignment as AssignmentIcon
+import {
+  Edit as EditIcon,
+  Assignment as AssignmentIcon,
+  Schedule as ScheduleIcon,
+  Person as PersonIcon,
+  CheckCircle as CheckCircleIcon,
+  Pending as PendingIcon,
+  Warning as WarningIcon,
+  Refresh as RefreshIcon,
+  Close as CloseIcon,
+  Save as SaveIcon,
+  TrendingUp as TrendingUpIcon,
+  PlayCircle as PlayCircleIcon,
+  TaskAlt as TaskAltIcon,
+  Visibility as VisibilityIcon,
+  PersonAdd as PersonAddIcon,
+  Flag as FlagIcon
 } from '@mui/icons-material';
-import ActionItem from './ActionItem';
+import { format } from 'date-fns';
+import { updateActionProgress } from '../../../store/slices/actionTracker/actionSlice';
+import api from '../../../services/api';
 
-// ==================== HELPERS ====================
+import EditActionDialog from './EditActionDialog';
+import AssignUserDialog from './AssignUserDialog';
 
-const isContentEmpty = (content) => {
-  if (!content) return true;
-  const textOnly = content.replace(/<[^>]*>/g, '').trim();
-  return textOnly === '';
+// ==================== Helper Functions ====================
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'No due date';
+  try {
+    return format(new Date(dateString), 'MMM d, yyyy');
+  } catch {
+    return 'Invalid date';
+  }
 };
 
-const stripHtml = (html) => {
-  if (!html) return '';
-  const temp = document.createElement('div');
-  temp.innerHTML = html;
-  return temp.textContent || temp.innerText || '';
-};
-
-const getSummaryFromContent = (content, maxLength = 100) => {
-  if (!content) return '';
-  const plainText = stripHtml(content);
-  if (plainText.length <= maxLength) return plainText;
-  return plainText.substring(0, maxLength) + '...';
-};
-
-// ==================== SUB-COMPONENTS ====================
-
-const RichTextDisplay = ({ content, maxPreviewLength = 200, isActive }) => {
-  const [expanded, setExpanded] = useState(false);
-  if (isContentEmpty(content)) return null;
+const getAssignedToName = (action) => {
+  // Priority 1: Full user object from relationship
+  if (action.assigned_to?.full_name) {
+    return action.assigned_to.full_name;
+  }
+  if (action.assigned_to?.username) {
+    return action.assigned_to.username;
+  }
   
-  const plainText = stripHtml(content);
-  const shouldTruncate = plainText.length > maxPreviewLength && !expanded;
-  const previewText = shouldTruncate ? plainText.substring(0, maxPreviewLength) + '...' : plainText;
+  // Priority 2: Direct string field
+  if (typeof action.assigned_to_name === 'string' && action.assigned_to_name && action.assigned_to_name !== 'null') {
+    return action.assigned_to_name;
+  }
   
-  return (
-    <Box sx={{ mt: 1, pl: 2, opacity: isActive ? 1 : 0.7 }}>
-      {shouldTruncate ? (
-        <>
-          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
-            {previewText}
-          </Typography>
-          <Button 
-            size="small" 
-            onClick={() => setExpanded(true)}
-            sx={{ mt: 0.5, textTransform: 'none' }}
-          >
-            Read more
-          </Button>
-        </>
-      ) : (
-        <Box 
-          sx={{
-            fontSize: '0.875rem',
-            lineHeight: 1.6,
-            color: isActive ? 'text.primary' : 'text.disabled',
-            '& p': { margin: 0, mb: 1 },
-            '& ul, & ol': { margin: 0, mb: 1, pl: 2 },
-            '& strong': { fontWeight: 600 },
-            '& a': { color: 'primary.main' }
-          }}
-          dangerouslySetInnerHTML={{ __html: content }}
-        />
-      )}
-    </Box>
-  );
+  // Priority 3: Object with name property
+  if (action.assigned_to_name && typeof action.assigned_to_name === 'object') {
+    return action.assigned_to_name.name || action.assigned_to_name.email || null;
+  }
+  
+  // Priority 4: Fallback to assigned_by (who created/assigned)
+  if (action.assigned_by_name && typeof action.assigned_by_name === 'string' && action.assigned_by_name !== 'null') {
+    return `${action.assigned_by_name} (assigned by)`;
+  }
+  
+  // Priority 5: Created by
+  if (action.created_by_name && typeof action.created_by_name === 'string' && action.created_by_name !== 'null') {
+    return `${action.created_by_name} (created)`;
+  }
+  
+  return 'Unassigned';
 };
 
-const CollapsibleSection = ({ title, content, isExpanded, onToggle, color, isActive, summary }) => {
-  if (isContentEmpty(content)) return null;
+const getStatusConfig = (action) => {
+  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
+  const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
   
-  return (
-    <Box sx={{ mt: 2 }}>
-      <Typography
-        variant="subtitle2"
-        onClick={onToggle}
-        sx={{ 
-          cursor: 'pointer', 
-          color: isActive ? `${color}.main` : 'text.disabled', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 0.5,
-          fontWeight: 600,
-          '&:hover': isActive ? { opacity: 0.8 } : {}
-        }}
-      >
-        {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
-        {title}
-        {!isExpanded && summary && (
-          <Chip 
-            size="small" 
-            label={summary} 
-            variant="outlined" 
-            color={isActive ? color : "default"}
-            sx={{ ml: 1, height: 20, fontSize: '0.65rem', maxWidth: 200 }}
-          />
-        )}
-      </Typography>
-      <Collapse in={isExpanded}>
-        <RichTextDisplay content={content} isActive={isActive} />
-      </Collapse>
-    </Box>
-  );
+  if (isCompleted) {
+    return { 
+      label: 'Completed', 
+      color: 'success', 
+      icon: <CheckCircleIcon fontSize="small" />, 
+      bgColor: '#D1FAE5', 
+      textColor: '#065F46' 
+    };
+  }
+  if (isOverdue) {
+    return { 
+      label: 'Overdue', 
+      color: 'error', 
+      icon: <WarningIcon fontSize="small" />, 
+      bgColor: '#FEE2E2', 
+      textColor: '#991B1B' 
+    };
+  }
+  if (action.overall_status_name === 'in_progress') {
+    return { 
+      label: 'In Progress', 
+      color: 'info', 
+      icon: <PendingIcon fontSize="small" />, 
+      bgColor: '#DBEAFE', 
+      textColor: '#1E40AF' 
+    };
+  }
+  return { 
+    label: 'Pending', 
+    color: 'warning', 
+    icon: <ScheduleIcon fontSize="small" />, 
+    bgColor: '#FEF3C7', 
+    textColor: '#92400E' 
+  };
 };
 
-const MinutesHeader = ({ minute, onEditMinutes, onDeleteMinutes, onCopyMinutes, loading }) => {
-  const isActive = minute.is_active !== false;
-  const [menuAnchor, setMenuAnchor] = useState(null);
+const getPriorityConfig = (priority) => {
+  switch(priority) {
+    case 1: return { label: 'High', color: '#EF4444', bgColor: '#FEE2E2' };
+    case 2: return { label: 'Medium', color: '#F59E0B', bgColor: '#FEF3C7' };
+    case 3: return { label: 'Low', color: '#10B981', bgColor: '#D1FAE5' };
+    case 4: return { label: 'Very Low', color: '#6B7280', bgColor: '#F3F4F6' };
+    default: return { label: 'Medium', color: '#F59E0B', bgColor: '#FEF3C7' };
+  }
+};
 
-  const handleMenuOpen = (event) => {
-    event.stopPropagation();
-    setMenuAnchor(event.currentTarget);
-  };
+const PROGRESS_PRESETS = [
+  { value: 0, label: 'Not Started', icon: <ScheduleIcon sx={{ fontSize: 20 }} />, color: '#6B7280' },
+  { value: 25, label: 'Just Started', icon: <PlayCircleIcon sx={{ fontSize: 20 }} />, color: '#3B82F6' },
+  { value: 50, label: 'Halfway There', icon: <TrendingUpIcon sx={{ fontSize: 20 }} />, color: '#F59E0B' },
+  { value: 75, label: 'Almost Done', icon: <PendingIcon sx={{ fontSize: 20 }} />, color: '#8B5CF6' },
+  { value: 100, label: 'Completed', icon: <TaskAltIcon sx={{ fontSize: 20 }} />, color: '#10B981' },
+];
 
-  const handleMenuClose = () => {
-    setMenuAnchor(null);
-  };
+// ==================== Loading Skeleton ====================
+const TableSkeleton = () => (
+  <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+    <Table>
+      <TableHead>
+        <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+          {['Description', 'Assigned To', 'Due Date', 'Status', 'Progress', 'Actions'].map((header) => (
+            <TableCell key={header} sx={{ fontWeight: 700 }}>{header}</TableCell>
+          ))}
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {[1, 2, 3].map((i) => (
+          <TableRow key={i}>
+            <TableCell><Skeleton variant="text" width="100%" /></TableCell>
+            <TableCell><Skeleton variant="circular width={28} height={28} /><Skeleton variant="text" width={80} /></TableCell>
+            <TableCell><Skeleton variant="text" width={100} /></TableCell>
+            <TableCell><Skeleton variant="rounded" width={90} height={26} /></TableCell>
+            <TableCell><Skeleton variant="rounded" width={120} height={30} /></TableCell>
+            <TableCell><Skeleton variant="circular width={28} height={28} /></TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </TableContainer>
+);
 
-  const handleCopy = () => {
-    if (onCopyMinutes) onCopyMinutes(minute);
-    handleMenuClose();
-  };
+// ==================== Action Row Component ====================
+const ActionRow = ({ action, onOpenProgress, onEdit, onAssign, onView }) => {
+  const statusConfig = getStatusConfig(action);
+  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
+  const assignedToName = getAssignedToName(action);
+  const progress = action.overall_progress_percentage || 0;
+  const progressColor = progress >= 100 ? '#10B981' : progress >= 75 ? '#8B5CF6' : progress >= 50 ? '#F59E0B' : progress >= 25 ? '#3B82F6' : '#6B7280';
+  const priorityConfig = getPriorityConfig(action.priority);
 
   return (
-    <>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+    <TableRow hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+      <TableCell>
         <Stack spacing={0.5}>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-            <Typography variant="h6" color={isActive ? "primary" : "text.disabled"} fontWeight={700}>
-              {minute.topic || minute.title || 'Untitled Minutes'}
-            </Typography>
-            {!isActive && (
-              <Chip 
-                label="INACTIVE" 
-                size="small" 
-                color="error" 
-                variant="filled" 
-                sx={{ height: 20, fontWeight: 'bold', fontSize: '0.65rem' }} 
-              />
-            )}
-            {minute.is_approved && (
-              <Chip 
-                label="APPROVED" 
-                size="small" 
-                color="success" 
-                variant="outlined"
-                icon={<CheckCircleIcon sx={{ fontSize: 12 }} />}
-                sx={{ height: 20, fontSize: '0.65rem' }} 
-              />
+          <Typography variant="body2" fontWeight={500}>
+            {action.description}
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip
+              size="small"
+              label={priorityConfig.label}
+              sx={{
+                height: 20,
+                fontSize: '0.65rem',
+                bgcolor: priorityConfig.bgColor,
+                color: priorityConfig.color,
+                fontWeight: 500
+              }}
+            />
+            {action.remarks && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <FlagIcon sx={{ fontSize: 12 }} />
+                {action.remarks.length > 50 ? `${action.remarks.substring(0, 50)}...` : action.remarks}
+              </Typography>
             )}
           </Stack>
-          <Typography variant="caption" color="text.secondary">
-            ID: {minute.id?.slice(0, 8)}...
+        </Stack>
+      </TableCell>
+      <TableCell>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Badge
+            overlap="circular"
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            variant="dot"
+            color={assignedToName !== 'Unassigned' ? 'success' : 'warning'}
+          >
+            <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.light', fontSize: '0.75rem' }}>
+              {assignedToName?.[0]?.toUpperCase() || '?'}
+            </Avatar>
+          </Badge>
+          <Typography variant="body2" color={assignedToName === 'Unassigned' ? 'text.secondary' : 'text.primary'}>
+            {assignedToName}
           </Typography>
         </Stack>
-        
-        <Stack direction="row" spacing={0.5}>
-          <Tooltip title={isActive ? "Copy Minutes" : "Cannot copy inactive minutes"}>
-            <span>
-              <IconButton 
-                size="small" 
-                onClick={handleCopy}
-                disabled={loading || !isActive}
-              >
-                <CopyIcon fontSize="small" />
-              </IconButton>
-            </span>
+      </TableCell>
+      <TableCell>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <ScheduleIcon fontSize="small" color={isOverdue ? 'error' : 'action'} />
+          <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
+            {formatDate(action.due_date)}
+          </Typography>
+        </Stack>
+      </TableCell>
+      <TableCell>
+        <Chip
+          size="small"
+          label={statusConfig.label}
+          color={statusConfig.color}
+          icon={statusConfig.icon}
+          sx={{ 
+            height: 26, 
+            fontWeight: 500,
+            bgcolor: statusConfig.bgColor,
+            color: statusConfig.textColor,
+            '& .MuiChip-icon': { color: statusConfig.textColor }
+          }}
+        />
+      </TableCell>
+      <TableCell sx={{ minWidth: 150 }}>
+        <Stack spacing={0.5}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="caption" fontWeight={500} color={progressColor}>
+              {progress}%
+            </Typography>
+            {progress === 100 && (
+              <CheckCircleIcon sx={{ fontSize: 14, color: '#10B981' }} />
+            )}
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={progress}
+            sx={{
+              height: 6,
+              borderRadius: 3,
+              bgcolor: '#e2e8f0',
+              '& .MuiLinearProgress-bar': {
+                bgcolor: progressColor,
+                borderRadius: 3
+              }
+            }}
+          />
+        </Stack>
+      </TableCell>
+      <TableCell align="center">
+        <Stack direction="row" spacing={0.5} justifyContent="center">
+          <Tooltip title="Update Progress">
+            <IconButton size="small" onClick={() => onOpenProgress(action)} color="primary">
+              <TrendingUpIcon fontSize="small" />
+            </IconButton>
           </Tooltip>
-          <Tooltip title={isActive ? "Edit Minutes" : "Record is inactive"}>
-            <span>
-              <IconButton 
-                size="small" 
-                onClick={() => onEditMinutes(minute)} 
-                disabled={loading || !isActive}
-              >
-                <EditIcon fontSize="small" />
-              </IconButton>
-            </span>
+          <Tooltip title="Edit Action">
+            <IconButton size="small" onClick={() => onEdit(action)} color="secondary">
+              <EditIcon fontSize="small" />
+            </IconButton>
           </Tooltip>
-          <Tooltip title={isActive ? "Deactivate Minutes" : "Already inactive"}>
-            <span>
-              <IconButton 
-                size="small" 
-                color="error" 
-                onClick={() => onDeleteMinutes(minute.id)} 
-                disabled={loading || !isActive}
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </span>
+          <Tooltip title="Assign/Reassign User">
+            <IconButton size="small" onClick={() => onAssign(action)} color="success">
+              <PersonAddIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="View Details">
+            <IconButton size="small" onClick={() => onView(action.id)} color="default">
+              <VisibilityIcon fontSize="small" />
+            </IconButton>
           </Tooltip>
         </Stack>
-      </Box>
-
-      <Divider sx={{ my: 1.5 }} />
-
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Chip
-          icon={<PersonIcon sx={{ fontSize: '1rem !important' }} />}
-          label={`By: ${minute.recorded_by_name || 'System'}`}
-          size="small"
-          variant="outlined"
-        />
-        <Chip
-          icon={<ScheduleIcon sx={{ fontSize: '1rem !important' }} />}
-          label={`Created: ${minute.created_at ? new Date(minute.created_at).toLocaleString() : 'Unknown'}`}
-          size="small"
-          variant="outlined"
-        />
-        {minute.updated_at && (
-          <Chip
-            label={`Updated: ${new Date(minute.updated_at).toLocaleString()}`}
-            size="small"
-            variant="outlined"
-            color="secondary"
-          />
-        )}
-        {minute.approved_at && (
-          <Chip
-            label={`Approved: ${new Date(minute.approved_at).toLocaleDateString()}`}
-            size="small"
-            variant="outlined"
-            color="success"
-          />
-        )}
-      </Stack>
-    </>
+      </TableCell>
+    </TableRow>
   );
 };
 
-// ==================== MAIN COMPONENT ====================
+// ==================== Empty State Component ====================
+const EmptyState = ({ onRefresh }) => (
+  <Grow in timeout={500}>
+    <Box sx={{ textAlign: 'center', py: 4 }}>
+      <AssignmentIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+      <Typography variant="body1" color="text.secondary" gutterBottom>
+        No action items found for this meeting.
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Actions can be added from the Minutes tab by expanding a minute and clicking "Add Action".
+      </Typography>
+      <Button variant="outlined" startIcon={<RefreshIcon />} onClick={onRefresh} sx={{ mt: 1 }}>
+        Refresh
+      </Button>
+    </Box>
+  </Grow>
+);
 
-const MinutesList = ({ 
-  minutes, 
-  onEditMinutes, 
-  onDeleteMinutes, 
-  onAddAction, 
-  onEditAction,
-  onCopyMinutes,
-  onUpdate, 
-  loading, 
-  isMeetingStarted 
-}) => {
-  const [expandedItems, setExpandedItems] = useState({});
-  const [expandedMinutes, setExpandedMinutes] = useState({});
+// ==================== Main Component ====================
+const MeetingActionsList = ({ meetingId, onRefresh }) => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { updatingProgress } = useSelector((state) => state.actions || {});
+  
+  const [actions, setActions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [progressValue, setProgressValue] = useState(0);
+  const [progressRemarks, setProgressRemarks] = useState('');
+  const [localUpdating, setLocalUpdating] = useState(false);
+  const [statusOptions, setStatusOptions] = useState([]);
+  const [selectedStatusId, setSelectedStatusId] = useState('');
+  const [selectedStatusName, setSelectedStatusName] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const toggleSection = useCallback((id, type) => {
-    setExpandedItems(prev => ({
-      ...prev,
-      [`${id}-${type}`]: !prev[`${id}-${type}`]
-    }));
+  // Fetch status options
+  const fetchStatusOptions = useCallback(async () => {
+    try {
+      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
+      const attributes = response.data?.items || response.data || [];
+      const actionStatuses = attributes.filter(attr => 
+        attr.code?.startsWith('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
+      );
+      setStatusOptions(actionStatuses);
+    } catch (err) {
+      console.error('Failed to fetch status options:', err);
+    }
   }, []);
 
-  const toggleMinuteExpansion = useCallback((id) => {
-    setExpandedMinutes(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }));
-  }, []);
+  // Fetch actions
+  const fetchActions = useCallback(async () => {
+    if (!meetingId) {
+      console.error('No meetingId provided to MeetingActionsList');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log('Fetching actions for meeting:', meetingId);
+      
+      let actionsData = [];
+      
+      const minutesResponse = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
+      const minutes = minutesResponse.data?.items || minutesResponse.data || [];
+      
+      minutes.forEach(minute => {
+        if (minute.actions && minute.actions.length > 0) {
+          actionsData.push(...minute.actions);
+        }
+      });
+      
+      // Sort actions: Overdue first, then by due date
+      actionsData.sort((a, b) => {
+        const aOverdue = a.due_date && new Date(a.due_date) < new Date() && !a.completed_at;
+        const bOverdue = b.due_date && new Date(b.due_date) < new Date() && !b.completed_at;
+        if (aOverdue && !bOverdue) return -1;
+        if (!aOverdue && bOverdue) return 1;
+        return new Date(a.due_date) - new Date(b.due_date);
+      });
+      
+      setActions(actionsData);
+    } catch (err) {
+      console.error('Error fetching actions:', err);
+      setError(err.response?.data?.detail || err.message || 'Failed to load actions');
+    } finally {
+      setLoading(false);
+    }
+  }, [meetingId]);
 
-  // Calculate stats for each minute
-  const minutesWithStats = useMemo(() => {
-    return minutes?.map(minute => ({
-      ...minute,
-      actions: Array.isArray(minute.actions) ? minute.actions : [],
-      stats: {
-        totalActions: minute.actions?.length || 0,
-        completedActions: minute.actions?.filter(a => a.completed_at || a.status === 'completed').length || 0,
-        overdueActions: minute.actions?.filter(a => a.is_overdue || (a.due_date && new Date(a.due_date) < new Date() && !a.completed_at)).length || 0,
-        inProgressActions: minute.actions?.filter(a => a.overall_progress_percentage > 0 && a.overall_progress_percentage < 100).length || 0
-      }
-    })) || [];
-  }, [minutes]);
+  useEffect(() => {
+    if (meetingId) {
+      fetchActions();
+      fetchStatusOptions();
+    }
+  }, [fetchActions, fetchStatusOptions, meetingId, refreshKey]);
 
-  // Loading skeleton
-  if (loading) {
-    return (
-      <Stack spacing={3}>
-        {[1, 2, 3].map(i => (
-          <Card key={i} variant="outlined" sx={{ borderRadius: 3 }}>
-            <CardContent>
-              <Skeleton variant="text" width="60%" height={32} />
-              <Skeleton variant="text" width="40%" height={20} sx={{ mt: 1 }} />
-              <Divider sx={{ my: 2 }} />
-              <Skeleton variant="rectangular" height={100} sx={{ borderRadius: 2 }} />
-            </CardContent>
-          </Card>
-        ))}
-      </Stack>
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  const handleRefresh = () => {
+    fetchActions();
+    if (onRefresh) onRefresh();
+    setRefreshKey(prev => prev + 1);
+  };
+
+  const handleViewAction = (actionId) => {
+    navigate(`/actions/${actionId}`);
+  };
+
+  const handleEditAction = (action) => {
+    setSelectedAction(action);
+    setShowEditDialog(true);
+  };
+
+  const handleAssignAction = (action) => {
+    setSelectedAction(action);
+    setShowAssignDialog(true);
+  };
+
+  const handleEditSave = () => {
+    fetchActions();
+    setSuccessMessage('Action updated successfully!');
+  };
+
+  const handleAssignSave = () => {
+    fetchActions();
+    setSuccessMessage('Action assigned successfully!');
+  };
+
+  const handleProgressUpdate = async () => {
+    if (!selectedAction) return;
+    
+    const selectedOption = statusOptions.find(opt => 
+      opt.id === selectedStatusId || 
+      opt.short_name === selectedStatusName ||
+      opt.code === selectedStatusName
     );
+    
+    const statusIdToUse = selectedOption?.id || selectedStatusId;
+    
+    if (!statusIdToUse) {
+      setError('Please select a status');
+      return;
+    }
+    
+    setLocalUpdating(true);
+    setError(null);
+    
+    try {
+      const payload = {
+        progress_percentage: parseInt(progressValue),
+        individual_status_id: statusIdToUse,
+        remarks: progressRemarks.trim() || `Progress updated to ${progressValue}%`
+      };
+      
+      await dispatch(updateActionProgress({ 
+        id: selectedAction.id, 
+        progressData: payload 
+      })).unwrap();
+      
+      setShowProgressDialog(false);
+      setProgressRemarks('');
+      setProgressValue(0);
+      setSelectedStatusId('');
+      setSuccessMessage('Progress updated successfully!');
+      
+      await fetchActions();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Error updating progress:', err);
+      setError(err.message || 'Failed to update progress');
+    } finally {
+      setLocalUpdating(false);
+    }
+  };
+
+  const handleOpenProgressDialog = (action) => {
+    setSelectedAction(action);
+    setProgressValue(action.overall_progress_percentage || 0);
+    setProgressRemarks('');
+    setSelectedStatusId(action.overall_status_id || '');
+    setSelectedStatusName(action.overall_status_name || '');
+    setShowProgressDialog(true);
+  };
+
+  const stats = useMemo(() => {
+    const total = actions.length;
+    const completed = actions.filter(a => a.completed_at || a.overall_progress_percentage >= 100).length;
+    const inProgress = actions.filter(a => a.overall_status_name === 'in_progress' && !a.completed_at).length;
+    const overdue = actions.filter(a => a.due_date && new Date(a.due_date) < new Date() && !a.completed_at).length;
+    return { total, completed, inProgress, overdue };
+  }, [actions]);
+
+  const isUpdating = localUpdating || updatingProgress;
+
+  if (loading && actions.length === 0) {
+    return <TableSkeleton />;
   }
 
-  if (!minutesWithStats || minutesWithStats.length === 0) {
-    return (
-      <Alert 
-        severity="info" 
-        sx={{ mt: 2, borderRadius: 2 }}
-        icon={<AssignmentIcon />}
-        action={
-          isMeetingStarted && (
-            <Button color="inherit" size="small" onClick={() => onAddAction(null)}>
-              Add First Minutes
-            </Button>
-          )
-        }
-      >
-        <Typography variant="body2">
-          No minutes recorded for this meeting.
-          {isMeetingStarted && " Click the button above to add minutes."}
-        </Typography>
-      </Alert>
-    );
+  if (actions.length === 0 && !loading) {
+    return <EmptyState onRefresh={handleRefresh} />;
   }
 
   return (
-    <Box>
-      {minutesWithStats.map((minute) => {
-        const isActive = minute.is_active !== false;
-        const canEdit = isActive && isMeetingStarted;
-        const actions = minute.actions;
-        const hasContent = !isContentEmpty(minute.discussion) || !isContentEmpty(minute.decisions);
-        const isExpanded = expandedMinutes[minute.id] || false;
-        
-        // Action stats
-        const completedCount = minute.stats.completedActions;
-        const totalActions = minute.stats.totalActions;
-        const completionRate = totalActions > 0 ? Math.round((completedCount / totalActions) * 100) : 0;
-        
-        return (
-          <Card 
-            key={minute.id} 
-            variant="outlined" 
-            sx={{ 
-              mb: 3, 
-              borderRadius: 3,
-              border: isActive ? '1px solid #e2e8f0' : '1px dashed #cbd5e1',
-              bgcolor: isActive ? 'background.paper' : '#f8fafc',
-              transition: 'all 0.2s',
-              '&:hover': {
-                boxShadow: isActive ? '0 4px 12px rgba(0,0,0,0.08)' : 'none'
-              }
-            }}
+    <Fade in timeout={500}>
+      <Box>
+        {/* Header with Stats */}
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }} flexWrap="wrap" gap={2}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Typography variant="h6" fontWeight={700}>
+              Action Items
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Chip size="small" label={`Total: ${stats.total}`} variant="outlined" />
+              {stats.completed > 0 && <Chip size="small" label={`Completed: ${stats.completed}`} color="success" variant="outlined" />}
+              {stats.inProgress > 0 && <Chip size="small" label={`In Progress: ${stats.inProgress}`} color="info" variant="outlined" />}
+              {stats.overdue > 0 && <Chip size="small" label={`Overdue: ${stats.overdue}`} color="error" variant="outlined" />}
+            </Stack>
+          </Stack>
+          <Tooltip title="Refresh">
+            <IconButton onClick={handleRefresh} size="small" disabled={loading}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+
+        {/* Success Message */}
+        {successMessage && (
+          <Alert 
+            severity="success" 
+            sx={{ mb: 3, borderRadius: 2 }}
+            onClose={() => setSuccessMessage('')}
           >
-            <CardContent>
-              <MinutesHeader
-                minute={minute}
-                onEditMinutes={onEditMinutes}
-                onDeleteMinutes={onDeleteMinutes}
-                onCopyMinutes={onCopyMinutes}
-                loading={loading}
-              />
+            {successMessage}
+          </Alert>
+        )}
 
-              {/* Quick Stats Badges */}
-              {totalActions > 0 && (
-                <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-                  <Chip 
-                    size="small" 
-                    label={`${completionRate}% Complete`}
-                    color="success"
-                    variant="outlined"
-                  />
-                  <Chip 
-                    size="small" 
-                    label={`${minute.stats.overdueActions} Overdue`}
-                    color="error"
-                    variant="outlined"
-                  />
-                  <Chip 
-                    size="small" 
-                    label={`${minute.stats.inProgressActions} In Progress`}
-                    color="warning"
-                    variant="outlined"
-                  />
-                </Stack>
-              )}
+        {/* Error Alert */}
+        {error && (
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
+            {error}
+          </Alert>
+        )}
 
-              {/* Expand/Collapse button for minutes content */}
-              {(hasContent || totalActions > 0) && (
-                <Button
-                  size="small"
-                  onClick={() => toggleMinuteExpansion(minute.id)}
-                  startIcon={isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                  sx={{ mb: 1, textTransform: 'none' }}
-                >
-                  {isExpanded ? 'Hide Details' : 'Show Details'}
-                </Button>
-              )}
-
-              <Collapse in={isExpanded}>
-                <CollapsibleSection
-                  title="Discussion"
-                  content={minute.discussion}
-                  isActive={isActive}
-                  color="primary"
-                  isExpanded={expandedItems[`${minute.id}-disc`]}
-                  onToggle={() => toggleSection(minute.id, 'disc')}
-                  summary={getSummaryFromContent(minute.discussion, 60)}
+        {/* Actions Table */}
+        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, overflowX: 'auto' }}>
+          <Table sx={{ minWidth: 800 }}>
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {actions.map((action) => (
+                <ActionRow
+                  key={action.id}
+                  action={action}
+                  onOpenProgress={handleOpenProgressDialog}
+                  onEdit={handleEditAction}
+                  onAssign={handleAssignAction}
+                  onView={handleViewAction}
                 />
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
 
-                <CollapsibleSection
-                  title="Decisions"
-                  content={minute.decisions}
-                  isActive={isActive}
-                  color="success"
-                  isExpanded={expandedItems[`${minute.id}-deci`]}
-                  onToggle={() => toggleSection(minute.id, 'deci')}
-                  summary={getSummaryFromContent(minute.decisions, 60)}
-                />
-              </Collapse>
+        {/* Progress Update Dialog */}
+        <Dialog 
+          open={showProgressDialog} 
+          onClose={() => setShowProgressDialog(false)} 
+          maxWidth="md" 
+          fullWidth
+          TransitionComponent={Fade}
+          transitionDuration={300}
+        >
+          <DialogTitle sx={{ pb: 1 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="h6" fontWeight={700}>
+                Update Progress
+              </Typography>
+              <IconButton onClick={() => setShowProgressDialog(false)} size="small">
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </DialogTitle>
+          <Divider />
+          <DialogContent sx={{ pt: 2 }}>
+            <Stack spacing={3}>
+              <Card variant="outlined" sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}>
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <AssignmentIcon color="primary" />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Current Task
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        {selectedAction?.description}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </Card>
 
-              {!hasContent && (
-                <Typography variant="body2" color="text.disabled" sx={{ mt: 2, fontStyle: 'italic', pl: 1 }}>
-                  No discussion or decisions provided.
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                  Progress: {progressValue}%
                 </Typography>
+                <Slider
+                  value={progressValue}
+                  onChange={(e, val) => setProgressValue(val)}
+                  step={5}
+                  marks={PROGRESS_PRESETS.map(p => ({ value: p.value, label: p.label }))}
+                  min={0}
+                  max={100}
+                  valueLabelDisplay="auto"
+                />
+              </Box>
+
+              <Grid container spacing={1}>
+                {PROGRESS_PRESETS.map((preset) => (
+                  <Grid size={{ xs: 12, sm: 2.4 }} key={preset.value}>
+                    <Button
+                      fullWidth
+                      variant={progressValue === preset.value ? 'contained' : 'outlined'}
+                      onClick={() => setProgressValue(preset.value)}
+                      sx={{
+                        py: 1,
+                        borderColor: preset.color,
+                        color: progressValue === preset.value ? '#fff' : preset.color,
+                        bgcolor: progressValue === preset.value ? preset.color : 'transparent',
+                        '&:hover': {
+                          bgcolor: preset.color,
+                          color: '#fff',
+                          opacity: 0.9
+                        }
+                      }}
+                    >
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        {preset.icon}
+                        <Typography variant="caption">{preset.label}</Typography>
+                      </Stack>
+                    </Button>
+                  </Grid>
+                ))}
+              </Grid>
+
+              <Divider />
+
+              {statusOptions.length > 0 && (
+                <FormControl fullWidth>
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={selectedStatusId}
+                    onChange={(e) => setSelectedStatusId(e.target.value)}
+                    label="Status"
+                  >
+                    {statusOptions.map((opt) => (
+                      <MenuItem key={opt.id} value={opt.id}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          {opt.short_name === 'COMPLETED' && <CheckCircleIcon fontSize="small" color="success" />}
+                          {opt.short_name === 'IN_PROGRESS' && <PendingIcon fontSize="small" color="info" />}
+                          {opt.short_name === 'PENDING' && <ScheduleIcon fontSize="small" color="warning" />}
+                          {opt.short_name === 'OVERDUE' && <WarningIcon fontSize="small" color="error" />}
+                          <Typography variant="body2">
+                            {opt.name?.replace('Action Status - ', '') || opt.short_name}
+                          </Typography>
+                        </Stack>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               )}
 
-              {/* Actions Section */}
-              <Box mt={4} sx={{ opacity: canEdit || !isActive ? 1 : 0.5 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Typography variant="subtitle1" fontWeight={700}>
-                      Action Items
-                    </Typography>
-                    {totalActions > 0 && (
-                      <Badge badgeContent={totalActions} color="primary" sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem' } }}>
-                        <AssignmentIcon fontSize="small" color="action" />
-                      </Badge>
-                    )}
-                  </Stack>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<AddIcon />}
-                    onClick={() => onAddAction(minute.id)}
-                    disabled={loading || !canEdit}
-                  >
-                    Add Action
-                  </Button>
-                </Box>
+              <TextField
+                fullWidth
+                label="Remarks (Optional)"
+                multiline
+                rows={3}
+                value={progressRemarks}
+                onChange={(e) => setProgressRemarks(e.target.value)}
+                placeholder="Add any notes about this progress update..."
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ p: 2.5, pt: 0 }}>
+            <Button onClick={() => setShowProgressDialog(false)} disabled={isUpdating}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleProgressUpdate}
+              disabled={isUpdating || !selectedStatusId}
+              startIcon={isUpdating ? <CircularProgress size={16} /> : <SaveIcon />}
+            >
+              {isUpdating ? 'Saving...' : 'Save Progress'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
-                {actions.length > 0 ? (
-                  <Stack spacing={2}>
-                    {actions.map((action, index) => (
-                      <ActionItem
-                        key={action.id || index}
-                        action={action}
-                        minuteId={minute.id}
-                        onUpdate={onUpdate}
-                        onEdit={onEditAction}
-                        disabled={!canEdit}
-                      />
-                    ))}
-                  </Stack>
-                ) : (
-                  <Box 
-                    sx={{ 
-                      py: 3, 
-                      border: '1px dashed #e2e8f0', 
-                      borderRadius: 2, 
-                      textAlign: 'center', 
-                      bgcolor: 'rgba(0,0,0,0.02)' 
-                    }}
-                  >
-                    <AssignmentIcon sx={{ fontSize: 32, color: '#94a3b8', mb: 1 }} />
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      No action items yet
-                    </Typography>
-                    {canEdit && (
-                      <Button 
-                        size="small" 
-                        onClick={() => onAddAction(minute.id)}
-                        sx={{ mt: 1 }}
-                      >
-                        Add first action
-                      </Button>
-                    )}
-                  </Box>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
-        );
-      })}
-    </Box>
+        {/* Edit Action Dialog */}
+        <EditActionDialog
+          open={showEditDialog}
+          action={selectedAction}
+          onClose={() => {
+            setShowEditDialog(false);
+            setSelectedAction(null);
+          }}
+          onSave={handleEditSave}
+        />
+
+        {/* Assign User Dialog */}
+        <AssignUserDialog
+          open={showAssignDialog}
+          action={selectedAction}
+          onClose={() => {
+            setShowAssignDialog(false);
+            setSelectedAction(null);
+          }}
+          onAssign={handleAssignSave}
+        />
+      </Box>
+    </Fade>
   );
 };
 
-export default MinutesList;
+export default MeetingActionsList;

@@ -285,34 +285,142 @@ EXTRA_METADATA='{
 create_attribute "INDIVIDUAL_STATUS" "Individual Status" "User's self-reported status for assigned actions" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
-# ==================== 4. DOCUMENT TYPE ====================
+# ==================== 4. DOCUMENT TYPE GROUP ====================
 echo ""
-print_header "4. Document Type Attribute"
+print_header "4. Document Type Group (Parent Attribute)"
 echo ""
 
-OPTIONS='[
-    {"value": "agenda", "label": "Agenda", "icon": "article", "sort_order": 1},
-    {"value": "presentation", "label": "Presentation", "icon": "slideshow", "sort_order": 2},
-    {"value": "report", "label": "Report", "icon": "assessment", "sort_order": 3},
-    {"value": "minutes", "label": "Minutes", "icon": "description", "sort_order": 4},
-    {"value": "attachment", "label": "Attachment", "icon": "attach_file", "sort_order": 5},
-    {"value": "reference", "label": "Reference", "icon": "menu_book", "sort_order": 6}
-]'
+# This is the parent/group attribute for document types
+OPTIONS='[]'  # No options, this is just a group
+
+EXTRA_METADATA='{
+    "display_as": "group",
+    "filterable": true,
+    "category": "document_management",
+    "is_group": true,
+    "children": ["DOC_TYPE_AGENDA", "DOC_TYPE_PRESENTATION", "DOC_TYPE_REPORT", "DOC_TYPE_MINUTES", "DOC_TYPE_ATTACHMENT", "DOC_TYPE_REFERENCE"]
+}'
+
+create_attribute "DOCUMENT_TYPE" "Document Type" "Document type category for meeting documents" "group" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+((TOTAL_COUNT++))
+
+# ==================== 5. DOCUMENT TYPE - AGENDA ====================
+echo ""
+print_header "5. Document Type - Agenda"
+echo ""
+
+OPTIONS='[]'
 
 EXTRA_METADATA='{
     "display_as": "chip",
-    "filterable": true,
-    "category": "document_management",
-    "default": "attachment",
-    "allowed_extensions": ["pdf", "doc", "docx", "xlsx", "pptx", "jpg", "png", "txt"]
+    "icon": "article",
+    "color": "#3B82F6",
+    "category": "document_type",
+    "parent_code": "DOCUMENT_TYPE",
+    "allowed_extensions": ["pdf", "doc", "docx"]
 }'
 
-create_attribute "DOCUMENT_TYPE" "Document Type" "Types of documents attached to meetings and actions" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+create_attribute "DOC_TYPE_AGENDA" "Agenda" "Meeting agenda documents" "string" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
-# ==================== 5. ACTION PRIORITY ====================
+# ==================== 6. DOCUMENT TYPE - PRESENTATION ====================
 echo ""
-print_header "5. Action Priority Attribute"
+print_header "6. Document Type - Presentation"
+echo ""
+
+OPTIONS='[]'
+
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "icon": "slideshow",
+    "color": "#8B5CF6",
+    "category": "document_type",
+    "parent_code": "DOCUMENT_TYPE",
+    "allowed_extensions": ["pdf", "ppt", "pptx"]
+}'
+
+create_attribute "DOC_TYPE_PRESENTATION" "Presentation" "Presentation documents" "string" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+((TOTAL_COUNT++))
+
+# ==================== 7. DOCUMENT TYPE - REPORT ====================
+echo ""
+print_header "7. Document Type - Report"
+echo ""
+
+OPTIONS='[]'
+
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "icon": "assessment",
+    "color": "#10B981",
+    "category": "document_type",
+    "parent_code": "DOCUMENT_TYPE",
+    "allowed_extensions": ["pdf", "doc", "docx", "xls", "xlsx"]
+}'
+
+create_attribute "DOC_TYPE_REPORT" "Report" "Report documents" "string" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+((TOTAL_COUNT++))
+
+# ==================== 8. DOCUMENT TYPE - MINUTES ====================
+echo ""
+print_header "8. Document Type - Minutes"
+echo ""
+
+OPTIONS='[]'
+
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "icon": "description",
+    "color": "#F59E0B",
+    "category": "document_type",
+    "parent_code": "DOCUMENT_TYPE",
+    "allowed_extensions": ["pdf", "doc", "docx", "txt"]
+}'
+
+create_attribute "DOC_TYPE_MINUTES" "Minutes" "Meeting minutes documents" "string" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+((TOTAL_COUNT++))
+
+# ==================== 9. DOCUMENT TYPE - ATTACHMENT ====================
+echo ""
+print_header "9. Document Type - Attachment"
+echo ""
+
+OPTIONS='[]'
+
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "icon": "attach_file",
+    "color": "#6B7280",
+    "category": "document_type",
+    "parent_code": "DOCUMENT_TYPE",
+    "allowed_extensions": ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "png", "txt", "zip"]
+}'
+
+create_attribute "DOC_TYPE_ATTACHMENT" "Attachment" "General attachment documents" "string" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+((TOTAL_COUNT++))
+
+# ==================== 10. DOCUMENT TYPE - REFERENCE ====================
+echo ""
+print_header "10. Document Type - Reference"
+echo ""
+
+OPTIONS='[]'
+
+EXTRA_METADATA='{
+    "display_as": "chip",
+    "icon": "menu_book",
+    "color": "#EF4444",
+    "category": "document_type",
+    "parent_code": "DOCUMENT_TYPE",
+    "allowed_extensions": ["pdf", "doc", "docx", "txt", "url"]
+}'
+
+create_attribute "DOC_TYPE_REFERENCE" "Reference" "Reference documents" "string" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
+((TOTAL_COUNT++))
+
+# ==================== 11. ACTION PRIORITY ====================
+echo ""
+print_header "11. Action Priority Attribute"
 echo ""
 
 OPTIONS='[
@@ -333,9 +441,9 @@ EXTRA_METADATA='{
 create_attribute "ACTION_PRIORITY" "Action Priority" "Priority levels for action items" "select" "$OPTIONS" "$EXTRA_METADATA" true && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
-# ==================== 6. PARTICIPANT LIST VISIBILITY ====================
+# ==================== 12. PARTICIPANT LIST VISIBILITY ====================
 echo ""
-print_header "6. Participant List Visibility Attribute"
+print_header "12. Participant List Visibility Attribute"
 echo ""
 
 OPTIONS='[
@@ -354,9 +462,9 @@ EXTRA_METADATA='{
 create_attribute "PARTICIPANT_LIST_VISIBILITY" "Participant List Visibility" "Visibility levels for participant lists" "select" "$OPTIONS" "$EXTRA_METADATA" true && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
-# ==================== 7. NOTIFICATION TYPE ====================
+# ==================== 13. NOTIFICATION TYPE ====================
 echo ""
-print_header "7. Notification Type Attribute"
+print_header "13. Notification Type Attribute"
 echo ""
 
 OPTIONS='[
@@ -376,9 +484,9 @@ EXTRA_METADATA='{
 create_attribute "NOTIFICATION_TYPE" "Notification Type" "Types of notifications sent to users" "select" "$OPTIONS" "$EXTRA_METADATA" false && ((SUCCESS_COUNT++))
 ((TOTAL_COUNT++))
 
-# ==================== 8. RECURRENCE PATTERN ====================
+# ==================== 14. RECURRENCE PATTERN ====================
 echo ""
-print_header "8. Recurrence Pattern Attribute"
+print_header "14. Recurrence Pattern Attribute"
 echo ""
 
 OPTIONS='[
@@ -414,7 +522,13 @@ echo -e "${CYAN}📋 Attributes Created:${NC}"
 echo "  ✅ MEETING_STATUS - Meeting Status"
 echo "  ✅ ACTION_STATUS - Action Status"
 echo "  ✅ INDIVIDUAL_STATUS - Individual Status"
-echo "  ✅ DOCUMENT_TYPE - Document Type"
+echo "  ✅ DOCUMENT_TYPE - Document Type (Group/Parent)"
+echo "  ✅ DOC_TYPE_AGENDA - Agenda"
+echo "  ✅ DOC_TYPE_PRESENTATION - Presentation"
+echo "  ✅ DOC_TYPE_REPORT - Report"
+echo "  ✅ DOC_TYPE_MINUTES - Minutes"
+echo "  ✅ DOC_TYPE_ATTACHMENT - Attachment"
+echo "  ✅ DOC_TYPE_REFERENCE - Reference"
 echo "  ✅ ACTION_PRIORITY - Action Priority"
 echo "  ✅ PARTICIPANT_LIST_VISIBILITY - Participant List Visibility"
 echo "  ✅ NOTIFICATION_TYPE - Notification Type"

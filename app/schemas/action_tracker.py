@@ -331,8 +331,17 @@ class MeetingDocumentBase(ORMBase):
     description: Optional[str] = None
 
 
-class MeetingDocumentCreate(MeetingDocumentBase):
-    pass
+class MeetingDocumentCreate(BaseModel):
+    """Schema for creating a meeting document"""
+    file_name: str
+    title: str
+    description: Optional[str] = None
+    document_type: Optional[str] = "attachment"  # Change from document_type_id to document_type
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 
 class MeetingDocumentUpdate(ORMBase):
@@ -345,8 +354,11 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     id: UUID
     meeting_id: UUID
     file_path: str
+    file_name: str
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
+    description: Optional[str] = None
+    document_type_id: Optional[UUID] = None 
     version: int = 1
     document_type_name: Optional[str] = None
     uploaded_by_id: Optional[UUID] = None

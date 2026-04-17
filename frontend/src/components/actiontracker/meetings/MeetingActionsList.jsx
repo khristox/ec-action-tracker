@@ -1,5 +1,6 @@
 // src/components/actiontracker/meetings/MeetingActionsList.jsx
 import React, { useState, useEffect, useCallback } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
   Paper, Typography, Box, Stack, Button, IconButton,
@@ -7,7 +8,9 @@ import {
   TableCell, TableContainer, TableHead, TableRow,
   Avatar, Tooltip, LinearProgress, Menu, MenuItem,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, FormControl, InputLabel, Select
+  TextField, FormControl, InputLabel, Select, Slider,
+  Grid, Divider, Card, CardContent, Fade, Grow,
+  Autocomplete
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -19,10 +22,20 @@ import {
   Warning as WarningIcon,
   MoreVert as MoreVertIcon,
   Refresh as RefreshIcon,
-  Flag as FlagIcon
+  Close as CloseIcon,
+  Save as SaveIcon,
+  TrendingUp as TrendingUpIcon,
+  PlayCircle as PlayCircleIcon,
+  TaskAlt as TaskAltIcon,
+  Visibility as VisibilityIcon,
+  PersonAdd as PersonAddIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
+import { updateActionProgress } from '../../../store/slices/actionTracker/actionSlice';
 import api from '../../../services/api';
+
+import EditActionDialog from './EditActionDialog';
+import AssignUserDialog from './AssignUserDialog';
 
 const formatDate = (dateString) => {
   if (!dateString) return 'No due date';
@@ -33,90 +46,199 @@ const getStatusConfig = (action) => {
   const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
   const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
   
-  if (isCompleted) return { label: 'Completed', color: 'success', icon: <CheckCircleIcon fontSize="small" /> };
-  if (isOverdue) return { label: 'Overdue', color: 'error', icon: <WarningIcon fontSize="small" /> };
-  if (action.overall_status_name === 'in_progress') return { label: 'In Progress', color: 'info', icon: <PendingIcon fontSize="small" /> };
-  return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" /> };
+  if (isCompleted) return { label: 'Completed', color: 'success', icon: <CheckCircleIcon fontSize="small" />, bgColor: '#D1FAE5', textColor: '#065F46' };
+  if (isOverdue) return { label: 'Overdue', color: 'error', icon: <WarningIcon fontSize="small" />, bgColor: '#FEE2E2', textColor: '#991B1B' };
+  if (action.overall_status_name === 'in_progress') return { label: 'In Progress', color: 'info', icon: <PendingIcon fontSize="small" />, bgColor: '#DBEAFE', textColor: '#1E40AF' };
+  return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" />, bgColor: '#FEF3C7', textColor: '#92400E' };
 };
 
+const PROGRESS_PRESETS = [
+  { value: 0, label: 'Not Started', icon: <ScheduleIcon sx={{ fontSize: 20 }} />, color: '#6B7280' },
+  { value: 25, label: 'Just Started', icon: <PlayCircleIcon sx={{ fontSize: 20 }} />, color: '#3B82F6' },
+  { value: 50, label: 'Halfway There', icon: <TrendingUpIcon sx={{ fontSize: 20 }} />, color: '#F59E0B' },
+  { value: 75, label: 'Almost Done', icon: <PendingIcon sx={{ fontSize: 20 }} />, color: '#8B5CF6' },
+  { value: 100, label: 'Completed', icon: <TaskAltIcon sx={{ fontSize: 20 }} />, color: '#10B981' },
+];
+
+
+
 const MeetingActionsList = ({ meetingId, onRefresh }) => {
+  const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { updatingProgress } = useSelector((state) => state.actions || {});
+  
   const [actions, setActions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [anchorEl, setAnchorEl] = useState(null);
   const [selectedAction, setSelectedAction] = useState(null);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [progressValue, setProgressValue] = useState(0);
-  const [updatingProgress, setUpdatingProgress] = useState(false);
+  const [progressRemarks, setProgressRemarks] = useState('');
+  const [localUpdating, setLocalUpdating] = useState(false);
+  const [statusOptions, setStatusOptions] = useState([]);
+  const [selectedStatusId, setSelectedStatusId] = useState('');
+  const [selectedStatusName, setSelectedStatusName] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Fetch status options
+  const fetchStatusOptions = useCallback(async () => {
+    try {
+      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
+      const attributes = response.data?.items || response.data || [];
+      const actionStatuses = attributes.filter(attr => 
+        attr.code?.startsWith('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
+      );
+      setStatusOptions(actionStatuses);
+    } catch (err) {
+      console.error('Failed to fetch status options:', err);
+    }
+  }, []);
 
   const fetchActions = useCallback(async () => {
-    if (!meetingId) return;
+    if (!meetingId) {
+      console.error('No meetingId provided to MeetingActionsList');
+      return;
+    }
     
     setLoading(true);
     setError(null);
     
     try {
-      const response = await api.get(`/action-tracker/meetings/${meetingId}/actions`);
-      const actionsData = response.data?.items || response.data || [];
+      console.log('Fetching actions for meeting:', meetingId);
+      
+      let actionsData = [];
+      
+      const minutesResponse = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
+      const minutes = minutesResponse.data?.items || minutesResponse.data || [];
+      
+      minutes.forEach(minute => {
+        if (minute.actions && minute.actions.length > 0) {
+          actionsData.push(...minute.actions);
+        }
+      });
+      console.log('Actions extracted from minutes:', actionsData.length);
+      
       setActions(actionsData);
     } catch (err) {
       console.error('Error fetching actions:', err);
-      setError(err.response?.data?.detail || 'Failed to load actions');
+      setError(err.response?.data?.detail || err.message || 'Failed to load actions');
     } finally {
       setLoading(false);
     }
   }, [meetingId]);
 
   useEffect(() => {
-    fetchActions();
-  }, [fetchActions, meetingId]);
+    if (meetingId) {
+      fetchActions();
+      fetchStatusOptions();
+    }
+  }, [fetchActions, fetchStatusOptions, meetingId]);
+
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   const handleRefresh = () => {
     fetchActions();
     if (onRefresh) onRefresh();
   };
 
-  const handleEditAction = (actionId) => {
-    navigate(`/actions/edit/${actionId}`);
+  const handleViewAction = (actionId) => {
+    navigate(`/actions/${actionId}`);
+  };
+
+  const handleEditAction = (action) => {
+    setSelectedAction(action);
+    setShowEditDialog(true);
+  };
+
+  const handleAssignAction = (action) => {
+    setSelectedAction(action);
+    setShowAssignDialog(true);
+  };
+
+  const handleEditSave = () => {
+    fetchActions();
+    setSuccessMessage('Action updated successfully!');
+  };
+
+  const handleAssignSave = () => {
+    fetchActions();
+    setSuccessMessage('Action assigned successfully!');
   };
 
   const handleProgressUpdate = async () => {
     if (!selectedAction) return;
     
-    setUpdatingProgress(true);
+    const selectedOption = statusOptions.find(opt => 
+      opt.id === selectedStatusId || 
+      opt.short_name === selectedStatusName ||
+      opt.code === selectedStatusName
+    );
+    
+    const statusIdToUse = selectedOption?.id || selectedStatusId;
+    
+    if (!statusIdToUse) {
+      setError('Please select a status');
+      return;
+    }
+    
+    setLocalUpdating(true);
+    setError(null);
+    
     try {
-      await api.patch(`/action-tracker/actions/${selectedAction.id}/progress`, {
-        progress_percentage: progressValue
-      });
+      const payload = {
+        progress_percentage: parseInt(progressValue),
+        individual_status_id: statusIdToUse,
+        remarks: progressRemarks.trim() || `Progress updated to ${progressValue}%`
+      };
+      
+      console.log('Updating progress with payload:', payload);
+      
+      await dispatch(updateActionProgress({ 
+        id: selectedAction.id, 
+        progressData: payload 
+      })).unwrap();
+      
       setShowProgressDialog(false);
-      fetchActions();
+      setProgressRemarks('');
+      setProgressValue(0);
+      setSelectedStatusId('');
+      setSuccessMessage('Progress updated successfully!');
+      
+      await fetchActions();
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('Error updating progress:', err);
-      setError(err.response?.data?.detail || 'Failed to update progress');
+      setError(err.message || 'Failed to update progress');
     } finally {
-      setUpdatingProgress(false);
+      setLocalUpdating(false);
     }
   };
 
-  const handleMenuOpen = (event, action) => {
-    setAnchorEl(event.currentTarget);
+  const handleOpenProgressDialog = (action) => {
     setSelectedAction(action);
+    setProgressValue(action.overall_progress_percentage || 0);
+    setProgressRemarks('');
+    setSelectedStatusId(action.overall_status_id || '');
+    setSelectedStatusName(action.overall_status_name || '');
+    setShowProgressDialog(true);
   };
 
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-    setSelectedAction(null);
+  const getProgressColor = (value) => {
+    if (value >= 100) return '#10B981';
+    if (value >= 75) return '#8B5CF6';
+    if (value >= 50) return '#F59E0B';
+    if (value >= 25) return '#3B82F6';
+    return '#6B7280';
   };
 
-  const handleOpenProgressDialog = () => {
-    if (selectedAction) {
-      setProgressValue(selectedAction.overall_progress_percentage || 0);
-      setShowProgressDialog(true);
-      handleMenuClose();
-    }
-  };
+  const isUpdating = localUpdating || updatingProgress;
 
   if (loading && actions.length === 0) {
     return (
@@ -131,183 +253,354 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
 
   if (actions.length === 0 && !loading) {
     return (
-      <Box sx={{ textAlign: 'center', py: 4 }}>
-        <AssignmentIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
-        <Typography variant="body1" color="text.secondary" gutterBottom>
-          No action items found for this meeting.
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Actions can be added from the Minutes tab.
-        </Typography>
-      </Box>
+      <Grow in timeout={500}>
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <AssignmentIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+          <Typography variant="body1" color="text.secondary" gutterBottom>
+            No action items found for this meeting.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Actions can be added from the Minutes tab by expanding a minute and clicking "Add Action".
+          </Typography>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            sx={{ mt: 1 }}
+          >
+            Refresh
+          </Button>
+        </Box>
+      </Grow>
     );
   }
 
   return (
-    <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-        <Typography variant="h6" fontWeight={700}>
-          Action Items ({actions.length})
-        </Typography>
-        <Tooltip title="Refresh">
-          <IconButton onClick={handleRefresh} size="small">
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
-      </Stack>
+    <Fade in timeout={500}>
+      <Box>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+          <Typography variant="h6" fontWeight={700}>
+            Action Items ({actions.length})
+          </Typography>
+          <Tooltip title="Refresh">
+            <IconButton onClick={handleRefresh} size="small" disabled={loading}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Stack>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
+        {successMessage && (
+          <Alert 
+            severity="success" 
+            sx={{ mb: 3, borderRadius: 2 }}
+            onClose={() => setSuccessMessage('')}
+          >
+            {successMessage}
+          </Alert>
+        )}
 
-      <TableContainer component={Paper} variant="outlined">
-        <Table>
-          <TableHead>
-            <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-              <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
-              <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {actions.map((action) => {
-              const statusConfig = getStatusConfig(action);
-              const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
-              const assignedToName = action.assigned_to?.full_name || action.assigned_to_name || 'Unassigned';
-              
-              return (
-                <TableRow key={action.id} hover>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight={500}>
-                      {action.description}
-                    </Typography>
-                    {action.remarks && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                        {action.remarks}
+        {error && (
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
+            {error}
+          </Alert>
+        )}
+
+        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {actions.map((action) => {
+                const statusConfig = getStatusConfig(action);
+                const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
+                let assignedToName = 'Unassigned';
+                if (action.assigned_to?.full_name) {
+                  assignedToName = action.assigned_to.full_name;
+                } else if (action.assigned_to?.username) {
+                  assignedToName = action.assigned_to.username;
+                } else if (typeof action.assigned_to_name === 'string') {
+                  assignedToName = action.assigned_to_name;
+                } else if (action.assigned_to_name && typeof action.assigned_to_name === 'object') {
+                  assignedToName = action.assigned_to_name.name || action.assigned_to_name.email || 'Unassigned';
+                }
+                const progress = action.overall_progress_percentage || 0;
+                const progressColor = getProgressColor(progress);
+                
+                return (
+                  <TableRow key={action.id} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={500}>
+                        {action.description}
                       </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.light', fontSize: '0.75rem' }}>
-                        {assignedToName?.[0]?.toUpperCase() || '?'}
-                      </Avatar>
-                      <Typography variant="body2">{assignedToName}</Typography>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <ScheduleIcon fontSize="small" color={isOverdue ? 'error' : 'action'} />
-                      <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
-                        {formatDate(action.due_date)}
-                      </Typography>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      label={statusConfig.label}
-                      color={statusConfig.color}
-                      icon={statusConfig.icon}
-                      sx={{ height: 26, fontWeight: 500 }}
-                    />
-                  </TableCell>
-                  <TableCell sx={{ minWidth: 150 }}>
-                    <Stack spacing={0.5}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" fontWeight={500}>
-                          {action.overall_progress_percentage || 0}%
+                      {action.remarks && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                          {action.remarks}
                         </Typography>
-                      </Box>
-                      <LinearProgress
-                        variant="determinate"
-                        value={action.overall_progress_percentage || 0}
-                        sx={{
-                          height: 6,
-                          borderRadius: 3,
-                          bgcolor: '#e2e8f0',
-                          '& .MuiLinearProgress-bar': {
-                            bgcolor: statusConfig.label === 'Completed' ? '#10b981' : (isOverdue ? '#ef4444' : '#3b82f6'),
-                            borderRadius: 3
-                          }
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.light', fontSize: '0.75rem' }}>
+                          {assignedToName?.[0]?.toUpperCase() || '?'}
+                        </Avatar>
+                        <Typography variant="body2">{assignedToName}</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <ScheduleIcon fontSize="small" color={isOverdue ? 'error' : 'action'} />
+                        <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
+                          {formatDate(action.due_date)}
+                        </Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={statusConfig.label}
+                        color={statusConfig.color}
+                        icon={statusConfig.icon}
+                        sx={{ 
+                          height: 26, 
+                          fontWeight: 500,
+                          bgcolor: statusConfig.bgColor,
+                          color: statusConfig.textColor,
+                          '& .MuiChip-icon': { color: statusConfig.textColor }
                         }}
                       />
-                    </Stack>
-                  </TableCell>
-                  <TableCell align="center">
-                    <IconButton size="small" onClick={() => handleEditAction(action.id)} color="primary">
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" onClick={(e) => handleMenuOpen(e, action)}>
-                      <MoreVertIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 150 }}>
+                      <Stack spacing={0.5}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" fontWeight={500} color={progressColor}>
+                            {progress}%
+                          </Typography>
+                          {progress === 100 && (
+                            <CheckCircleIcon sx={{ fontSize: 14, color: '#10B981' }} />
+                          )}
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={progress}
+                          sx={{
+                            height: 6,
+                            borderRadius: 3,
+                            bgcolor: '#e2e8f0',
+                            '& .MuiLinearProgress-bar': {
+                              bgcolor: progressColor,
+                              borderRadius: 3
+                            }
+                          }}
+                        />
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack direction="row" spacing={0.5} justifyContent="center">
+                        <Tooltip title="Update Progress">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleOpenProgressDialog(action)} 
+                            color="primary"
+                          >
+                            <TrendingUpIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Edit Action">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleEditAction(action)} 
+                            color="secondary"
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Assign User">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleAssignAction(action)} 
+                            color="success"
+                          >
+                            <PersonAddIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="View Details">
+                          <IconButton 
+                            size="small" 
+                            onClick={() => handleViewAction(action.id)} 
+                            color="default"
+                          >
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
 
-      {/* Action Menu */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
-        PaperProps={{ sx: { borderRadius: 2, minWidth: 180 } }}
-      >
-        <MenuItem onClick={handleOpenProgressDialog}>
-          Update Progress
-        </MenuItem>
-        <MenuItem onClick={() => {
-          if (selectedAction) handleEditAction(selectedAction.id);
-          handleMenuClose();
-        }}>
-          Edit Action
-        </MenuItem>
-      </Menu>
+        {/* Progress Update Dialog */}
+        <Dialog 
+          open={showProgressDialog} 
+          onClose={() => setShowProgressDialog(false)} 
+          maxWidth="md" 
+          fullWidth
+          TransitionComponent={Fade}
+          transitionDuration={300}
+        >
+          <DialogTitle sx={{ pb: 1 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="h6" fontWeight={700}>
+                Update Progress
+              </Typography>
+              <IconButton onClick={() => setShowProgressDialog(false)} size="small">
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </DialogTitle>
+          <Divider />
+          <DialogContent sx={{ pt: 2 }}>
+            <Stack spacing={3}>
+              <Card variant="outlined" sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}>
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <AssignmentIcon color="primary" />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Current Task
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        {selectedAction?.description}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </CardContent>
+              </Card>
 
-      {/* Progress Update Dialog */}
-      <Dialog open={showProgressDialog} onClose={() => setShowProgressDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Update Progress</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              {selectedAction?.description}
-            </Typography>
-            <FormControl fullWidth>
-              <InputLabel>Progress (%)</InputLabel>
-              <Select
-                value={progressValue}
-                label="Progress (%)"
-                onChange={(e) => setProgressValue(e.target.value)}
-              >
-                <MenuItem value={0}>0% - Not Started</MenuItem>
-                <MenuItem value={25}>25% - Quarter Done</MenuItem>
-                <MenuItem value={50}>50% - Half Done</MenuItem>
-                <MenuItem value={75}>75% - Almost Done</MenuItem>
-                <MenuItem value={100}>100% - Completed</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowProgressDialog(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleProgressUpdate}
-            disabled={updatingProgress}
-          >
-            {updatingProgress ? <CircularProgress size={24} /> : 'Update'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+              <Box>
+                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                  Progress: {progressValue}%
+                </Typography>
+                <Slider
+                  value={progressValue}
+                  onChange={(e, val) => setProgressValue(val)}
+                  step={5}
+                  marks={PROGRESS_PRESETS.map(p => ({ value: p.value, label: p.label }))}
+                  min={0}
+                  max={100}
+                  valueLabelDisplay="auto"
+                />
+              </Box>
+
+              <Grid container spacing={1}>
+                {PROGRESS_PRESETS.map((preset) => (
+                  <Grid size={{ xs: 12, sm: 2.4 }} key={preset.value}>
+                    <Button
+                      fullWidth
+                      variant={progressValue === preset.value ? 'contained' : 'outlined'}
+                      onClick={() => setProgressValue(preset.value)}
+                      sx={{
+                        py: 1,
+                        borderColor: preset.color,
+                        color: progressValue === preset.value ? '#fff' : preset.color,
+                        bgcolor: progressValue === preset.value ? preset.color : 'transparent',
+                      }}
+                    >
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        {preset.icon}
+                        <Typography variant="caption">{preset.label}</Typography>
+                      </Stack>
+                    </Button>
+                  </Grid>
+                ))}
+              </Grid>
+
+              <Divider />
+
+              {statusOptions.length > 0 && (
+                <FormControl fullWidth>
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={selectedStatusId}
+                    onChange={(e) => setSelectedStatusId(e.target.value)}
+                    label="Status"
+                  >
+                    {statusOptions.map((opt) => (
+                      <MenuItem key={opt.id} value={opt.id}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          {opt.short_name === 'COMPLETED' && <CheckCircleIcon fontSize="small" color="success" />}
+                          {opt.short_name === 'IN_PROGRESS' && <PendingIcon fontSize="small" color="info" />}
+                          {opt.short_name === 'PENDING' && <ScheduleIcon fontSize="small" color="warning" />}
+                          {opt.short_name === 'OVERDUE' && <WarningIcon fontSize="small" color="error" />}
+                          <Typography variant="body2">
+                            {opt.name?.replace('Action Status - ', '') || opt.short_name}
+                          </Typography>
+                        </Stack>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+
+              <TextField
+                fullWidth
+                label="Remarks (Optional)"
+                multiline
+                rows={3}
+                value={progressRemarks}
+                onChange={(e) => setProgressRemarks(e.target.value)}
+                placeholder="Add any notes about this progress update..."
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ p: 2.5, pt: 0 }}>
+            <Button onClick={() => setShowProgressDialog(false)} disabled={isUpdating}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleProgressUpdate}
+              disabled={isUpdating || !selectedStatusId}
+              startIcon={isUpdating ? <CircularProgress size={16} /> : <SaveIcon />}
+            >
+              {isUpdating ? 'Saving...' : 'Save Progress'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Edit Action Dialog */}
+        <EditActionDialog
+          open={showEditDialog}
+          action={selectedAction}
+          onClose={() => {
+            setShowEditDialog(false);
+            setSelectedAction(null);
+          }}
+          onSave={handleEditSave}
+        />
+
+        {/* Assign User Dialog */}
+        <AssignUserDialog
+          open={showAssignDialog}
+          action={selectedAction}
+          onClose={() => {
+            setShowAssignDialog(false);
+            setSelectedAction(null);
+          }}
+          onAssign={handleAssignSave}
+        />
+      </Box>
+    </Fade>
   );
 };
 

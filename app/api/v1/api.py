@@ -43,8 +43,11 @@ api_router.include_router(attributes_router, prefix="/attributes", tags=["attrib
 api_router.include_router(locations_router, prefix="/locations", tags=["locations"])
 api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 
+api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
+
+
 # Action Tracker (this already includes all sub-routers)
-api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker"])
+api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker-documents"])
 
 # DO NOT add import_export separately here - it should be inside action_tracker_router
 

@@ -707,6 +707,7 @@ class MeetingDocument(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Relationships
+    title = Column(String(500), nullable=True)  # Document title/name
     meeting = relationship("Meeting", back_populates="documents")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id], lazy="selectin")
     document_type = relationship("Attribute", foreign_keys=[document_type_id], lazy="selectin")

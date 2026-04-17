@@ -5,9 +5,11 @@ Complete implementation with all CRUD operations for all entities
 
 import json
 from typing import List, Optional, Dict, Any, Union, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime
 from contextlib import asynccontextmanager
+from venv import logger
+from fastapi import UploadFile
 from sqlalchemy import select, and_, or_, func, update, delete, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1554,6 +1556,180 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, MeetingDocumentCreate, Meeti
             await db.rollback()
             raise ValueError(f"Failed to delete document: {str(e)}")
 
+
+# app/crud/action_tracker.py - Update upload_document method
+
+    # app/crud/action_tracker.py - Complete corrected upload_document method
+
+    async def upload_document(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        document_in: MeetingDocumentCreate,
+        file: UploadFile,
+        user_id: UUID
+    ) -> MeetingDocument:
+        """
+        Upload a document to a meeting - saves file to disk
+        """
+        import os
+        from pathlib import Path
+        from uuid import uuid4
+        from datetime import datetime
+        
+        try:
+            # Create upload directory if it doesn't exist
+            upload_dir = Path("uploads/meeting_documents")
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Read file content
+            file_content = await file.read()
+            file_size = len(file_content)
+            
+            # Generate unique filename to avoid collisions
+            file_extension = os.path.splitext(file.filename)[1]
+            unique_filename = f"{uuid4()}{file_extension}"
+            file_path = upload_dir / unique_filename
+            
+            # Save the file to disk
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+            
+            # Prepare document data - ONLY fields that exist in the model
+            # IMPORTANT: Do NOT include 'file_content' or 'title' if they don't exist
+            document_data = {
+                "meeting_id": meeting_id,
+                "file_name": file.filename,
+                "file_path": str(file_path),
+                "file_size": file_size,
+                "mime_type": file.content_type,
+                "uploaded_by_id": user_id,
+                "created_by_id": user_id,
+                "updated_by_id": user_id,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                "is_active": True
+            }
+            
+            # Add optional fields only if they exist in the model and have values
+            if hasattr(document_in, 'description') and document_in.description:
+                document_data["description"] = document_in.description
+            
+            if hasattr(document_in, 'document_type_id') and document_in.document_type_id:
+                document_data["document_type_id"] = document_in.document_type_id
+            
+            # Remove any None values that might cause issues
+            document_data = {k: v for k, v in document_data.items() if v is not None}
+            
+            # Log what we're saving
+            logger.info(f"💾 Saving document with data: {document_data}")
+            
+            # Create database record
+            db_obj = MeetingDocument(**document_data)
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj)
+            
+            return db_obj
+            
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Failed to upload document: {str(e)}")
+            raise ValueError(f"Failed to upload document: {str(e)}")
+   
+   
+   
+    async def get_document_content(
+        self,
+        db: AsyncSession,
+        document_id: UUID
+    ) -> Optional[bytes]:
+        """Retrieve document content from database"""
+        result = await db.execute(
+            select(MeetingDocument.file_content).where(
+                MeetingDocument.id == document_id,
+                MeetingDocument.is_active == True
+            )
+        )
+        return result.scalar_one_or_none()
+    
+    async def get_meeting_documents(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        skip: int = DEFAULT_SKIP,
+        limit: int = DEFAULT_LIMIT,
+        document_type_id: Optional[UUID] = None
+    ) -> List[MeetingDocument]:
+        """Get all documents for a meeting, optionally filtered by type"""
+        query = select(MeetingDocument).where(
+            MeetingDocument.meeting_id == meeting_id,
+            MeetingDocument.is_active == True
+        )
+        
+        if document_type_id:
+            query = query.where(MeetingDocument.document_type_id == document_type_id)
+        
+        query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(
+            MeetingDocument.uploaded_at.desc()
+        )
+        
+        result = await db.execute(query)
+        return result.scalars().all()
+    
+    async def update_document_metadata(
+        self,
+        db: AsyncSession,
+        document_id: UUID,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        document_type_id: Optional[UUID] = None,
+        updated_by_id: Optional[UUID] = None
+    ) -> Optional[MeetingDocument]:
+        """Update document metadata without changing the file"""
+        try:
+            db_obj = await self.get(db, document_id)
+            if not db_obj:
+                return None
+            
+            if title is not None:
+                db_obj.title = title
+            if description is not None:
+                db_obj.description = description
+            if document_type_id is not None:
+                db_obj.document_type_id = document_type_id
+            if updated_by_id:
+                db_obj.updated_by_id = updated_by_id
+                db_obj.updated_at = datetime.now()
+            
+            await db.commit()
+            await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update document metadata: {str(e)}")
+        
+
+        
+    async def get_meeting_documents(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        skip: int = DEFAULT_SKIP,
+        limit: int = DEFAULT_LIMIT
+    ) -> List[MeetingDocument]:
+        """Get all documents for a meeting"""
+        result = await db.execute(
+            select(MeetingDocument)
+            .where(
+                MeetingDocument.meeting_id == meeting_id,
+                MeetingDocument.is_active == True
+            )
+            .offset(skip)
+            .limit(min(limit, MAX_LIMIT))
+            .order_by(MeetingDocument.created_at.desc())
+        )
+        return result.scalars().all()
 
 # ============================================================================
 # MEETING ACTION CRUD - COMPLETE

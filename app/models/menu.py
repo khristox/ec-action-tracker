@@ -1,5 +1,5 @@
 # app/models/menu.py
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Column, Enum, String, Integer, Boolean, DateTime, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship, object_session
 from datetime import datetime, timezone
 import uuid
@@ -14,7 +14,16 @@ class Menu(Base):
     id = Column(CustomUUID, primary_key=True, default=uuid.uuid4)
     code = Column(String(50), unique=True, nullable=False, index=True)
     title = Column(String(100), nullable=False)
-    icon = Column(String(50), nullable=True)
+
+    
+        # Icon fields - enhanced
+    icon = Column(String(50))  # Icon name
+    icon_type = Column(String(50))
+    icon_library = Column(String(50), default='mui')  # 'fas', 'far', 'material-icons'
+    icon_color = Column(String(20), default='inherit')
+    icon_size = Column(String(10), default='medium')
+    icon_animation = Column(String(50))  # 'spin', 'pulse', 'bounce'
+
     path = Column(String(255), nullable=True)
     parent_id = Column(CustomUUID, ForeignKey("menus.id", ondelete="SET NULL"), nullable=True, index=True)
     sort_order = Column(Integer, default=0, nullable=False)

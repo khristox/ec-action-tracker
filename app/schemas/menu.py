@@ -17,6 +17,69 @@ class MenuTarget(str, Enum):
     TOP = "_top"
 
 
+class IconType(str, Enum):
+    """Type of icon library to use"""
+    MUI = "mui"
+    FONTAWESOME = "fontawesome"
+    MATERIAL_SYMBOLS = "material_symbols"
+    CUSTOM = "custom"
+    IMAGE = "image"
+
+
+class IconLibrary(str, Enum):
+    """Icon library identifiers"""
+    MUI = "mui"
+    FAS = "fas"  # Font Awesome Solid
+    FAR = "far"  # Font Awesome Regular
+    FAL = "fal"  # Font Awesome Light
+    FAT = "fat"  # Font Awesome Thin
+    FAB = "fab"  # Font Awesome Brands
+    MATERIAL_SYMBOLS = "material-symbols"
+    MATERIAL_SYMBOLS_OUTLINED = "material-symbols-outlined"
+    MATERIAL_SYMBOLS_ROUNDED = "material-symbols-rounded"
+    MATERIAL_SYMBOLS_SHARP = "material-symbols-sharp"
+
+
+class IconSize(str, Enum):
+    """Icon size options"""
+    EXTRA_SMALL = "xs"
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large"
+    EXTRA_LARGE = "xl"
+
+
+class IconAnimation(str, Enum):
+    """Icon animation effects"""
+    NONE = "none"
+    SPIN = "spin"
+    PULSE = "pulse"
+    BOUNCE = "bounce"
+    SHAKE = "shake"
+    BEAT = "beat"
+    FLIP = "flip"
+    WIGGLE = "wiggle"
+
+
+class BadgeType(str, Enum):
+    """Type of badge to display"""
+    COUNT = "count"
+    TEXT = "text"
+    DOT = "dot"
+    STATUS = "status"
+
+
+class BadgeColor(str, Enum):
+    """Badge color options"""
+    DEFAULT = "default"
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    ERROR = "error"
+    INFO = "info"
+    SUCCESS = "success"
+    WARNING = "warning"
+
+
 class MenuIcon(str, Enum):
     """Common menu icon names for consistency"""
     DASHBOARD = "Dashboard"
@@ -55,6 +118,19 @@ class MenuIcon(str, Enum):
     TRENDING_UP = "TrendingUp"
     ARTICLE = "Article"
     DOWNLOAD = "Download"
+    SEARCH = "Search"
+    FILTER = "Filter"
+    SORT = "Sort"
+    EXPORT = "Export"
+    IMPORT = "Import"
+    PRINT = "Print"
+    SHARE = "Share"
+    BOOKMARK = "Bookmark"
+    FAVORITE = "Favorite"
+    HELP = "Help"
+    INFO = "Info"
+    SUPPORT = "Support"
+    FEEDBACK = "Feedback"
 
 
 # ==================== Constants ====================
@@ -72,6 +148,160 @@ MAX_MOBILE_BOTTOM_ITEMS = 5
 
 # Pattern for menu code validation
 MENU_CODE_PATTERN = re.compile(r'^[a-z_][a-z0-9_]*$')
+
+# Predefined color palette for icons
+ICON_COLORS = {
+    "primary": "#1976d2",
+    "secondary": "#dc004e",
+    "success": "#4caf50",
+    "warning": "#ff9800",
+    "error": "#f44336",
+    "info": "#2196f3",
+    "purple": "#9c27b0",
+    "indigo": "#3f51b5",
+    "teal": "#009688",
+    "orange": "#ff5722",
+    "pink": "#e91e63",
+    "cyan": "#00bcd4",
+    "brown": "#795548",
+    "gray": "#757575",
+    "black": "#000000",
+    "white": "#ffffff"
+}
+
+# Font Awesome icon mapping to MUI icons
+FA_TO_MUI_MAP = {
+    "fa-tachometer-alt": "Dashboard",
+    "fa-tasks": "Assignment",
+    "fa-exclamation-triangle": "Warning",
+    "fa-check-circle": "CheckCircle",
+    "fa-calendar-alt": "Event",
+    "fa-users": "People",
+    "fa-chart-bar": "Assessment",
+    "fa-cog": "Settings",
+    "fa-shield-alt": "Security",
+    "fa-bell": "Notifications",
+    "fa-search": "Search",
+    "fa-plus-circle": "Add",
+    "fa-edit": "Edit",
+    "fa-trash-alt": "Delete",
+    "fa-folder": "Folder",
+    "fa-download": "Download",
+    "fa-upload": "Upload",
+    "fa-print": "Print",
+    "fa-share": "Share",
+    "fa-star": "Star",
+    "fa-heart": "Favorite",
+    "fa-question-circle": "Help",
+    "fa-info-circle": "Info",
+    "fa-life-ring": "Support",
+    "fa-comment": "Feedback"
+}
+
+
+# ==================== Icon Schemas ====================
+
+class IconConfig(BaseModel):
+    """Icon configuration for a menu"""
+    name: str = Field(..., description="Icon name")
+    type: IconType = Field(IconType.MUI, description="Icon library type")
+    library: IconLibrary = Field(IconLibrary.MUI, description="Icon library")
+    color: str = Field("inherit", description="Icon color (hex or theme color)")
+    size: IconSize = Field(IconSize.MEDIUM, description="Icon size")
+    animation: IconAnimation = Field(IconAnimation.NONE, description="Icon animation")
+    rotate: Optional[int] = Field(None, ge=0, le=360, description="Rotation in degrees")
+    flip: Optional[str] = Field(None, description="Flip direction (horizontal/vertical)")
+    
+    @field_validator('color')
+    @classmethod
+    def validate_color(cls, v: str) -> str:
+        """Validate color format"""
+        # Check if it's a theme color
+        if v in ICON_COLORS or v == "inherit":
+            return v
+        # Check if it's a valid hex color
+        if re.match(r'^#[0-9a-fA-F]{3,6}$', v):
+            return v
+        # Check if it's rgb/rgba
+        if re.match(r'^rgba?\(', v):
+            return v
+        raise ValueError(f"Invalid color format: {v}")
+    
+    @model_validator(mode='after')
+    def validate_icon_combination(self) -> 'IconConfig':
+        """Validate icon type and library combination"""
+        if self.type == IconType.FONTAWESOME and self.library == IconLibrary.MUI:
+            self.library = IconLibrary.FAS
+        if self.type == IconType.MATERIAL_SYMBOLS and self.library not in [
+            IconLibrary.MATERIAL_SYMBOLS,
+            IconLibrary.MATERIAL_SYMBOLS_OUTLINED,
+            IconLibrary.MATERIAL_SYMBOLS_ROUNDED,
+            IconLibrary.MATERIAL_SYMBOLS_SHARP
+        ]:
+            self.library = IconLibrary.MATERIAL_SYMBOLS
+        return self
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "Dashboard",
+                "type": "mui",
+                "library": "mui",
+                "color": "#1976d2",
+                "size": "medium",
+                "animation": "none"
+            }
+        }
+
+
+class BadgeConfig(BaseModel):
+    """Badge configuration for a menu"""
+    text: Optional[str] = Field(None, description="Badge text (for TEXT type)")
+    count: Optional[int] = Field(None, ge=0, description="Badge count (for COUNT type)")
+    type: BadgeType = Field(BadgeType.TEXT, description="Badge type")
+    color: BadgeColor = Field(BadgeColor.ERROR, description="Badge color")
+    max_count: int = Field(99, ge=1, le=999, description="Maximum count before showing 99+")
+    show_zero: bool = Field(False, description="Show badge when count is 0")
+    animated: bool = Field(False, description="Animate badge")
+    
+    @property
+    def display_text(self) -> Optional[str]:
+        """Get display text for badge"""
+        if self.type == BadgeType.COUNT and self.count is not None:
+            if self.count > self.max_count:
+                return f"{self.max_count}+"
+            if self.count == 0 and not self.show_zero:
+                return None
+            return str(self.count)
+        if self.type == BadgeType.DOT:
+            return None
+        if self.type == BadgeType.STATUS:
+            return None
+        return self.text
+    
+    @property
+    def show_badge(self) -> bool:
+        """Determine if badge should be shown"""
+        if self.type == BadgeType.COUNT:
+            if self.count is None:
+                return False
+            if self.count == 0 and not self.show_zero:
+                return False
+            return True
+        if self.type == BadgeType.DOT:
+            return True
+        if self.type == BadgeType.STATUS:
+            return True
+        return bool(self.text)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "New",
+                "type": "text",
+                "color": "error"
+            }
+        }
 
 
 # ==================== Menu Schemas ====================
@@ -93,12 +323,53 @@ class MenuBase(BaseModel):
         description="Display title",
         examples=["Dashboard", "User Profile", "System Settings"]
     )
+    
+    # Icon fields - extended
     icon: Optional[str] = Field(
         None, 
         max_length=50, 
-        description="Material-UI icon name",
-        examples=["Dashboard", "Person", "Settings"]
+        description="Icon name",
+        examples=["Dashboard", "Person", "Settings", "fa-tachometer-alt"]
     )
+    icon_type: IconType = Field(
+        IconType.MUI, 
+        description="Type of icon library"
+    )
+    icon_library: IconLibrary = Field(
+        IconLibrary.MUI, 
+        description="Icon library identifier"
+    )
+    icon_color: str = Field(
+        "inherit", 
+        description="Icon color (hex, theme color, or inherit)"
+    )
+    icon_size: IconSize = Field(
+        IconSize.MEDIUM, 
+        description="Icon size"
+    )
+    icon_animation: IconAnimation = Field(
+        IconAnimation.NONE, 
+        description="Icon animation effect"
+    )
+    icon_rotation: Optional[int] = Field(
+        None, 
+        ge=0, 
+        le=360, 
+        description="Icon rotation in degrees"
+    )
+    
+    # Badge fields
+    badge: Optional[str] = Field(
+        None, 
+        max_length=50, 
+        description="Badge text (legacy, use badge_config instead)"
+    )
+    badge_config: Optional[BadgeConfig] = Field(
+        None, 
+        description="Badge configuration"
+    )
+    
+    # Menu fields
     path: Optional[str] = Field(
         None, 
         max_length=255, 
@@ -127,10 +398,25 @@ class MenuBase(BaseModel):
         MenuTarget.SELF, 
         description="Link target"
     )
-    badge: Optional[str] = Field(
+    
+    # Additional metadata
+    description: Optional[str] = Field(
         None, 
-        max_length=50, 
-        description="Badge text/notification count"
+        max_length=500, 
+        description="Menu description"
+    )
+    keywords: Optional[List[str]] = Field(
+        None, 
+        description="Search keywords"
+    )
+    is_external: bool = Field(
+        False, 
+        description="Whether this is an external link"
+    )
+    external_url: Optional[str] = Field(
+        None, 
+        max_length=500, 
+        description="External URL if is_external is true"
     )
     
     @field_validator('code')
@@ -150,20 +436,55 @@ class MenuBase(BaseModel):
     def validate_path(cls, v: Optional[str]) -> Optional[str]:
         """Validate path format"""
         if v is not None:
-            # Ensure path doesn't start with http:// or https://
+            # Ensure path doesn't start with http:// or https:// if not external
             if v.startswith(('http://', 'https://')):
-                raise ValueError("Path should be relative, not absolute URL")
+                raise ValueError("Path should be relative, not absolute URL. Use external_url for external links.")
             # Ensure path doesn't have trailing slash
             v = v.rstrip('/')
+            # Ensure path starts with /
+            if not v.startswith('/'):
+                v = '/' + v
+        return v
+    
+    @field_validator('external_url')
+    @classmethod
+    def validate_external_url(cls, v: Optional[str]) -> Optional[str]:
+        """Validate external URL format"""
+        if v is not None:
+            if not v.startswith(('http://', 'https://')):
+                raise ValueError("External URL must start with http:// or https://")
         return v
     
     @field_validator('icon')
     @classmethod
     def validate_icon(cls, v: Optional[str]) -> Optional[str]:
         """Validate icon name format"""
-        if v is not None and not v[0].isupper():
-            raise ValueError("Icon name should start with uppercase letter")
+        if v is not None:
+            # For Font Awesome icons
+            if v.startswith('fa-'):
+                return v
+            # For MUI icons - should start with uppercase
+            if not v[0].isupper():
+                # Try to convert to proper format or just warn
+                v = v[0].upper() + v[1:] if v else v
         return v
+    
+    @model_validator(mode='after')
+    def validate_external_consistency(self) -> 'MenuBase':
+        """Validate external link consistency"""
+        if self.is_external and not self.external_url:
+            raise ValueError("external_url is required when is_external is true")
+        if not self.is_external and self.external_url:
+            self.is_external = True
+        return self
+    
+    @model_validator(mode='after')
+    def validate_badge_consistency(self) -> 'MenuBase':
+        """Ensure badge config is consistent with legacy badge"""
+        if self.badge and not self.badge_config:
+            # Create badge config from legacy badge
+            self.badge_config = BadgeConfig(text=self.badge)
+        return self
     
     class Config:
         use_enum_values = True
@@ -172,10 +493,19 @@ class MenuBase(BaseModel):
                 "code": "dashboard",
                 "title": "Dashboard",
                 "icon": "Dashboard",
+                "icon_type": "mui",
+                "icon_library": "mui",
+                "icon_color": "#1976d2",
+                "icon_size": "medium",
+                "icon_animation": "none",
                 "path": "/dashboard",
                 "sort_order": 1,
                 "is_active": True,
-                "requires_auth": True
+                "requires_auth": True,
+                "badge_config": {
+                    "type": "count",
+                    "color": "error"
+                }
             }
         }
 
@@ -190,13 +520,24 @@ class MenuUpdate(BaseModel):
     code: Optional[str] = Field(None, min_length=2, max_length=50)
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     icon: Optional[str] = Field(None, max_length=50)
+    icon_type: Optional[IconType] = None
+    icon_library: Optional[IconLibrary] = None
+    icon_color: Optional[str] = Field(None, max_length=20)
+    icon_size: Optional[IconSize] = None
+    icon_animation: Optional[IconAnimation] = None
+    icon_rotation: Optional[int] = Field(None, ge=0, le=360)
+    badge: Optional[str] = Field(None, max_length=50)
+    badge_config: Optional[BadgeConfig] = None
     path: Optional[str] = Field(None, max_length=255)
     parent_id: Optional[UUID] = None
     sort_order: Optional[int] = Field(None, ge=0, le=9999)
     is_active: Optional[bool] = None
     requires_auth: Optional[bool] = None
     target: Optional[MenuTarget] = None
-    badge: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+    keywords: Optional[List[str]] = None
+    is_external: Optional[bool] = None
+    external_url: Optional[str] = Field(None, max_length=500)
     
     @field_validator('code')
     @classmethod
@@ -218,6 +559,13 @@ class MenuUpdate(BaseModel):
         if v is not None and v.startswith(('http://', 'https://')):
             raise ValueError("Path should be relative, not absolute URL")
         return v.rstrip('/') if v else v
+    
+    @model_validator(mode='after')
+    def validate_external_consistency(self) -> 'MenuUpdate':
+        """Validate external link consistency"""
+        if self.is_external is True and not self.external_url:
+            raise ValueError("external_url is required when is_external is true")
+        return self
     
     class Config:
         use_enum_values = True
@@ -242,6 +590,11 @@ class MenuResponse(MenuBase):
     level: int = Field(0, ge=0, le=MAX_MENU_DEPTH, description="Hierarchy level (0 = root)")
     has_children: bool = Field(False, description="Has child menus")
     
+    # Computed properties
+    icon_config: Optional[IconConfig] = Field(None, description="Computed icon configuration")
+    badge_display: Optional[str] = Field(None, description="Computed badge display text")
+    show_badge: bool = Field(False, description="Whether to show badge")
+    
     class Config:
         from_attributes = True
         json_schema_extra = {
@@ -250,6 +603,11 @@ class MenuResponse(MenuBase):
                 "code": "dashboard",
                 "title": "Dashboard",
                 "icon": "Dashboard",
+                "icon_type": "mui",
+                "icon_library": "mui",
+                "icon_color": "#1976d2",
+                "icon_size": "medium",
+                "icon_animation": "none",
                 "path": "/dashboard",
                 "parent_id": None,
                 "sort_order": 1,
@@ -264,7 +622,8 @@ class MenuResponse(MenuBase):
                 "can_access": True,
                 "can_show_mb_bottom": True,
                 "level": 0,
-                "has_children": False
+                "has_children": False,
+                "show_badge": False
             }
         }
     
@@ -279,6 +638,33 @@ class MenuResponse(MenuBase):
         """Validate menu depth doesn't exceed maximum"""
         if self.level > MAX_MENU_DEPTH:
             raise ValueError(f"Menu depth exceeds maximum of {MAX_MENU_DEPTH}")
+        return self
+    
+    @model_validator(mode='after')
+    def compute_icon_config(self) -> 'MenuResponse':
+        """Compute icon configuration"""
+        self.icon_config = IconConfig(
+            name=self.icon or "Circle",
+            type=self.icon_type,
+            library=self.icon_library,
+            color=self.icon_color,
+            size=self.icon_size,
+            animation=self.icon_animation,
+            rotate=self.icon_rotation if hasattr(self, 'icon_rotation') else None
+        )
+        return self
+    
+    @model_validator(mode='after')
+    def compute_badge(self) -> 'MenuResponse':
+        """Compute badge display"""
+        if self.badge_config and self.badge_config.show_badge:
+            self.badge_display = self.badge_config.display_text
+            self.show_badge = True
+        elif self.badge:
+            self.badge_display = self.badge
+            self.show_badge = True
+        else:
+            self.show_badge = False
         return self
 
 
@@ -295,6 +681,8 @@ class MenuFlatResponse(MenuBase):
     
     full_path: Optional[str] = Field(None, description="Full hierarchical path")
     level: int = Field(0, ge=0, description="Hierarchy level")
+    show_badge: bool = Field(False)
+    badge_display: Optional[str] = Field(None)
     
     class Config:
         from_attributes = True
@@ -304,6 +692,17 @@ class MenuFlatResponse(MenuBase):
         """Build full path from title (can be enhanced with parent data)"""
         if not self.full_path:
             self.full_path = self.title
+        return self
+    
+    @model_validator(mode='after')
+    def compute_badge(self) -> 'MenuFlatResponse':
+        """Compute badge display"""
+        if self.badge_config and self.badge_config.show_badge:
+            self.badge_display = self.badge_config.display_text
+            self.show_badge = True
+        elif self.badge:
+            self.badge_display = self.badge
+            self.show_badge = True
         return self
 
 
@@ -334,6 +733,52 @@ class MenuBreadcrumbResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# ==================== Icon Helper Functions ====================
+
+def get_icon_config(
+    icon_name: Optional[str], 
+    icon_type: IconType = IconType.MUI,
+    icon_library: IconLibrary = IconLibrary.MUI,
+    icon_color: str = "inherit",
+    icon_size: IconSize = IconSize.MEDIUM
+) -> IconConfig:
+    """Helper to create icon configuration"""
+    return IconConfig(
+        name=icon_name or "Circle",
+        type=icon_type,
+        library=icon_library,
+        color=icon_color,
+        size=icon_size,
+        animation=IconAnimation.NONE
+    )
+
+
+def convert_fa_to_mui(fa_icon: str) -> Optional[str]:
+    """Convert Font Awesome icon name to MUI icon name"""
+    return FA_TO_MUI_MAP.get(fa_icon)
+
+
+def get_icon_color_by_menu_code(menu_code: str) -> str:
+    """Get default icon color based on menu code"""
+    color_map = {
+        "dashboard": "#1976d2",
+        "meetings": "#4caf50",
+        "actions": "#ff9800",
+        "participants": "#9c27b0",
+        "documents": "#2196f3",
+        "reports": "#f44336",
+        "calendar": "#00bcd4",
+        "settings": "#757575",
+        "profile": "#795548",
+        "security": "#dc004e",
+        "notifications": "#ff9800",
+        "users": "#3f51b5",
+        "roles": "#9c27b0",
+        "audit": "#607d8b"
+    }
+    return color_map.get(menu_code, "inherit")
 
 
 # ==================== Role Menu Permission Schemas ====================
@@ -377,20 +822,17 @@ class RoleMenuPermissionUpdate(BaseModel):
 
 
 class RoleMenuPermissionResponse(RoleMenuPermissionBase):
-    """Schema for role-menu permission response - WITHOUT relationship to avoid greenlet errors"""
+    """Schema for role-menu permission response"""
     id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    # Don't include menu relationship here to avoid greenlet issues
-    # Use separate endpoint to fetch menu details
     
     class Config:
         from_attributes = True
 
 
 class RoleMenuPermissionWithMenuResponse(RoleMenuPermissionResponse):
-    """Schema for role-menu permission response WITH menu details (use with eager loading)"""
+    """Schema for role-menu permission response WITH menu details"""
     menu: Optional[MenuFlatResponse] = Field(None, description="Associated menu details")
     
     class Config:
@@ -553,7 +995,7 @@ class MenuSearchParams(BaseModel):
 
 class MenuExportData(BaseModel):
     """Schema for menu export data"""
-    version: str = Field("1.0", description="Export format version")
+    version: str = Field("2.0", description="Export format version")
     exported_at: datetime = Field(default_factory=datetime.utcnow)
     exported_by: Optional[str] = Field(None, description="User who exported")
     menus: List[MenuResponse]
@@ -596,13 +1038,30 @@ class MobileBottomNavItem(BaseModel):
     code: str
     title: str
     icon: Optional[str] = None
+    icon_type: IconType = IconType.MUI
+    icon_library: IconLibrary = IconLibrary.MUI
+    icon_color: str = "inherit"
     path: Optional[str] = None
     badge: Optional[str] = None
+    badge_config: Optional[BadgeConfig] = None
     sort_order: int = Field(0, ge=0)
     is_active: bool = True
+    show_badge: bool = False
+    badge_display: Optional[str] = None
     
     class Config:
         from_attributes = True
+    
+    @model_validator(mode='after')
+    def compute_badge(self) -> 'MobileBottomNavItem':
+        """Compute badge display"""
+        if self.badge_config and self.badge_config.show_badge:
+            self.badge_display = self.badge_config.display_text
+            self.show_badge = True
+        elif self.badge:
+            self.badge_display = self.badge
+            self.show_badge = True
+        return self
 
 
 class MobileBottomNavResponse(BaseModel):

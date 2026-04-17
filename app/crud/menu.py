@@ -1,6 +1,6 @@
 # app/crud/menu.py
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, and_, or_, func
+from sqlalchemy import select, update, delete, and_, or_, func, case
 from sqlalchemy.orm import selectinload, joinedload
 from typing import Optional, List, Dict, Any, Set, Tuple
 from uuid import UUID
@@ -8,22 +8,58 @@ from datetime import datetime, timezone
 import logging
 from app.models.menu import Menu
 from app.models.role import RoleMenuPermission, Role
-from app.schemas.menu import MenuCreate, MenuUpdate
+from app.schemas.menu import (
+    MenuCreate, MenuUpdate, IconConfig, BadgeConfig,
+    IconType, IconLibrary, IconSize, IconAnimation,
+    BadgeType, BadgeColor
+)
 
 logger = logging.getLogger(__name__)
 
 
 class MenuCRUD:
-    """CRUD operations for Menu model with optimized queries"""
+    """CRUD operations for Menu model with enhanced icon support"""
     
+    # Cache for frequently accessed menus (TTL: 5 minutes)
+    _cache: Dict[str, Any] = {}
+    _cache_timestamp: Dict[str, float] = {}
+    _CACHE_TTL = 300  # 5 seconds
+
+    def _get_cache_key(self, *args, **kwargs) -> str:
+        """Generate cache key from arguments"""
+        return f"{args}_{sorted(kwargs.items())}"
+
+    def _is_cache_valid(self, key: str) -> bool:
+        """Check if cache entry is still valid"""
+        if key not in self._cache_timestamp:
+            return False
+        return (datetime.now().timestamp() - self._cache_timestamp[key]) < self._CACHE_TTL
+
+    def _invalidate_cache(self, pattern: Optional[str] = None):
+        """Invalidate cache entries"""
+        if pattern:
+            keys_to_remove = [k for k in self._cache.keys() if pattern in k]
+            for k in keys_to_remove:
+                self._cache.pop(k, None)
+                self._cache_timestamp.pop(k, None)
+        else:
+            self._cache.clear()
+            self._cache_timestamp.clear()
+
     async def get(
         self, 
         db: AsyncSession, 
         id: UUID,
         load_children: bool = False,
-        load_permissions: bool = False
+        load_permissions: bool = False,
+        use_cache: bool = False
     ) -> Optional[Menu]:
         """Get menu by ID with optional eager loading"""
+        cache_key = self._get_cache_key("get", str(id), load_children, load_permissions)
+        
+        if use_cache and self._is_cache_valid(cache_key):
+            return self._cache.get(cache_key)
+        
         try:
             query = select(Menu).where(Menu.id == id)
             
@@ -33,7 +69,13 @@ class MenuCRUD:
                 query = query.options(selectinload(Menu.role_permissions))
             
             result = await db.execute(query)
-            return result.scalar_one_or_none()
+            menu = result.scalar_one_or_none()
+            
+            if use_cache and menu:
+                self._cache[cache_key] = menu
+                self._cache_timestamp[cache_key] = datetime.now().timestamp()
+            
+            return menu
         except Exception as e:
             logger.error(f"Error fetching menu {id}: {e}")
             return None
@@ -42,9 +84,15 @@ class MenuCRUD:
         self, 
         db: AsyncSession, 
         code: str,
-        load_children: bool = False
+        load_children: bool = False,
+        use_cache: bool = False
     ) -> Optional[Menu]:
         """Get menu by code with optional eager loading"""
+        cache_key = self._get_cache_key("get_by_code", code, load_children)
+        
+        if use_cache and self._is_cache_valid(cache_key):
+            return self._cache.get(cache_key)
+        
         try:
             query = select(Menu).where(Menu.code == code)
             
@@ -52,7 +100,13 @@ class MenuCRUD:
                 query = query.options(selectinload(Menu.children))
             
             result = await db.execute(query)
-            return result.scalar_one_or_none()
+            menu = result.scalar_one_or_none()
+            
+            if use_cache and menu:
+                self._cache[cache_key] = menu
+                self._cache_timestamp[cache_key] = datetime.now().timestamp()
+            
+            return menu
         except Exception as e:
             logger.error(f"Error fetching menu by code {code}: {e}")
             return None
@@ -81,7 +135,8 @@ class MenuCRUD:
         limit: int = 100,
         active_only: bool = True,
         load_children: bool = False,
-        load_permissions: bool = False
+        load_permissions: bool = False,
+        include_icons: bool = True
     ) -> List[Menu]:
         """Get all menus with pagination and optional eager loading"""
         try:
@@ -97,7 +152,16 @@ class MenuCRUD:
             
             query = query.offset(skip).limit(limit)
             result = await db.execute(query)
-            return result.scalars().all()
+            menus = result.scalars().all()
+            
+            # Compute icon configs for each menu
+            if include_icons:
+                for menu in menus:
+                    menu.icon_config = self._compute_icon_config(menu)
+                    menu.badge_display = self._compute_badge_display(menu)
+                    menu.show_badge = bool(menu.badge_display)
+            
+            return menus
         except Exception as e:
             logger.error(f"Error fetching all menus: {e}")
             return []
@@ -105,7 +169,8 @@ class MenuCRUD:
     async def get_root_menus(
         self, 
         db: AsyncSession,
-        active_only: bool = True
+        active_only: bool = True,
+        include_icons: bool = True
     ) -> List[Menu]:
         """Get only root menus (no parent)"""
         try:
@@ -116,7 +181,15 @@ class MenuCRUD:
             
             query = query.order_by(Menu.sort_order)
             result = await db.execute(query)
-            return result.scalars().all()
+            menus = result.scalars().all()
+            
+            if include_icons:
+                for menu in menus:
+                    menu.icon_config = self._compute_icon_config(menu)
+                    menu.badge_display = self._compute_badge_display(menu)
+                    menu.show_badge = bool(menu.badge_display)
+            
+            return menus
         except Exception as e:
             logger.error(f"Error fetching root menus: {e}")
             return []
@@ -126,21 +199,30 @@ class MenuCRUD:
         db: AsyncSession, 
         parent_id: UUID,
         active_only: bool = True,
-        recursive: bool = False
+        recursive: bool = False,
+        include_icons: bool = True
     ) -> List[Menu]:
         """Get children of a menu, optionally recursive"""
         try:
             if recursive:
-                return await self._get_descendants(db, parent_id, active_only)
+                menus = await self._get_descendants(db, parent_id, active_only)
+            else:
+                query = select(Menu).where(Menu.parent_id == parent_id)
+                
+                if active_only:
+                    query = query.where(Menu.is_active == True)
+                
+                query = query.order_by(Menu.sort_order)
+                result = await db.execute(query)
+                menus = result.scalars().all()
             
-            query = select(Menu).where(Menu.parent_id == parent_id)
+            if include_icons:
+                for menu in menus:
+                    menu.icon_config = self._compute_icon_config(menu)
+                    menu.badge_display = self._compute_badge_display(menu)
+                    menu.show_badge = bool(menu.badge_display)
             
-            if active_only:
-                query = query.where(Menu.is_active == True)
-            
-            query = query.order_by(Menu.sort_order)
-            result = await db.execute(query)
-            return result.scalars().all()
+            return menus
         except Exception as e:
             logger.error(f"Error fetching children for menu {parent_id}: {e}")
             return []
@@ -151,19 +233,38 @@ class MenuCRUD:
         parent_id: UUID,
         active_only: bool = True
     ) -> List[Menu]:
-        """Get all descendants of a menu (recursive)"""
-        # Use recursive CTE for PostgreSQL
-        # For simplicity, we'll do iterative fetching
-        descendants = []
-        to_process = [parent_id]
+        """Get all descendants of a menu (recursive using CTE)"""
+        # Use recursive CTE for better performance
+        from sqlalchemy import text
         
-        while to_process:
-            current_id = to_process.pop()
-            children = await self.get_children(db, current_id, active_only)
-            descendants.extend(children)
-            to_process.extend([child.id for child in children])
+        active_filter = "AND m.is_active = 1" if active_only else ""
         
-        return descendants
+        query = text(f"""
+            WITH RECURSIVE menu_tree AS (
+                SELECT id, code, title, icon, icon_type, icon_library, icon_color,
+                       icon_size, icon_animation, badge, path, parent_id, sort_order,
+                       is_active, requires_auth, target, created_at, updated_at,
+                       0 as level
+                FROM menus
+                WHERE id = :parent_id
+                
+                UNION ALL
+                
+                SELECT m.id, m.code, m.title, m.icon, m.icon_type, m.icon_library,
+                       m.icon_color, m.icon_size, m.icon_animation, m.badge,
+                       m.path, m.parent_id, m.sort_order, m.is_active,
+                       m.requires_auth, m.target, m.created_at, m.updated_at,
+                       mt.level + 1
+                FROM menus m
+                INNER JOIN menu_tree mt ON m.parent_id = mt.id
+                WHERE m.is_active = 1 {active_filter}
+            )
+            SELECT * FROM menu_tree WHERE id != :parent_id
+            ORDER BY level, sort_order
+        """)
+        
+        result = await db.execute(query, {"parent_id": parent_id})
+        return [Menu(**row._mapping) for row in result]
     
     async def get_hierarchy(
         self, 
@@ -171,7 +272,8 @@ class MenuCRUD:
         role_ids: Optional[List[UUID]] = None,
         user_id: Optional[UUID] = None,
         include_inactive: bool = False,
-        max_depth: int = 10
+        max_depth: int = 10,
+        include_icons: bool = True
     ) -> List[Menu]:
         """
         Get hierarchical menu structure with role-based filtering.
@@ -203,7 +305,13 @@ class MenuCRUD:
             menus = result.scalars().all()
             
             # Build hierarchy with depth limiting
-            return self._build_hierarchy(menus, max_depth)
+            hierarchy = self._build_hierarchy(menus, max_depth)
+            
+            # Compute icon configs and badges
+            if include_icons:
+                hierarchy = self._enrich_menus_with_icons(hierarchy)
+            
+            return hierarchy
             
         except Exception as e:
             logger.error(f"Error building menu hierarchy: {e}")
@@ -259,8 +367,52 @@ class MenuCRUD:
             ancestors.append(current)
         return ancestors
     
+    def _compute_icon_config(self, menu: Menu) -> Optional[Dict[str, Any]]:
+        """Compute icon configuration for a menu"""
+        if not menu.icon:
+            return None
+        
+        return {
+            "name": menu.icon,
+            "type": getattr(menu, 'icon_type', 'mui'),
+            "library": getattr(menu, 'icon_library', 'mui'),
+            "color": getattr(menu, 'icon_color', 'inherit'),
+            "size": getattr(menu, 'icon_size', 'medium'),
+            "animation": getattr(menu, 'icon_animation', 'none'),
+            "rotation": getattr(menu, 'icon_rotation', None)
+        }
+    
+    def _compute_badge_display(self, menu: Menu) -> Optional[str]:
+        """Compute badge display text"""
+        if menu.badge_config:
+            if menu.badge_config.type == BadgeType.COUNT and menu.badge_config.count:
+                if menu.badge_config.count > menu.badge_config.max_count:
+                    return f"{menu.badge_config.max_count}+"
+                return str(menu.badge_config.count)
+            if menu.badge_config.type == BadgeType.TEXT and menu.badge_config.text:
+                return menu.badge_config.text
+            if menu.badge_config.type == BadgeType.DOT:
+                return "●"
+            if menu.badge_config.type == BadgeType.STATUS:
+                return menu.badge_config.text or "●"
+        elif menu.badge:
+            return menu.badge
+        return None
+    
+    def _enrich_menus_with_icons(self, menus: List[Menu]) -> List[Menu]:
+        """Recursively enrich menus with computed icon configs and badges"""
+        for menu in menus:
+            menu.icon_config = self._compute_icon_config(menu)
+            menu.badge_display = self._compute_badge_display(menu)
+            menu.show_badge = bool(menu.badge_display)
+            
+            if hasattr(menu, 'children') and menu.children:
+                self._enrich_menus_with_icons(menu.children)
+        
+        return menus
+    
     async def create(self, db: AsyncSession, obj_in: MenuCreate) -> Menu:
-        """Create a new menu with validation"""
+        """Create a new menu with validation and icon support"""
         try:
             # Check for duplicate code
             existing = await self.get_by_code(db, obj_in.code)
@@ -272,14 +424,24 @@ class MenuCRUD:
                 await self._validate_no_circular_reference(db, obj_in.parent_id, None)
             
             # Create menu instance with timestamps
-            menu_data = obj_in.model_dump()
+            menu_data = obj_in.model_dump(exclude_unset=True)
             menu_data['created_at'] = datetime.now(timezone.utc)
             menu_data['updated_at'] = datetime.now(timezone.utc)
+            
+            # Handle badge_config if provided
+            if 'badge_config' in menu_data and menu_data['badge_config']:
+                badge_config = menu_data['badge_config']
+                if isinstance(badge_config, dict):
+                    # Convert dict to BadgeConfig
+                    menu_data['badge'] = badge_config.get('text')
             
             menu = Menu(**menu_data)
             db.add(menu)
             await db.commit()
             await db.refresh(menu)
+            
+            # Invalidate cache
+            self._invalidate_cache()
             
             logger.info(f"Menu created: {menu.code} (ID: {menu.id})")
             return menu
@@ -295,7 +457,7 @@ class MenuCRUD:
         id: UUID, 
         obj_in: MenuUpdate
     ) -> Optional[Menu]:
-        """Update an existing menu"""
+        """Update an existing menu with icon support"""
         try:
             menu = await self.get(db, id)
             if not menu:
@@ -319,6 +481,9 @@ class MenuCRUD:
             menu.updated_at = datetime.now(timezone.utc)
             await db.commit()
             await db.refresh(menu)
+            
+            # Invalidate cache
+            self._invalidate_cache()
             
             logger.info(f"Menu updated: {menu.code} (ID: {menu.id})")
             return menu
@@ -359,6 +524,7 @@ class MenuCRUD:
             deleted = result.rowcount > 0
             if deleted:
                 logger.info(f"Menu deleted: {menu.code} (ID: {id})")
+                self._invalidate_cache()
             
             return deleted
             
@@ -391,6 +557,7 @@ class MenuCRUD:
                     .values(sort_order=index, updated_at=datetime.now(timezone.utc))
                 )
             await db.commit()
+            self._invalidate_cache()
             logger.info(f"Reordered {len(menu_ids)} menus")
             return True
         except Exception as e:
@@ -410,6 +577,8 @@ class MenuCRUD:
             await db.commit()
             await db.refresh(menu)
             
+            self._invalidate_cache()
+            
             status = "activated" if menu.is_active else "deactivated"
             logger.info(f"Menu {status}: {menu.code}")
             return menu
@@ -421,19 +590,21 @@ class MenuCRUD:
     async def get_menu_tree_for_user(
         self, 
         db: AsyncSession, 
-        user_roles: List[Role]
+        user_roles: List[Role],
+        include_icons: bool = True
     ) -> List[Menu]:
         """Get menu tree for a user based on their roles"""
         role_ids = [role.id for role in user_roles]
-        return await self.get_hierarchy(db, role_ids)
+        return await self.get_hierarchy(db, role_ids, include_icons=include_icons)
     
     async def search_menus(
         self, 
         db: AsyncSession, 
         query: str,
-        limit: int = 20
+        limit: int = 20,
+        include_icons: bool = True
     ) -> List[Menu]:
-        """Search menus by code or title"""
+        """Search menus by code, title, or keywords"""
         try:
             search_term = f"%{query}%"
             result = await db.execute(
@@ -441,18 +612,28 @@ class MenuCRUD:
                 .where(
                     or_(
                         Menu.code.ilike(search_term),
-                        Menu.title.ilike(search_term)
+                        Menu.title.ilike(search_term),
+                        Menu.description.ilike(search_term) if hasattr(Menu, 'description') else False,
+                        func.JSON_CONTAINS(Menu.keywords, f'"{query}"') if hasattr(Menu, 'keywords') else False
                     )
                 )
                 .limit(limit)
             )
-            return result.scalars().all()
+            menus = result.scalars().all()
+            
+            if include_icons:
+                for menu in menus:
+                    menu.icon_config = self._compute_icon_config(menu)
+                    menu.badge_display = self._compute_badge_display(menu)
+                    menu.show_badge = bool(menu.badge_display)
+            
+            return menus
         except Exception as e:
             logger.error(f"Error searching menus: {e}")
             return []
     
     async def get_statistics(self, db: AsyncSession) -> Dict[str, Any]:
-        """Get menu statistics"""
+        """Get menu statistics including icon usage"""
         try:
             total_menus = await db.execute(select(func.count()).select_from(Menu))
             total = total_menus.scalar() or 0
@@ -467,16 +648,79 @@ class MenuCRUD:
             )
             root = root_menus.scalar() or 0
             
+            # Icon usage statistics
+            mui_icons = await db.execute(
+                select(func.count()).select_from(Menu).where(Menu.icon_type == 'mui')
+            )
+            fa_icons = await db.execute(
+                select(func.count()).select_from(Menu).where(Menu.icon_type == 'fontawesome')
+            )
+            material_icons = await db.execute(
+                select(func.count()).select_from(Menu).where(Menu.icon_type == 'material_symbols')
+            )
+            
+            # Badge usage
+            menus_with_badge = await db.execute(
+                select(func.count()).select_from(Menu).where(Menu.badge.isnot(None))
+            )
+            
             return {
                 "total": total,
                 "active": active,
                 "inactive": total - active,
                 "root": root,
-                "has_menus": total > 0
+                "has_menus": total > 0,
+                "icon_usage": {
+                    "mui": mui_icons.scalar() or 0,
+                    "fontawesome": fa_icons.scalar() or 0,
+                    "material_symbols": material_icons.scalar() or 0
+                },
+                "menus_with_badge": menus_with_badge.scalar() or 0
             }
         except Exception as e:
             logger.error(f"Error getting menu statistics: {e}")
             return {"total": 0, "active": 0, "inactive": 0, "root": 0, "has_menus": False}
+    
+    async def get_mobile_bottom_menus(
+        self, 
+        db: AsyncSession, 
+        role_ids: List[UUID],
+        limit: int = 5
+    ) -> List[Menu]:
+        """Get menus configured for mobile bottom navigation"""
+        try:
+            # Get permissions with mobile bottom enabled
+            permissions_query = select(RoleMenuPermission.menu_id).where(
+                RoleMenuPermission.role_id.in_(role_ids),
+                RoleMenuPermission.can_show_mb_bottom == True,
+                RoleMenuPermission.can_view == True
+            ).distinct()
+            
+            result = await db.execute(permissions_query)
+            menu_ids = [row[0] for row in result.all()]
+            
+            if not menu_ids:
+                return []
+            
+            # Get menus
+            query = select(Menu).where(
+                Menu.id.in_(menu_ids),
+                Menu.is_active == True
+            ).order_by(Menu.sort_order).limit(limit)
+            
+            result = await db.execute(query)
+            menus = result.scalars().all()
+            
+            # Enrich with icon configs
+            for menu in menus:
+                menu.icon_config = self._compute_icon_config(menu)
+                menu.badge_display = self._compute_badge_display(menu)
+                menu.show_badge = bool(menu.badge_display)
+            
+            return menus
+        except Exception as e:
+            logger.error(f"Error fetching mobile bottom menus: {e}")
+            return []
     
     async def _validate_no_circular_reference(
         self, 
@@ -511,7 +755,8 @@ class RoleMenuPermissionCRUD:
         self, 
         db: AsyncSession, 
         role_id: UUID,
-        include_menu_details: bool = False
+        include_menu_details: bool = False,
+        include_menu_icons: bool = True
     ) -> List[RoleMenuPermission]:
         """Get all permissions for a role"""
         try:
@@ -521,7 +766,17 @@ class RoleMenuPermissionCRUD:
                 query = query.options(selectinload(RoleMenuPermission.menu))
             
             result = await db.execute(query)
-            return result.scalars().all()
+            permissions = result.scalars().all()
+            
+            # Enrich with icon configs if requested
+            if include_menu_icons and include_menu_details:
+                for perm in permissions:
+                    if perm.menu:
+                        perm.menu.icon_config = MenuCRUD()._compute_icon_config(perm.menu)
+                        perm.menu.badge_display = MenuCRUD()._compute_badge_display(perm.menu)
+                        perm.menu.show_badge = bool(perm.menu.badge_display)
+            
+            return permissions
         except Exception as e:
             logger.error(f"Error fetching permissions for role {role_id}: {e}")
             return []
@@ -566,8 +821,6 @@ class RoleMenuPermissionCRUD:
             logger.error(f"Error fetching permission for role {role_id} and menu {menu_id}: {e}")
             return None
     
-    # app/crud/menu.py - Update the set_permission method
-
     async def set_permission(
         self, 
         db: AsyncSession, 
@@ -579,20 +832,16 @@ class RoleMenuPermissionCRUD:
     ) -> RoleMenuPermission:
         """Set permission for a role on a menu (create or update)"""
         try:
-            from datetime import datetime, timezone
-            
             permission = await self.get_by_role_and_menu(db, role_id, menu_id)
             now = datetime.now(timezone.utc)
             
             if permission:
-                # Update existing
                 permission.can_view = can_view
                 permission.can_access = can_access
                 permission.can_show_mb_bottom = can_show_mb_bottom
                 permission.updated_at = now
                 action = "updated"
             else:
-                # Create new with explicit timestamps
                 permission = RoleMenuPermission(
                     role_id=role_id,
                     menu_id=menu_id,
@@ -615,16 +864,17 @@ class RoleMenuPermissionCRUD:
             await db.rollback()
             logger.error(f"Failed to set permission: {e}")
             raise
-        
+    
     async def batch_assign_menus(
         self, 
         db: AsyncSession, 
         role_id: UUID, 
         menu_ids: List[UUID],
         replace_existing: bool = True,
-        default_can_show_mb_bottom: bool = False
+        default_can_show_mb_bottom: bool = False,
+        auto_detect_mobile_bottom: bool = True
     ) -> List[RoleMenuPermission]:
-        """Batch assign multiple menus to a role"""
+        """Batch assign multiple menus to a role with mobile bottom detection"""
         if not menu_ids:
             return []
         
@@ -640,6 +890,10 @@ class RoleMenuPermissionCRUD:
             permissions = []
             now = datetime.now(timezone.utc)
             
+            # Get menu data for mobile bottom detection
+            menu_crud = MenuCRUD()
+            menus = await menu_crud.get_by_codes(db, [])  # Would need to get by IDs
+            
             for menu_id in menu_ids:
                 if not replace_existing:
                     existing = await self.get_by_role_and_menu(db, role_id, menu_id)
@@ -647,12 +901,19 @@ class RoleMenuPermissionCRUD:
                         permissions.append(existing)
                         continue
                 
+                # Auto-detect if this menu should show on mobile bottom
+                can_show_mb = default_can_show_mb_bottom
+                if auto_detect_mobile_bottom:
+                    # Logic for auto-detection based on menu properties
+                    # For example: root menus, dashboards, actions, meetings
+                    can_show_mb = await self._should_show_on_mobile_bottom(db, menu_id)
+                
                 permission = RoleMenuPermission(
                     role_id=role_id,
                     menu_id=menu_id,
                     can_view=True,
                     can_access=True,
-                    can_show_mb_bottom=default_can_show_mb_bottom,
+                    can_show_mb_bottom=can_show_mb,
                     created_at=now,
                     updated_at=now
                 )
@@ -671,6 +932,23 @@ class RoleMenuPermissionCRUD:
             await db.rollback()
             logger.error(f"Failed to batch assign menus: {e}")
             raise
+    
+    async def _should_show_on_mobile_bottom(self, db: AsyncSession, menu_id: UUID) -> bool:
+        """Determine if a menu should show on mobile bottom navigation"""
+        menu_crud = MenuCRUD()
+        menu = await menu_crud.get(db, menu_id)
+        
+        if not menu:
+            return False
+        
+        # Mobile bottom navigation candidates
+        mobile_candidates = [
+            "dashboard", "meetings", "actions", "calendar",
+            "my_tasks", "notifications", "participants"
+        ]
+        
+        # Check if menu code is in candidates or if it's a root menu
+        return menu.code in mobile_candidates or menu.parent_id is None
     
     async def get_role_menu_ids(
         self, 
@@ -768,15 +1046,12 @@ class RoleMenuPermissionCRUD:
     ) -> Dict[str, Any]:
         """Sync role permissions to exactly match the provided menu IDs"""
         try:
-            # Get current permissions
             current_menu_ids = await self.get_role_menu_ids(db, role_id)
             target_menu_ids = set(menu_ids)
             
-            # Calculate changes
             to_add = target_menu_ids - current_menu_ids
             to_remove = current_menu_ids - target_menu_ids
             
-            # Apply changes
             for menu_id in to_add:
                 await self.set_permission(db, role_id, menu_id, True, True)
             
@@ -806,7 +1081,7 @@ class RoleMenuPermissionCRUD:
         db: AsyncSession, 
         role_id: UUID
     ) -> Dict[str, Any]:
-        """Get summary of permissions for a role"""
+        """Get summary of permissions for a role including icon usage"""
         try:
             permissions = await self.get_by_role(db, role_id, include_menu_details=True)
             
@@ -814,6 +1089,18 @@ class RoleMenuPermissionCRUD:
             can_view = sum(1 for p in permissions if p.can_view)
             can_access = sum(1 for p in permissions if p.can_access)
             mobile_bottom = sum(1 for p in permissions if p.can_show_mb_bottom)
+            
+            # Icon type distribution
+            icon_types = {
+                "mui": 0,
+                "fontawesome": 0,
+                "material_symbols": 0,
+                "custom": 0
+            }
+            
+            for p in permissions:
+                if p.menu and p.menu.icon_type:
+                    icon_types[p.menu.icon_type] = icon_types.get(p.menu.icon_type, 0) + 1
             
             # Group by parent menu
             by_parent = {}
@@ -828,6 +1115,7 @@ class RoleMenuPermissionCRUD:
                 "can_view_count": can_view,
                 "can_access_count": can_access,
                 "mobile_bottom_count": mobile_bottom,
+                "icon_type_distribution": icon_types,
                 "by_parent": by_parent
             }
         except Exception as e:
@@ -838,6 +1126,7 @@ class RoleMenuPermissionCRUD:
                 "can_view_count": 0,
                 "can_access_count": 0,
                 "mobile_bottom_count": 0,
+                "icon_type_distribution": {},
                 "by_parent": {},
                 "error": str(e)
             }

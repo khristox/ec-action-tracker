@@ -15,9 +15,11 @@ from app.crud.menu import menu, role_menu_permission
 from app.schemas.menu import (
     MenuCreate, MenuUpdate, MenuResponse, MenuTreeResponse,
     RoleMenuPermissionCreate, RoleMenuPermissionUpdate,
-    RoleMenuPermissionResponse, BatchRoleMenuPermissionUpdate
+    RoleMenuPermissionResponse, BatchRoleMenuPermissionUpdate,
+    IconType, IconLibrary
 )
 from app.core.config import settings
+from app.services.menu_icon_service import MenuIconService
 
 router = APIRouter()
 
@@ -118,20 +120,96 @@ async def get_user_menus_with_permissions(
     
     return list(menus_dict.values()), permission_map
 
+
+# IMPROVED: Build menu response with proper icon field handling
 def build_menu_response_sync(menu: Menu, permission: Optional[RoleMenuPermission]) -> MenuResponse:
-    """Build a MenuResponse synchronously (no async calls)."""
+    """Build a MenuResponse synchronously with proper icon field handling."""
+    
+    # Safely get icon fields from menu object with fallbacks
+    icon_type = getattr(menu, 'icon_type', None)
+    icon_library = getattr(menu, 'icon_library', None)
+    icon_color = getattr(menu, 'icon_color', None)
+    icon_size = getattr(menu, 'icon_size', None)
+    icon_animation = getattr(menu, 'icon_animation', None)
+    icon_rotation = getattr(menu, 'icon_rotation', None)
+    
+    # Safely get badge fields
+    badge = getattr(menu, 'badge', None)
+    badge_config = getattr(menu, 'badge_config', None)
+    
+    # Safely get other optional fields
+    description = getattr(menu, 'description', None)
+    keywords = getattr(menu, 'keywords', None)
+    is_external = getattr(menu, 'is_external', False)
+    external_url = getattr(menu, 'external_url', None)
+    
+    # Auto-detect Font Awesome icons that might have wrong types
+    if menu.icon and menu.icon.startswith('fa-'):
+        # Font Awesome brand icons list
+        brand_icons = ['facebook', 'twitter', 'linkedin', 'github', 'youtube', 
+                      'whatsapp', 'instagram', 'telegram', 'discord', 'tiktok',
+                      'fa-facebook', 'fa-twitter', 'fa-linkedin', 'fa-github']
+        
+        icon_name = menu.icon.replace('fa-', '')
+        
+        # Auto-set icon_type if not set or wrong
+        if not icon_type or icon_type == "mui":
+            icon_type = "fontawesome"
+        
+        # Auto-set icon_library for brand icons
+        if not icon_library or icon_library == "mui":
+            if icon_name in brand_icons:
+                icon_library = "fab"
+            else:
+                icon_library = "fas"
+        
+        # Auto-set default color for brand icons if not set
+        if not icon_color or icon_color == "inherit":
+            brand_colors = {
+                'facebook': '#1877f2',
+                'twitter': '#1DA1F2',
+                'linkedin': '#0077b5',
+                'github': '#333333',
+                'youtube': '#FF0000',
+                'whatsapp': '#25D366',
+                'instagram': '#E4405F',
+                'telegram': '#26A5E4',
+                'discord': '#5865F2',
+                'tiktok': '#000000',
+            }
+            if icon_name in brand_colors:
+                icon_color = brand_colors[icon_name]
+    
+    # Set defaults if still None
+    icon_type = icon_type or "mui"
+    icon_library = icon_library or "mui"
+    icon_color = icon_color or "inherit"
+    icon_size = icon_size or "medium"
+    icon_animation = icon_animation or "none"
+    
     return MenuResponse(
         id=menu.id,
         code=menu.code,
         title=menu.title,
         icon=menu.icon,
+        icon_type=icon_type,
+        icon_library=icon_library,
+        icon_color=icon_color,
+        icon_size=icon_size,
+        icon_animation=icon_animation,
+        icon_rotation=icon_rotation,
         path=menu.path,
         parent_id=menu.parent_id,
         sort_order=menu.sort_order,
         is_active=menu.is_active,
         requires_auth=menu.requires_auth,
         target=menu.target,
-        badge=menu.badge,
+        badge=badge,
+        badge_config=badge_config,
+        description=description,
+        keywords=keywords,
+        is_external=is_external,
+        external_url=external_url,
         created_at=menu.created_at,
         updated_at=menu.updated_at,
         children=[],
@@ -184,6 +262,23 @@ def build_menu_hierarchy_sync(menus: List[Menu], permission_map: Dict[UUID, Role
 
 # ==================== MENU ENDPOINTS ====================
 
+@router.get("/icons/options")
+async def get_icon_options():
+    """Get available icon options for menu customization"""
+    return {
+        "libraries": [
+            {"value": "mui", "label": "Material-UI Icons", "preview": "🏠"},
+            {"value": "fontawesome", "label": "Font Awesome", "preview": "fa-home"},
+            {"value": "material_symbols", "label": "Material Symbols", "preview": "home"},
+            {"value": "custom", "label": "Custom Images", "preview": "🖼️"}
+        ],
+        "mui_icons": list(MenuIconService.MUI_ICONS.values()),
+        "fa_icons": list(MenuIconService.FA_ICONS.values()),
+        "material_symbols": list(MenuIconService.MATERIAL_SYMBOLS.values()),
+        "animations": ["none", "spin", "pulse", "bounce", "shake", "beat"]
+    }
+
+    
 @router.get("/", response_model=List[MenuTreeResponse])
 async def get_menus(
     db: AsyncSession = Depends(deps.get_db),
@@ -254,14 +349,16 @@ async def get_flat_menus(
     return [build_menu_response_sync(menu, permission_map.get(menu.id)) for menu in menus]
 
 
+# IMPROVED: Get menu endpoint with debug logging
 @router.get("/{menu_id}", response_model=MenuResponse)
 async def get_menu(
     menu_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> MenuResponse:
-    """Get a specific menu by ID."""
-    # Eager load the menu
+    """Get a specific menu by ID with full icon support."""
+    
+    # Eager load the menu with all fields
     result = await db.execute(
         select(Menu).options(selectinload(Menu.children)).where(Menu.id == menu_id)
     )
@@ -272,6 +369,13 @@ async def get_menu(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Menu not found"
         )
+    
+    # Debug logging (remove in production)
+    print(f"[DEBUG] Menu {menu_item.code}:")
+    print(f"  icon: {menu_item.icon}")
+    print(f"  icon_type (raw): {getattr(menu_item, 'icon_type', 'NOT SET')}")
+    print(f"  icon_library (raw): {getattr(menu_item, 'icon_library', 'NOT SET')}")
+    print(f"  icon_color (raw): {getattr(menu_item, 'icon_color', 'NOT SET')}")
     
     user_role_ids = [role.id for role in current_user.roles]
     has_permission = False
@@ -298,7 +402,65 @@ async def get_menu(
             detail="Access denied to this menu"
         )
     
-    return build_menu_response_sync(menu_item, None)
+    response = build_menu_response_sync(menu_item, None)
+    
+    # Debug response values
+    print(f"[DEBUG] Response for {menu_item.code}:")
+    print(f"  icon_type: {response.icon_type}")
+    print(f"  icon_library: {response.icon_library}")
+    print(f"  icon_color: {response.icon_color}")
+    
+    return response
+
+
+# NEW: Debug endpoint to check raw database values
+@router.get("/debug/icon-fields/{menu_id}")
+async def debug_menu_icon_fields(
+    menu_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Debug endpoint to check raw icon field values from database (admin only)."""
+    
+    # Admin only for security
+    if not any(role.code in ["admin", "super_admin"] for role in current_user.roles):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    # Get raw menu data
+    result = await db.execute(
+        select(Menu).where(Menu.id == menu_id)
+    )
+    menu = result.scalar_one_or_none()
+    
+    if not menu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Menu not found"
+        )
+    
+    # Return raw database values
+    return {
+        "id": str(menu.id),
+        "code": menu.code,
+        "title": menu.title,
+        "raw_database_values": {
+            "icon": menu.icon,
+            "icon_type": getattr(menu, 'icon_type', None),
+            "icon_library": getattr(menu, 'icon_library', None),
+            "icon_color": getattr(menu, 'icon_color', None),
+            "icon_size": getattr(menu, 'icon_size', None),
+            "icon_animation": getattr(menu, 'icon_animation', None),
+            "icon_rotation": getattr(menu, 'icon_rotation', None),
+        },
+        "has_attributes": {
+            "icon_type": hasattr(menu, 'icon_type'),
+            "icon_library": hasattr(menu, 'icon_library'),
+            "icon_color": hasattr(menu, 'icon_color'),
+        }
+    }
 
 
 @router.post("/", response_model=MenuResponse, status_code=status.HTTP_201_CREATED)
@@ -724,4 +886,4 @@ async def get_mobile_bottom_config(
     return {
         "config": {k: list(v) for k, v in MOBILE_BOTTOM_NAV_CONFIG.items()},
         "never_show": list(NEVER_MOBILE_BOTTOM)
-    }
+    }   

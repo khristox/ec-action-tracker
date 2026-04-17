@@ -54,7 +54,7 @@ export const fetchActionById = createAsyncThunk(
 
     try {
       const response = await api.get(`/action-tracker/actions/${actionId}`);
-      return response.data;                    // ← Return the full action object
+      return response.data;
     } catch (error) {
       console.error('fetchActionById failed:', error.response?.data || error);
       if (error.response?.status === 404) return rejectWithValue('Task not found');
@@ -98,15 +98,17 @@ export const addActionComment = createAsyncThunk(
   }
 );
 
-// Keep these if you use them elsewhere
-export const fetchAllActions = createAsyncThunk('actions/fetchAllActions', async (params = {}, { rejectWithValue }) => {
-  try {
-    const response = await api.get('/action-tracker/actions', { params });
-    return response.data;
-  } catch (error) {
-    return rejectWithValue(error.response?.data?.detail || 'Failed to fetch actions');
+export const fetchAllActions = createAsyncThunk(
+  'actions/fetchAllActions',
+  async (params = {}, { rejectWithValue }) => {
+    try {
+      const response = await api.get('/action-tracker/actions', { params });
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.detail || 'Failed to fetch actions');
+    }
   }
-});
+);
 
 export const fetchActionComments = createAsyncThunk(
   'actions/fetchActionComments',
@@ -134,7 +136,7 @@ export const fetchActionHistory = createAsyncThunk(
   }
 );
 
-// ====================== SLICE ======================
+// ====================== INITIAL STATE ======================
 
 const initialState = {
   myTasks: { items: [], total: 0, page: 1, limit: 10, totalPages: 1 },
@@ -144,20 +146,70 @@ const initialState = {
   updatingProgress: false,
   error: null,
   success: false,
+  // Filter state
+  filters: {
+    search: '',
+    status: '',
+    priority: '',
+  },
+  page: 1,
+  limit: 10,
 };
+
+// ====================== SLICE ======================
 
 const actionSlice = createSlice({
   name: 'actions',
   initialState,
   reducers: {
-    clearError: (state) => { state.error = null; },
-    clearSuccess: (state) => { state.success = false; },
-    clearCurrentAction: (state) => { state.currentAction = null; },
+    clearError: (state) => { 
+      state.error = null; 
+    },
+    clearSuccess: (state) => { 
+      state.success = false; 
+    },
+    clearCurrentAction: (state) => { 
+      state.currentAction = null; 
+    },
+    setFilters: (state, action) => {
+      state.filters = { ...state.filters, ...action.payload };
+      state.page = 1;
+    },
+    setSearchFilter: (state, action) => {
+      state.filters.search = action.payload;
+      state.page = 1;
+    },
+    setStatusFilter: (state, action) => {
+      state.filters.status = action.payload;
+      state.page = 1;
+    },
+    setPriorityFilter: (state, action) => {
+      state.filters.priority = action.payload;
+      state.page = 1;
+    },
+    resetFilters: (state) => {
+      state.filters = {
+        search: '',
+        status: '',
+        priority: '',
+      };
+      state.page = 1;
+    },
+    setPage: (state, action) => {
+      state.page = action.payload;
+    },
+    setLimit: (state, action) => {
+      state.limit = action.payload;
+      state.page = 1;
+    },
   },
   extraReducers: (builder) => {
     builder
       // Fetch My Tasks
-      .addCase(fetchMyTasks.pending, (state) => { state.loading = true; state.error = null; })
+      .addCase(fetchMyTasks.pending, (state) => { 
+        state.loading = true; 
+        state.error = null; 
+      })
       .addCase(fetchMyTasks.fulfilled, (state, action) => {
         state.loading = false;
         state.myTasks = action.payload;
@@ -167,7 +219,7 @@ const actionSlice = createSlice({
         state.error = action.payload;
       })
 
-      // Fetch Single Action (Critical for ActionDetail)
+      // Fetch Single Action
       .addCase(fetchActionById.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -189,8 +241,9 @@ const actionSlice = createSlice({
       })
       .addCase(updateActionProgress.fulfilled, (state, action) => {
         state.updatingProgress = false;
+        state.success = true;
         if (state.currentAction?.id === action.meta.arg.id) {
-          state.currentAction = action.payload;   // Update current action in place
+          state.currentAction = action.payload;
         }
       })
       .addCase(updateActionProgress.rejected, (state, action) => {
@@ -200,13 +253,65 @@ const actionSlice = createSlice({
 
       // Add Comment
       .addCase(addActionComment.fulfilled, (state) => {
-        // You can refresh currentAction here if needed
+        state.success = true;
       })
       .addCase(addActionComment.rejected, (state, action) => {
+        state.error = action.payload;
+      })
+      
+      // Fetch All Actions
+      .addCase(fetchAllActions.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchAllActions.fulfilled, (state, action) => {
+        state.loading = false;
+        const data = action.payload.data || action.payload || [];
+        const items = Array.isArray(data) ? data : (data.items || []);
+        const total = Array.isArray(data) ? data.length : (data.total || items.length);
+        state.allActions = {
+          items,
+          total,
+          page: state.page,
+          limit: state.limit,
+          totalPages: Math.ceil(total / state.limit),
+        };
+      })
+      .addCase(fetchAllActions.rejected, (state, action) => {
+        state.loading = false;
         state.error = action.payload;
       });
   },
 });
 
-export const { clearError, clearSuccess, clearCurrentAction } = actionSlice.actions;
+// ====================== EXPORT ACTIONS ======================
+
+export const { 
+  clearError, 
+  clearSuccess, 
+  clearCurrentAction,
+  setFilters,
+  setSearchFilter,
+  setStatusFilter,
+  setPriorityFilter,
+  resetFilters,
+  setPage,
+  setLimit,
+} = actionSlice.actions;
+
+// ====================== SELECTORS ======================
+
+export const selectMyTasks = (state) => state.actions.myTasks;
+export const selectAllActions = (state) => state.actions.allActions;
+export const selectCurrentAction = (state) => state.actions.currentAction;
+export const selectActionsLoading = (state) => state.actions.loading;
+export const selectActionsError = (state) => state.actions.error;
+export const selectActionsSuccess = (state) => state.actions.success;
+export const selectUpdatingProgress = (state) => state.actions.updatingProgress;
+export const selectActionFilters = (state) => state.actions.filters;
+export const selectActionPage = (state) => state.actions.page;
+export const selectActionLimit = (state) => state.actions.limit;
+
+// ====================== DEFAULT EXPORT ======================
+
 export default actionSlice.reducer;

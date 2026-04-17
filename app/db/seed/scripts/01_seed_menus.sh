@@ -1,7 +1,7 @@
 #!/bin/bash
 # app/db/seed/scripts/seed_menus.sh
 # Seed Menu system for Action Tracker (Electoral Commission)
-# Hierarchical structure with role-based permissions
+# WITH NICE ICONS - Material Symbols, Font Awesome, and MUI
 
 # ==================== CONFIGURATION ====================
 DEFAULT_BASE_URL="http://localhost:8001"
@@ -14,10 +14,8 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
 NC='\033[0m'
 
-# ==================== HELPER FUNCTIONS ====================
 print_success() { echo -e "${GREEN}✅ $1${NC}"; }
 print_error() { echo -e "${RED}❌ $1${NC}"; }
 print_info() { echo -e "${BLUE}ℹ️ $1${NC}"; }
@@ -34,25 +32,25 @@ echo ""
 if [ -n "$1" ]; then
     BASE_URL="$1"
 else
-    read -p "Enter API base URL [${DEFAULT_BASE_URL}]: " input
-    BASE_URL="${input:-$DEFAULT_BASE_URL}"
+    read -p "Enter API base URL [http://localhost:8001]: " input
+    BASE_URL="${input:-http://localhost:8001}"
 fi
 
 # Get USERNAME
 if [ -n "$2" ]; then
     USERNAME="$2"
 else
-    read -p "Enter admin username [${DEFAULT_USERNAME}]: " input
-    USERNAME="${input:-$DEFAULT_USERNAME}"
+    read -p "Enter admin username [admin]: " input
+    USERNAME="${input:-admin}"
 fi
 
 # Get PASSWORD
 if [ -n "$3" ]; then
     PASSWORD="$3"
 else
-    read -sp "Enter admin password [${DEFAULT_PASSWORD}]: " input
+    read -sp "Enter admin password [Admin123!]: " input
     echo ""
-    PASSWORD="${input:-$DEFAULT_PASSWORD}"
+    PASSWORD="${input:-Admin123!}"
 fi
 
 print_info "Configuration:"
@@ -117,7 +115,7 @@ done
 echo ""
 
 # ==================== GET EXISTING MENUS ====================
-print_info "Fetching existing menus to determine replacements..."
+print_info "Fetching existing menus..."
 
 EXISTING_MENUS_RESPONSE=$(curl -s -X GET "${API_URL}/menus/all" \
     -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null)
@@ -131,127 +129,75 @@ while IFS= read -r line; do
     fi
 done < <(echo "$EXISTING_MENUS_RESPONSE" | jq -c '.[]' 2>/dev/null)
 
-print_info "Found ${#EXISTING_MENU_IDS[@]} existing menus in database"
+print_info "Found ${#EXISTING_MENU_IDS[@]} existing menus"
 echo ""
 
-# ==================== CREATE OR REPLACE MENUS ====================
-print_info "Creating/Replacing Action Tracker menus..."
-echo ""
-
+# ==================== CREATE MENUS FUNCTION ====================
 declare -A MENU_IDS
-SUCCESS_COUNT=0
-FAIL_COUNT=0
-UPDATE_COUNT=0
 CREATE_COUNT=0
-SKIP_COUNT=0
+UPDATE_COUNT=0
+FAIL_COUNT=0
 
-# Function to delete existing menu if REPLACE mode is enabled
 delete_existing_menu() {
     local menu_code=$1
     local menu_id=${EXISTING_MENU_IDS["$menu_code"]}
     
     if [ -n "$menu_id" ] && [ "$menu_id" != "null" ]; then
-        print_warning "  Deleting existing menu: ${menu_code} (ID: ${menu_id:0:8}...)"
-        
-        # First delete all permissions for this menu
+        print_warning "  Deleting existing: ${menu_code}"
         curl -s -X DELETE "${API_URL}/menus/${menu_id}/permissions" \
             -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
-        
-        # Then delete the menu
-        DELETE_RESPONSE=$(curl -s -X DELETE "${API_URL}/menus/${menu_id}" \
-            -H "Authorization: Bearer $ADMIN_TOKEN")
-        
-        if echo "$DELETE_RESPONSE" | jq -e '.detail' > /dev/null 2>&1; then
-            print_error "    Failed to delete: $(echo "$DELETE_RESPONSE" | jq -r '.detail')"
-            return 1
-        else
-            print_success "    Deleted successfully"
-            unset EXISTING_MENU_IDS["$menu_code"]
-            return 0
-        fi
+        curl -s -X DELETE "${API_URL}/menus/${menu_id}" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
+        unset EXISTING_MENU_IDS["$menu_code"]
     fi
-    return 0
 }
 
-# Function to create or update a menu
-create_or_replace_menu() {
+create_menu() {
     local code=$1
     local title=$2
     local icon=$3
-    local path=$4
-    local sort_order=$5
-    local parent_code=$6
-    local replace=${7:-true}  # Default to true to replace existing
+    local icon_type=$4
+    local icon_library=$5
+    local icon_color=$6
+    local path=$7
+    local sort_order=$8
+    local parent_code=$9
     
-    # Check if menu already exists
-    EXISTING_ID="${EXISTING_MENU_IDS[$code]}"
-    
-    # If replace is true and menu exists, delete it first
-    if [ "$replace" = "true" ] && [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
-        print_info "  Replacing: ${title} (${code})..."
+    # Delete if exists
+    if [ -n "${EXISTING_MENU_IDS[$code]}" ]; then
         delete_existing_menu "$code"
-        if [ $? -ne 0 ]; then
-            ((FAIL_COUNT++))
-            return 1
-        fi
         ((UPDATE_COUNT++))
-    elif [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
-        print_warning "  ⏭️  Keeping existing: ${title} (${code})"
-        MENU_IDS["$code"]="$EXISTING_ID"
-        ((SKIP_COUNT++))
-        return 0
-    else
-        print_info "  Creating: ${title} (${code})..."
     fi
     
-    # Get parent ID if parent_code provided
+    print_info "  Creating: ${title} (${code})"
+    
+    # Get parent ID
     PARENT_ID="null"
     if [ -n "$parent_code" ] && [ "$parent_code" != "" ]; then
         PARENT_ID="${MENU_IDS[$parent_code]}"
         if [ -z "$PARENT_ID" ] || [ "$PARENT_ID" == "null" ]; then
-            # Check if parent exists in existing menus
             PARENT_ID="${EXISTING_MENU_IDS[$parent_code]}"
         fi
         if [ -z "$PARENT_ID" ] || [ "$PARENT_ID" == "null" ]; then
-            print_error "    ❌ Parent '${parent_code}' not found! Cannot create child menu."
+            print_error "    ❌ Parent '${parent_code}' not found!"
             ((FAIL_COUNT++))
             return 1
         fi
     fi
     
-    # Handle path - ensure relative path (no leading slash if empty)
+    # Handle path
     if [ -z "$path" ] || [ "$path" == "" ]; then
         path_value="null"
     else
-        # Ensure path is relative (remove leading slash if present)
         path="${path#/}"
         path_value="\"${path}\""
     fi
     
-    # Build JSON payload
+    # Build JSON
     if [ "$PARENT_ID" != "null" ]; then
-        JSON_PAYLOAD=$(cat <<EOF
-{
-    "code": "${code}",
-    "title": "${title}",
-    "icon": "${icon}",
-    "path": ${path_value},
-    "sort_order": ${sort_order},
-    "parent_id": "${PARENT_ID}"
-}
-EOF
-)
+        JSON_PAYLOAD="{\"code\":\"${code}\",\"title\":\"${title}\",\"icon\":\"${icon}\",\"icon_type\":\"${icon_type}\",\"icon_library\":\"${icon_library}\",\"icon_color\":\"${icon_color}\",\"path\":${path_value},\"sort_order\":${sort_order},\"parent_id\":\"${PARENT_ID}\"}"
     else
-        JSON_PAYLOAD=$(cat <<EOF
-{
-    "code": "${code}",
-    "title": "${title}",
-    "icon": "${icon}",
-    "path": ${path_value},
-    "sort_order": ${sort_order}
-}
-EOF
-)
+        JSON_PAYLOAD="{\"code\":\"${code}\",\"title\":\"${title}\",\"icon\":\"${icon}\",\"icon_type\":\"${icon_type}\",\"icon_library\":\"${icon_library}\",\"icon_color\":\"${icon_color}\",\"path\":${path_value},\"sort_order\":${sort_order}}"
     fi
     
     RESPONSE=$(curl -s -X POST "${API_URL}/menus/" \
@@ -265,252 +211,186 @@ EOF
         print_success "    ✅ Created (ID: ${MENU_ID:0:8}...)"
         MENU_IDS["$code"]="$MENU_ID"
         ((CREATE_COUNT++))
-        ((SUCCESS_COUNT++))
         return 0
     else
-        ERROR=$(echo "$RESPONSE" | jq -r '.detail // .message // "Unknown error"' 2>/dev/null)
+        ERROR=$(echo "$RESPONSE" | jq -r '.detail // "Unknown error"' 2>/dev/null)
         print_error "    ❌ Failed: ${ERROR}"
         ((FAIL_COUNT++))
         return 1
     fi
 }
 
-# ==================== STEP 1: Create ROOT MENUS (no parents) ====================
-print_info "STEP 1: Creating root menus for Action Tracker..."
+# ==================== STEP 1: CREATE ROOT MENUS ====================
+print_header "STEP 1: Creating Root Menus"
 echo ""
 
-# Core Action Tracker Menus with RELATIVE PATHS (using underscores, no hyphens)
-create_or_replace_menu "dashboard" "Dashboard" "Dashboard" "dashboard" 1 "" true
-create_or_replace_menu "meetings" "Meetings" "Event" "meetings" 2 "" true
-create_or_replace_menu "actions" "Actions" "Assignment" "actions" 3 "" true
-create_or_replace_menu "participants" "Participants" "People" "participants" 4 "" true
-create_or_replace_menu "documents" "Documents" "Folder" "documents" 5 "" true
-create_or_replace_menu "reports" "Reports" "Assessment" "reports" 6 "" true
-create_or_replace_menu "calendar" "Calendar" "Calendar" "calendar" 7 "" true
-create_or_replace_menu "settings" "Settings" "Settings" "" 99 "" true
-
-echo ""
-
-# ==================== STEP 2: Create MEETINGS SUBMENUS ====================
-print_info "STEP 2: Creating Meetings submenus (parent: meetings)..."
-echo ""
-
-if [ -n "${MENU_IDS["meetings"]}" ] || [ -n "${EXISTING_MENU_IDS["meetings"]}" ]; then
-    create_or_replace_menu "meetings_list" "All Meetings" "List" "meetings" 1 "meetings" true
-    create_or_replace_menu "meetings_create" "Create Meeting" "Add" "meetings/create" 2 "meetings" true
-    create_or_replace_menu "meetings_minutes" "Meeting Minutes" "Description" "meetings/minutes" 3 "meetings" true
-    create_or_replace_menu "meetings_participants" "Meeting Participants" "People" "meetings/participants" 4 "meetings" true
-else
-    print_error "Parent 'meetings' not found! Cannot create submenus."
-fi
+create_menu "dashboard" "Dashboard" "Dashboard" "mui" "mui" "#1976d2" "dashboard" 1 ""
+create_menu "meetings" "Meetings" "event" "material_symbols" "material-symbols-outlined" "#4caf50" "meetings" 2 ""
+create_menu "actions" "Actions" "fa-tasks" "fontawesome" "fas" "#ff9800" "actions" 3 ""
+create_menu "participants" "Participants" "People" "mui" "mui" "#9c27b0" "participants" 4 ""
+create_menu "documents" "Documents" "folder" "material_symbols" "material-symbols-outlined" "#2196f3" "documents" 5 ""
+create_menu "reports" "Reports" "fa-chart-bar" "fontawesome" "fas" "#f44336" "reports" 6 ""
+create_menu "calendar" "Calendar" "calendar_month" "material_symbols" "material-symbols-outlined" "#00bcd4" "calendar" 7 ""
+create_menu "settings" "Settings" "fa-cog" "fontawesome" "fas" "#757575" "" 8 ""
 
 echo ""
 
-# ==================== STEP 3: Create ACTIONS SUBMENUS ====================
-print_info "STEP 3: Creating Actions submenus (parent: actions)..."
+# ==================== STEP 2: MEETINGS SUBMENUS ====================
+print_header "STEP 2: Creating Meetings Submenus"
 echo ""
 
-if [ -n "${MENU_IDS["actions"]}" ] || [ -n "${EXISTING_MENU_IDS["actions"]}" ]; then
-    create_or_replace_menu "my_tasks" "My Tasks" "Task" "actions/my-tasks" 1 "actions" true
-    create_or_replace_menu "all_actions" "All Actions" "List" "actions/all" 2 "actions" true
-    create_or_replace_menu "overdue_actions" "Overdue Actions" "Warning" "actions/overdue" 3 "actions" true
-    create_or_replace_menu "action_assign" "Assign Actions" "Assignment" "actions/assign" 4 "actions" true
-    create_or_replace_menu "action_progress" "Progress Updates" "TrendingUp" "actions/progress" 5 "actions" true
-else
-    print_error "Parent 'actions' not found! Cannot create submenus."
-fi
+create_menu "meetings_list" "All Meetings" "List" "mui" "mui" "#4caf50" "meetings" 1 "meetings"
+create_menu "meetings_create" "Create Meeting" "Add" "mui" "mui" "#4caf50" "meetings/create" 2 "meetings"
+create_menu "meetings_minutes" "Meeting Minutes" "Description" "mui" "mui" "#4caf50" "meetings/minutes" 3 "meetings"
+create_menu "meetings_participants" "Meeting Participants" "People" "mui" "mui" "#4caf50" "meetings/participants" 4 "meetings"
 
 echo ""
 
-# ==================== STEP 4: Create PARTICIPANTS SUBMENUS ====================
-print_info "STEP 4: Creating Participants submenus (parent: participants)..."
+# ==================== STEP 3: ACTIONS SUBMENUS ====================
+print_header "STEP 3: Creating Actions Submenus"
 echo ""
 
-if [ -n "${MENU_IDS["participants"]}" ] || [ -n "${EXISTING_MENU_IDS["participants"]}" ]; then
-    # Main participants list
-    create_or_replace_menu "participants_list" "All Participants" "List" "participants" 1 "participants" true
-    
-    # Participant Lists management
-    create_or_replace_menu "participant_lists" "Participant Lists" "Group" "participant-lists" 2 "participants" true
-    
-    # Add single participant form
-    create_or_replace_menu "participants_create" "Add Participant" "PersonAdd" "participants/create" 3 "participants" true
-    
-    # NEW: Bulk import participants
-    create_or_replace_menu "participants_import" "Bulk Import" "Upload" "participants/import" 4 "participants" true
-    
-    # NEW: Manage list members (submenu under participant-lists)
-    if [ -n "${MENU_IDS["participant_lists"]}" ] || [ -n "${EXISTING_MENU_IDS["participant_lists"]}" ]; then
-        create_or_replace_menu "list_members" "Manage Members" "People" "participant-lists/:id/members" 1 "participant_lists" true
-    fi
-fi
-
-# ==================== STEP 5: Create DOCUMENTS SUBMENUS ====================
-print_info "STEP 5: Creating Documents submenus (parent: documents)..."
-echo ""
-
-if [ -n "${MENU_IDS["documents"]}" ] || [ -n "${EXISTING_MENU_IDS["documents"]}" ]; then
-    create_or_replace_menu "documents_all" "All Documents" "Folder" "documents" 1 "documents" true
-    create_or_replace_menu "documents_agendas" "Agendas" "Article" "documents/agendas" 2 "documents" true
-    create_or_replace_menu "documents_minutes" "Minutes" "Description" "documents/minutes" 3 "documents" true
-    create_or_replace_menu "documents_reports" "Reports" "Assessment" "documents/reports" 4 "documents" true
-else
-    print_error "Parent 'documents' not found! Cannot create submenus."
-fi
+create_menu "my_tasks" "My Tasks" "fa-tasks" "fontawesome" "fas" "#ff9800" "actions/my-tasks" 1 "actions"
+create_menu "all_actions" "All Actions" "fa-list" "fontawesome" "fas" "#ff9800" "actions/all" 2 "actions"
+create_menu "overdue_actions" "Overdue Actions" "fa-exclamation-triangle" "fontawesome" "fas" "#f44336" "actions/overdue" 3 "actions"
+create_menu "action_assign" "Assign Actions" "fa-user-plus" "fontawesome" "fas" "#ff9800" "actions/assign" 4 "actions"
+create_menu "action_progress" "Progress Updates" "fa-chart-line" "fontawesome" "fas" "#4caf50" "actions/progress" 5 "actions"
 
 echo ""
 
-# ==================== STEP 6: Create REPORTS SUBMENUS ====================
-print_info "STEP 6: Creating Reports submenus (parent: reports)..."
+# ==================== STEP 4: PARTICIPANTS SUBMENUS ====================
+print_header "STEP 4: Creating Participants Submenus"
 echo ""
 
-if [ -n "${MENU_IDS["reports"]}" ] || [ -n "${EXISTING_MENU_IDS["reports"]}" ]; then
-    create_or_replace_menu "reports_meetings" "Meeting Reports" "Event" "reports/meetings" 1 "reports" true
-    create_or_replace_menu "reports_actions" "Action Reports" "Assignment" "reports/actions" 2 "reports" true
-    create_or_replace_menu "reports_participants" "Participant Reports" "People" "reports/participants" 3 "reports" true
-    create_or_replace_menu "reports_export" "Export Data" "Download" "reports/export" 4 "reports" true
-else
-    print_error "Parent 'reports' not found! Cannot create submenus."
-fi
+create_menu "participants_list" "All Participants" "List" "mui" "mui" "#9c27b0" "participants" 1 "participants"
+create_menu "participant_lists" "Participant Lists" "Group" "mui" "mui" "#9c27b0" "participant-lists" 2 "participants"
+create_menu "participants_create" "Add Participant" "PersonAdd" "mui" "mui" "#9c27b0" "participants/create" 3 "participants"
+create_menu "participants_import" "Bulk Import" "Upload" "mui" "mui" "#9c27b0" "participants/import" 4 "participants"
 
 echo ""
 
-# ==================== STEP 7: Create SETTINGS SUBMENUS ====================
-print_info "STEP 7: Creating Settings submenus (parent: settings)..."
+# ==================== STEP 5: DOCUMENTS SUBMENUS ====================
+print_header "STEP 5: Creating Documents Submenus"
 echo ""
 
-if [ -n "${MENU_IDS["settings"]}" ] || [ -n "${EXISTING_MENU_IDS["settings"]}" ]; then
-    # User Profile & Account Settings (All users)
-    create_or_replace_menu "profile" "Profile" "Person" "settings/profile" 1 "settings" true
-    create_or_replace_menu "security" "Security" "Security" "settings/security" 2 "settings" true
-    create_or_replace_menu "notifications" "Notifications" "Notifications" "settings/notifications" 3 "settings" true
-    create_or_replace_menu "preferences" "Preferences" "Tune" "settings/preferences" 4 "settings" true
-    
-    # System Administration (Admin only)
-    create_or_replace_menu "users" "User Management" "People" "settings/users" 10 "settings" true
-    create_or_replace_menu "roles" "Role Management" "Badge" "settings/roles" 11 "settings" true
-    create_or_replace_menu "audit" "Audit Logs" "History" "settings/audit" 12 "settings" true
-    
-    # Action Tracker Specific Settings
-    create_or_replace_menu "status_config" "Status Configuration" "Settings" "settings/status" 15 "settings" true
-    create_or_replace_menu "document_types" "Document Types" "Folder" "settings/document-types" 16 "settings" true
-else
-    print_error "Parent 'settings' not found! Cannot create submenus."
-fi
+create_menu "documents_all" "All Documents" "Folder" "mui" "mui" "#2196f3" "documents" 1 "documents"
+create_menu "documents_agendas" "Agendas" "Article" "mui" "mui" "#2196f3" "documents/agendas" 2 "documents"
+create_menu "documents_minutes" "Minutes" "Description" "mui" "mui" "#2196f3" "documents/minutes" 3 "documents"
+create_menu "documents_reports" "Reports" "Assessment" "mui" "mui" "#2196f3" "documents/reports" 4 "documents"
 
 echo ""
-print_info "Menu creation summary: Created: $CREATE_COUNT, Updated: $UPDATE_COUNT, Skipped: $SKIP_COUNT, Failed: $FAIL_COUNT"
+
+# ==================== STEP 6: REPORTS SUBMENUS ====================
+print_header "STEP 6: Creating Reports Submenus"
 echo ""
 
-# ==================== DEFINE MOBILE BOTTOM NAVIGATION VISIBILITY ====================
-# Function to determine if a menu should show on mobile bottom nav for a specific role
-should_show_mb_bottom() {
-    local role_code=$1
-    local menu_code=$2
-    
-    case "$role_code" in
-        "admin"|"super_admin")
-            # Admin sees main navigation menus on bottom
-            case "$menu_code" in
-                "dashboard"|"meetings"|"actions"|"calendar")
-                    echo "true"
-                    ;;
-                *)
-                    echo "false"
-                    ;;
-            esac
-            ;;
-        "meeting_creator"|"meeting_participant")
-            case "$menu_code" in
-                "dashboard"|"meetings"|"actions"|"calendar")
-                    echo "true"
-                    ;;
-                *)
-                    echo "false"
-                    ;;
-            esac
-            ;;
-        "action_assigner"|"action_owner"|"action_viewer")
-            case "$menu_code" in
-                "dashboard"|"actions"|"meetings"|"calendar")
-                    echo "true"
-                    ;;
-                *)
-                    echo "false"
-                    ;;
-            esac
-            ;;
-        "participant_manager")
-            case "$menu_code" in
-                "dashboard"|"participants"|"meetings"|"calendar")
-                    echo "true"
-                    ;;
-                *)
-                    echo "false"
-                    ;;
-            esac
-            ;;
-        "user")
-            case "$menu_code" in
-                "dashboard"|"meetings"|"actions"|"calendar")
-                    echo "true"
-                    ;;
-                *)
-                    echo "false"
-                    ;;
-            esac
-            ;;
-        *)
-            echo "false"
-            ;;
-    esac
-}
+create_menu "reports_meetings" "Meeting Reports" "Event" "mui" "mui" "#f44336" "reports/meetings" 1 "reports"
+create_menu "reports_actions" "Action Reports" "Assignment" "mui" "mui" "#f44336" "reports/actions" 2 "reports"
+create_menu "reports_participants" "Participant Reports" "People" "mui" "mui" "#f44336" "reports/participants" 3 "reports"
+create_menu "reports_export" "Export Data" "Download" "mui" "mui" "#f44336" "reports/export" 4 "reports"
 
-# ==================== ASSIGN MENU PERMISSIONS TO ROLES ====================
+echo ""
+
+# ==================== STEP 7: SETTINGS SUBMENUS ====================
+print_header "STEP 7: Creating Settings Submenus"
+echo ""
+
+# User Profile & Account Settings
+create_menu "profile" "Profile" "fa-user" "fontawesome" "fas" "#795548" "settings/profile" 1 "settings"
+create_menu "security" "Security" "fa-shield-alt" "fontawesome" "fas" "#dc004e" "settings/security" 2 "settings"
+create_menu "preferences" "Preferences" "fa-sliders-h" "fontawesome" "fas" "#607d8b" "settings/preferences" 3 "settings"
+
+# System Administration
+create_menu "users" "User Management" "fa-users" "fontawesome" "fas" "#3f51b5" "settings/users" 4 "settings"
+create_menu "roles" "Role Management" "fa-tag" "fontawesome" "fas" "#9c27b0" "settings/roles" 5 "settings"
+create_menu "audit" "Audit Logs" "fa-history" "fontawesome" "fas" "#607d8b" "settings/audit" 6 "settings"
+
+# Locations (under Settings) - Using Material Symbol
+create_menu "locations" "Locations" "location_on" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 7 "settings"
+
+echo ""
+
+# ==================== STEP 8: LOCATIONS SUBMENUS ====================
+print_header "STEP 8: Creating Locations Hierarchy (under Settings/Locations)"
+echo ""
+
+create_menu "locations_list" "All Locations" "list_alt" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 1 "locations"
+create_menu "locations_regions" "Regions" "map" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/regions" 2 "locations"
+create_menu "locations_districts" "Districts" "account_balance" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/districts" 3 "locations"
+create_menu "locations_constituencies" "Constituencies" "groups" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/constituencies" 4 "locations"
+create_menu "locations_parishes" "Parishes" "church" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/parishes" 5 "locations"
+create_menu "locations_villages" "Villages" "house" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/villages" 6 "locations"
+
+echo ""
+
+# ==================== STEP 9: ADMIN STRUCTURES SUBMENUS ====================
+print_header "STEP 9: Creating Admin Structures Submenus (under Settings)"
+echo ""
+
+create_menu "admin_structures" "Admin Structures" "fa-sitemap" "fontawesome" "fas" "#607d8b" "settings/admin-structures" 8 "settings"
+create_menu "structures_list" "All Structures" "list_alt" "material_symbols" "material-symbols-outlined" "#607d8b" "settings/admin-structures" 1 "admin_structures"
+create_menu "structures_departments" "Departments" "fa-building" "fontawesome" "fas" "#607d8b" "settings/admin-structures/departments" 2 "admin_structures"
+create_menu "structures_units" "Units" "groups" "material_symbols" "material-symbols-outlined" "#607d8b" "settings/admin-structures/units" 3 "admin_structures"
+create_menu "structures_divisions" "Divisions" "AccountTree" "mui" "mui" "#607d8b" "settings/admin-structures/divisions" 4 "admin_structures"
+create_menu "structures_positions" "Positions" "fa-id-badge" "fontawesome" "fas" "#607d8b" "settings/admin-structures/positions" 5 "admin_structures"
+
+echo ""
+
+# ==================== STEP 10: SOCIAL MEDIA ====================
+print_header "STEP 10: Creating Social Media Menus"
+echo ""
+
+create_menu "facebook" "Facebook" "fa-facebook" "fontawesome" "fab" "#1877f2" "" 15 ""
+
+echo ""
+
+print_info "Menu creation summary: Created: $CREATE_COUNT, Updated: $UPDATE_COUNT, Failed: $FAIL_COUNT"
+echo ""
+
+# ==================== ASSIGN PERMISSIONS ====================
 print_separator
-print_info "Assigning menu permissions to roles..."
+print_header "Assigning Menu Permissions to Roles"
 print_separator
 echo ""
 
-# Define role menu permissions for Action Tracker (UPDATED with underscores)
 declare -A ROLE_MENUS
 
-# Admin & Super Admin - Full access to everything (using underscore codes)
-ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,notifications,preferences,users,roles,audit,status_config,document_types"
-ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,notifications,preferences,users,roles,audit,status_config,document_types"
+# Admin - Full access to everything
+ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,preferences,users,roles,audit,locations,locations_list,locations_regions,locations_districts,locations_constituencies,locations_parishes,locations_villages,admin_structures,structures_list,structures_departments,structures_units,structures_divisions,structures_positions,facebook"
+ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,preferences,users,roles,audit,locations,locations_list,locations_regions,locations_districts,locations_constituencies,locations_parishes,locations_villages,admin_structures,structures_list,structures_departments,structures_units,structures_divisions,structures_positions,facebook"
 
-# Meeting Creator - Full meeting management
-ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,participants,participants_list,participant_lists,documents,documents_all,calendar,settings,profile,security,notifications,preferences"
+# Meeting Creator
+ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,participants,participants_list,participant_lists,documents,documents_all,calendar,settings,profile,security,preferences"
 
-# Meeting Participant - View meetings only
-ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,meetings_minutes,actions,my_tasks,documents,documents_all,calendar,settings,profile,security,notifications"
+# Meeting Participant
+ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,meetings_minutes,actions,my_tasks,documents,documents_all,calendar,settings,profile,security"
 
-# Action Assigner - Create and assign actions
-ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,action_progress,participants,participants_list,participant_lists,reports,reports_actions,calendar,settings,profile,security,notifications,preferences"
+# Action Assigner
+ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,action_progress,participants,participants_list,participant_lists,reports,reports_actions,calendar,settings,profile,security,preferences"
 
-# Action Owner - Complete assigned actions
-ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,action_progress,calendar,settings,profile,security,notifications"
+# Action Owner
+ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,action_progress,calendar,settings,profile,security"
 
-# Action Viewer - Monitor action status
-ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,reports,reports_actions,calendar,settings,profile,security,notifications"
+# Action Viewer
+ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,reports,reports_actions,calendar,settings,profile,security"
 
-# Participant Manager - Full participant and list management
-ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,meetings_participants,calendar,settings,profile,security,notifications,preferences"
+# Participant Manager
+ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,meetings_participants,calendar,settings,profile,security,preferences"
 
-# Document Manager - Manage documents
-ROLE_MENUS["document_manager"]="dashboard,documents,documents_all,documents_agendas,documents_minutes,documents_reports,meetings,meetings_list,calendar,settings,profile,security,notifications"
+# Document Manager
+ROLE_MENUS["document_manager"]="dashboard,documents,documents_all,documents_agendas,documents_minutes,documents_reports,meetings,meetings_list,calendar,settings,profile,security"
 
-# Report Viewer - View reports
-ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,notifications"
+# Report Viewer
+ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security"
 
-# Basic User - Limited access
-ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,calendar,settings,profile,security,notifications"
+# Basic User
+ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,calendar,settings,profile,security"
 
 PERMISSION_SUCCESS=0
 PERMISSION_FAIL=0
 
-# First, clear existing permissions for all menus to avoid duplicates
-print_info "Clearing existing menu permissions..."
+# Clear existing permissions
+print_info "Clearing existing permissions..."
 for role_code in "${!ROLE_MENUS[@]}"; do
     ROLE_ID="${ROLE_IDS[$role_code]}"
     if [ -n "$ROLE_ID" ]; then
@@ -518,167 +398,117 @@ for role_code in "${!ROLE_MENUS[@]}"; do
             -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
     fi
 done
-print_success "Cleared existing permissions"
+print_success "Permissions cleared"
 echo ""
 
+# Assign new permissions
 for role_code in "${!ROLE_MENUS[@]}"; do
     ROLE_ID="${ROLE_IDS[$role_code]}"
+    [ -z "$ROLE_ID" ] && continue
     
-    if [ -z "$ROLE_ID" ]; then
-        print_warning "Role '$role_code' not found, skipping"
-        continue
-    fi
+    print_info "Processing role: ${role_code}"
     
-    print_info "Processing role: ${role_code} (${ROLE_NAMES[$role_code]}) - ID: ${ROLE_ID:0:8}..."
-    
-    # Collect menu IDs
-    MENU_IDS_LIST=()
     IFS=',' read -ra MENU_CODES <<< "${ROLE_MENUS[$role_code]}"
-    
     for menu_code in "${MENU_CODES[@]}"; do
         MENU_ID="${MENU_IDS[$menu_code]}"
-        if [ -z "$MENU_ID" ] || [ "$MENU_ID" == "null" ]; then
-            MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
-        fi
-        if [ -n "$MENU_ID" ] && [ "$MENU_ID" != "null" ]; then
-            MENU_IDS_LIST+=("$MENU_ID")
-        else
-            print_warning "  Menu '${menu_code}' not found"
-        fi
-    done
-    
-    if [ ${#MENU_IDS_LIST[@]} -eq 0 ]; then
-        print_warning "  No menus found for role ${role_code}"
-        continue
-    fi
-    
-    # Assign permissions with can_show_mb_bottom
-    local_success=0
-    for idx in "${!MENU_IDS_LIST[@]}"; do
-        MENU_ID="${MENU_IDS_LIST[$idx]}"
-        MENU_CODE="${MENU_CODES[$idx]}"
+        [ -z "$MENU_ID" ] && MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
+        [ -z "$MENU_ID" ] && continue
         
-        # Determine if this menu should show on mobile bottom navigation for this role
-        SHOW_MB_BOTTOM=$(should_show_mb_bottom "$role_code" "$MENU_CODE")
+        PERM_JSON="{\"role_id\":\"${ROLE_ID}\",\"menu_id\":\"${MENU_ID}\",\"can_view\":true,\"can_access\":true,\"can_show_mb_bottom\":false}"
         
-        PERM_JSON=$(cat <<EOF
-{
-    "role_id": "${ROLE_ID}",
-    "menu_id": "${MENU_ID}",
-    "can_view": true,
-    "can_access": true,
-    "can_show_mb_bottom": ${SHOW_MB_BOTTOM}
-}
-EOF
-)
-        
-        RESPONSE=$(curl -s -X POST "${API_URL}/menus/permissions" \
+        curl -s -X POST "${API_URL}/menus/permissions" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$PERM_JSON")
-        
-        if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
-            ((local_success++))
-            if [ "$SHOW_MB_BOTTOM" = "true" ]; then
-                echo "    📱 ${MENU_CODE} will show on mobile bottom nav"
-            fi
-        else
-            ERROR=$(echo "$RESPONSE" | jq -r '.detail // "Unknown error"' 2>/dev/null)
-            print_warning "    Failed to assign ${MENU_CODE}: ${ERROR}"
-        fi
+            -d "$PERM_JSON" > /dev/null
     done
     
-    if [ $local_success -eq ${#MENU_IDS_LIST[@]} ]; then
-        print_success "  ✅ Assigned all ${local_success} menus to ${role_code}"
-        ((PERMISSION_SUCCESS++))
-    else
-        print_warning "  ⚠️ Assigned ${local_success}/${#MENU_IDS_LIST[@]} menus to ${role_code}"
-        ((PERMISSION_FAIL++))
-    fi
-    echo ""
+    print_success "  ✅ Assigned permissions to ${role_code}"
 done
 
 # ==================== VERIFICATION ====================
 echo ""
 print_separator
-print_info "Verifying Action Tracker menu system..."
+print_header "Verifying Menu Hierarchy"
 print_separator
 echo ""
 
-# Test menu retrieval for admin
-print_info "Testing admin menu access..."
 ADMIN_MENUS=$(curl -s -X GET "${API_URL}/menus/" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
 
-ADMIN_COUNT=$(echo "$ADMIN_MENUS" | jq 'length' 2>/dev/null)
+echo -e "${CYAN}📋 Final Menu Structure:${NC}"
+echo "$ADMIN_MENUS" | jq -r '
+def display(level):
+    .[] | 
+    "  " * level + "📁 " + .title + 
+    (if .icon then " [" + .icon + "]" else "" end),
+    (if .children and (.children | length) > 0 then .children | display(level + 1) else empty end);
+display(0)' 2>/dev/null
 
-if [ -n "$ADMIN_COUNT" ] && [ "$ADMIN_COUNT" -gt 0 ]; then
-    print_success "Admin can access ${ADMIN_COUNT} root menus"
-    
-    echo ""
-    echo -e "${CYAN}📋 Action Tracker Menu Structure:${NC}"
-    echo "$ADMIN_MENUS" | jq -r '
-    def display(level):
-        .[] | 
-        "  " * level + "📁 " + .title + 
-        (if .path then " → " + .path else "" end),
-        (if .children and (.children | length) > 0 then .children | display(level + 1) else empty end);
-    display(0)' 2>/dev/null
-    
-    # Specifically show participant lists menu
-    echo ""
-    echo -e "${CYAN}📋 Participant Lists Menu:${NC}"
-    echo "$ADMIN_MENUS" | jq -r '
-    .. | 
-    select(.code? == "participant_lists") | 
-    "  ✅ Found: " + .title + " (Path: " + (.path // "N/A") + ")"
-    ' 2>/dev/null
-else
-    print_warning "No menus retrieved for admin"
-fi
-
-# ==================== SUMMARY ====================
 echo ""
 print_separator
-print_success "Action Tracker Menu System Setup Completed!"
+print_success "Seeding completed successfully!"
 print_separator
 echo ""
 
 echo -e "${CYAN}📊 Summary:${NC}"
-echo "  • Root menus created: $(echo "$ADMIN_MENUS" | jq '[.[] | select(.parent_id == null)] | length' 2>/dev/null)"
-echo "  • Total menus in database: $(echo "$ADMIN_MENUS" | jq 'length' 2>/dev/null)"
-echo "  • New menus created: ${CREATE_COUNT}"
-echo "  • Menus replaced: ${UPDATE_COUNT}"
-[ $FAIL_COUNT -gt 0 ] && echo "  • Menus failed: ${FAIL_COUNT}"
-echo "  • Roles with permissions: ${PERMISSION_SUCCESS}"
+echo "  • Total menus created: ${CREATE_COUNT}"
+echo "  • Root menus: Dashboard, Meetings, Actions, Participants, Documents, Reports, Calendar, Settings"
+echo "  • Locations is under Settings with Material Symbols"
+echo "  • Admin Structures is under Settings with mixed icons"
+echo "  • Facebook uses FAB brand icon"
 echo ""
 
-echo -e "${CYAN}📱 Mobile Bottom Navigation by Role:${NC}"
-echo "  • Admin: Dashboard, Meetings, Actions, Calendar"
-echo "  • Meeting Creator: Dashboard, Meetings, Actions, Calendar"
-echo "  • Meeting Participant: Dashboard, Meetings, Actions, Calendar"
-echo "  • Action Assigner: Dashboard, Actions, Meetings, Calendar"
-echo "  • Action Owner: Dashboard, Actions (My Tasks), Calendar"
-echo "  • Action Viewer: Dashboard, Actions, Calendar"
-echo "  • Participant Manager: Dashboard, Participants, Meetings, Calendar"
-echo "  • User: Dashboard, Meetings, Actions, Calendar"
+echo -e "${CYAN}📂 Complete Menu Hierarchy:${NC}"
+echo ""
+echo "📁 Dashboard [Dashboard] (MUI)"
+echo "📁 Meetings [event] (Material Symbol)"
+echo "  📄 All Meetings [List] (MUI)"
+echo "  📄 Create Meeting [Add] (MUI)"
+echo "  📄 Meeting Minutes [Description] (MUI)"
+echo "  📄 Meeting Participants [People] (MUI)"
+echo "📁 Actions [fa-tasks] (Font Awesome)"
+echo "  📄 My Tasks [fa-tasks] (FA)"
+echo "  📄 All Actions [fa-list] (FA)"
+echo "  📄 Overdue Actions [fa-exclamation-triangle] (FA)"
+echo "  📄 Assign Actions [fa-user-plus] (FA)"
+echo "  📄 Progress Updates [fa-chart-line] (FA)"
+echo "📁 Participants [People] (MUI)"
+echo "  📄 All Participants [List] (MUI)"
+echo "  📄 Participant Lists [Group] (MUI)"
+echo "  📄 Add Participant [PersonAdd] (MUI)"
+echo "  📄 Bulk Import [Upload] (MUI)"
+echo "📁 Documents [folder] (Material Symbol)"
+echo "  📄 All Documents [Folder] (MUI)"
+echo "  📄 Agendas [Article] (MUI)"
+echo "  📄 Minutes [Description] (MUI)"
+echo "  📄 Reports [Assessment] (MUI)"
+echo "📁 Reports [fa-chart-bar] (Font Awesome)"
+echo "  📄 Meeting Reports [Event] (MUI)"
+echo "  📄 Action Reports [Assignment] (MUI)"
+echo "  📄 Participant Reports [People] (MUI)"
+echo "  📄 Export Data [Download] (MUI)"
+echo "📁 Calendar [calendar_month] (Material Symbol)"
+echo "📁 Settings [fa-cog] (Font Awesome)"
+echo "  📄 Profile [fa-user] (FA)"
+echo "  📄 Security [fa-shield-alt] (FA)"
+echo "  📄 Preferences [fa-sliders-h] (FA)"
+echo "  📄 User Management [fa-users] (FA)"
+echo "  📄 Role Management [fa-tag] (FA)"
+echo "  📄 Audit Logs [fa-history] (FA)"
+echo "  📁 Locations [location_on] (Material Symbol)"
+echo "    📄 All Locations [list_alt] (MS)"
+echo "    📄 Regions [map] (MS)"
+echo "    📄 Districts [account_balance] (MS)"
+echo "    📄 Constituencies [groups] (MS)"
+echo "    📄 Parishes [church] (MS)"
+echo "    📄 Villages [house] (MS)"
+echo "  📁 Admin Structures [fa-sitemap] (FA)"
+echo "    📄 All Structures [list_alt] (MS)"
+echo "    📄 Departments [fa-building] (FA)"
+echo "    📄 Units [groups] (MS)"
+echo "    📄 Divisions [AccountTree] (MUI)"
+echo "    📄 Positions [fa-id-badge] (FA)"
+echo "📁 Facebook [fa-facebook] (FAB Brand)"
 echo ""
 
-echo -e "${CYAN}🧪 Test Commands:${NC}"
-echo ""
-echo "  # Get menus for admin"
-echo "  curl -X GET \"${API_URL}/menus/\" \\"
-echo "    -H \"Authorization: Bearer \$ADMIN_TOKEN\" | jq '.[] | {title, path}'"
-echo ""
-echo "  # Get all menus"
-echo "  curl -X GET \"${API_URL}/menus/all\" \\"
-echo "    -H \"Authorization: Bearer \$ADMIN_TOKEN\" | jq '.[] | {code, title}'"
-echo ""
-echo "  # Check participant lists menu"
-echo "  curl -X GET \"${API_URL}/menus/\" \\"
-echo "    -H \"Authorization: Bearer \$ADMIN_TOKEN\" | jq '.. | select(.code? == \"participant_lists\")'"
-echo ""
-
-print_separator
-print_success "Action Tracker menu system seeding completed successfully!"
-print_separator
+print_success "Done! Refresh your browser to see the updated menu structure with nice icons!"

@@ -1,15 +1,49 @@
 // src/components/actiontracker/meetings/MeetingDocuments.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Paper, Typography, Box, Stack, Button, IconButton,
-  List, ListItem, ListItemText, ListItemIcon, ListItemSecondaryAction,
-  Chip, Alert, CircularProgress, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Tooltip,
-  LinearProgress, Fade, Grow, Card, CardContent, Divider,
-  FormControl, InputLabel, Select, MenuItem
+  Paper,
+  Typography,
+  Box,
+  Stack,
+  Button,
+  IconButton,
+  Chip,
+  Alert,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Tooltip,
+  LinearProgress,
+  Fade,
+  Grow,
+  Card,
+  CardContent,
+  Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tabs,
+  Tab,
+  Backdrop,
+  Snackbar,
+  Skeleton,
+  Pagination,
+  useMediaQuery,
+  useTheme,
+  SwipeableDrawer
 } from '@mui/material';
+
 import {
-  Description as DescriptionIcon,
   PictureAsPdf as PdfIcon,
   Image as ImageIcon,
   InsertDriveFile as FileIcon,
@@ -18,58 +52,145 @@ import {
   CloudUpload as UploadIcon,
   Refresh as RefreshIcon,
   Close as CloseIcon,
-  Schedule as ScheduleIcon
+  Visibility as VisibilityIcon,
+  Info as InfoIcon,
+  ZoomIn as ZoomInIcon,
+  ZoomOut as ZoomOutIcon,
+  Print as PrintIcon,
+  Fullscreen as FullscreenIcon,
+  FolderOpen as FolderOpenIcon,
+  Error as ErrorIcon,
+  MoreVert as MoreVertIcon
 } from '@mui/icons-material';
+
 import api from '../../../services/api';
 
 const MeetingDocuments = ({ meetingId, onRefresh }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
+
+  // State Management
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [fileName, setFileName] = useState('');
   const [fileTitle, setFileTitle] = useState('');
   const [fileDescription, setFileDescription] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [deletingId, setDeletingId] = useState(null);
   const [documentTypes, setDocumentTypes] = useState([]);
   const [selectedDocumentTypeId, setSelectedDocumentTypeId] = useState('');
+  const [loadingTypes, setLoadingTypes] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
 
-  // Fetch document types from attributes
+  // Preview States
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewTab, setPreviewTab] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Mobile Menu
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [selectedDocForMenu, setSelectedDocForMenu] = useState(null);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const itemsPerPage = isMobile ? 5 : 10;
+  const totalPages = Math.ceil(documents.length / itemsPerPage);
+  const paginatedDocs = documents.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+
+  // Toast/Snackbar
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
+  // Refs
+  const fileInputRef = useRef(null);
+  const abortControllerRef = useRef(null);
+
+  // Helper Functions
+  const showNotification = (message, severity = 'success') => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+
+  // Fetch document types
+
+  // In MeetingDocuments.jsx - fetchDocumentTypes function
   const fetchDocumentTypes = useCallback(async () => {
+    setLoadingTypes(true);
     try {
-      console.log('Fetching document types...');
-      const response = await api.get('/attribute-groups/DOCUMENT_TYPE/attributes');
-      const types = response.data?.items || response.data || [];
-      console.log('Document types fetched:', types.length);
+      const response = await api.get('/action-tracker/documents/attribute-groups/DOCUMENT_TYPE/attributes');
+      console.log('Raw response:', response.data);
+      
+      // Handle both response formats
+      let types = [];
+      if (response.data?.items) {
+        // If response has items property
+        types = response.data.items;
+      } else if (Array.isArray(response.data)) {
+        // If response is an array
+        types = response.data;
+      } else {
+        types = [];
+      }
+      
+      console.log('Processed document types:', types);
       setDocumentTypes(types);
       
-      // Set default to first active document type
       if (types.length > 0 && !selectedDocumentTypeId) {
         setSelectedDocumentTypeId(types[0].id);
+        console.log('Selected default type:', types[0]);
       }
     } catch (err) {
       console.error('Error fetching document types:', err);
+      setError('Failed to load document types.');
+    } finally {
+      setLoadingTypes(false);
     }
-  }, []);
+  }, [selectedDocumentTypeId]);
 
+
+  // Fetch documents with abort controller for cleanup
   const fetchDocuments = useCallback(async () => {
     if (!meetingId) return;
     
+    // Cancel previous request if exists
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    abortControllerRef.current = new AbortController();
+    
     setLoading(true);
     setError(null);
-    
+
     try {
-      console.log('Fetching documents for meeting:', meetingId);
-      const response = await api.get(`/action-tracker/meetings/${meetingId}/documents`);
-      const docsData = response.data?.items || response.data || [];
-      console.log('Documents fetched:', docsData.length);
-      setDocuments(docsData);
+      const response = await api.get(`/action-tracker/documents/meetings/${meetingId}/documents`, {
+        signal: abortControllerRef.current.signal
+      });
+      const docs = response.data?.items || response.data || [];
+      setDocuments(docs);
+      // Reset to first page when documents change
+      setPage(1);
+      if (docs.length === 0) {
+        showNotification('No documents found for this meeting', 'info');
+      }
     } catch (err) {
-      console.error('Error fetching documents:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to load documents');
+      // Don't show error if request was aborted
+      if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
+        const errorMsg = err.response?.data?.detail || 'Failed to load documents';
+        setError(errorMsg);
+        showNotification(errorMsg, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -80,179 +201,324 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
       fetchDocuments();
       fetchDocumentTypes();
     }
-  }, [fetchDocuments, fetchDocumentTypes, meetingId]);
+    
+    // Cleanup function to abort requests on unmount
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [meetingId, fetchDocuments, fetchDocumentTypes]);
 
   const handleRefresh = () => {
     fetchDocuments();
+    fetchDocumentTypes();
     if (onRefresh) onRefresh();
+    showNotification('Documents refreshed', 'success');
   };
 
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (file) {
+      if (file.size > 50 * 1024 * 1024) {
+        showNotification('File size must be less than 50MB', 'error');
+        return;
+      }
       setSelectedFile(file);
-      setFileTitle(file.name.replace(/\.[^/.]+$/, '')); // Default title from filename without extension
-      setFileName(file.name);
+      setFileTitle(file.name.replace(/\.[^/.]+$/, ''));
       setUploadProgress(0);
     }
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) {
-      setError('Please select a file to upload');
+    if (!selectedFile || !fileTitle.trim() || !selectedDocumentTypeId) {
+      showNotification('Please fill all required fields', 'warning');
       return;
     }
-    
-    if (!fileTitle.trim()) {
-      setError('Please enter a document title');
-      return;
-    }
-    
-    if (!selectedDocumentTypeId) {
-      setError('Please select a document type');
-      return;
-    }
-    
+
     setUploading(true);
     setError(null);
-    setUploadProgress(0);
-    
+
     const formData = new FormData();
     formData.append('file', selectedFile);
-    formData.append('title', fileTitle);
+    formData.append('title', fileTitle.trim());
     formData.append('description', fileDescription);
     formData.append('document_type_id', selectedDocumentTypeId);
-    
+
     try {
-      console.log('Uploading document to meeting:', meetingId);
-      // ✅ CORRECT: POST /api/v1/action-tracker/documents/documents/{meeting_id}/documents
-      const response = await api.post(
-        `/action-tracker/documents/documents/${meetingId}/documents`,
-        formData,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          onUploadProgress: (progressEvent) => {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setUploadProgress(percentCompleted);
+      await api.post(`/action-tracker/documents/meetings/${meetingId}/documents`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percent);
           }
         }
-      );
-      
-      console.log('Upload successful:', response.data);
+      });
+
       setUploadDialogOpen(false);
       setSelectedFile(null);
       setFileTitle('');
-      setFileName('');
       setFileDescription('');
-      setSelectedDocumentTypeId(documentTypes[0]?.id || '');
       setUploadProgress(0);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       await fetchDocuments();
       if (onRefresh) onRefresh();
+      showNotification('Document uploaded successfully!', 'success');
     } catch (err) {
-      console.error('Error uploading document:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to upload document');
+      const errorMsg = err.response?.data?.detail || 'Failed to upload document';
+      setError(errorMsg);
+      showNotification(errorMsg, 'error');
     } finally {
       setUploading(false);
     }
   };
 
-  const handleDownload = async (doc) => {
+  const handleDelete = async (doc) => {
+    if (!window.confirm(`Delete "${doc.title || doc.file_name}"?`)) return;
+
+    setDeletingId(doc.id);
     try {
-      console.log('Downloading document:', doc.id);
-      const response = await api.get(`/action-tracker/documents/${doc.id}`, {
+      await api.delete(`/action-tracker/documents/document/${doc.id}`);
+      showNotification('Document deleted successfully', 'success');
+      await fetchDocuments();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      const errorMsg = err.response?.data?.detail || 'Failed to delete document';
+      showNotification(errorMsg, 'error');
+    } finally {
+      setDeletingId(null);
+      setMobileMenuOpen(false);
+    }
+  };
+
+  const handlePreview = async (doc) => {
+    setSelectedDoc(doc);
+    setPreviewTab(0);
+    setPreviewError(null);
+    setImageZoom(1);
+    setPreviewDialogOpen(true);
+    setPreviewLoading(true);
+
+    if (doc.mime_type === 'application/pdf' || doc.mime_type?.startsWith('image/')) {
+      try {
+        const response = await api.get(`/action-tracker/documents/document/${doc.id}/download`, {
+          responseType: 'blob'
+        });
+        const url = URL.createObjectURL(response.data);
+        setPreviewUrl(url);
+      } catch (err) {
+        console.error('Preview error:', err);
+        setPreviewError('Failed to load preview. You can still download the file.');
+      } finally {
+        setPreviewLoading(false);
+      }
+    } else {
+      setPreviewLoading(false);
+    }
+    setMobileMenuOpen(false);
+  };
+
+  const handleClosePreview = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewDialogOpen(false);
+    setSelectedDoc(null);
+    setPreviewUrl(null);
+    setPreviewError(null);
+    setImageZoom(1);
+    setIsFullscreen(false);
+  };
+
+  const handleDownload = async (doc) => {
+    if (!doc) return;
+    setDownloadingId(doc.id);
+    try {
+      // Fixed: Added /document/ in the URL path
+      const response = await api.get(`/action-tracker/documents/document/${doc.id}/download`, {
         responseType: 'blob'
       });
       
-      const url = window.URL.createObjectURL(response.data);
+      const blob = new Blob([response.data], { 
+        type: doc.mime_type || 'application/octet-stream' 
+      });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', doc.name || doc.file_name || 'document');
+      link.download = doc.file_name || doc.title || 'document';
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+      showNotification('Download started', 'success');
     } catch (err) {
-      console.error('Error downloading document:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to download document');
-    }
-  };
-
-  const handleDelete = async (docId) => {
-    if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
-      return;
-    }
-    
-    setDeletingId(docId);
-    try {
-      console.log('Deleting document:', docId);
-      await api.delete(`/action-tracker/documents/${docId}`);
-      console.log('Document deleted successfully');
-      await fetchDocuments();
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      console.error('Error deleting document:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to delete document');
+      console.error('Download failed:', err);
+      showNotification('Download failed. Please try again.', 'error');
+      // Fallback: open in new tab with correct URL
+      window.open(`/api/v1/action-tracker/documents/document/${doc.id}/download`, '_blank');
     } finally {
-      setDeletingId(null);
+      setDownloadingId(null);
+      setMobileMenuOpen(false);
     }
   };
 
-  const getFileIcon = (fileName, documentType) => {
-    const extension = fileName?.split('.').pop()?.toLowerCase();
-    
-    // Use document type icon if available
-    if (documentType?.extra_metadata?.icon) {
-      const iconName = documentType.extra_metadata.icon;
-      if (iconName === 'article') return <DescriptionIcon sx={{ color: '#3B82F6' }} />;
-      if (iconName === 'slideshow') return <DescriptionIcon sx={{ color: '#8B5CF6' }} />;
-      if (iconName === 'assessment') return <DescriptionIcon sx={{ color: '#10B981' }} />;
-      if (iconName === 'description') return <DescriptionIcon sx={{ color: '#F59E0B' }} />;
-      if (iconName === 'attach_file') return <FileIcon sx={{ color: '#6B7280' }} />;
-      if (iconName === 'menu_book') return <DescriptionIcon sx={{ color: '#EF4444' }} />;
+  const handleZoomIn = () => setImageZoom((z) => Math.min(z + 0.25, 3));
+  const handleZoomOut = () => setImageZoom((z) => Math.max(z - 0.25, 0.5));
+  const handleResetZoom = () => setImageZoom(1);
+
+  const handlePrint = () => {
+    if (previewUrl) {
+      const win = window.open(previewUrl);
+      win?.addEventListener('load', () => win.print());
     }
+  };
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(console.error);
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  const getFileIcon = (fileName, mimeType) => {
+    if (mimeType === 'application/pdf') return <PdfIcon sx={{ color: '#ef4444', fontSize: isMobile ? 28 : 40 }} />;
+    if (mimeType?.startsWith('image/')) return <ImageIcon sx={{ color: '#10b981', fontSize: isMobile ? 28 : 40 }} />;
     
-    // Fallback to file extension icons
-    if (extension === 'pdf') return <PdfIcon sx={{ color: '#ef4444' }} />;
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(extension)) return <ImageIcon sx={{ color: '#10b981' }} />;
-    if (['doc', 'docx'].includes(extension)) return <DescriptionIcon sx={{ color: '#3b82f6' }} />;
-    if (['xls', 'xlsx'].includes(extension)) return <DescriptionIcon sx={{ color: '#10b981' }} />;
-    if (['ppt', 'pptx'].includes(extension)) return <DescriptionIcon sx={{ color: '#f59e0b' }} />;
-    return <FileIcon sx={{ color: '#6b7280' }} />;
+    const ext = fileName?.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') return <PdfIcon sx={{ color: '#ef4444', fontSize: isMobile ? 28 : 40 }} />;
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) return <ImageIcon sx={{ color: '#10b981', fontSize: isMobile ? 28 : 40 }} />;
+    return <FileIcon sx={{ color: '#6b7280', fontSize: isMobile ? 28 : 40 }} />;
   };
 
   const formatFileSize = (bytes) => {
-    if (!bytes) return 'Unknown size';
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    if (!bytes) return '—';
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
   };
 
   const getDocumentTypeName = (doc) => {
-    const docType = documentTypes.find(t => t.id === doc.document_type_id);
-    return docType?.name || doc.document_type_name || 'Document';
+    if (!doc) return 'Document';
+    const typeFromList = documentTypes.find((t) => t.id === doc.document_type_id);
+    if (typeFromList?.name) return typeFromList.name;
+    if (doc.document_type_name) return doc.document_type_name;
+    return 'Document';
   };
 
-  if (loading && documents.length === 0) {
-    return (
-      <Box sx={{ textAlign: 'center', py: 4 }}>
-        <CircularProgress />
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          Loading documents...
-        </Typography>
-      </Box>
-    );
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown';
+    try {
+      const options = isMobile 
+        ? { month: 'short', day: 'numeric' }
+        : { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+      return new Date(dateString).toLocaleDateString('en-US', options);
+    } catch {
+      return 'Unknown';
+    }
+  };
+
+  // Mobile Document Card Component
+  const MobileDocumentCard = ({ doc, index }) => (
+    <Card 
+      key={doc.id || index} 
+      sx={{ 
+        mb: 2, 
+        borderRadius: 2,
+        position: 'relative',
+        '&:last-child': { mb: 0 }
+      }}
+    >
+      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+        <Stack direction="row" spacing={2}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {getFileIcon(doc.file_name, doc.mime_type)}
+          </Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="subtitle2" fontWeight={600} noWrap>
+              {doc.title || doc.file_name || 'Untitled Document'}
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap">
+              <Chip
+                label={getDocumentTypeName(doc)}
+                size="small"
+                variant="outlined"
+                sx={{ height: 20, fontSize: '0.65rem' }}
+              />
+              <Chip
+                label={formatFileSize(doc.file_size)}
+                size="small"
+                variant="outlined"
+                sx={{ height: 20, fontSize: '0.65rem' }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {formatDate(doc.uploaded_at)}
+              </Typography>
+            </Stack>
+            {doc.description && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }} noWrap>
+                {doc.description}
+              </Typography>
+            )}
+          </Box>
+          <IconButton 
+            size="small" 
+            onClick={() => {
+              setSelectedDocForMenu(doc);
+              setMobileMenuOpen(true);
+            }}
+          >
+            <MoreVertIcon />
+          </IconButton>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  // Loading Skeleton
+  const LoadingSkeleton = () => (
+    <Stack spacing={2}>
+      {[1, 2, 3].map((i) => (
+        <Paper key={i} sx={{ p: 2, borderRadius: 2 }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Skeleton variant="circular" width={isMobile ? 36 : 40} height={isMobile ? 36 : 40} />
+            <Box sx={{ flex: 1 }}>
+              <Skeleton variant="text" width="70%" height={24} />
+              <Skeleton variant="text" width="50%" height={20} />
+            </Box>
+            <Skeleton variant="circular" width={32} height={32} />
+            <Skeleton variant="circular" width={32} height={32} />
+          </Stack>
+        </Paper>
+      ))}
+    </Stack>
+  );
+
+  if ((loading && documents.length === 0) || loadingTypes) {
+    return <LoadingSkeleton />;
   }
 
   return (
-    <Fade in timeout={500}>
+    <Fade in timeout={400}>
       <Box>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-          <Typography variant="h6" fontWeight={700}>
+        {/* Header */}
+        <Stack 
+          direction="row" 
+          justifyContent="space-between" 
+          alignItems="center" 
+          sx={{ mb: 3 }} 
+          flexWrap="wrap" 
+          gap={2}
+        >
+          <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight={700}>
             Documents ({documents.length})
           </Typography>
           <Stack direction="row" spacing={1}>
             <Tooltip title="Refresh">
-              <IconButton onClick={handleRefresh} size="small" disabled={loading}>
+              <IconButton onClick={handleRefresh} disabled={loading} size="small">
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
@@ -260,120 +526,454 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
               variant="contained"
               startIcon={<UploadIcon />}
               onClick={() => setUploadDialogOpen(true)}
+              size={isMobile ? "small" : "medium"}
             >
-              Upload Document
+              {isMobile ? "Upload" : "Upload Document"}
             </Button>
           </Stack>
         </Stack>
 
+        {/* Error Alert */}
         {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
+          <Alert 
+            severity="error" 
+            sx={{ mb: 3, borderRadius: 2 }} 
+            onClose={() => setError(null)}
+          >
             {error}
           </Alert>
         )}
 
+        {/* Empty State */}
         {documents.length === 0 ? (
           <Grow in timeout={500}>
-            <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
-              <FileIcon sx={{ fontSize: 80, color: '#cbd5e1', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
+            <Paper
+              sx={{
+                p: isMobile ? 4 : 8,
+                textAlign: 'center',
+                borderRadius: 3,
+                border: '1px dashed',
+                borderColor: 'divider',
+              }}
+            >
+              <FolderOpenIcon sx={{ fontSize: isMobile ? 60 : 90, color: 'text.disabled', mb: 2 }} />
+              <Typography variant={isMobile ? "subtitle1" : "h6"} color="text.secondary" gutterBottom>
                 No Documents Yet
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 400, mx: 'auto' }}>
-                Upload meeting agendas, presentations, minutes, or other relevant documents.
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ maxWidth: 420, mx: 'auto', mb: 3 }}
+              >
+                Upload meeting agendas, presentations, minutes, or any supporting documents here.
               </Typography>
               <Button
                 variant="contained"
                 startIcon={<UploadIcon />}
                 onClick={() => setUploadDialogOpen(true)}
+                size={isMobile ? "medium" : "large"}
               >
                 Upload First Document
               </Button>
             </Paper>
           </Grow>
         ) : (
-          <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-            <List sx={{ p: 0 }}>
-              {documents.map((doc, index) => (
-                <React.Fragment key={doc.id}>
-                  {index > 0 && <Divider />}
-                  <ListItem
-                    sx={{
-                      py: 2,
-                      transition: 'background-color 0.2s',
-                      '&:hover': { bgcolor: '#f8fafc' }
-                    }}
-                  >
-                    <ListItemIcon>
-                      {getFileIcon(doc.file_name || doc.name, doc.document_type)}
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={
-                        <Typography variant="subtitle2" fontWeight={600}>
-                          {doc.title || doc.name || doc.file_name}
-                        </Typography>
-                      }
-                      secondary={
-                        <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 0.5 }} flexWrap="wrap">
-                          <Chip
-                            label={getDocumentTypeName(doc)}
-                            size="small"
-                            variant="outlined"
-                            sx={{ height: 20, fontSize: '0.7rem' }}
-                          />
-                          {doc.file_size && (
+          <>
+            {isMobile ? (
+              // Mobile View - Cards
+              <Box>
+                {paginatedDocs.map((doc, index) => (
+                  <MobileDocumentCard key={doc.id || index} doc={doc} index={index} />
+                ))}
+              </Box>
+            ) : (
+              // Desktop View - Table
+              <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'auto' }}>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                        <TableCell sx={{ fontWeight: 700, width: '40%' }}>Document</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Size</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Uploaded</TableCell>
+                        <TableCell sx={{ fontWeight: 700, width: 120 }} align="center">Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {paginatedDocs.map((doc, index) => (
+                        <TableRow key={doc.id || index} hover>
+                          <TableCell>
+                            <Stack direction="row" spacing={1.5} alignItems="center">
+                              {getFileIcon(doc.file_name, doc.mime_type)}
+                              <Box>
+                                <Typography variant="body2" fontWeight={500}>
+                                  {doc.title || doc.file_name || 'Untitled Document'}
+                                </Typography>
+                                {doc.description && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {doc.description}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
                             <Chip
-                              label={formatFileSize(doc.file_size)}
+                              label={getDocumentTypeName(doc)}
                               size="small"
                               variant="outlined"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
                             />
-                          )}
-                          <Stack direction="row" spacing={0.5} alignItems="center">
-                            <ScheduleIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
-                            <Typography variant="caption" color="text.secondary">
-                              Uploaded: {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : (doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'Unknown date')}
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {formatFileSize(doc.file_size)}
                             </Typography>
-                          </Stack>
-                          {doc.description && (
+                          </TableCell>
+                          <TableCell>
                             <Typography variant="caption" color="text.secondary">
-                              {doc.description}
+                              {formatDate(doc.uploaded_at)}
                             </Typography>
-                          )}
-                        </Stack>
-                      }
-                    />
-                    <ListItemSecondaryAction>
-                      <Tooltip title="Download">
-                        <IconButton edge="end" onClick={() => handleDownload(doc)} sx={{ mr: 1 }}>
-                          <DownloadIcon />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton 
-                          edge="end" 
-                          onClick={() => handleDelete(doc.id)} 
-                          color="error"
-                          disabled={deletingId === doc.id}
-                        >
-                          {deletingId === doc.id ? <CircularProgress size={20} /> : <DeleteIcon />}
-                        </IconButton>
-                      </Tooltip>
-                    </ListItemSecondaryAction>
-                  </ListItem>
-                </React.Fragment>
-              ))}
-            </List>
-          </Paper>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Stack direction="row" spacing={0.5} justifyContent="center">
+                              <Tooltip title="Preview">
+                                <IconButton onClick={() => handlePreview(doc)} size="small">
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Download">
+                                <IconButton 
+                                  onClick={() => handleDownload(doc)} 
+                                  size="small"
+                                  disabled={downloadingId === doc.id}
+                                >
+                                  {downloadingId === doc.id ? (
+                                    <CircularProgress size={16} />
+                                  ) : (
+                                    <DownloadIcon fontSize="small" />
+                                  )}
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton 
+                                  onClick={() => handleDelete(doc)} 
+                                  color="error"
+                                  size="small"
+                                  disabled={deletingId === doc.id}
+                                >
+                                  {deletingId === doc.id ? (
+                                    <CircularProgress size={16} />
+                                  ) : (
+                                    <DeleteIcon fontSize="small" />
+                                  )}
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            )}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <Stack alignItems="center" sx={{ mt: 3 }}>
+                <Pagination
+                  count={totalPages}
+                  page={page}
+                  onChange={(e, value) => setPage(value)}
+                  color="primary"
+                  size={isMobile ? "small" : "large"}
+                  siblingCount={isMobile ? 0 : 1}
+                />
+              </Stack>
+            )}
+          </>
         )}
 
-        {/* Upload Dialog */}
-        <Dialog 
-          open={uploadDialogOpen} 
-          onClose={() => !uploading && setUploadDialogOpen(false)} 
-          maxWidth="sm" 
+        {/* Mobile Action Menu */}
+        <SwipeableDrawer
+          anchor="bottom"
+          open={mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+          onOpen={() => {}}
+          disableBackdropTransition
+        >
+          <Box sx={{ p: 2 }}>
+            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+              {selectedDocForMenu?.title || selectedDocForMenu?.file_name}
+            </Typography>
+            <Divider sx={{ mb: 2 }} />
+            <Stack spacing={1}>
+              <Button 
+                fullWidth 
+                startIcon={<VisibilityIcon />}
+                onClick={() => handlePreview(selectedDocForMenu)}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Preview
+              </Button>
+              <Button 
+                fullWidth 
+                startIcon={<DownloadIcon />}
+                onClick={() => handleDownload(selectedDocForMenu)}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Download
+              </Button>
+              <Button 
+                fullWidth 
+                startIcon={<DeleteIcon />}
+                onClick={() => handleDelete(selectedDocForMenu)}
+                color="error"
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Delete
+              </Button>
+            </Stack>
+          </Box>
+        </SwipeableDrawer>
+
+        {/* Preview Dialog */}
+        <Dialog
+          open={previewDialogOpen}
+          onClose={handleClosePreview}
+          maxWidth="xl"
           fullWidth
-          PaperProps={{ sx: { borderRadius: 3 } }}
+          fullScreen={isMobile || isFullscreen}
+          PaperProps={{
+            sx: {
+              borderRadius: isMobile ? 0 : 3,
+              height: isMobile ? '100vh' : (isFullscreen ? '100vh' : '92vh'),
+              margin: isMobile ? 0 : undefined,
+            },
+          }}
+        >
+          <DialogTitle sx={{ p: isMobile ? 1.5 : 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="subtitle1" fontWeight={600} noWrap>
+                  {selectedDoc?.title || selectedDoc?.file_name || 'Document Preview'}
+                </Typography>
+                {!isMobile && (
+                  <Typography variant="caption" color="text.secondary">
+                    {getDocumentTypeName(selectedDoc)} • {formatFileSize(selectedDoc?.file_size)}
+                  </Typography>
+                )}
+              </Box>
+
+              <Stack direction="row" spacing={0.5}>
+                {selectedDoc?.mime_type?.startsWith('image/') && !isMobile && (
+                  <>
+                    <Tooltip title="Zoom Out">
+                      <IconButton onClick={handleZoomOut} size="small">
+                        <ZoomOutIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Reset Zoom">
+                      <IconButton onClick={handleResetZoom} size="small">
+                        <Typography variant="caption" fontWeight="bold">
+                          {Math.round(imageZoom * 100)}%
+                        </Typography>
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Zoom In">
+                      <IconButton onClick={handleZoomIn} size="small">
+                        <ZoomInIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </>
+                )}
+
+                <Tooltip title="Print">
+                  <IconButton onClick={handlePrint} size="small">
+                    <PrintIcon />
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}>
+                  <IconButton onClick={toggleFullscreen} size="small">
+                    <FullscreenIcon />
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title="Close">
+                  <IconButton onClick={handleClosePreview} size="small">
+                    <CloseIcon />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Stack>
+          </DialogTitle>
+
+          <DialogContent sx={{ p: 0, bgcolor: '#fafafa', position: 'relative' }}>
+            <Tabs
+              value={previewTab}
+              onChange={(e, v) => setPreviewTab(v)}
+              sx={{ px: isMobile ? 1 : 3, borderBottom: 1, borderColor: 'divider', bgcolor: '#fff' }}
+              variant={isMobile ? "fullWidth" : "standard"}
+            >
+              <Tab label="Preview" icon={<VisibilityIcon />} iconPosition="start" />
+              <Tab label="Details" icon={<InfoIcon />} iconPosition="start" />
+            </Tabs>
+
+            {previewTab === 0 && (
+              <Box
+                sx={{
+                  height: isMobile ? 'calc(100vh - 180px)' : 'calc(100% - 48px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  p: isMobile ? 1 : 3,
+                  overflow: 'auto',
+                  minHeight: 300,
+                }}
+              >
+                {previewLoading && (
+                  <Backdrop open sx={{ position: 'absolute', bgcolor: 'rgba(0,0,0,0.7)', zIndex: 1 }}>
+                    <CircularProgress color="inherit" />
+                  </Backdrop>
+                )}
+
+                {previewError ? (
+                  <Box textAlign="center">
+                    <ErrorIcon sx={{ fontSize: isMobile ? 60 : 80, color: '#ef4444', mb: 2 }} />
+                    <Typography color="error" gutterBottom>{previewError}</Typography>
+                    <Button
+                      variant="contained"
+                      startIcon={<DownloadIcon />}
+                      onClick={() => handleDownload(selectedDoc)}
+                      sx={{ mt: 2 }}
+                    >
+                      Download File
+                    </Button>
+                  </Box>
+                ) : selectedDoc?.mime_type === 'application/pdf' && previewUrl ? (
+                  <iframe
+                    src={previewUrl}
+                    title={selectedDoc.file_name}
+                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, minHeight: 400 }}
+                  />
+                ) : selectedDoc?.mime_type?.startsWith('image/') && previewUrl ? (
+                  <Box
+                    sx={{
+                      transform: `scale(${imageZoom})`,
+                      transition: 'transform 0.25s ease',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <img
+                      src={previewUrl}
+                      alt={selectedDoc.file_name}
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 }}
+                    />
+                  </Box>
+                ) : (
+                  <Box textAlign="center">
+                    <FileIcon sx={{ fontSize: isMobile ? 60 : 100, color: '#cbd5e1', mb: 2 }} />
+                    <Typography variant="body1" color="text.secondary" gutterBottom>
+                      Preview not available
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      startIcon={<DownloadIcon />}
+                      onClick={() => handleDownload(selectedDoc)}
+                      sx={{ mt: 2 }}
+                    >
+                      Download to View
+                    </Button>
+                  </Box>
+                )}
+              </Box>
+            )}
+
+            {previewTab === 1 && selectedDoc && (
+              <TableContainer sx={{ p: isMobile ? 2 : 4 }}>
+                <Table size={isMobile ? "small" : "medium"}>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, width: isMobile ? '35%' : '30%', bgcolor: '#f8fafc' }}>
+                        File Name
+                      </TableCell>
+                      <TableCell>{selectedDoc.file_name || '—'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Title</TableCell>
+                      <TableCell>{selectedDoc.title || '—'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Description</TableCell>
+                      <TableCell>{selectedDoc.description || 'No description'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Document Type</TableCell>
+                      <TableCell>{getDocumentTypeName(selectedDoc)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>File Size</TableCell>
+                      <TableCell>{formatFileSize(selectedDoc.file_size)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>MIME Type</TableCell>
+                      <TableCell>{selectedDoc.mime_type || 'Unknown'}</TableCell>
+                    </TableRow>
+                    {!isMobile && (
+                      <>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Uploaded By</TableCell>
+                          <TableCell>{selectedDoc.uploaded_by_name || 'Unknown'}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Uploaded At</TableCell>
+                          <TableCell>{formatDate(selectedDoc.uploaded_at)}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Status</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={selectedDoc.is_active ? 'Active' : 'Inactive'} 
+                              size="small"
+                              color={selectedDoc.is_active ? 'success' : 'default'}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </DialogContent>
+
+          <DialogActions sx={{ p: isMobile ? 1.5 : 2, borderTop: 1, borderColor: 'divider' }}>
+            <Button onClick={handleClosePreview} size={isMobile ? "small" : "medium"}>
+              Close
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<DownloadIcon />}
+              onClick={() => handleDownload(selectedDoc)}
+              size={isMobile ? "small" : "medium"}
+            >
+              Download
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Upload Dialog */}
+        <Dialog
+          open={uploadDialogOpen}
+          onClose={() => !uploading && setUploadDialogOpen(false)}
+          maxWidth="sm"
+          fullWidth
+          fullScreen={isMobile}
+          PaperProps={{ sx: { borderRadius: isMobile ? 0 : 3 } }}
         >
           <DialogTitle sx={{ pb: 1 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -386,33 +986,35 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
             </Stack>
           </DialogTitle>
           <Divider />
-          <DialogContent sx={{ pt: 2 }}>
-            <Stack spacing={2.5}>
-              {/* File Selection */}
+
+          <DialogContent sx={{ pt: 3 }}>
+            <Stack spacing={3}>
               <Button
                 variant="outlined"
                 component="label"
                 startIcon={<UploadIcon />}
                 fullWidth
-                sx={{ py: 2, borderStyle: 'dashed' }}
+                sx={{ py: isMobile ? 2 : 3, borderStyle: 'dashed' }}
                 disabled={uploading}
               >
                 {selectedFile ? 'Change File' : 'Select File'}
-                <input
-                  type="file"
-                  hidden
-                  onChange={handleFileSelect}
+                <input 
+                  type="file" 
+                  hidden 
+                  onChange={handleFileSelect} 
                   disabled={uploading}
+                  ref={fileInputRef}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.txt,.zip"
                 />
               </Button>
-              
+
               {selectedFile && (
                 <Card variant="outlined" sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}>
-                  <CardContent>
-                    <Stack direction="row" spacing={1.5} alignItems="center">
-                      {getFileIcon(selectedFile.name)}
+                  <CardContent sx={{ p: isMobile ? 1.5 : 2 }}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      {getFileIcon(selectedFile.name, selectedFile.type)}
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" fontWeight={500}>
+                        <Typography variant="body2" fontWeight={500} noWrap>
                           {selectedFile.name}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
@@ -429,34 +1031,35 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
                 </Card>
               )}
 
-              {/* Upload Progress */}
-              {uploading && uploadProgress > 0 && uploadProgress < 100 && (
+              {uploading && (
                 <Box>
                   <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
                     <Typography variant="caption">Uploading...</Typography>
                     <Typography variant="caption">{uploadProgress}%</Typography>
                   </Stack>
-                  <LinearProgress variant="determinate" value={uploadProgress} sx={{ height: 6, borderRadius: 3 }} />
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={uploadProgress} 
+                    sx={{ height: 6, borderRadius: 3 }}
+                  />
                 </Box>
               )}
 
-              {/* Document Title */}
               {selectedFile && (
                 <TextField
                   fullWidth
                   label="Document Title *"
                   value={fileTitle}
                   onChange={(e) => setFileTitle(e.target.value)}
-                  placeholder="Enter document title"
                   disabled={uploading}
                   required
-                  helperText="Title is required for the document"
+                  placeholder="Enter a descriptive title"
+                  size={isMobile ? "small" : "medium"}
                 />
               )}
 
-              {/* Document Type Selection */}
               {selectedFile && documentTypes.length > 0 && (
-                <FormControl fullWidth>
+                <FormControl fullWidth size={isMobile ? "small" : "medium"}>
                   <InputLabel>Document Type *</InputLabel>
                   <Select
                     value={selectedDocumentTypeId}
@@ -467,12 +1070,6 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
                     {documentTypes.map((type) => (
                       <MenuItem key={type.id} value={type.id}>
                         <Stack direction="row" alignItems="center" spacing={1}>
-                          {type.extra_metadata?.icon === 'article' && <DescriptionIcon sx={{ fontSize: 20 }} />}
-                          {type.extra_metadata?.icon === 'slideshow' && <DescriptionIcon sx={{ fontSize: 20 }} />}
-                          {type.extra_metadata?.icon === 'assessment' && <DescriptionIcon sx={{ fontSize: 20 }} />}
-                          {type.extra_metadata?.icon === 'description' && <DescriptionIcon sx={{ fontSize: 20 }} />}
-                          {type.extra_metadata?.icon === 'attach_file' && <FileIcon sx={{ fontSize: 20 }} />}
-                          {type.extra_metadata?.icon === 'menu_book' && <DescriptionIcon sx={{ fontSize: 20 }} />}
                           <Typography>{type.name}</Typography>
                         </Stack>
                       </MenuItem>
@@ -481,33 +1078,51 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
                 </FormControl>
               )}
 
-              {/* Description Input */}
               <TextField
                 fullWidth
                 label="Description (Optional)"
                 multiline
-                rows={3}
+                rows={isMobile ? 2 : 3}
                 value={fileDescription}
                 onChange={(e) => setFileDescription(e.target.value)}
-                placeholder="Add a description for this document..."
                 disabled={uploading}
+                placeholder="Add notes about this document..."
+                size={isMobile ? "small" : "medium"}
               />
             </Stack>
           </DialogContent>
+
           <DialogActions sx={{ p: 2.5, pt: 0 }}>
-            <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading}>
+            <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading} size={isMobile ? "small" : "medium"}>
               Cancel
             </Button>
             <Button
               variant="contained"
               onClick={handleUpload}
               disabled={uploading || !selectedFile || !fileTitle.trim() || !selectedDocumentTypeId}
-              startIcon={uploading ? <CircularProgress size={16} /> : <UploadIcon />}
+              startIcon={uploading ? <CircularProgress size={20} /> : <UploadIcon />}
+              size={isMobile ? "small" : "medium"}
             >
               {uploading ? 'Uploading...' : 'Upload'}
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Snackbar for notifications */}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={handleCloseSnackbar}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert 
+            onClose={handleCloseSnackbar} 
+            severity={snackbar.severity} 
+            sx={{ width: '100%', borderRadius: 2 }}
+          >
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Box>
     </Fade>
   );

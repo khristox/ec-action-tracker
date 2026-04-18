@@ -336,7 +336,7 @@ class MeetingDocumentCreate(BaseModel):
     file_name: str
     title: str
     description: Optional[str] = None
-    document_type: Optional[str] = "attachment"  # Change from document_type_id to document_type
+    document_type: Optional[str] = "attachment" 
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
     
@@ -359,6 +359,8 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     mime_type: Optional[str] = None
     description: Optional[str] = None
     document_type_id: Optional[UUID] = None 
+    document_type_name: Optional[str] = None  # ← Add this field
+
     version: int = 1
     document_type_name: Optional[str] = None
     uploaded_by_id: Optional[UUID] = None

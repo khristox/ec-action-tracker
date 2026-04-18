@@ -670,7 +670,6 @@ class ActionComment(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
-
 class MeetingDocument(Base):
     """Depends on Meeting, User, Attribute"""
     __tablename__ = "meeting_documents"
@@ -714,19 +713,246 @@ class MeetingDocument(Base):
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
 
+    # ============ User Name Properties ============
+    
     @property
     def created_by_name(self) -> Optional[str]:
+        """Get the username of who created this document"""
         return self.created_by.username if self.created_by else None
     
     @property
     def updated_by_name(self) -> Optional[str]:
+        """Get the username of who last updated this document"""
         return self.updated_by.username if self.updated_by else None
     
     @property
     def uploaded_by_name(self) -> Optional[str]:
+        """Get the username of who uploaded this document"""
         return self.uploaded_by.username if self.uploaded_by else None
 
+    # ============ Document Type Properties ============
+    
+    @property
+    def document_type_name(self) -> str:
+        """Get the document type name from the related Attribute"""
+        if self.document_type:
+            # Try to get name from attribute
+            if hasattr(self.document_type, 'name') and self.document_type.name:
+                return self.document_type.name
+            # Try to get from extra_metadata
+            if hasattr(self.document_type, 'extra_metadata') and self.document_type.extra_metadata:
+                metadata = self.document_type.extra_metadata
+                if isinstance(metadata, dict) and 'display_name' in metadata:
+                    return metadata['display_name']
+        return "General Document"
+    
+    @property
+    def document_type_code(self) -> Optional[str]:
+        """Get the document type code (e.g., 'AGENDA', 'MINUTES')"""
+        if self.document_type:
+            # Try direct code
+            if hasattr(self.document_type, 'code') and self.document_type.code:
+                # Remove 'DOC_TYPE_' prefix if present
+                code = self.document_type.code
+                if code.startswith('DOC_TYPE_'):
+                    return code[9:]  # Remove 'DOC_TYPE_' prefix
+                return code
+            # Try to get from extra_metadata
+            if hasattr(self.document_type, 'extra_metadata') and self.document_type.extra_metadata:
+                metadata = self.document_type.extra_metadata
+                if isinstance(metadata, dict) and 'code' in metadata:
+                    return metadata['code']
+        return None
+    
+    @property
+    def document_type_short_name(self) -> Optional[str]:
+        """Get the short name of the document type"""
+        if self.document_type and hasattr(self.document_type, 'short_name'):
+            return self.document_type.short_name
+        return self.document_type_name[:20] if self.document_type_name else None
+    
+    @property
+    def document_type_icon(self) -> Optional[str]:
+        """Get the icon associated with this document type"""
+        if self.document_type and hasattr(self.document_type, 'extra_metadata'):
+            metadata = self.document_type.extra_metadata
+            if isinstance(metadata, dict) and 'icon' in metadata:
+                return metadata['icon']
+        # Return default icon based on mime type
+        if self.mime_type:
+            if self.mime_type == 'application/pdf':
+                return 'pdf'
+            if self.mime_type.startswith('image/'):
+                return 'image'
+        return 'document'
+    
+    @property
+    def document_type_color(self) -> Optional[str]:
+        """Get the color associated with this document type for UI"""
+        if self.document_type and hasattr(self.document_type, 'extra_metadata'):
+            metadata = self.document_type.extra_metadata
+            if isinstance(metadata, dict) and 'color' in metadata:
+                return metadata['color']
+        # Return default colors based on document type code
+        if self.document_type_code:
+            color_map = {
+                'AGENDA': '#3b82f6',    # Blue
+                'MINUTES': '#10b981',   # Green
+                'PRESENTATION': '#f59e0b',  # Amber
+                'REPORT': '#8b5cf6',    # Purple
+                'ATTACHMENT': '#6b7280', # Gray
+            }
+            return color_map.get(self.document_type_code, '#6b7280')
+        return '#6b7280'
 
+    # ============ File Properties ============
+    
+    @property
+    def file_url(self) -> Optional[str]:
+        """Generate download URL for the file"""
+        if self.id:
+            return f"/api/v1/action-tracker/documents/document/{self.id}/download"
+        return None
+    
+    @property
+    def file_extension(self) -> str:
+        """Get the file extension (e.g., '.pdf', '.docx')"""
+        if self.file_name and '.' in self.file_name:
+            return self.file_name.rsplit('.', 1)[-1].lower()
+        return 'unknown'
+    
+    @property
+    def file_size_formatted(self) -> str:
+        """Get human-readable file size (e.g., '1.5 MB', '256 KB')"""
+        if not self.file_size:
+            return 'Unknown size'
+        
+        size = self.file_size
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f"{size:.1f} {unit}" if unit != 'B' else f"{size:.0f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
+    
+    @property
+    def is_image(self) -> bool:
+        """Check if the document is an image"""
+        return self.mime_type and self.mime_type.startswith('image/')
+    
+    @property
+    def is_pdf(self) -> bool:
+        """Check if the document is a PDF"""
+        return self.mime_type == 'application/pdf' or self.file_extension == 'pdf'
+    
+    @property
+    def is_previewable(self) -> bool:
+        """Check if the document can be previewed in the browser"""
+        return self.is_pdf or self.is_image
+    
+    @property
+    def thumbnail_url(self) -> Optional[str]:
+        """Get thumbnail URL for images (if applicable)"""
+        if self.is_image and self.id:
+            # You could implement a thumbnail generation endpoint
+            return f"/api/v1/action-tracker/documents/document/{self.id}/thumbnail"
+        return None
+
+    # ============ Document Information ============
+    
+    @property
+    def display_title(self) -> str:
+        """Get the display title (fallback to filename if title is empty)"""
+        return self.title if self.title else self.file_name.replace(f'.{self.file_extension}', '') if self.file_name else 'Untitled Document'
+    
+    @property
+    def version_display(self) -> str:
+        """Get formatted version (e.g., 'v1', 'v2')"""
+        return f"v{self.version}"
+    
+    @property
+    def is_latest_version(self) -> bool:
+        """Check if this is the latest version of the document"""
+        # You would need to implement version checking logic
+        # This could query for other documents with same title/meeting
+        return True  # Placeholder
+    
+    @property
+    def uploaded_at_formatted(self) -> str:
+        """Get formatted upload date/time"""
+        if self.uploaded_at:
+            return self.uploaded_at.strftime("%Y-%m-%d %H:%M:%S")
+        return "Unknown"
+    
+    @property
+    def uploaded_at_relative(self) -> str:
+        """Get relative time (e.g., '2 hours ago', '3 days ago')"""
+        if not self.uploaded_at:
+            return "Unknown"
+        
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        diff = now - self.uploaded_at
+        
+        if diff.days > 365:
+            years = diff.days // 365
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        if diff.days > 30:
+            months = diff.days // 30
+            return f"{months} month{'s' if months > 1 else ''} ago"
+        if diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        if diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        if diff.seconds > 60:
+            minutes = diff.seconds // 60
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        return "Just now"
+
+    # ============ Utility Methods ============
+    
+    def to_dict(self, include_relationships: bool = False) -> dict:
+        """Convert document to dictionary"""
+        data = {
+            "id": str(self.id),
+            "meeting_id": str(self.meeting_id),
+            "file_name": self.file_name,
+            "title": self.title,
+            "description": self.description,
+            "file_size": self.file_size,
+            "file_size_formatted": self.file_size_formatted,
+            "file_extension": self.file_extension,
+            "mime_type": self.mime_type,
+            "document_type_id": str(self.document_type_id) if self.document_type_id else None,
+            "document_type_name": self.document_type_name,
+            "document_type_code": self.document_type_code,
+            "version": self.version,
+            "version_display": self.version_display,
+            "uploaded_at": self.uploaded_at.isoformat() if self.uploaded_at else None,
+            "uploaded_at_formatted": self.uploaded_at_formatted,
+            "uploaded_at_relative": self.uploaded_at_relative,
+            "is_active": self.is_active,
+            "is_previewable": self.is_previewable,
+            "file_url": self.file_url,
+            "display_title": self.display_title,
+        }
+        
+        if include_relationships:
+            data.update({
+                "uploaded_by_id": str(self.uploaded_by_id) if self.uploaded_by_id else None,
+                "uploaded_by_name": self.uploaded_by_name,
+                "created_by_name": self.created_by_name,
+                "updated_by_name": self.updated_by_name,
+                "created_at": self.created_at.isoformat() if self.created_at else None,
+                "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            })
+        
+        return data
+    
+    def __repr__(self) -> str:
+        """String representation of the document"""
+        return f"<MeetingDocument {self.display_title} (meeting: {self.meeting_id})>"
+    
 # ==================== Helper Methods for Eager Loading ====================
 
 from sqlalchemy import select

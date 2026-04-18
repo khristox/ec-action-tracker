@@ -1,6 +1,9 @@
 # app/api/v1/endpoints/action_tracker/documents.py
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
@@ -8,7 +11,7 @@ import logging
 
 from app.api import deps
 from app.crud.action_tracker import meeting, meeting_document
-from app.models.general.dynamic_attribute import Attribute
+from app.models.general.dynamic_attribute import Attribute, AttributeGroup
 from app.models.user import User
 from app.schemas.action_tracker import MeetingDocumentResponse, MeetingDocumentCreate
 
@@ -17,16 +20,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 async def validate_document_type_id(db: AsyncSession, document_type_id: UUID) -> bool:
-    """
-    Validate that the document_type_id exists in the DOCUMENT_TYPE attribute group.
-    
-    This checks if the provided UUID corresponds to a valid attribute 
-    within the DOCUMENT_TYPE group (e.g., DOC_TYPE_AGENDA, DOC_TYPE_ATTACHMENT, etc.)
-    """
+    """Validate that the document_type_id exists in the DOCUMENT_TYPE attribute group."""
     from sqlalchemy import select
     from app.models.general.dynamic_attribute import Attribute
     
-    # Query to find attributes in the DOCUMENT_TYPE group with the given ID
     result = await db.execute(
         select(Attribute).where(
             Attribute.id == document_type_id,
@@ -41,107 +38,17 @@ async def validate_document_type_id(db: AsyncSession, document_type_id: UUID) ->
         logger.info(f"✅ Valid document type found: {document_type_attr.code} - {document_type_attr.name}")
         return True
     
-    logger.warning(f"❌ Invalid document_type_id: {document_type_id} - Not found in DOCUMENT_TYPE group")
+    logger.warning(f"❌ Invalid document_type_id: {document_type_id}")
     return False
 
+# ============ MAIN ENDPOINTS ============
 
-async def get_document_type_by_id(db: AsyncSession, document_type_id: UUID) -> Optional[dict]:
-    """
-    Get document type details by ID.
-    Returns a dict with code, name, and extra_metadata.
-    """
-    from sqlalchemy import select
-    from app.models.general.dynamic_attribute import Attribute
-    
-    result = await db.execute(
-        select(Attribute).where(
-            Attribute.id == document_type_id,
-            Attribute.group.has(code="DOCUMENT_TYPE"),
-            Attribute.is_active == True
-        )
-    )
-    
-    document_type_attr = result.scalar_one_or_none()
-    
-    if document_type_attr:
-        return {
-            "id": document_type_attr.id,
-            "code": document_type_attr.code,
-            "name": document_type_attr.name,
-            "short_name": document_type_attr.short_name,
-            "extra_metadata": document_type_attr.extra_metadata
-        }
-    
-    return None
-
-
-async def get_all_document_types(db: AsyncSession, include_inactive: bool = False) -> List[dict]:
-    """
-    Get all available document types from the DOCUMENT_TYPE group.
-    """
-    from sqlalchemy import select
-    from app.models.general.dynamic_attribute import Attribute
-    
-    query = select(Attribute).where(
-        Attribute.group.has(code="DOCUMENT_TYPE")
-    )
-    
-    if not include_inactive:
-        query = query.where(Attribute.is_active == True)
-    
-    query = query.order_by(Attribute.sort_order)
-    
-    result = await db.execute(query)
-    attributes = result.scalars().all()
-    
-    return [
-        {
-            "id": attr.id,
-            "code": attr.code,
-            "name": attr.name,
-            "short_name": attr.short_name,
-            "description": attr.description,
-            "sort_order": attr.sort_order,
-            "extra_metadata": attr.extra_metadata,
-            "is_active": attr.is_active
-        }
-        for attr in attributes
-    ]
-
-
-async def get_document_type_by_code(db: AsyncSession, code: str) -> Optional[dict]:
-    """
-    Get document type by its code (e.g., 'DOC_TYPE_ATTACHMENT').
-    """
-    from sqlalchemy import select
-    from app.models.general.dynamic_attribute import Attribute
-    
-    result = await db.execute(
-        select(Attribute).where(
-            Attribute.code == code,
-            Attribute.group.has(code="DOCUMENT_TYPE"),
-            Attribute.is_active == True
-        )
-    )
-    
-    document_type_attr = result.scalar_one_or_none()
-    
-    if document_type_attr:
-        return {
-            "id": document_type_attr.id,
-            "code": document_type_attr.code,
-            "name": document_type_attr.name,
-            "extra_metadata": document_type_attr.extra_metadata
-        }
-    
-    return None
-
-@router.post("/documents/{meeting_id}/documents", response_model=MeetingDocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{meeting_id}/documents", response_model=MeetingDocumentResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     meeting_id: UUID,
     title: str = Form(...),
     description: Optional[str] = Form(None),
-    document_type_id: UUID = Form(...),  # Changed from document_type to document_type_id (UUID)
+    document_type_id: UUID = Form(...), 
     file: UploadFile = File(...),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -174,8 +81,8 @@ async def upload_document(
         file_name=file.filename,
         title=title,
         description=description,
-        document_type_id=document_type_id,  # Now using UUID directly
-        file_size=None,  # Will be set in CRUD
+        document_type_id=document_type_id,
+        file_size=None,
         mime_type=file.content_type
     )
     
@@ -195,17 +102,95 @@ async def upload_document(
     return result
 
 
-@router.get("/documents/{meeting_id}/documents", response_model=List[MeetingDocumentResponse])
+@router.get("/{meeting_id}/documents", response_model=List[MeetingDocumentResponse])
 async def get_meeting_documents(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
     """Get all documents for a meeting"""
-    return await meeting_document.get_meeting_documents(db, meeting_id)
+    documents = await meeting_document.get_meeting_documents(db, meeting_id)
+    return documents
 
 
-@router.get("/documents/{document_id}", response_model=MeetingDocumentResponse)
+# ============ NEW ENDPOINT FOR MEETINGS PREFIX (matches frontend) ============
+@router.get("/meetings/{meeting_id}/documents", response_model=List[MeetingDocumentResponse])
+async def get_meeting_documents_alt(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get all documents for a meeting (alternative endpoint for frontend)"""
+    from sqlalchemy import select
+    from app.models.action_tracker import MeetingDocument
+    from sqlalchemy.orm import selectinload
+    
+    result = await db.execute(
+        select(MeetingDocument)
+        .where(MeetingDocument.meeting_id == meeting_id)
+        .where(MeetingDocument.is_active == True)
+        .options(
+            selectinload(MeetingDocument.document_type),
+            selectinload(MeetingDocument.uploaded_by)
+        )
+        .order_by(MeetingDocument.uploaded_at.desc())
+    )
+    documents = result.scalars().all()
+    return documents
+
+
+@router.post("/meetings/{meeting_id}/documents", response_model=MeetingDocumentResponse, status_code=status.HTTP_201_CREATED)
+async def upload_document_alt(
+    meeting_id: UUID,
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    document_type_id: UUID = Form(...), 
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Upload a document to a meeting (alternative endpoint for frontend)"""
+    
+    logger.info("=" * 60)
+    logger.info("📄 UPLOAD_DOCUMENT ALT ENDPOINT HIT!")
+    logger.info(f"📍 Meeting ID: {meeting_id}")
+    logger.info(f"📍 Title: {title}")
+    logger.info(f"📍 Document Type ID: {document_type_id}")
+    logger.info(f"📍 File: {file.filename}")
+    logger.info("=" * 60)
+    
+    # Verify meeting exists
+    meeting_obj = await meeting.get(db, meeting_id)
+    if not meeting_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    
+    # Validate document type ID
+    is_valid = await validate_document_type_id(db, document_type_id)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"Invalid document_type_id: {document_type_id}. Must be a valid DOCUMENT_TYPE attribute ID."
+        )
+    
+    # Call CRUD method with all parameters
+    result = await meeting_document.upload_document(
+        db=db,
+        meeting_id=meeting_id,
+        file=file,
+        title=title,
+        description=description,
+        document_type_id=document_type_id,
+        user_id=current_user.id
+    )
+    
+    logger.info(f"✅ Document uploaded successfully! Document ID: {result.id}")
+    logger.info(f"   Document Type ID saved: {result.document_type_id}")
+    
+    return result
+
+# ============ SINGLE DOCUMENT ENDPOINTS ============
+
+@router.get("/document/{document_id}", response_model=MeetingDocumentResponse)
 async def get_document(
     document_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -218,52 +203,134 @@ async def get_document(
     return result
 
 
-@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/document/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Delete a document"""
+    """Delete a document (soft delete)"""
     result = await meeting_document.get(db, document_id)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    await meeting_document.remove(db, document_id)
+    
+    await meeting_document.remove(db, id=document_id, user=current_user.id, soft_delete=False)
+    
+    return None
 
 
-# Optional: Helper endpoint to get available document types
-@router.get("/document-types", response_model=List[dict])
-async def get_document_types(
+@router.get("/document/{document_id}/download")
+async def download_document(
+    document_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Get available document types for the dropdown"""
-    from sqlalchemy import select
+    """Download the actual file content"""
+    result = await meeting_document.get(db, document_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     
-    result = await db.execute(
-        select(Attribute).where(
-            Attribute.code == "DOCUMENT_TYPE",
-            Attribute.is_active == True
-        )
+    # Check if file exists on disk
+    if not result.file_path or not os.path.exists(result.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
+    
+    # Return the file
+    return FileResponse(
+        path=result.file_path,
+        filename=result.file_name,
+        media_type=result.mime_type or "application/octet-stream"
     )
-    document_type_attr = result.scalar_one_or_none()
+
+
+# ============ DOCUMENT TYPES ENDPOINTS ============
+
+@router.get("/attribute-groups/DOCUMENT_TYPE/attributes")
+async def get_document_type_attributes(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get all document type attributes (matches frontend expectation)"""
+    from sqlalchemy import select
+    from app.models.general.dynamic_attribute import Attribute, AttributeGroup
     
-    if not document_type_attr:
+    logger.info("=" * 60)
+    logger.info("📄 FETCHING DOCUMENT TYPES")
+    logger.info("=" * 60)
+    
+    # Find the DOCUMENT_TYPE group
+    result = await db.execute(
+        select(AttributeGroup).where(AttributeGroup.code == "DOCUMENT_TYPE")
+    )
+    group = result.scalar_one_or_none()
+    
+    if not group:
+        logger.warning("DOCUMENT_TYPE attribute group not found")
+        # Return empty array directly (not wrapped in items)
         return []
     
-    # Return the options for the frontend dropdown
-    options = []
-    if document_type_attr.options:
-        for option in document_type_attr.options:
-            options.append({
-                "id": document_type_attr.id,  # Or option.get('id') if available
-                "value": option.get('value'),
-                "label": option.get('label'),
-                "icon": option.get('icon'),
-                "sort_order": option.get('sort_order')
-            })
+    # Get all attributes in this group
+    result = await db.execute(
+        select(Attribute)
+        .where(Attribute.group_id == group.id)
+        .where(Attribute.is_active == True)
+        .order_by(Attribute.sort_order)
+    )
+    attributes = result.scalars().all()
     
-    # Sort by sort_order
-    options.sort(key=lambda x: x.get('sort_order', 999))
+    logger.info(f"Found {len(attributes)} document types")
     
-    return options
+    # Return as array directly (not wrapped in items)
+    response = [
+        {
+            "id": str(attr.id),
+            "name": attr.name,
+            "code": attr.code,
+            "description": attr.description,
+            "short_name": attr.short_name
+        }
+        for attr in attributes
+    ]
+    
+    logger.info(f"✅ Returning {len(response)} document types")
+    return response
+
+@router.get("/document-types", response_model=List[dict])
+async def get_document_types_simple(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get simplified document types for dropdown"""
+    from sqlalchemy import select
+    from app.models.general.dynamic_attribute import Attribute, AttributeGroup
+    
+    result = await db.execute(
+        select(AttributeGroup).where(AttributeGroup.code == "DOCUMENT_TYPE")
+    )
+    group = result.scalar_one_or_none()
+    
+    if not group:
+        # Return default document types
+        return [
+            {"id": "1", "name": "Agenda", "code": "AGENDA"},
+            {"id": "2", "name": "Minutes", "code": "MINUTES"},
+            {"id": "3", "name": "Presentation", "code": "PRESENTATION"},
+            {"id": "4", "name": "Report", "code": "REPORT"},
+            {"id": "5", "name": "Other", "code": "OTHER"},
+        ]
+    
+    result = await db.execute(
+        select(Attribute)
+        .where(Attribute.group_id == group.id)
+        .where(Attribute.is_active == True)
+        .order_by(Attribute.sort_order)
+    )
+    attributes = result.scalars().all()
+    
+    return [
+        {
+            "id": str(attr.id),
+            "name": attr.name,
+            "code": attr.code,
+        }
+        for attr in attributes
+    ]

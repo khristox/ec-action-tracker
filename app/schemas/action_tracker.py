@@ -374,6 +374,12 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     updated_at: Optional[datetime] = None
     is_active: bool = True
 
+    ocr_text: Optional[str] = None
+    ocr_processed_at: Optional[datetime] = None
+    ocr_language: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 # ==================== Meeting Status History Schemas ====================
 

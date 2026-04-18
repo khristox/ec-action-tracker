@@ -1,9 +1,12 @@
 # app/api/v1/endpoints/action_tracker/documents.py
 
+from datetime import datetime
 import os
+from tkinter import Image
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from sqlalchemy.ext import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
@@ -14,6 +17,14 @@ from app.crud.action_tracker import meeting, meeting_document
 from app.models.general.dynamic_attribute import Attribute, AttributeGroup
 from app.models.user import User
 from app.schemas.action_tracker import MeetingDocumentResponse, MeetingDocumentCreate
+
+
+import pytesseract
+from PIL import Image
+import io
+import pdf2image
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +63,8 @@ async def upload_document(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    ocr_enabled: bool = Form(False),
+    ocr_language: str = Form("eng")
 ):
     """Upload a document to a meeting"""
     
@@ -334,3 +347,121 @@ async def get_document_types_simple(
         }
         for attr in attributes
     ]
+
+@router.post("/document/{document_id}/ocr")
+async def process_document_ocr(
+    document_id: UUID,
+    language: str = "eng",
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Process OCR on a document to extract text
+    Supports PDF and image files (JPEG, PNG, TIFF, BMP)
+    """
+    logger.info("=" * 60)
+    logger.info("🔍 OCR PROCESSING REQUEST")
+    logger.info(f"📍 Document ID: {document_id}")
+    logger.info(f"📍 Language: {language}")
+    logger.info("=" * 60)
+    
+    # Get the document
+    document = await meeting_document.get(db, document_id)
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    # Check if file exists
+    if not document.file_path or not os.path.exists(document.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
+    
+    # Check if file type is supported for OCR
+    supported_mimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff', 'image/bmp']
+    if document.mime_type not in supported_mimes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OCR not supported for file type: {document.mime_type}"
+        )
+    
+    try:
+        extracted_text = ""
+        pages_processed = 0
+        
+        # Process PDF files
+        if document.mime_type == 'application/pdf':
+            # Convert PDF to images
+            images = pdf2image.convert_from_path(document.file_path)
+            pages_processed = len(images)
+            
+            # Process each page with OCR
+            for i, image in enumerate(images):
+                # Convert PIL image to bytes for OCR
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                # Perform OCR
+                text = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: pytesseract.image_to_string(Image.open(io.BytesIO(img_byte_arr)), lang=language)
+                )
+                extracted_text += f"\n--- Page {i+1} ---\n{text}\n"
+        
+        # Process image files
+        elif document.mime_type.startswith('image/'):
+            # Open image and perform OCR
+            image = Image.open(document.file_path)
+            extracted_text = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: pytesseract.image_to_string(image, lang=language)
+            )
+            pages_processed = 1
+        
+        # Update document with OCR text
+        document.ocr_text = extracted_text
+        document.ocr_processed_at = datetime.now()
+        document.ocr_language = language
+        document.updated_at = datetime.now()
+        document.updated_by_id = current_user.id
+        
+        await db.commit()
+        await db.refresh(document)
+        
+        logger.info(f"✅ OCR completed for document {document_id}")
+        logger.info(f"   Pages processed: {pages_processed}")
+        logger.info(f"   Text length: {len(extracted_text)} characters")
+        
+        return {
+            "success": True,
+            "document_id": str(document_id),
+            "text": extracted_text[:5000],  # Return first 5000 chars for preview
+            "text_length": len(extracted_text),
+            "pages": pages_processed,
+            "language": language
+        }
+        
+    except Exception as e:
+        logger.error(f"OCR processing failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OCR processing failed: {str(e)}"
+        )
+
+
+@router.get("/document/{document_id}/ocr-text")
+async def get_document_ocr_text(
+    document_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get the OCR extracted text for a document"""
+    document = await meeting_document.get(db, document_id)
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    return {
+        "document_id": str(document_id),
+        "has_ocr": bool(document.ocr_text),
+        "text": document.ocr_text,
+        "processed_at": document.ocr_processed_at,
+        "language": document.ocr_language
+    }

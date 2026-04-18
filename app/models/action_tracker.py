@@ -713,6 +713,12 @@ class MeetingDocument(Base):
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
 
+
+    # OCR fields
+    ocr_text = Column(Text, nullable=True)
+    ocr_processed_at = Column(DateTime(timezone=True), nullable=True)
+    ocr_language = Column(String(10), nullable=True)
+    
     # ============ User Name Properties ============
     
     @property

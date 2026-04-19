@@ -22,7 +22,6 @@ from app.models.user import User
 from app.models.action_tracker import MeetingDocument
 from app.schemas.action_tracker import MeetingDocumentResponse, MeetingDocumentCreate
 
-# Image processing - Using PIL only (no tkinter)
 from PIL import Image
 
 # OCR imports with graceful fallback

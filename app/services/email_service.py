@@ -122,9 +122,9 @@ class EmailService:
         self.config = EmailConfig.from_settings()
         self._secret_key = self._get_secret_key()
         self._algorithm = getattr(settings, 'ALGORITHM', 'HS256')
-        self._backend_url = getattr(settings, 'BACKEND_URL', 'http://localhost:8001')
+        self._backend_url = getattr(settings, 'BACKEND_URL', 'http://127.0.0.1:8001')
         self._api_prefix = getattr(settings, 'API_V1_STR', '/api/v1')
-        self._frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:8001/api/v1/auth')
+        self._frontend_url = getattr(settings, 'FRONTEND_URL', 'http://127.0.0.1:8001/api/v1/auth')
         
         self._log_initialization()
         

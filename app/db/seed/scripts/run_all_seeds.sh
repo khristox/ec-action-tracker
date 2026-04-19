@@ -18,7 +18,7 @@ print_header() { echo -e "${CYAN}📌 $1${NC}"; }
 print_separator() { echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 
 # ==================== CONFIGURATION ====================
-DEFAULT_BASE_URL="http://localhost:8000"
+DEFAULT_BASE_URL="http://127.0.0.1:8000"
 DEFAULT_USERNAME="admin"
 DEFAULT_PASSWORD="Admin123"
 

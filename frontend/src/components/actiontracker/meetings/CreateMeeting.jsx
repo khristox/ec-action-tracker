@@ -1,4 +1,4 @@
-// CreateMeeting.jsx - Complete Fixed Version
+// CreateMeeting.jsx - Redirect to Dashboard after successful creation
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -47,6 +47,8 @@ import {
   Switch,
   FormGroup,
   Fab,
+  Collapse,
+  CardActionArea
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -69,6 +71,9 @@ import {
   ContentPaste as PasteIcon,
   GpsFixed as GpsFixedIcon,
   GpsNotFixed as GpsNotFixedIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  Dashboard as DashboardIcon
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -88,7 +93,6 @@ import {
   setMeetingChairperson,
   addParticipantsFromListToMeeting,
   clearMeetingParticipants,
-  setSelectedListForMeeting,
   selectParticipantLists,
   selectMeetingParticipantsAll,
   selectMeetingChairperson,
@@ -96,7 +100,7 @@ import {
 } from '../../../store/slices/actionTracker/participantSlice';
 import { createMeeting, clearMeetingState } from '../../../store/slices/actionTracker/meetingSlice';
 
-// Quill modules for mobile (simplified)
+// Quill modules
 const mobileModules = {
   toolbar: [
     ['bold', 'italic', 'underline'],
@@ -114,10 +118,8 @@ const desktopModules = {
   ],
 };
 
-// Fixed formats - removed 'bullet' to avoid warning
 const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'list', 'link'];
 
-// Step icons
 const steps = [
   { label: 'Details', icon: EventIcon },
   { label: 'Participants', icon: PeopleIcon },
@@ -143,6 +145,8 @@ const CreateMeeting = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
   const [selectedParticipantList, setSelectedParticipantList] = useState(null);
+  const [showGpsDetails, setShowGpsDetails] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Form data
   const [formData, setFormData] = useState({
@@ -173,7 +177,7 @@ const CreateMeeting = () => {
     is_chairperson: false,
   });
 
-  const apiLoading = meetingLoading || participantsLoading;
+  const apiLoading = meetingLoading || participantsLoading || submitting;
 
   // Fetch data on mount
   useEffect(() => {
@@ -195,16 +199,16 @@ const CreateMeeting = () => {
     };
   }, [dispatch]);
 
-  // Handle meeting creation success
+  // Handle meeting creation success - Redirect to Dashboard
   useEffect(() => {
     if (success) {
       setSnackbar({
         open: true,
-        message: 'Meeting created successfully! Redirecting...',
+        message: 'Meeting created successfully! Redirecting to Dashboard...',
         severity: 'success',
       });
       setTimeout(() => {
-        navigate('/meetings');
+        navigate('/dashboard');
       }, 2000);
     }
   }, [success, navigate]);
@@ -232,119 +236,71 @@ const CreateMeeting = () => {
     }
 
     setGpsLoading(true);
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
         setFormData((prev) => ({
           ...prev,
-          gps_latitude: latitude.toString(),
-          gps_longitude: longitude.toString(),
+          gps_latitude: latitude.toFixed(6),
+          gps_longitude: longitude.toFixed(6),
         }));
         setGpsEnabled(true);
         setSnackbar({
           open: true,
-          message: `Location captured: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+          message: 'Location captured successfully!',
           severity: 'success',
         });
         setGpsLoading(false);
       },
       (error) => {
         let errorMessage = 'Unable to get your location. ';
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage += 'Please allow location access in your browser settings.';
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage += 'Location information is unavailable.';
-            break;
-          case error.TIMEOUT:
-            errorMessage += 'Location request timed out.';
-            break;
-          default:
-            errorMessage += 'Please check your GPS settings.';
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMessage += 'Please allow location access.';
+        } else if (error.code === error.TIMEOUT) {
+          errorMessage += 'Request timed out.';
+        } else {
+          errorMessage += 'Please check your GPS settings.';
         }
         setSnackbar({ open: true, message: errorMessage, severity: 'error' });
         setGpsLoading(false);
-        setGpsEnabled(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
   const handleCopyCoordinates = () => {
     const coordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
-    navigator.clipboard
-      .writeText(coordinates)
-      .then(() => {
-        setSnackbar({ open: true, message: 'Coordinates copied to clipboard!', severity: 'success' });
-      })
-      .catch(() => {
-        setSnackbar({ open: true, message: 'Failed to copy coordinates', severity: 'error' });
-      });
+    navigator.clipboard.writeText(coordinates).then(() => {
+      setSnackbar({ open: true, message: 'Coordinates copied!', severity: 'success' });
+    });
   };
 
   const handlePasteCoordinates = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      let latitude = null;
-      let longitude = null;
-
-      const commaSeparated = text.match(/([-+]?\d*\.?\d+)\s*[,]\s*([-+]?\d*\.?\d+)/);
-      const spaceSeparated = text.match(/([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)/);
-      const latLonMatch = commaSeparated || spaceSeparated;
-
-      if (latLonMatch) {
-        latitude = latLonMatch[1];
-        longitude = latLonMatch[2];
-      } else {
-        try {
-          const parsed = JSON.parse(text);
-          if (Array.isArray(parsed) && parsed.length >= 2) {
-            latitude = parsed[0];
-            longitude = parsed[1];
-          }
-        } catch (e) {
-          // Not JSON
-          console.warn('Clipboard text is not in expected format:', e.message);
-        }
-      }
-
-      if (latitude && longitude) {
+      const match = text.match(/([-+]?\d*\.?\d+)\s*[,]\s*([-+]?\d*\.?\d+)/);
+      if (match) {
         setFormData((prev) => ({
           ...prev,
-          gps_latitude: latitude,
-          gps_longitude: longitude,
+          gps_latitude: match[1],
+          gps_longitude: match[2],
         }));
         setGpsEnabled(true);
-        setSnackbar({ open: true, message: 'Coordinates pasted successfully!', severity: 'success' });
+        setSnackbar({ open: true, message: 'Coordinates pasted!', severity: 'success' });
       } else {
-        setSnackbar({
-          open: true,
-          message: 'Invalid coordinate format. Expected: "lat, lon"',
-          severity: 'warning',
-        });
+        setSnackbar({ open: true, message: 'Invalid format. Use: lat, lon', severity: 'warning' });
       }
     } catch (err) {
-      setSnackbar({
-        open: true,
-        message: 'Unable to paste. Please allow clipboard access.' + err.message,
-        severity: 'error',
-      });
+      setSnackbar({ open: true, message: 'Unable to paste', severity: 'error' });
     }
   };
 
   const handleGpsToggle = (event) => {
     const enabled = event.target.checked;
     setGpsEnabled(enabled);
-
     if (!enabled) {
-      setFormData((prev) => ({
-        ...prev,
-        gps_latitude: '',
-        gps_longitude: '',
-      }));
-    } else if (gpsSupported && !formData.gps_latitude && !formData.gps_longitude) {
+      setFormData((prev) => ({ ...prev, gps_latitude: '', gps_longitude: '' }));
+    } else if (gpsSupported && !formData.gps_latitude) {
       getCurrentLocation();
     }
   };
@@ -353,21 +309,10 @@ const CreateMeeting = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleDateChange = (date) => {
-    setFormData({ ...formData, meeting_date: date });
-  };
-
-  const handleStartTimeChange = (time) => {
-    setFormData({ ...formData, start_time: time });
-  };
-
-  const handleEndTimeChange = (time) => {
-    setFormData({ ...formData, end_time: time });
-  };
-
-  const handleAgendaChange = (value) => {
-    setFormData({ ...formData, agenda: value });
-  };
+  const handleDateChange = (date) => setFormData({ ...formData, meeting_date: date });
+  const handleStartTimeChange = (time) => setFormData({ ...formData, start_time: time });
+  const handleEndTimeChange = (time) => setFormData({ ...formData, end_time: time });
+  const handleAgendaChange = (value) => setFormData({ ...formData, agenda: value });
 
   const handleUseParticipantList = () => {
     if (selectedParticipantList) {
@@ -381,12 +326,11 @@ const CreateMeeting = () => {
         );
         setSnackbar({
           open: true,
-          message: `Added ${list.participants.length} participants from ${list.name}`,
+          message: `Added ${list.participants.length} participants`,
           severity: 'success',
         });
       }
       setSelectedParticipantList(null);
-      dispatch(setSelectedListForMeeting(null));
     }
   };
 
@@ -395,9 +339,7 @@ const CreateMeeting = () => {
       setSnackbar({ open: true, message: 'Please enter participant name', severity: 'warning' });
       return;
     }
-
-    const exists = meetingParticipants.some((p) => p.name === newParticipant.name);
-    if (exists) {
+    if (meetingParticipants.some((p) => p.name === newParticipant.name)) {
       setSnackbar({ open: true, message: 'Participant already added', severity: 'warning' });
       return;
     }
@@ -412,7 +354,7 @@ const CreateMeeting = () => {
       is_chairperson: false,
     });
     setShowAddParticipantDialog(false);
-    setSnackbar({ open: true, message: 'Participant added successfully', severity: 'success' });
+    setSnackbar({ open: true, message: 'Participant added', severity: 'success' });
   };
 
   const handleRemoveParticipant = (participantId) => {
@@ -422,14 +364,6 @@ const CreateMeeting = () => {
 
   const handleSetChairperson = (participantId) => {
     dispatch(setMeetingChairperson(participantId));
-    const participant = meetingParticipants.find((p) => p.id === participantId);
-    if (participant) {
-      setSnackbar({
-        open: true,
-        message: `${participant.name} is now the Chairperson`,
-        severity: 'info',
-      });
-    }
   };
 
   const validateStep = () => {
@@ -454,144 +388,110 @@ const CreateMeeting = () => {
   const handleNext = () => {
     if (validateStep()) {
       setActiveStep(activeStep + 1);
-      if (isMobile) window.scrollTo(0, 0);
+      window.scrollTo(0, 0);
     }
   };
 
   const handleBack = () => {
-    if (activeStep === 0) {
-      navigate('/meetings');
-    } else {
-      setActiveStep(activeStep - 1);
-      if (isMobile) window.scrollTo(0, 0);
+    if (activeStep === 0) navigate('/meetings');
+    else setActiveStep(activeStep - 1);
+    window.scrollTo(0, 0);
+  };
+
+  const handleCancel = () => navigate('/meetings');
+
+const handleSubmit = async () => {
+  setSubmitting(true);
+  try {
+    const meetingDate = formData.meeting_date;
+    if (!meetingDate) throw new Error('Meeting date is required');
+    if (!formData.start_time) throw new Error('Start time is required');
+
+    const startDateTime = new Date(meetingDate);
+    startDateTime.setHours(formData.start_time.getHours(), formData.start_time.getMinutes());
+
+    let endDateTime = null;
+    if (formData.end_time) {
+      endDateTime = new Date(meetingDate);
+      endDateTime.setHours(formData.end_time.getHours(), formData.end_time.getMinutes());
+      if (endDateTime <= startDateTime) {
+        setSnackbar({ open: true, message: 'End time must be after start time', severity: 'warning' });
+        setSubmitting(false);
+        return;
+      }
     }
-  };
 
-  const handleCancel = () => {
-    navigate('/meetings');
-  };
-
-  const handleSubmit = async () => {
-    try {
-      const meetingDate = formData.meeting_date;
-      if (!meetingDate) {
-        throw new Error('Meeting date is required');
-      }
-      if (!formData.start_time) {
-        throw new Error('Start time is required');
-      }
-
-      const startDateTime = new Date(meetingDate);
-      startDateTime.setHours(
-        formData.start_time.getHours(),
-        formData.start_time.getMinutes(),
-        0,
-        0
-      );
-
-      let endDateTime = null;
-      if (formData.end_time) {
-        endDateTime = new Date(meetingDate);
-        endDateTime.setHours(
-          formData.end_time.getHours(),
-          formData.end_time.getMinutes(),
-          0,
-          0
-        );
-
-        if (endDateTime <= startDateTime) {
-          setSnackbar({
-            open: true,
-            message: 'End time must be after start time',
-            severity: 'warning',
-          });
-          return;
-        }
-      }
-
-      let gpsCoordinates = null;
-      if (gpsEnabled && formData.gps_latitude && formData.gps_longitude) {
-        gpsCoordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
-      }
-
-      const meetingPayload = {
-        title: formData.title,
-        description: formData.description || null,
-        meeting_date: startDateTime.toISOString(),
-        start_time: startDateTime.toISOString(),
-        end_time: endDateTime ? endDateTime.toISOString() : null,
-        location_text: formData.location_text || null,
-        gps_coordinates: gpsCoordinates,
-        agenda: formData.agenda || null,
-        facilitator: formData.facilitator || null,
-        chairperson_name: chairperson?.name || null,
-        custom_participants: meetingParticipants.map((p) => ({
-          name: p.name,
-          email: p.email || null,
-          telephone: p.telephone || null,
-          title: p.title || null,
-          organization: p.organization || null,
-          is_chairperson: p.is_chairperson || false,
-        })),
-      };
-
-      await dispatch(createMeeting(meetingPayload)).unwrap();
-    } catch (error) {
-      console.error('Error creating meeting:', error);
-      let errorMessage = 'Failed to create meeting. ';
-      if (error.response?.status === 422) {
-        const details = error.response.data?.error?.details || error.response.data?.detail;
-        if (Array.isArray(details)) {
-          errorMessage += details.map((d) => d.message || d.msg).join(', ');
-        } else if (typeof details === 'string') {
-          errorMessage = details;
-        } else {
-          errorMessage += JSON.stringify(details);
-        }
-      } else {
-        errorMessage += error.response?.data?.message || error.message;
-      }
-      setSnackbar({
-        open: true,
-        message: errorMessage,
-        severity: 'error',
-      });
+    let gpsCoordinates = null;
+    if (gpsEnabled && formData.gps_latitude && formData.gps_longitude) {
+      gpsCoordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
     }
-  };
 
+    const meetingPayload = {
+      title: formData.title,
+      description: formData.description || null,
+      meeting_date: startDateTime.toISOString(),
+      start_time: startDateTime.toISOString(),
+      end_time: endDateTime ? endDateTime.toISOString() : null,
+      location_text: formData.location_text || null,
+      gps_coordinates: gpsCoordinates,
+      agenda: formData.agenda || null,
+      facilitator: formData.facilitator || null,
+      chairperson_name: chairperson?.name || null,
+      custom_participants: meetingParticipants.map((p) => ({
+        name: p.name,
+        email: p.email || null,
+        telephone: p.telephone || null,
+        title: p.title || null,
+        organization: p.organization || null,
+        is_chairperson: p.is_chairperson || false,
+      })),
+    };
+
+    console.log('Submitting meeting payload:', meetingPayload);
+    const result = await dispatch(createMeeting(meetingPayload)).unwrap();
+    console.log('Meeting created successfully:', result);
+    
+    // Show success message
+    setSnackbar({
+      open: true,
+      message: 'Meeting created successfully! Redirecting to Dashboard...',
+      severity: 'success',
+    });
+    
+    // Redirect after a short delay
+    setTimeout(() => {
+      navigate('/dashboard');
+    }, 2000);
+    
+  } catch (error) {
+    console.error('Error creating meeting:', error);
+    setSnackbar({
+      open: true,
+      message: error.message || 'Failed to create meeting',
+      severity: 'error',
+    });
+  } finally {
+    setSubmitting(false);
+  }
+};
   const isStepValid = () => {
-    if (activeStep === 0) {
-      return formData.title && formData.meeting_date && formData.start_time;
-    }
+    if (activeStep === 0) return formData.title && formData.meeting_date && formData.start_time;
     return true;
-  };
-
-  const handleCloseSnackbar = () => {
-    setSnackbar({ ...snackbar, open: false });
   };
 
   const chairpersonName = chairperson?.name || 'Not selected';
 
-  const DatePickerComponent = isMobile ? MobileDatePicker : DatePicker;
-  const TimePickerComponent = isMobile ? MobileTimePicker : TimePicker;
-
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box
-        sx={{
-          minHeight: '100vh',
-          bgcolor: 'background.default',
-          pb: isMobile ? 8 : 4,
-        }}
-      >
+      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 10, sm: 4 } }}>
         {/* Mobile App Bar */}
         {isMobile && (
-          <AppBar position="sticky" color="default" elevation={1} sx={{ bgcolor: 'background.paper' }}>
-            <Toolbar sx={{ justifyContent: 'space-between' }}>
+          <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Toolbar sx={{ px: 1.5 }}>
               <IconButton edge="start" onClick={() => navigate('/meetings')}>
                 <ArrowBackIcon />
               </IconButton>
-              <Typography variant="h6" fontWeight={600}>
+              <Typography variant="h6" sx={{ flex: 1, textAlign: 'center', fontWeight: 600 }}>
                 Create Meeting
               </Typography>
               <IconButton edge="end" onClick={handleCancel}>
@@ -601,54 +501,24 @@ const CreateMeeting = () => {
           </AppBar>
         )}
 
-        <Container maxWidth="md" sx={{ px: { xs: 1, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
+        <Container maxWidth="md" sx={{ px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
           {/* Desktop Header */}
           {!isMobile && (
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
               <Box>
-                <Typography variant="h4" fontWeight={800} color="primary">
-                  Create New Meeting
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Fill in the details to schedule a new meeting
-                </Typography>
+                <Typography variant="h4" fontWeight={800} color="primary">Create New Meeting</Typography>
+                <Typography variant="body2" color="text.secondary">Fill in the details to schedule a new meeting</Typography>
               </Box>
-              <Button
-                variant="outlined"
-                startIcon={<CancelIcon />}
-                onClick={handleCancel}
-                disabled={apiLoading}
-              >
+              <Button variant="outlined" startIcon={<CancelIcon />} onClick={handleCancel} disabled={apiLoading}>
                 Cancel
               </Button>
             </Box>
           )}
 
           {/* Main Form Card */}
-          <Paper
-            sx={{
-              p: { xs: 2, sm: 3, md: 4 },
-              borderRadius: { xs: 2, md: 3 },
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-          >
-            {/* Loading Overlay */}
+          <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, borderRadius: { xs: 2, md: 3 }, position: 'relative', overflow: 'hidden' }}>
             {apiLoading && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  bgcolor: 'rgba(255,255,255,0.9)',
-                  zIndex: 10,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
+              <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(255,255,255,0.9)', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <CircularProgress />
               </Box>
             )}
@@ -659,7 +529,6 @@ const CreateMeeting = () => {
                 <MobileStepper
                   variant="progress"
                   steps={3}
-                  position="static"
                   activeStep={activeStep}
                   sx={{ mb: 2, bgcolor: 'transparent', p: 0 }}
                   nextButton={null}
@@ -673,7 +542,7 @@ const CreateMeeting = () => {
                       icon={<step.icon />}
                       color={index === activeStep ? 'primary' : 'default'}
                       variant={index === activeStep ? 'filled' : 'outlined'}
-                      sx={{ flex: 1, mx: 0.5, py: 1 }}
+                      sx={{ flex: 1, mx: 0.5, py: { xs: 1, sm: 1.5 } }}
                     />
                   ))}
                 </Box>
@@ -688,7 +557,7 @@ const CreateMeeting = () => {
               </Stepper>
             )}
 
-            {/* ==================== STEP 1: MEETING DETAILS ==================== */}
+            {/* Step 1: Meeting Details */}
             {activeStep === 0 && (
               <Stack spacing={2.5}>
                 <TextField
@@ -700,7 +569,6 @@ const CreateMeeting = () => {
                   onChange={handleChange}
                   disabled={apiLoading}
                   placeholder="e.g., Quarterly Planning Session"
-                  size="medium"
                 />
 
                 <TextField
@@ -708,36 +576,35 @@ const CreateMeeting = () => {
                   label="Description"
                   name="description"
                   multiline
-                  rows={3}
+                  rows={isMobile ? 2 : 3}
                   value={formData.description}
                   onChange={handleChange}
                   disabled={apiLoading}
                   placeholder="Brief overview of the meeting purpose"
-                  size="medium"
                 />
 
-                <DatePickerComponent
+                <DatePicker
                   label="Meeting Date *"
                   value={formData.meeting_date}
                   onChange={handleDateChange}
                   disabled={apiLoading}
-                  slotProps={{ textField: { fullWidth: true, required: true, size: 'medium' } }}
+                  slotProps={{ textField: { fullWidth: true, required: true } }}
                 />
 
-                <TimePickerComponent
+                <TimePicker
                   label="Start Time *"
                   value={formData.start_time}
                   onChange={handleStartTimeChange}
                   disabled={apiLoading}
-                  slotProps={{ textField: { fullWidth: true, required: true, size: 'medium' } }}
+                  slotProps={{ textField: { fullWidth: true, required: true } }}
                 />
 
-                <TimePickerComponent
+                <TimePicker
                   label="End Time"
                   value={formData.end_time}
                   onChange={handleEndTimeChange}
                   disabled={apiLoading}
-                  slotProps={{ textField: { fullWidth: true, size: 'medium' } }}
+                  slotProps={{ textField: { fullWidth: true } }}
                 />
 
                 <TextField
@@ -748,165 +615,85 @@ const CreateMeeting = () => {
                   onChange={handleChange}
                   disabled={apiLoading}
                   placeholder="Conference Room A, Virtual Meeting, etc."
-                  size="medium"
-                  InputProps={{
-                    startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} />,
-                  }}
+                  InputProps={{ startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} /> }}
                 />
 
-                {/* GPS Section with Toggle */}
+                {/* GPS Section */}
                 <Card variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-                  <Box sx={{ p: 2, bgcolor: gpsEnabled ? '#e8f5e9' : '#fafafa' }}>
-                    <Box
-                      display="flex"
-                      alignItems="center"
-                      justifyContent="space-between"
-                      flexWrap="wrap"
-                      gap={1}
-                    >
+                  <CardActionArea onClick={() => setShowGpsDetails(!showGpsDetails)}>
+                    <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box display="flex" alignItems="center" gap={1}>
-                        {gpsEnabled ? (
-                          <GpsFixedIcon color="success" />
-                        ) : (
-                          <GpsNotFixedIcon color="disabled" />
-                        )}
-                        <Typography variant="subtitle1" fontWeight="bold">
-                          GPS Coordinates
-                        </Typography>
+                        {gpsEnabled ? <GpsFixedIcon color="success" /> : <GpsNotFixedIcon color="disabled" />}
+                        <Typography variant="subtitle1" fontWeight="bold">GPS Coordinates</Typography>
                       </Box>
-                      <FormGroup>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={gpsEnabled}
-                              onChange={handleGpsToggle}
-                              disabled={apiLoading || !gpsSupported}
-                              color="primary"
-                            />
-                          }
-                          label={gpsEnabled ? 'Enabled' : 'Disabled'}
-                        />
-                      </FormGroup>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Switch checked={gpsEnabled} onChange={handleGpsToggle} disabled={apiLoading || !gpsSupported} size="small" />
+                        <IconButton size="small">{showGpsDetails ? <ExpandLessIcon /> : <ExpandMoreIcon />}</IconButton>
+                      </Box>
                     </Box>
+                  </CardActionArea>
 
-                    {!gpsSupported && (
-                      <Alert severity="warning" sx={{ mt: 1 }}>
-                        Geolocation is not supported by your browser
-                      </Alert>
-                    )}
-
-                    {gpsEnabled && gpsSupported && (
-                      <Stack spacing={2} sx={{ mt: 2 }}>
-                        <Box display="flex" gap={1}>
-                          <Button
-                            variant="contained"
-                            startIcon={gpsLoading ? <CircularProgress size={20} /> : <MyLocationIcon />}
-                            onClick={getCurrentLocation}
-                            disabled={apiLoading || gpsLoading}
-                            size="small"
-                          >
-                            {gpsLoading ? 'Getting Location...' : 'Get Current Location'}
+                  <Collapse in={showGpsDetails && gpsEnabled}>
+                    <Box sx={{ p: 2, pt: 0, borderTop: 1, borderColor: 'divider' }}>
+                      <Stack spacing={2}>
+                        <Box display="flex" gap={1} flexWrap="wrap">
+                          <Button size="small" variant="contained" startIcon={gpsLoading ? <CircularProgress size={16} /> : <MyLocationIcon />} onClick={getCurrentLocation} disabled={apiLoading || gpsLoading}>
+                            {gpsLoading ? 'Getting...' : 'Get Location'}
                           </Button>
-                          <Tooltip title="Copy coordinates">
-                            <IconButton
-                              onClick={handleCopyCoordinates}
-                              disabled={!formData.gps_latitude || !formData.gps_longitude}
-                              size="small"
-                            >
+                          <Tooltip title="Copy">
+                            <IconButton onClick={handleCopyCoordinates} disabled={!formData.gps_latitude} size="small">
                               <ContentCopyIcon />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="Paste coordinates">
+                          <Tooltip title="Paste">
                             <IconButton onClick={handlePasteCoordinates} size="small">
                               <PasteIcon />
                             </IconButton>
                           </Tooltip>
                         </Box>
-
-                        <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                          <TextField
-                            fullWidth
-                            label="Latitude"
-                            name="gps_latitude"
-                            type="text"
-                            value={formData.gps_latitude}
-                            onChange={(e) =>
-                              setFormData({ ...formData, gps_latitude: e.target.value })
-                            }
-                            disabled={apiLoading}
-                            placeholder="e.g., 0.3136"
-                            size="small"
-                            InputProps={{
-                              startAdornment: (
-                                <InputAdornment position="start">
-                                  <Typography color="textSecondary">🌐</Typography>
-                                </InputAdornment>
-                              ),
-                            }}
-                          />
-                          <TextField
-                            fullWidth
-                            label="Longitude"
-                            name="gps_longitude"
-                            type="text"
-                            value={formData.gps_longitude}
-                            onChange={(e) =>
-                              setFormData({ ...formData, gps_longitude: e.target.value })
-                            }
-                            disabled={apiLoading}
-                            placeholder="e.g., 32.5811"
-                            size="small"
-                            InputProps={{
-                              startAdornment: (
-                                <InputAdornment position="start">
-                                  <Typography color="textSecondary">🌐</Typography>
-                                </InputAdornment>
-                              ),
-                            }}
-                          />
-                        </Box>
-
-                        {(formData.gps_latitude || formData.gps_longitude) && (
-                          <Alert severity="info" icon={<InfoIcon />} sx={{ py: 0 }}>
-                            <Typography variant="caption">
-                              Coordinates: {formData.gps_latitude || '?'},{' '}
-                              {formData.gps_longitude || '?'}
-                            </Typography>
-                          </Alert>
-                        )}
+                        <TextField
+                          fullWidth
+                          label="Latitude"
+                          value={formData.gps_latitude}
+                          onChange={(e) => setFormData({ ...formData, gps_latitude: e.target.value })}
+                          size="small"
+                          placeholder="0.0000"
+                        />
+                        <TextField
+                          fullWidth
+                          label="Longitude"
+                          value={formData.gps_longitude}
+                          onChange={(e) => setFormData({ ...formData, gps_longitude: e.target.value })}
+                          size="small"
+                          placeholder="0.0000"
+                        />
                       </Stack>
-                    )}
-                  </Box>
+                    </Box>
+                  </Collapse>
                 </Card>
 
                 <Box>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                    Agenda
-                  </Typography>
+                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Agenda</Typography>
                   <ReactQuill
                     theme="snow"
                     value={formData.agenda}
                     onChange={handleAgendaChange}
                     modules={isMobile ? mobileModules : desktopModules}
                     formats={formats}
-                    style={{ height: '180px', marginBottom: '50px' }}
-                    readOnly={apiLoading}
+                    style={{ height: '150px', marginBottom: '50px' }}
                     placeholder="Enter meeting agenda..."
                   />
                 </Box>
               </Stack>
             )}
 
-            {/* ==================== STEP 2: ADD PARTICIPANTS ==================== */}
+            {/* Step 2: Participants */}
             {activeStep === 1 && (
               <Stack spacing={3}>
-                {/* Add from participant list */}
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                      📋 Add from Participant List
-                    </Typography>
-                    <FormControl fullWidth size="medium" sx={{ mb: 2 }}>
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>📋 Add from Participant List</Typography>
+                    <FormControl fullWidth size="small" sx={{ mb: 2 }}>
                       <InputLabel>Select Participant List</InputLabel>
                       <Select
                         value={selectedParticipantList || ''}
@@ -921,33 +708,17 @@ const CreateMeeting = () => {
                         ))}
                       </Select>
                     </FormControl>
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      startIcon={<GroupAddIcon />}
-                      onClick={handleUseParticipantList}
-                      disabled={!selectedParticipantList || apiLoading}
-                      size="large"
-                    >
+                    <Button fullWidth variant="contained" startIcon={<GroupAddIcon />} onClick={handleUseParticipantList} disabled={!selectedParticipantList || apiLoading}>
                       Add Selected List
                     </Button>
                   </CardContent>
                 </Card>
 
-                {/* Individual participants */}
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                  <CardContent>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                      <Typography variant="subtitle1" fontWeight="bold">
-                        👤 Individual Participants
-                      </Typography>
-                      <Button
-                        variant="outlined"
-                        startIcon={<PersonAddIcon />}
-                        onClick={() => setShowAddParticipantDialog(true)}
-                        disabled={apiLoading}
-                        size="small"
-                      >
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
+                      <Typography variant="subtitle1" fontWeight="bold">👤 Individual Participants</Typography>
+                      <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)} disabled={apiLoading} size="small">
                         Add
                       </Button>
                     </Box>
@@ -955,76 +726,37 @@ const CreateMeeting = () => {
                     {meetingParticipants.length === 0 ? (
                       <Box textAlign="center" py={4}>
                         <PeopleIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
-                        <Typography variant="body2" color="text.secondary">
-                          No participants added yet
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Add participants from a list or individually
-                        </Typography>
+                        <Typography variant="body2" color="text.secondary">No participants added yet</Typography>
                       </Box>
                     ) : (
                       <>
                         <List sx={{ maxHeight: 400, overflow: 'auto' }}>
                           {meetingParticipants.map((participant) => (
                             <React.Fragment key={participant.id}>
-                              <ListItem
-                                sx={{ px: 0, py: 1.5 }}
-                                secondaryAction={
-                                  <IconButton
-                                    edge="end"
-                                    onClick={() => handleRemoveParticipant(participant.id)}
-                                    disabled={apiLoading}
-                                  >
-                                    <DeleteIcon />
-                                  </IconButton>
-                                }
-                              >
+                              <ListItem sx={{ px: 0, py: 1.5, flexWrap: 'wrap' }} secondaryAction={
+                                <IconButton edge="end" onClick={() => handleRemoveParticipant(participant.id)} disabled={apiLoading}>
+                                  <DeleteIcon />
+                                </IconButton>
+                              }>
                                 <ListItemAvatar>
-                                  <Avatar
-                                    sx={{
-                                      bgcolor: participant.is_chairperson ? '#1976d2' : '#4caf50',
-                                    }}
-                                  >
+                                  <Avatar sx={{ bgcolor: participant.is_chairperson ? '#1976d2' : '#4caf50' }}>
                                     {participant.name.charAt(0).toUpperCase()}
                                   </Avatar>
                                 </ListItemAvatar>
                                 <ListItemText
-                                  primary={
-                                    <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                                      {participant.name}
-                                      {participant.is_chairperson && (
-                                        <Chip label="Chairperson" size="small" color="primary" />
-                                      )}
-                                    </Box>
-                                  }
+                                  primary={participant.name}
                                   secondary={
-                                    <Box component="div" sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
-                                      {participant.email && (
-                                        <Typography variant="caption" component="span" color="text.secondary">
-                                          {participant.email}
-                                        </Typography>
-                                      )}
-                                      {participant.telephone && (
-                                        <Typography variant="caption" component="span" color="text.secondary">
-                                          {participant.telephone}
-                                        </Typography>
-                                      )}
+                                    <Box component="div">
+                                      {participant.email && <Typography variant="caption" component="span" display="block" color="text.secondary">{participant.email}</Typography>}
+                                      {participant.telephone && <Typography variant="caption" component="span" display="block" color="text.secondary">{participant.telephone}</Typography>}
                                     </Box>
                                   }
                                 />
                               </ListItem>
                               {!participant.is_chairperson && (
-                                <Box sx={{ pl: 7, pb: 1 }}>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    startIcon={<PersonIcon />}
-                                    onClick={() => handleSetChairperson(participant.id)}
-                                    disabled={apiLoading}
-                                  >
-                                    Make Chairperson
-                                  </Button>
-                                </Box>
+                                <Button size="small" variant="outlined" onClick={() => handleSetChairperson(participant.id)} disabled={apiLoading} sx={{ ml: 7, mb: 1 }}>
+                                  Make Chairperson
+                                </Button>
                               )}
                               <Divider component="li" />
                             </React.Fragment>
@@ -1032,130 +764,64 @@ const CreateMeeting = () => {
                         </List>
 
                         <Box mt={2} p={2} bgcolor="#e3f2fd" borderRadius={2}>
-                          <Typography variant="body2" fontWeight="bold">
-                            👑 Chairperson: {chairpersonName}
-                          </Typography>
+                          <Typography variant="body2" fontWeight="bold">👑 Chairperson: {chairpersonName}</Typography>
                         </Box>
                       </>
                     )}
                   </CardContent>
                 </Card>
 
-                {/* Facilitator */}
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                      🎯 Facilitator
-                    </Typography>
-                    <TextField
-                      fullWidth
-                      label="Facilitator Name"
-                      name="facilitator"
-                      value={formData.facilitator}
-                      onChange={handleChange}
-                      disabled={apiLoading}
-                      placeholder="Enter facilitator's name"
-                      size="medium"
-                    />
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>🎯 Facilitator</Typography>
+                    <TextField fullWidth label="Facilitator Name" name="facilitator" value={formData.facilitator} onChange={handleChange} disabled={apiLoading} placeholder="Enter facilitator's name" />
                   </CardContent>
                 </Card>
               </Stack>
             )}
 
-            {/* ==================== STEP 3: REVIEW & CREATE ==================== */}
+            {/* Step 3: Review */}
             {activeStep === 2 && (
               <Stack spacing={2}>
                 <Alert severity="info">Please review your meeting details before creating</Alert>
 
                 <Card variant="outlined" sx={{ bgcolor: '#fafafa', borderRadius: 2 }}>
-                  <CardContent>
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
                     <Stack spacing={2}>
                       <Box>
-                        <Typography variant="subtitle2" fontWeight="bold" color="primary">
-                          Basic Information
-                        </Typography>
+                        <Typography variant="subtitle2" fontWeight="bold" color="primary">Basic Information</Typography>
                         <Divider sx={{ my: 1 }} />
-                        <Typography variant="body2">
-                          <strong>Title:</strong> {formData.title || 'Not specified'}
-                        </Typography>
-                        {formData.description && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>Description:</strong> {formData.description}
-                          </Typography>
-                        )}
+                        <Typography variant="body2"><strong>Title:</strong> {formData.title || 'Not specified'}</Typography>
+                        {formData.description && <Typography variant="body2" sx={{ mt: 1 }}><strong>Description:</strong> {formData.description}</Typography>}
                       </Box>
 
                       <Box>
-                        <Typography variant="subtitle2" fontWeight="bold" color="primary">
-                          Date & Time
-                        </Typography>
+                        <Typography variant="subtitle2" fontWeight="bold" color="primary">Date & Time</Typography>
                         <Divider sx={{ my: 1 }} />
-                        <Typography variant="body2">
-                          <strong>Date:</strong>{' '}
-                          {formData.meeting_date?.toLocaleDateString() || 'Not set'}
-                        </Typography>
-                        <Typography variant="body2">
-                          <strong>Start:</strong>{' '}
-                          {formData.start_time?.toLocaleTimeString() || 'Not set'}
-                        </Typography>
-                        {formData.end_time && (
-                          <Typography variant="body2">
-                            <strong>End:</strong> {formData.end_time.toLocaleTimeString()}
-                          </Typography>
-                        )}
+                        <Typography variant="body2"><strong>Date:</strong> {formData.meeting_date?.toLocaleDateString() || 'Not set'}</Typography>
+                        <Typography variant="body2"><strong>Start:</strong> {formData.start_time?.toLocaleTimeString() || 'Not set'}</Typography>
+                        {formData.end_time && <Typography variant="body2"><strong>End:</strong> {formData.end_time.toLocaleTimeString()}</Typography>}
                       </Box>
 
                       {formData.location_text && (
                         <Box>
-                          <Typography variant="subtitle2" fontWeight="bold" color="primary">
-                            Location
-                          </Typography>
+                          <Typography variant="subtitle2" fontWeight="bold" color="primary">Location</Typography>
                           <Divider sx={{ my: 1 }} />
                           <Typography variant="body2">{formData.location_text}</Typography>
                         </Box>
                       )}
 
-                      {gpsEnabled && formData.gps_latitude && formData.gps_longitude && (
-                        <Box>
-                          <Typography variant="subtitle2" fontWeight="bold" color="primary">
-                            GPS Coordinates
-                          </Typography>
-                          <Divider sx={{ my: 1 }} />
-                          <Typography variant="body2">
-                            {formData.gps_latitude}, {formData.gps_longitude}
-                          </Typography>
-                        </Box>
-                      )}
-
                       <Box>
-                        <Typography variant="subtitle2" fontWeight="bold" color="primary">
-                          Participants ({meetingParticipants.length})
-                        </Typography>
+                        <Typography variant="subtitle2" fontWeight="bold" color="primary">Participants ({meetingParticipants.length})</Typography>
                         <Divider sx={{ my: 1 }} />
-                        <Typography variant="body2">
-                          <strong>Chairperson:</strong> {chairpersonName}
-                        </Typography>
-                        {formData.facilitator && (
-                          <Typography variant="body2">
-                            <strong>Facilitator:</strong> {formData.facilitator}
-                          </Typography>
-                        )}
+                        <Typography variant="body2"><strong>Chairperson:</strong> {chairpersonName}</Typography>
+                        {formData.facilitator && <Typography variant="body2"><strong>Facilitator:</strong> {formData.facilitator}</Typography>}
                         {meetingParticipants.length > 0 && (
                           <Box component="ul" sx={{ mt: 1, pl: 2 }}>
-                            {meetingParticipants.slice(0, 5).map((p) => (
-                              <li key={p.id}>
-                                <Typography variant="body2">
-                                  {p.name} {p.is_chairperson && '(Chairperson)'}
-                                </Typography>
-                              </li>
+                            {meetingParticipants.slice(0, 3).map((p) => (
+                              <li key={p.id}><Typography variant="body2">{p.name} {p.is_chairperson && '(Chairperson)'}</Typography></li>
                             ))}
-                            {meetingParticipants.length > 5 && (
-                              <li>
-                                <Typography variant="caption">
-                                  ...and {meetingParticipants.length - 5} more
-                                </Typography>
-                              </li>
-                            )}
+                            {meetingParticipants.length > 3 && <li><Typography variant="caption">...and {meetingParticipants.length - 3} more</Typography></li>}
                           </Box>
                         )}
                       </Box>
@@ -1166,45 +832,16 @@ const CreateMeeting = () => {
             )}
 
             {/* Navigation Buttons */}
-            <Box
-              sx={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 2,
-                mt: 4,
-                flexDirection: isMobile ? 'column' : 'row',
-              }}
-            >
-              <Button
-                onClick={handleBack}
-                disabled={apiLoading}
-                startIcon={activeStep === 0 ? <CancelIcon /> : <ArrowBackIcon />}
-                size="large"
-                fullWidth={isMobile}
-                variant="outlined"
-              >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mt: 4, flexDirection: isMobile ? 'column' : 'row' }}>
+              <Button onClick={handleBack} disabled={apiLoading} startIcon={activeStep === 0 ? <CancelIcon /> : <ArrowBackIcon />} size="large" fullWidth={isMobile} variant="outlined">
                 {activeStep === 0 ? 'Cancel' : 'Back'}
               </Button>
               {activeStep === 2 ? (
-                <Button
-                  variant="contained"
-                  onClick={handleSubmit}
-                  disabled={apiLoading || success}
-                  startIcon={apiLoading ? <CircularProgress size={20} /> : <SaveIcon />}
-                  size="large"
-                  fullWidth={isMobile}
-                >
+                <Button variant="contained" onClick={handleSubmit} disabled={apiLoading} startIcon={apiLoading ? <CircularProgress size={20} /> : <SaveIcon />} size="large" fullWidth={isMobile}>
                   {apiLoading ? 'Creating...' : 'Create Meeting'}
                 </Button>
               ) : (
-                <Button
-                  variant="contained"
-                  onClick={handleNext}
-                  disabled={!isStepValid() || apiLoading}
-                  endIcon={<ArrowForwardIcon />}
-                  size="large"
-                  fullWidth={isMobile}
-                >
+                <Button variant="contained" onClick={handleNext} disabled={!isStepValid() || apiLoading} endIcon={<ArrowForwardIcon />} size="large" fullWidth={isMobile}>
                   Next
                 </Button>
               )}
@@ -1215,118 +852,34 @@ const CreateMeeting = () => {
         {/* Mobile FAB */}
         {isMobile && !apiLoading && (
           <Zoom in>
-            <Fab
-              color="primary"
-              sx={{
-                position: 'fixed',
-                bottom: 16,
-                right: 16,
-                zIndex: 1000,
-              }}
-              onClick={activeStep === 2 ? handleSubmit : handleNext}
-              disabled={!isStepValid() || apiLoading}
-            >
+            <Fab color="primary" sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 1000 }} onClick={activeStep === 2 ? handleSubmit : handleNext} disabled={!isStepValid() || apiLoading}>
               {activeStep === 2 ? <SaveIcon /> : <ArrowForwardIcon />}
             </Fab>
           </Zoom>
         )}
 
         {/* Add Participant Dialog */}
-        <Dialog
-          open={showAddParticipantDialog}
-          onClose={() => setShowAddParticipantDialog(false)}
-          maxWidth="sm"
-          fullWidth
-          fullScreen={isMobile}
-        >
-          <DialogTitle>
-            Add Participant
-            <IconButton
-              sx={{ position: 'absolute', right: 8, top: 8 }}
-              onClick={() => setShowAddParticipantDialog(false)}
-            >
-              <CloseIcon />
-            </IconButton>
-          </DialogTitle>
+        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
+          <DialogTitle>Add Participant</DialogTitle>
           <DialogContent>
             <Stack spacing={2.5} sx={{ mt: 1 }}>
-              <TextField
-                fullWidth
-                label="Full Name *"
-                value={newParticipant.name}
-                onChange={(e) => setNewParticipant({ ...newParticipant, name: e.target.value })}
-                required
-                size="medium"
-              />
-              <TextField
-                fullWidth
-                label="Email Address"
-                type="email"
-                value={newParticipant.email}
-                onChange={(e) => setNewParticipant({ ...newParticipant, email: e.target.value })}
-                size="medium"
-              />
-              <TextField
-                fullWidth
-                label="Phone Number"
-                value={newParticipant.telephone}
-                onChange={(e) => setNewParticipant({ ...newParticipant, telephone: e.target.value })}
-                size="medium"
-              />
-              <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }}>
-                <TextField
-                  fullWidth
-                  label="Title / Role"
-                  value={newParticipant.title}
-                  onChange={(e) => setNewParticipant({ ...newParticipant, title: e.target.value })}
-                  size="medium"
-                />
-                <TextField
-                  fullWidth
-                  label="Organization"
-                  value={newParticipant.organization}
-                  onChange={(e) =>
-                    setNewParticipant({ ...newParticipant, organization: e.target.value })
-                  }
-                  size="medium"
-                />
-              </Box>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={newParticipant.is_chairperson}
-                    onChange={(e) =>
-                      setNewParticipant({ ...newParticipant, is_chairperson: e.target.checked })
-                    }
-                  />
-                }
-                label="Set as Chairperson"
-              />
+              <TextField fullWidth label="Full Name *" value={newParticipant.name} onChange={(e) => setNewParticipant({ ...newParticipant, name: e.target.value })} required />
+              <TextField fullWidth label="Email Address" type="email" value={newParticipant.email} onChange={(e) => setNewParticipant({ ...newParticipant, email: e.target.value })} />
+              <TextField fullWidth label="Phone Number" value={newParticipant.telephone} onChange={(e) => setNewParticipant({ ...newParticipant, telephone: e.target.value })} />
+              <TextField fullWidth label="Title / Role" value={newParticipant.title} onChange={(e) => setNewParticipant({ ...newParticipant, title: e.target.value })} />
+              <TextField fullWidth label="Organization" value={newParticipant.organization} onChange={(e) => setNewParticipant({ ...newParticipant, organization: e.target.value })} />
+              <FormControlLabel control={<Checkbox checked={newParticipant.is_chairperson} onChange={(e) => setNewParticipant({ ...newParticipant, is_chairperson: e.target.checked })} />} label="Set as Chairperson" />
             </Stack>
           </DialogContent>
           <DialogActions sx={{ p: 2, flexDirection: isMobile ? 'column' : 'row', gap: 1 }}>
-            <Button onClick={() => setShowAddParticipantDialog(false)} fullWidth={isMobile}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAddCustomParticipant}
-              variant="contained"
-              disabled={!newParticipant.name}
-              fullWidth={isMobile}
-            >
-              Add Participant
-            </Button>
+            <Button onClick={() => setShowAddParticipantDialog(false)} fullWidth={isMobile}>Cancel</Button>
+            <Button onClick={handleAddCustomParticipant} variant="contained" disabled={!newParticipant.name} fullWidth={isMobile}>Add Participant</Button>
           </DialogActions>
         </Dialog>
 
         {/* Snackbar */}
-        <Snackbar
-          open={snackbar.open}
-          autoHideDuration={4000}
-          onClose={handleCloseSnackbar}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        >
-          <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+          <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
             {snackbar.message}
           </Alert>
         </Snackbar>

@@ -17,7 +17,7 @@ services:
     networks:
       - ec_network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-paradmin!2723646"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-paradmin!2723646"]
       timeout: 10s
       retries: 30
       interval: 5s
@@ -59,7 +59,7 @@ services:
       FRONTEND_DIST_PATH: /app/static
       ROOT_PATH: ""
       BASE_URL: /ec
-      CORS_ORIGINS: '["https://eminence.co.ug","https://eminence.co.ug/ec","http://localhost:5173","http://localhost:8001","http://localhost:8006"]'
+      CORS_ORIGINS: '["https://eminence.co.ug","https://eminence.co.ug/ec","http://127.0.0.1:5173","http://127.0.0.1:8001","http://127.0.0.1:8006","http://localhost:3000"."http://localhost:8001","http://localhost:8006"]'
       LOG_LEVEL: INFO
       LOG_API_ACCESS: "true"
       LOG_ALL_API_ACCESS: "false"

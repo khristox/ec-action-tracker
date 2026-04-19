@@ -212,15 +212,13 @@ export const createMeeting = createAsyncThunk(
   'meetings/createMeeting',
   async (meetingData, { rejectWithValue }) => {
     try {
-      const validationErrors = validateMeetingData(meetingData);
-      if (validationErrors.length > 0) {
-        throw new Error(validationErrors.join(', '));
-      }
-      
+      console.log('Creating meeting with data:', meetingData);
       const response = await api.post('/action-tracker/meetings/', meetingData);
+      console.log('Create meeting response:', response.data);
       return response.data;
     } catch (error) {
-      return rejectWithValue(handleApiError(error));
+      console.error('Create meeting error:', error.response?.data);
+      return rejectWithValue(error.response?.data?.detail || error.message);
     }
   }
 );
@@ -275,6 +273,7 @@ export const fetchMeetingById = createAsyncThunk(
 );
 
 // Update a meeting
+// In meetingSlice.js
 export const updateMeeting = createAsyncThunk(
   'meetings/updateMeeting',
   async ({ id, data }, { rejectWithValue }) => {
@@ -624,20 +623,27 @@ const meetingSlice = createSlice({
       // ========== Create Meeting ==========
       .addCase(createMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
-        state.ui.error = null;
         state.ui.success = false;
+        state.ui.error = null;
       })
       .addCase(createMeeting.fulfilled, (state, action) => {
         state.ui.isSubmitting = false;
-        state.currentMeeting = action.payload;
         state.ui.success = true;
-        state.meetings.items = addMeetingToList(state.meetings.items, action.payload);
-        state.meetings.total += 1;
+        state.currentMeeting = action.payload;
+        state.ui.error = null;
+        
+        if (action.payload) {
+          state.meetings.items = [action.payload, ...state.meetings.items];
+          state.meetings.total += 1;
+        }
+        
+        console.log('Meeting created successfully in state:', action.payload);
       })
       .addCase(createMeeting.rejected, (state, action) => {
         state.ui.isSubmitting = false;
-        state.ui.error = action.payload;
         state.ui.success = false;
+        state.ui.error = action.payload;
+        console.error('Meeting creation rejected:', action.payload);
       })
 
       // ========== Fetch Meetings ==========

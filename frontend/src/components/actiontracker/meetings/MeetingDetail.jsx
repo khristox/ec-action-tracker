@@ -13,6 +13,7 @@ import {
 import {
   ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
+  Delete as DeleteIcon,
   LocationOn as LocationIcon,
   AccessTime as AccessTimeIcon,
   People as PeopleIcon,
@@ -29,6 +30,7 @@ import {
   fetchMeetingById, 
   clearMeetingState, 
   updateMeetingStatus,
+  deleteMeeting,
   fetchActionTrackerAttributes,
   selectCurrentMeeting,
   selectMeetingsLoading,
@@ -38,6 +40,51 @@ import {
 import MeetingMinutes from './MeetingMinutes';
 import MeetingActionsList from './MeetingActionsList';
 import MeetingDocuments from './MeetingDocuments';
+
+// ==================== Rich Text Content Component ====================
+const RichTextContent = ({ content }) => {
+  if (!content || content.trim() === '' || content === '<p></p>') {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+        No agenda provided.
+      </Typography>
+    );
+  }
+
+  return (
+    <Box
+      sx={{
+        '& p': { marginBottom: '12px', lineHeight: 1.7 },
+        '& p:last-child': { marginBottom: 0 },
+        '& ul, & ol': { paddingLeft: '24px', marginBottom: '12px' },
+        '& li': { marginBottom: '6px' },
+        '& h1, & h2, & h3': { margin: '16px 0 8px 0', fontWeight: 600 },
+        '& blockquote': {
+          borderLeft: '4px solid',
+          borderColor: 'primary.main',
+          paddingLeft: '16px',
+          color: 'text.secondary',
+          fontStyle: 'italic',
+          margin: '16px 0'
+        },
+        '& pre': {
+          backgroundColor: '#f8fafc',
+          padding: '12px',
+          borderRadius: 1,
+          overflowX: 'auto',
+          fontFamily: 'monospace'
+        },
+        '& img': {
+          maxWidth: '100%',
+          height: 'auto',
+          borderRadius: 1,
+          margin: '12px 0'
+        }
+      }}
+      dangerouslySetInnerHTML={{ __html: content }}
+    />
+  );
+};
 
 // Tab Panel Component
 const TabPanel = ({ children, value, index, ...other }) => (
@@ -66,9 +113,11 @@ const MeetingDetail = () => {
   const [localError, setLocalError] = useState(null);
   const [statusAnchorEl, setStatusAnchorEl] = useState(null);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('');
   const [statusComment, setStatusComment] = useState('');
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch meeting details
   const fetchMeeting = useCallback(() => {
@@ -97,7 +146,22 @@ const MeetingDetail = () => {
   };
 
   const handleEdit = () => {
-    navigate(`/meetings/edit/${id}`);
+    navigate(`/meetings/${id}/edit/`);
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await dispatch(deleteMeeting(id)).unwrap();
+      setShowDeleteDialog(false);
+      navigate('/meetings');
+    } catch (err) {
+      console.error('Error deleting meeting:', err);
+      setLocalError(err.message || 'Failed to delete meeting');
+      setShowDeleteDialog(false);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleTabChange = (event, newValue) => {
@@ -265,6 +329,11 @@ const MeetingDetail = () => {
               <EditIcon />
             </IconButton>
           </Tooltip>
+          <Tooltip title="Delete Meeting">
+            <IconButton onClick={() => setShowDeleteDialog(true)} color="error">
+              <DeleteIcon />
+            </IconButton>
+          </Tooltip>
         </Stack>
       </Stack>
 
@@ -353,6 +422,43 @@ const MeetingDetail = () => {
             disabled={updatingStatus || !selectedStatus}
           >
             {updatingStatus ? <CircularProgress size={24} /> : 'Update Status'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onClose={() => setShowDeleteDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Delete Meeting</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" gutterBottom>
+            Are you sure you want to delete this meeting?
+          </Typography>
+          <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+            <strong>Warning:</strong> This action cannot be undone. All minutes, actions, and documents will also be deleted.
+          </Typography>
+          <Box sx={{ mt: 2, p: 2, bgcolor: '#fef2f2', borderRadius: 1 }}>
+            <Typography variant="body2">
+              <strong>Meeting:</strong> {currentMeeting?.title}
+            </Typography>
+            {currentMeeting?.meeting_date && (
+              <Typography variant="body2">
+                <strong>Date:</strong> {formatDate(currentMeeting.meeting_date)}
+              </Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDeleteDialog(false)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDelete}
+            color="error"
+            variant="contained"
+            disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={16} /> : <DeleteIcon />}
+          >
+            {deleting ? 'Deleting...' : 'Delete Meeting'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -469,21 +575,21 @@ const MeetingDetail = () => {
           )}
         </Grid>
 
-        {/* Agenda */}
+        {/* ==================== RICH TEXT AGENDA ==================== */}
         {currentMeeting?.agenda && (
-          <Box sx={{ mt: 3 }}>
+          <Box sx={{ mt: 4 }}>
             <Divider sx={{ mb: 2 }} />
             <Stack direction="row" spacing={2} alignItems="flex-start">
               <Avatar sx={{ bgcolor: 'success.main' }}>
                 <DescriptionIcon />
               </Avatar>
               <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
                   Agenda
                 </Typography>
-                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 1 }}>
-                  {currentMeeting.agenda}
-                </Typography>
+                <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 2 }}>
+                  <RichTextContent content={currentMeeting.agenda} />
+                </Paper>
               </Box>
             </Stack>
           </Box>
@@ -498,45 +604,21 @@ const MeetingDetail = () => {
           variant="fullWidth"
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
-          <Tab 
-            icon={<DescriptionIcon />} 
-            iconPosition="start"
-            label="Minutes" 
-          />
-          <Tab 
-            icon={<AssignmentIcon />} 
-            iconPosition="start"
-            label="Actions" 
-          />
-          <Tab 
-            icon={<DescriptionIcon />} 
-            iconPosition="start"
-            label="Documents" 
-          />
+          <Tab icon={<DescriptionIcon />} iconPosition="start" label="Minutes" />
+          <Tab icon={<AssignmentIcon />} iconPosition="start" label="Actions" />
+          <Tab icon={<DescriptionIcon />} iconPosition="start" label="Documents" />
         </Tabs>
 
-        {/* Minutes Tab */}
         <TabPanel value={tabValue} index={0}>
-          <MeetingMinutes 
-            meetingId={id} 
-            onRefresh={handleRefresh}
-          />
+          <MeetingMinutes meetingId={id} onRefresh={handleRefresh} />
         </TabPanel>
 
-        {/* Actions Tab */}
         <TabPanel value={tabValue} index={1}>
-          <MeetingActionsList 
-            meetingId={id} 
-            onRefresh={handleRefresh}
-          />
+          <MeetingActionsList meetingId={id} onRefresh={handleRefresh} />
         </TabPanel>
 
-        {/* Documents Tab */}
         <TabPanel value={tabValue} index={2}>
-          <MeetingDocuments 
-            meetingId={id} 
-            onRefresh={handleRefresh}
-          />
+          <MeetingDocuments meetingId={id} onRefresh={handleRefresh} />
         </TabPanel>
       </Paper>
     </Container>

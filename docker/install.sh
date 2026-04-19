@@ -58,7 +58,7 @@ wait_for_mysql() {
     RETRY_COUNT=0
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        if docker-compose exec -T mysql mysqladmin ping -h localhost -u root -paradmin!2723646 --silent 2>/dev/null; then
+        if docker-compose exec -T mysql mysqladmin ping -h 127.0.0.1 -u root -paradmin!2723646 --silent 2>/dev/null; then
             print_status "MySQL is ready"
             return 0
         fi
@@ -114,7 +114,7 @@ verify_installation() {
     # Test API endpoint
     print_info "Testing API endpoint..."
     sleep 3
-    if curl -s -f http://localhost:8006/api/v1/health > /dev/null 2>&1; then
+    if curl -s -f http://127.0.0.1:8006/api/v1/health > /dev/null 2>&1; then
         print_status "API is responding"
     else
         print_warning "API not responding yet (might still be starting)"
@@ -138,8 +138,8 @@ show_info() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${BLUE}Access Information:${NC}"
-    echo "  • API URL:      http://localhost:8006"
-    echo "  • API Docs:     http://localhost:8006/docs"
+    echo "  • API URL:      http://127.0.0.1:8006"
+    echo "  • API Docs:     http://127.0.0.1:8006/docs"
     echo "  • Admin Login:  username: admin"
     echo "  • Admin Password: Admin123!"
     echo ""

@@ -453,8 +453,9 @@ const routeConfig = {
     { path: "dashboard", element: <Dashboard /> },
     { path: "meetings", element: <Meetings /> },
     { path: "meetings/create", element: <CreateMeeting /> },
-    { path: "meetings/:id", element: <MeetingDetail /> },
     { path: "meetings/:id/edit", element: <EditMeeting /> },
+    { path: "meetings/:id", element: <MeetingDetail /> },
+    
     { path: "actions", element: <ActionsList /> },
     { path: "actions/all", element: <AllActions /> },
     { path: "actions/my-tasks", element: <MyTasks /> },

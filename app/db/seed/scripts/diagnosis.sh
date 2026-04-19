@@ -1,7 +1,7 @@
 #!/bin/bash
 # diagnostic.sh - Check available menu endpoints
 
-BASE_URL="http://localhost:8001"
+BASE_URL="http://127.0.0.1:8001"
 API_URL="${BASE_URL}/api/v1"
 
 # Login first

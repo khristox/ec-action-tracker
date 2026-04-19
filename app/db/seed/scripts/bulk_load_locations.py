@@ -245,7 +245,7 @@ def get_config_from_user(base_url: Optional[str] = None,
     
     # Get base URL
     if not base_url:
-        default_url = "http://localhost:8001"
+        default_url = "http://127.0.0.1:8001"
         if is_interactive:
             print("\n" + "=" * 60)
             print("  LOCATION BULK LOADER - CONFIGURATION")
@@ -346,7 +346,7 @@ async def main():
         epilog="If no arguments are provided, you will be prompted for them."
     )
     parser.add_argument("csv_file", nargs="?", help="CSV file with location data")
-    parser.add_argument("--url", help="API base URL (default: http://localhost:8001)")
+    parser.add_argument("--url", help="API base URL (default: http://127.0.0.1:8001)")
     parser.add_argument("--username", help="Admin username (default: admin)")
     parser.add_argument("--password", help="Admin password (default: Admin123)")
     parser.add_argument("--concurrency", type=int, default=MAX_CONCURRENT,

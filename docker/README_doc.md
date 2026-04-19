@@ -71,9 +71,12 @@ networks:
 #seed.sh 
 docker compose run --rm app python app/db/seed/seed_data.py
 
+docker compose run --rm app python app/db/seed/seed_data.py http://127.0.0.1:8001 admin Admin123! --force
+
+
 docker exec ec_app python app/db/seed/seed_data.py
 
 
 docker exec -it ec_app /bin/sh
-
+docker exec -it ec_app /bin/bash
 

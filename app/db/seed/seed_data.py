@@ -85,7 +85,7 @@ def get_retry_config() -> Dict[str, Any]:
 # ==================== CONFIGURATION ====================
 
 class SeedConfig:
-    DEFAULT_BASE_URL = getattr(settings, 'BACKEND_URL', 'http://localhost:8001')
+    DEFAULT_BASE_URL = getattr(settings, 'BACKEND_URL', 'http://127.0.0.1:8001')
     DEFAULT_USERNAME = os.getenv('ADMIN_USERNAME', getattr(settings, 'ADMIN_USERNAME', 'admin'))
     DEFAULT_PASSWORD = os.getenv('ADMIN_PASSWORD', getattr(settings, 'ADMIN_PASSWORD', 'Admin123!'))
     PASSWORD_MAX_LENGTH = 72
@@ -142,36 +142,41 @@ def get_config_from_user(base_url: Optional[str] = None,
     """Get configuration with Docker-aware defaults"""
     is_interactive = sys.stdin.isatty() and not is_running_in_docker()
     
-    if not base_url:
+    # Use provided values first
+    if base_url:
+        final_base_url = base_url
+    elif not is_interactive:
+        final_base_url = SeedConfig.DEFAULT_BASE_URL
+    else:
         default_url = SeedConfig.DEFAULT_BASE_URL
-        if is_interactive:
-            print("\n" + "=" * 60)
-            print("  Action Tracker - SEED CONFIGURATION")
-            print(f"  Environment: {get_environment()}")
-            print("=" * 60)
-            base_url = input(f"Enter API base URL [{default_url}]: ").strip() or default_url
-        else:
-            base_url = default_url
-        logger.info(f"📁 Base URL: {base_url}")
+        print("\n" + "=" * 60)
+        print("  Action Tracker - SEED CONFIGURATION")
+        print(f"  Environment: {get_environment()}")
+        print("=" * 60)
+        final_base_url = input(f"Enter API base URL [{default_url}]: ").strip() or default_url
     
-    if not username:
+    if username:
+        final_username = username
+    elif not is_interactive:
+        final_username = SeedConfig.DEFAULT_USERNAME
+    else:
         default_username = SeedConfig.DEFAULT_USERNAME
-        if is_interactive:
-            username = input(f"Enter admin username [{default_username}]: ").strip() or default_username
-        else:
-            username = default_username
-        logger.info(f"👤 Username: {username}")
+        final_username = input(f"Enter admin username [{default_username}]: ").strip() or default_username
     
-    if not password:
+    if password:
+        final_password = truncate_password(password)
+    elif not is_interactive:
+        final_password = truncate_password(SeedConfig.DEFAULT_PASSWORD)
+    else:
         default_password = SeedConfig.DEFAULT_PASSWORD
-        if is_interactive:
-            password = getpass.getpass(f"Enter admin password [{default_password}]: ") or default_password
-        else:
-            password = default_password
-        password = truncate_password(password)
-        logger.info(f"🔒 Password: {'*' * len(password)}")
+        pwd = getpass.getpass(f"Enter admin password [{default_password}]: ") or default_password
+        final_password = truncate_password(pwd)
     
-    return base_url, username, password
+    logger.info(f"📁 Base URL: {final_base_url}")
+    logger.info(f"👤 Username: {final_username}")
+    logger.info(f"🔒 Password: {'*' * len(final_password)}")
+    
+    return final_base_url, final_username, final_password
 
 
 # ==================== FILE LOADERS ====================
@@ -359,7 +364,7 @@ class DatabaseCreator:
         clean_url = re.sub(r"\+[^:/]+", "", db_url)
         parsed = urlparse(clean_url)
         db_name = parsed.path.lstrip('/').split('?')[0]
-        host = parsed.hostname or 'localhost'
+        host = parsed.hostname or '127.0.0.1'
         port = parsed.port or 3306
         user = parsed.username or 'root'
         password = parsed.password or ''
@@ -863,10 +868,13 @@ async def main(drop_existing: bool = False, base_url: str = None,
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Initialize and seed Action Tracker database")
+    parser.add_argument("url", nargs="?", type=str, help="API base URL (positional argument)")
+    parser.add_argument("username", nargs="?", type=str, help="Admin username (positional argument)")
+    parser.add_argument("password", nargs="?", type=str, help="Admin password (positional argument)")
     parser.add_argument("--drop", action="store_true", help="Drop existing tables before creating")
-    parser.add_argument("--baseurl", type=str, help="API base URL for scripts")
-    parser.add_argument("--username", type=str, help="Admin username for scripts")
-    parser.add_argument("--password", type=str, help="Admin password for scripts")
+    parser.add_argument("--baseurl", type=str, help="API base URL for scripts (alternative to positional)")
+    parser.add_argument("--username-opt", type=str, dest="username_opt", help="Admin username for scripts (alternative to positional)")
+    parser.add_argument("--password-opt", type=str, dest="password_opt", help="Admin password for scripts (alternative to positional)")
     parser.add_argument("--skip-seed", action="store_true", help="Skip database seeding")
     parser.add_argument("--force", action="store_true", help="Force seeding even if data exists")
     args = parser.parse_args()
@@ -877,9 +885,14 @@ if __name__ == "__main__":
     if args.force:
         os.environ['SEED_ONLY_IF_EMPTY'] = 'false'
     
+    # Determine base_url, username, password from positional or named arguments
+    base_url = args.url or args.baseurl
+    username = args.username or args.username_opt
+    password = args.password or args.password_opt
+    
     asyncio.run(main(
         drop_existing=args.drop,
-        base_url=args.baseurl,
-        username=args.username,
-        password=args.password
+        base_url=base_url,
+        username=username,
+        password=password
     ))

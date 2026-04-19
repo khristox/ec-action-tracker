@@ -4,7 +4,7 @@
 # Usage: ./seed_attributes.sh [BASE_URL] [USERNAME] [PASSWORD]
 
 # ==================== CONFIGURATION ====================
-DEFAULT_BASE_URL="http://localhost:8001"
+DEFAULT_BASE_URL="http://127.0.0.1:8001"
 DEFAULT_USERNAME="admin"
 DEFAULT_PASSWORD="Admin123!"
 

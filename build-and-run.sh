@@ -54,12 +54,12 @@ docker-compose logs --tail=30
 
 # Step 8: Test MySQL connection
 echo -e "${YELLOW}Step 8: Testing MySQL connection...${NC}"
-docker exec ec_mysql mysqladmin ping -h localhost -u root -p'aradmin!2723646' --silent && echo -e "${GREEN}✅ MySQL is running${NC}" || echo -e "${RED}❌ MySQL failed${NC}"
+docker exec ec_mysql mysqladmin ping -h 127.0.0.1 -u root -p'aradmin!2723646' --silent && echo -e "${GREEN}✅ MySQL is running${NC}" || echo -e "${RED}❌ MySQL failed${NC}"
 
 # Step 9: Test App connection
 echo -e "${YELLOW}Step 9: Testing App connection...${NC}"
 sleep 5
-curl -f http://localhost:8006/health 2>/dev/null && echo -e "${GREEN}✅ App is running${NC}" || echo -e "${RED}❌ App not responding${NC}"
+curl -f http://127.0.0.1:8006/health 2>/dev/null && echo -e "${GREEN}✅ App is running${NC}" || echo -e "${RED}❌ App not responding${NC}"
 
 echo ""
 echo -e "${GREEN}=========================================="
@@ -67,9 +67,9 @@ echo "✅ Setup Complete!"
 echo "==========================================${NC}"
 echo ""
 echo "Access your application:"
-echo "  - API: http://localhost:8006"
-echo "  - API Docs: http://localhost:8006/docs"
-echo "  - Health: http://localhost:8006/health"
+echo "  - API: http://127.0.0.1:8006"
+echo "  - API Docs: http://127.0.0.1:8006/docs"
+echo "  - Health: http://127.0.0.1:8006/health"
 echo ""
 echo "Useful commands:"
 echo "  - View logs: docker-compose logs -f"

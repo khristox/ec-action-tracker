@@ -34,6 +34,7 @@ from app.models.user import User
 
 from app.schemas.action_tracker import ActionCommentCreate, ActionCommentUpdate, ActionProgressUpdate
 from sqlalchemy import or_
+from app.schemas.action_tracker import MeetingCreate, MeetingUpdate
 
 
 # ============================================================================
@@ -365,7 +366,104 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
 
 class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
     """CRUD operations for Meeting entity"""
+
+    async def create_with_participants(
+        self,
+        db: AsyncSession,
+        obj_in: MeetingCreate,
+        user_id: UUID,
+    ) -> Meeting:
+        """Create a meeting with participants"""
+        try:
+            # Create meeting
+            meeting = Meeting(
+                title=obj_in.title,
+                description=obj_in.description,
+                meeting_date=obj_in.meeting_date,
+                start_time=obj_in.start_time,
+                end_time=obj_in.end_time,
+                location_text=obj_in.location_text,
+                gps_coordinates=obj_in.gps_coordinates,
+                agenda=obj_in.agenda,
+                facilitator=obj_in.facilitator,
+                chairperson_name=obj_in.chairperson_name,
+                created_by_id=user_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            db.add(meeting)
+            await db.flush()
+            
+            # Add participants - Convert to dict if needed
+            participants = getattr(obj_in, 'custom_participants', [])
+            for participant_data in participants:
+                # Check if it's a dict or Pydantic model
+                if hasattr(participant_data, 'model_dump'):
+                    # It's a Pydantic model - convert to dict
+                    p = participant_data.model_dump()
+                elif hasattr(participant_data, 'dict'):
+                    # Older Pydantic version
+                    p = participant_data.dict()
+                else:
+                    # Assume it's already a dict
+                    p = participant_data
+                
+                participant = MeetingParticipant(
+                    meeting_id=meeting.id,
+                    name=p.get('name'),
+                    email=p.get('email'),
+                    telephone=p.get('telephone'),
+                    title=p.get('title'),
+                    organization=p.get('organization'),
+                    is_chairperson=p.get('is_chairperson', False),
+                    created_by_id=user_id,
+                    created_at=datetime.now(),
+                    is_active=True
+                )
+                db.add(participant)
+            
+            await db.commit()
+            await db.refresh(meeting)
+            return meeting
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to create meeting: {str(e)}")
+        
+    async def get_meeting_with_details(self, db: AsyncSession, meeting_id: UUID) -> Optional[Meeting]:
+        """Get meeting with all relationships loaded"""
+        result = await db.execute(
+            select(Meeting)
+            .where(Meeting.id == meeting_id, Meeting.is_active == True)
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.minutes),
+                selectinload(Meeting.documents),
+                selectinload(Meeting.status_history),
+                selectinload(Meeting.created_by),
+                selectinload(Meeting.updated_by),
+                selectinload(Meeting.location)
+            )
+        )
+        return result.scalar_one_or_none()
     
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
+        """Get a meeting by ID"""
+        result = await db.execute(
+            select(Meeting)
+            .where(Meeting.id == id, Meeting.is_active == True)
+        )
+        return result.scalar_one_or_none()
+
+    async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
+        """Get a meeting by ID"""
+        result = await db.execute(
+            select(Meeting)
+            .where(Meeting.id == id, Meeting.is_active == True)
+        )
+        return result.scalar_one_or_none()
+        
+
     async def create(
         self, db: AsyncSession, meeting_data: Dict[str, Any], created_by_id: UUID
     ) -> Meeting:
@@ -768,6 +866,42 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         """Alias for get_actions_assigned_to_user"""
         return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
     
+
+# In app/crud/action_tracker/meeting_action.py
+
+    async def get_overdue_actions_for_user(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[MeetingAction]:
+        """
+        Get overdue actions assigned to a user.
+        """
+        from sqlalchemy import and_
+        from datetime import datetime
+        
+        now = datetime.now()
+        
+        query = select(MeetingAction).options(
+            selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+            selectinload(MeetingAction.assigned_to),
+            selectinload(MeetingAction.assigned_by)
+        ).where(
+            MeetingAction.assigned_to_id == user_id,
+            MeetingAction.is_active == True,
+            MeetingAction.completed_at.is_(None),
+            MeetingAction.due_date.is_not(None),
+            MeetingAction.due_date < now
+        ).order_by(
+            MeetingAction.due_date.asc(),
+            MeetingAction.priority.asc()
+        ).offset(skip).limit(min(limit, 100))
+        
+        result = await db.execute(query)
+        return result.scalars().all()
+
     async def update_action(
         self, db: AsyncSession, action_id: UUID, action_in: MeetingActionUpdate, updated_by_id: UUID
     ) -> Optional[MeetingAction]:

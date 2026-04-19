@@ -78,7 +78,6 @@ async def get_my_tasks(
 ):
     """Get my tasks with filtering support"""
 
-    print('Testing My:',current_user.id) 
     try:
         actions = await meeting_action.get_actions_assigned_to_user(
             db=db,
@@ -141,31 +140,38 @@ async def get_overdue_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ):
-    """Get all overdue actions assigned to the current user."""
+    """
+    Get all overdue actions assigned to the current user.
+    """
     try:
-        actions = await meeting_action.get_overdue_actions(db, skip, limit)
-        
-        # Filter actions assigned to current user
-        user_actions = [a for a in actions if a.assigned_to_id == current_user.id]
+        actions = await meeting_action.get_overdue_actions_for_user(
+            db=db,
+            user_id=current_user.id,
+            skip=skip,
+            limit=limit
+        )
         
         result = []
-        for action in user_actions:
+        for action in actions:
             meeting_title = ""
+            meeting_date = None
+            
             if action.minutes and action.minutes.meeting:
                 meeting_title = action.minutes.meeting.title or ""
+                meeting_date = action.minutes.meeting.meeting_date
             
             result.append(MyTaskResponse(
                 id=action.id,
                 description=action.description,
                 meeting_title=meeting_title,
-                meeting_date=action.minutes.meeting.meeting_date if action.minutes and action.minutes.meeting else None,
+                meeting_date=meeting_date,
                 due_date=action.due_date,
                 overall_progress_percentage=action.overall_progress_percentage or 0,
                 overall_status_name=action.overall_status_name,
                 priority=action.priority,
                 is_overdue=True,
                 completed_at=action.completed_at,
-                created_at=action.created_at
+                created_at=action.created_at,
             ))
         
         logger.info(f"Found {len(result)} overdue tasks for user {current_user.id}")
@@ -175,9 +181,8 @@ async def get_overdue_tasks(
         logger.error(f"Error fetching overdue tasks: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch overdue tasks"
+            detail=f"Failed to fetch overdue tasks: {str(e)}"
         )
-
 
 # ==================== COLLECTION ROUTES ====================
 

@@ -34,7 +34,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=Admin123
 
 # API
-BACKEND_URL=http://localhost:8000
+BACKEND_URL=http://127.0.0.1:8000
 EOF
     echo "✅ .env file created"
 fi
@@ -52,5 +52,5 @@ echo "To start the server:"
 echo "  uvicorn app.main:app --reload"
 echo ""
 echo "To view API documentation:"
-echo "  http://localhost:8000/docs"
+echo "  http://127.0.0.1:8000/docs"
 echo ""

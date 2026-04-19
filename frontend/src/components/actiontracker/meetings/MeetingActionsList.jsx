@@ -341,7 +341,7 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
               onClick={() => setShowAddActionDialog(true)}
               size="small"
             >
-              Add Action d
+              Add Action
             </Button>
             <Tooltip title="Refresh">
               <IconButton onClick={handleRefresh} size="small" disabled={loading}>

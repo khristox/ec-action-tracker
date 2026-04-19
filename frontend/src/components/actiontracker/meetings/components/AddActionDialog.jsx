@@ -4,15 +4,25 @@ import {
   TextField, Button, LinearProgress, Alert,
   FormControl, InputLabel, Select, MenuItem,
   useMediaQuery, useTheme, IconButton, Typography,
-  Stack
+  Stack, Box
 } from '@mui/material';
-import { Close as CloseIcon } from '@mui/icons-material';
+import { Close as CloseIcon, Description as DescriptionIcon } from '@mui/icons-material';
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { addMinutes } from 'date-fns';
 import AssignToSelector from './AssignToSelector';
 
-const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, loading, error }) => {
+const AddActionDialog = ({ 
+  open, 
+  onClose, 
+  onSave, 
+  editingAction, 
+  meetingId, 
+  minutes = [],
+  selectedMinuteId = null,
+  loading, 
+  error 
+}) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -21,7 +31,8 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
     assigned_to: null,
     due_date: null,
     priority: 2,
-    remarks: ''
+    remarks: '',
+    minute_id: null
   });
   const [localError, setLocalError] = useState(null);
 
@@ -30,7 +41,7 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
       if (editingAction) {
         let parsedAssignment = null;
         
-        // Parse assigned_to_name if it exists
+        // Parse assigned_to_name if it exists (for editing existing actions)
         if (editingAction.assigned_to_name) {
           try {
             const data = typeof editingAction.assigned_to_name === 'string' 
@@ -39,21 +50,42 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
             
             parsedAssignment = {
               type: data.type || 'manual',
-              id: data.id || editingAction.assigned_to_id,
-              name: data.name || editingAction.assigned_to_name,
+              id: data.id,
+              name: data.name || data.full_name || data.username,
               email: data.email,
+              phone: data.phone || data.telephone,
               assigned_to_id: editingAction.assigned_to_id || data.id,
               assigned_to_name: data
             };
           } catch (e) {
+            // If parsing fails, treat as manual entry
             parsedAssignment = {
               type: 'manual',
+              id: null,
               name: editingAction.assigned_to_name,
               email: '',
+              phone: '',
               assigned_to_id: null,
               assigned_to_name: { name: editingAction.assigned_to_name, type: 'manual' }
             };
           }
+        } else if (editingAction.assigned_to) {
+          // If assigned_to relationship is loaded
+          parsedAssignment = {
+            type: 'user',
+            id: editingAction.assigned_to.id,
+            name: editingAction.assigned_to.full_name || editingAction.assigned_to.username,
+            email: editingAction.assigned_to.email,
+            phone: editingAction.assigned_to.phone || editingAction.assigned_to.telephone,
+            assigned_to_id: editingAction.assigned_to.id,
+            assigned_to_name: {
+              id: editingAction.assigned_to.id,
+              name: editingAction.assigned_to.full_name || editingAction.assigned_to.username,
+              email: editingAction.assigned_to.email,
+              phone: editingAction.assigned_to.phone || editingAction.assigned_to.telephone,
+              type: 'user'
+            }
+          };
         }
 
         setFormData({
@@ -61,19 +93,22 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
           assigned_to: parsedAssignment,
           due_date: editingAction.due_date ? new Date(editingAction.due_date) : null,
           priority: editingAction.priority || 2,
-          remarks: editingAction.remarks || ''
+          remarks: editingAction.remarks || '',
+          minute_id: editingAction.minute_id || null
         });
       } else {
+        // For new actions, use the selected minute if provided
         setFormData({
           description: '',
           assigned_to: null,
           due_date: null,
           priority: 2,
-          remarks: ''
+          remarks: '',
+          minute_id: selectedMinuteId || null
         });
       }
     }
-  }, [editingAction, open]);
+  }, [editingAction, open, selectedMinuteId]);
 
   const handleSave = async () => {
     if (!formData.description.trim()) {
@@ -81,27 +116,84 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
       return;
     }
     
-    // Additional check for due date in the future
+    // Check if minute is selected for new action
+    if (!editingAction && !formData.minute_id) {
+      setLocalError("Please select a minute to associate this action with");
+      return;
+    }
+    
+    // Check for due date in the future
     if (formData.due_date && formData.due_date < new Date()) {
-        setLocalError("Due date must be in the future");
-        return;
+      setLocalError("Due date must be in the future");
+      return;
     }
 
     setLocalError(null);
+
+    // Build the payload with proper assigned_to structure
+    let assignedToName = null;
+    let assignedToId = null;
+
+    if (formData.assigned_to) {
+      if (formData.assigned_to.type === 'user' && formData.assigned_to.id) {
+        // System user - save assigned_to_id and create proper assigned_to_name object
+        assignedToId = formData.assigned_to.id;
+        assignedToName = {
+          id: formData.assigned_to.id,
+          name: formData.assigned_to.name,
+          email: formData.assigned_to.email || '',
+          phone: formData.assigned_to.phone || '',
+          type: 'user'
+        };
+      } else if (formData.assigned_to.type === 'manual') {
+        // Manual entry - save only assigned_to_name with full details
+        assignedToName = {
+          name: formData.assigned_to.name,
+          email: formData.assigned_to.email || '',
+          phone: formData.assigned_to.phone || '',
+          type: 'manual'
+        };
+        assignedToId = null;
+      } else if (formData.assigned_to.assigned_to_name) {
+        // Handle the structure from AssignToSelector
+        const assignedData = formData.assigned_to.assigned_to_name;
+        assignedToName = assignedData;
+        assignedToId = formData.assigned_to.assigned_to_id || (assignedData.type === 'user' ? assignedData.id : null);
+      } else {
+        // Fallback - just use the object as is
+        assignedToName = {
+          name: formData.assigned_to.name || formData.assigned_to.full_name,
+          email: formData.assigned_to.email,
+          phone: formData.assigned_to.phone || formData.assigned_to.telephone,
+          type: formData.assigned_to.type || 'manual'
+        };
+        assignedToId = formData.assigned_to.id || (formData.assigned_to.type === 'user' ? formData.assigned_to.id : null);
+      }
+    }
 
     const payload = {
       description: formData.description.trim(),
       due_date: formData.due_date ? formData.due_date.toISOString() : null,
       priority: formData.priority,
       remarks: formData.remarks || '',
-      assigned_to_name: formData.assigned_to?.assigned_to_name || null,
-      assigned_to_id: formData.assigned_to?.assigned_to_id || null
+      minute_id: formData.minute_id,
+      assigned_to_id: assignedToId,
+      assigned_to_name: assignedToName
     };
 
     await onSave(payload);
     if (!error) onClose();
   };
 
+  // Get the selected minute details for display
+  const getSelectedMinuteText = () => {
+    if (!formData.minute_id) return null;
+    const minute = minutes.find(m => m.id === formData.minute_id);
+    if (!minute) return null;
+    
+    const minuteText = minute.minute_text || minute.description || '';
+    return minuteText.length > 100 ? minuteText.substring(0, 100) + '...' : minuteText;
+  };
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Dialog 
@@ -128,11 +220,61 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
         
         <DialogContent dividers sx={{ p: isMobile ? 2 : 3 }}>
           {(localError || error) && (
-            <Alert severity="error" sx={{ mb: 2 }}>{localError || error}</Alert>
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setLocalError(null)}>
+              {localError || error}
+            </Alert>
           )}
           
           <Stack spacing={3} sx={{ mt: 0.5 }}>
             
+            {/* Minute Selection - Only show for new actions */}
+            {!editingAction && minutes.length > 0 && (
+              <FormControl fullWidth required>
+                <InputLabel>Associated Minute</InputLabel>
+                <Select
+                  value={formData.minute_id || ''}
+                  onChange={(e) => setFormData({ ...formData, minute_id: e.target.value })}
+                  label="Associated Minute"
+                >
+                  {minutes.map((minute) => (
+                    <MenuItem key={minute.id} value={minute.id}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <DescriptionIcon fontSize="small" color="primary" />
+                        <Box>
+                          <Typography variant="body2">
+                            {minute.topic?.substring(0, 80) || minute.description?.substring(0, 80) || 'Untitled Minute'}
+                            {(minute.topic?.length > 80 || minute.description?.length > 80) && '...'}
+                          </Typography>
+                          {minute.created_at && (
+                            <Typography variant="caption" color="text.secondary">
+                              Created: {new Date(minute.created_at).toLocaleDateString()}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Stack>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+
+            {/* Display selected minute for editing */}
+            {editingAction && formData.minute_id && (
+              <Box sx={{ 
+                p: 1.5, 
+                bgcolor: '#f5f5f5', 
+                borderRadius: 1,
+                border: '1px solid #e0e0e0'
+              }}>
+                <Typography variant="caption" color="text.secondary" gutterBottom>
+                  Associated Minute:
+                </Typography>
+                <Typography variant="body2">
+                  {getSelectedMinuteText() || 'Minute not found'}
+                </Typography>
+              </Box>
+            )}
+
             <TextField
               fullWidth
               label="Task Description"
@@ -141,6 +283,7 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               required
+              placeholder="Describe the action item..."
             />
 
             <AssignToSelector
@@ -186,6 +329,7 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
               rows={2}
               value={formData.remarks}
               onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+              placeholder="Additional notes or context..."
             />
           </Stack>
         </DialogContent>
@@ -199,7 +343,7 @@ const AddActionDialog = ({ open, onClose, onSave, editingAction, meetingId, load
             fullWidth={isMobile}
             variant="contained"
             onClick={handleSave}
-            disabled={loading || !formData.description.trim()}
+            disabled={loading || !formData.description.trim() || (!editingAction && !formData.minute_id)}
             sx={{ order: isMobile ? 1 : 2, py: isMobile ? 1.5 : 1 }}
           >
             {editingAction ? 'Update Action' : 'Create Action'}

@@ -3,39 +3,72 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
-  Paper, Typography, Box, Stack, Button, IconButton,
-  Chip, Alert, CircularProgress, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow,
-  Avatar, Tooltip, LinearProgress, Menu, MenuItem,
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, FormControl, InputLabel, Select, Slider,
-  Grid, Divider, Card, CardContent, Fade, Grow,
-  Autocomplete
+  Paper,
+  Typography,
+  Box,
+  Stack,
+  Button,
+  IconButton,
+  Chip,
+  Alert,
+  CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Avatar,
+  Tooltip,
+  LinearProgress,
+  Fade,
+  Grow,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Slider,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Card,
+  CardContent,
+  Divider
 } from '@mui/material';
 import {
   Edit as EditIcon,
   Assignment as AssignmentIcon,
   Schedule as ScheduleIcon,
-  Person as PersonIcon,
   CheckCircle as CheckCircleIcon,
   Pending as PendingIcon,
   Warning as WarningIcon,
-  MoreVert as MoreVertIcon,
   Refresh as RefreshIcon,
-  Close as CloseIcon,
-  Save as SaveIcon,
   TrendingUp as TrendingUpIcon,
-  PlayCircle as PlayCircleIcon,
-  TaskAlt as TaskAltIcon,
   Visibility as VisibilityIcon,
-  PersonAdd as PersonAddIcon
+  PersonAdd as PersonAddIcon,
+  Add as AddIcon,
+  Save as SaveIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { updateActionProgress } from '../../../store/slices/actionTracker/actionSlice';
 import api from '../../../services/api';
 
-import EditActionDialog from './EditActionDialog';
-import AssignUserDialog from './AssignUserDialog';
+import EditActionDialog from './components/EditActionDialog';
+import AssignUserDialog from './components/AssignUserDialog';
+import AddActionDialog from './components/AddActionDialog';
+
+// Progress presets for the slider
+const PROGRESS_PRESETS = [
+  { value: 0, label: 'Not Started', color: '#6B7280', icon: <ScheduleIcon fontSize="small" /> },
+  { value: 25, label: '25%', color: '#3B82F6', icon: <PendingIcon fontSize="small" /> },
+  { value: 50, label: '50%', color: '#F59E0B', icon: <TrendingUpIcon fontSize="small" /> },
+  { value: 75, label: '75%', color: '#8B5CF6', icon: <TrendingUpIcon fontSize="small" /> },
+  { value: 100, label: 'Complete', color: '#10B981', icon: <CheckCircleIcon fontSize="small" /> }
+];
 
 const formatDate = (dateString) => {
   if (!dateString) return 'No due date';
@@ -52,28 +85,20 @@ const getStatusConfig = (action) => {
   return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" />, bgColor: '#FEF3C7', textColor: '#92400E' };
 };
 
-const PROGRESS_PRESETS = [
-  { value: 0, label: 'Not Started', icon: <ScheduleIcon sx={{ fontSize: 20 }} />, color: '#6B7280' },
-  { value: 25, label: 'Just Started', icon: <PlayCircleIcon sx={{ fontSize: 20 }} />, color: '#3B82F6' },
-  { value: 50, label: 'Halfway There', icon: <TrendingUpIcon sx={{ fontSize: 20 }} />, color: '#F59E0B' },
-  { value: 75, label: 'Almost Done', icon: <PendingIcon sx={{ fontSize: 20 }} />, color: '#8B5CF6' },
-  { value: 100, label: 'Completed', icon: <TaskAltIcon sx={{ fontSize: 20 }} />, color: '#10B981' },
-];
-
-
-
 const MeetingActionsList = ({ meetingId, onRefresh }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { updatingProgress } = useSelector((state) => state.actions || {});
   
   const [actions, setActions] = useState([]);
+  const [minutes, setMinutes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedAction, setSelectedAction] = useState(null);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [showAddActionDialog, setShowAddActionDialog] = useState(false);
   const [progressValue, setProgressValue] = useState(0);
   const [progressRemarks, setProgressRemarks] = useState('');
   const [localUpdating, setLocalUpdating] = useState(false);
@@ -81,6 +106,19 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   const [selectedStatusId, setSelectedStatusId] = useState('');
   const [selectedStatusName, setSelectedStatusName] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+
+  // Fetch minutes for the meeting
+  const fetchMinutes = useCallback(async () => {
+    if (!meetingId) return;
+    
+    try {
+      const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
+      const minutesData = response.data?.items || response.data || [];
+      setMinutes(minutesData);
+    } catch (err) {
+      console.error('Error fetching minutes:', err);
+    }
+  }, [meetingId]);
 
   // Fetch status options
   const fetchStatusOptions = useCallback(async () => {
@@ -111,9 +149,9 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
       let actionsData = [];
       
       const minutesResponse = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
-      const minutes = minutesResponse.data?.items || minutesResponse.data || [];
+      const minutesList = minutesResponse.data?.items || minutesResponse.data || [];
       
-      minutes.forEach(minute => {
+      minutesList.forEach(minute => {
         if (minute.actions && minute.actions.length > 0) {
           actionsData.push(...minute.actions);
         }
@@ -132,9 +170,10 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   useEffect(() => {
     if (meetingId) {
       fetchActions();
+      fetchMinutes();
       fetchStatusOptions();
     }
-  }, [fetchActions, fetchStatusOptions, meetingId]);
+  }, [fetchActions, fetchMinutes, fetchStatusOptions, meetingId]);
 
   useEffect(() => {
     if (successMessage) {
@@ -145,6 +184,7 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
 
   const handleRefresh = () => {
     fetchActions();
+    fetchMinutes();
     if (onRefresh) onRefresh();
   };
 
@@ -158,7 +198,13 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   };
 
   const handleAssignAction = (action) => {
-    setSelectedAction(action);
+    const meetingIdFromAction = action.minutes?.meeting_id || action.meeting_id;
+    console.log('Meeting ID from action:', meetingIdFromAction);
+    setSelectedAction({
+      ...action,
+      _meetingId: meetingIdFromAction  // Store it in the action
+    });
+   
     setShowAssignDialog(true);
   };
 
@@ -170,6 +216,12 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   const handleAssignSave = () => {
     fetchActions();
     setSuccessMessage('Action assigned successfully!');
+  };
+
+  const handleActionCreated = () => {
+    fetchActions();
+    if (onRefresh) onRefresh();
+    setSuccessMessage('Action created successfully!');
   };
 
   const handleProgressUpdate = async () => {
@@ -282,11 +334,21 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
           <Typography variant="h6" fontWeight={700}>
             Action Items ({actions.length})
           </Typography>
-          <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh} size="small" disabled={loading}>
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setShowAddActionDialog(true)}
+              size="small"
+            >
+              Add Action d
+            </Button>
+            <Tooltip title="Refresh">
+              <IconButton onClick={handleRefresh} size="small" disabled={loading}>
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Stack>
 
         {successMessage && (
@@ -449,6 +511,40 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
           </Table>
         </TableContainer>
 
+        {/* Add Action Dialog */}
+      
+
+      <AddActionDialog
+        open={showAddActionDialog}
+        onClose={() => setShowAddActionDialog(false)}
+        meetingId={meetingId}
+        minutes={minutes}
+        selectedMinuteId={null}
+        onSave={async (payload) => {
+          try {
+            // Use the minute-based endpoint that exists in your backend
+            const response = await api.post(
+              `/action-tracker/minutes/${payload.minute_id}/actions`,
+              {
+                description: payload.description,
+                due_date: payload.due_date,
+                priority: payload.priority,
+                remarks: payload.remarks,
+                assigned_to_id: payload.assigned_to_id,
+                assigned_to_name: payload.assigned_to_name
+              }
+            );
+            handleActionCreated();
+            return response.data;
+          } catch (err) {
+            console.error('Error creating action:', err);
+            throw err;
+          }
+        }}
+        loading={loading}
+        error={error}
+      />
+
         {/* Progress Update Dialog */}
         <Dialog 
           open={showProgressDialog} 
@@ -593,6 +689,7 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
         <AssignUserDialog
           open={showAssignDialog}
           action={selectedAction}
+          meetingId={selectedAction?._meetingId || meetingId}
           onClose={() => {
             setShowAssignDialog(false);
             setSelectedAction(null);

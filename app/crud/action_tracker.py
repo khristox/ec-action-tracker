@@ -12,7 +12,7 @@ from datetime import datetime
 from venv import logger
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import select, and_, or_, func, case
+from sqlalchemy import delete, select, and_, or_, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +30,11 @@ from app.schemas.meeting_minutes.meeting_minutes import (
     MeetingActionCreate, MeetingActionUpdate,
 )
 from app.models.user import User
+
+
+from app.schemas.action_tracker import ActionCommentCreate, ActionCommentUpdate, ActionProgressUpdate
+from sqlalchemy import or_
+
 
 # ============================================================================
 # CONSTANTS
@@ -327,7 +332,33 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         )
         return result.scalars().all()
 
-
+    async def get_accessible_lists(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[ParticipantList]:
+        """
+        Get participant lists accessible to a user.
+        """
+        try:
+            result = await db.execute(
+                select(ParticipantList)
+                .where(
+                    or_(
+                        ParticipantList.is_global == True,
+                        ParticipantList.created_by_id == user_id
+                    ),
+                    ParticipantList.is_active == True
+                )
+                .offset(skip)
+                .limit(limit)
+                .order_by(ParticipantList.name.asc())
+            )
+            return result.scalars().all()
+        except Exception as e:
+            raise ValueError(f"Failed to fetch accessible lists: {str(e)}")
 # ============================================================================
 # MEETING CRUD
 # ============================================================================
@@ -540,61 +571,92 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     """CRUD operations for MeetingAction entity"""
     
     async def create_action(
-        self, db: AsyncSession, minute_id: UUID, action_in: MeetingActionCreate, assigned_by_id: UUID
-    ) -> MeetingAction:
-        """Create a new action from meeting minutes"""
-        try:
-            action_data = action_in.model_dump()
-            assigned_to_id = action_data.get('assigned_to_id')
-            
-            # Verify assigned_to user exists
-            if assigned_to_id:
-                user_exists = await db.execute(
-                    select(User).where(User.id == assigned_to_id, User.is_active == True)
+            self, db: AsyncSession, minute_id: UUID, action_in: MeetingActionCreate, assigned_by_id: UUID
+        ) -> MeetingAction:
+            """Create a new action from meeting minutes"""
+            try:
+                action_data = action_in.model_dump()
+                assigned_to_id = action_data.get('assigned_to_id')
+                assigned_to_name = action_data.get('assigned_to_name')  # ADD THIS LINE
+                
+                # Verify assigned_to user exists
+                if assigned_to_id:
+                    user_result = await db.execute(
+                        select(User).where(User.id == assigned_to_id, User.is_active == True)
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if not user:
+                        assigned_to_id = None
+                        # If user doesn't exist, treat as manual entry
+                        if not assigned_to_name:
+                            assigned_to_name = {
+                                "name": "Unknown User",
+                                "type": "manual"
+                            }
+                    else:
+                        # If user exists and assigned_to_name not provided, create it from user data
+                        if not assigned_to_name:
+                            assigned_to_name = {
+                                "id": str(user.id),
+                                "name": user.full_name or user.username,
+                                "email": user.email,
+                                "phone": getattr(user, 'phone', None) or getattr(user, 'telephone', None),
+                                "type": "user"
+                            }
+                
+                action = MeetingAction(
+                    minute_id=minute_id,
+                    description=action_data.get('description'),
+                    assigned_to_id=assigned_to_id,
+                    assigned_to_name=assigned_to_name,  # ADD THIS LINE
+                    assigned_by_id=assigned_by_id,
+                    assigned_at=datetime.now(),
+                    due_date=action_data.get('due_date'),
+                    priority=action_data.get('priority', 2),
+                    estimated_hours=action_data.get('estimated_hours'),
+                    remarks=action_data.get('remarks'),
+                    created_by_id=assigned_by_id,
+                    created_at=datetime.now(),
+                    is_active=True
                 )
-                if not user_exists.scalar_one_or_none():
-                    assigned_to_id = None
-            
-            action = MeetingAction(
-                minute_id=minute_id,
-                description=action_data.get('description'),
-                assigned_to_id=assigned_to_id,
-                assigned_by_id=assigned_by_id,
-                assigned_at=datetime.now(),
-                due_date=action_data.get('due_date'),
-                priority=action_data.get('priority', 2),
-                estimated_hours=action_data.get('estimated_hours'),
-                remarks=action_data.get('remarks'),
-                created_by_id=assigned_by_id,
-                created_at=datetime.now(),
-                is_active=True
-            )
-            
-            db.add(action)
-            await db.commit()
-            await db.refresh(action)
-            return action
-        except Exception as e:
-            await db.rollback()
-            raise ValueError(f"Failed to create action: {str(e)}")
-    
+                
+                db.add(action)
+                await db.commit()
+                await db.refresh(action)
+                return action
+            except Exception as e:
+                await db.rollback()
+                raise ValueError(f"Failed to create action: {str(e)}")
     async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingAction]:
-        """Get a single action by ID"""
+        """Get a single action by ID with all relationships"""
         result = await db.execute(
             select(MeetingAction)
             .options(
                 selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
                 selectinload(MeetingAction.assigned_to),
-                selectinload(MeetingAction.assigned_by)
+                selectinload(MeetingAction.assigned_by),
+                selectinload(MeetingAction.created_by),
+                selectinload(MeetingAction.updated_by),
+                selectinload(MeetingAction.overall_status)
             )
             .where(MeetingAction.id == id, MeetingAction.is_active == True)
         )
-        return result.scalar_one_or_none()
+        action = result.scalar_one_or_none()
+        
+        # Debug logging to verify data
+        if action:
+            print(f"Action {action.id} - assigned_to_id: {action.assigned_to_id}")
+            print(f"Action {action.id} - assigned_to_name: {action.assigned_to_name}")
+        
+        return action
+
     
     async def get_actions_assigned_to_user(
         self,
         db: AsyncSession,
         user_id: UUID,
+        user_email: Optional[str] = None,
+        user_phone: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
         search: Optional[str] = None,
@@ -603,31 +665,82 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         is_overdue: Optional[bool] = None,
         include_completed: bool = False,
     ) -> List[MeetingAction]:
-        """Get actions assigned to user with filtering"""
+        """Get actions assigned to user with filtering
+        
+        Checks both:
+        1. assigned_to_id matches the user_id directly
+        2. assigned_to_name JSON contains user's email or phone (for legacy/imported data)
+        """
+        from sqlalchemy import or_, and_
+        from sqlalchemy.sql import case
+        from sqlalchemy.dialects.postgresql import JSONB
+        
         query = select(MeetingAction).options(
             selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
             selectinload(MeetingAction.assigned_to),
             selectinload(MeetingAction.assigned_by)
         )
 
-        query = query.where(
-            MeetingAction.assigned_to_id == user_id,
-            MeetingAction.is_active == True
-        )
+        # Build conditions for matching assignments
+        conditions = []
+        
+        # Condition 1: Direct user ID match
+        conditions.append(MeetingAction.assigned_to_id == user_id)
+        
+        # Condition 2: Match by email or phone in assigned_to_name JSON (for legacy/imported data)
+        if user_email or user_phone:
+            name_conditions = []
+            
+            # For PostgreSQL with JSONB
+            if user_email:
+                # Check if assigned_to_name is JSON and contains the email
+                name_conditions.append(
+                    MeetingAction.assigned_to_name['email'].astext.ilike(f"%{user_email}%")
+                )
+            
+            if user_phone:
+                # Check if assigned_to_name is JSON and contains the phone
+                name_conditions.append(
+                    MeetingAction.assigned_to_name['phone'].astext.ilike(f"%{user_phone}%")
+                )
+            
+            # Also check if assigned_to_name is a string (legacy) and contains the email/phone
+            if user_email:
+                name_conditions.append(
+                    MeetingAction.assigned_to_name.cast(String).ilike(f"%{user_email}%")
+                )
+            if user_phone:
+                name_conditions.append(
+                    MeetingAction.assigned_to_name.cast(String).ilike(f"%{user_phone}%")
+                )
+            
+            if name_conditions:
+                conditions.append(or_(*name_conditions))
+        
+        # Apply the OR condition
+        if conditions:
+            query = query.where(or_(*conditions), MeetingAction.is_active == True)
+        else:
+            query = query.where(MeetingAction.is_active == True)
 
+        # Filter by completion status
         if not include_completed:
             query = query.where(MeetingAction.completed_at.is_(None))
 
+        # Search filter
         if search and search.strip():
             term = f"%{search.strip()}%"
             query = query.where(MeetingAction.description.ilike(term))
 
+        # Status filter
         if status:
             query = query.where(MeetingAction.overall_status_name == status)
 
+        # Priority filter
         if priority is not None:
             query = query.where(MeetingAction.priority == priority)
 
+        # Overdue filter
         if is_overdue is True:
             query = query.where(
                 and_(
@@ -649,13 +762,14 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
 
         result = await db.execute(query)
         return result.scalars().all()
+
     
     async def get_my_tasks(self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100):
         """Alias for get_actions_assigned_to_user"""
         return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
     
     async def update_action(
-        self, db: AsyncSession, action_id: UUID, update_data: Dict[str, Any], updated_by_id: UUID
+        self, db: AsyncSession, action_id: UUID, action_in: MeetingActionUpdate, updated_by_id: UUID
     ) -> Optional[MeetingAction]:
         """Update an action"""
         try:
@@ -663,11 +777,39 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             if not action:
                 return None
             
+            update_data = action_in.model_dump(exclude_unset=True)
+            
+            # Handle assigned_to fields
+            if 'assigned_to_id' in update_data:
+                assigned_to_id = update_data.get('assigned_to_id')
+                assigned_to_name = update_data.get('assigned_to_name')
+                
+                # If assigned_to_id is provided but no name, fetch user data
+                if assigned_to_id and not assigned_to_name:
+                    user_result = await db.execute(
+                        select(User).where(User.id == assigned_to_id, User.is_active == True)
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user:
+                        assigned_to_name = {
+                            "id": str(user.id),
+                            "name": user.full_name or user.username,
+                            "email": user.email,
+                            "phone": getattr(user, 'phone', None) or getattr(user, 'telephone', None),
+                            "type": "user"
+                        }
+                
+                action.assigned_to_id = assigned_to_id
+                action.assigned_to_name = assigned_to_name
+            
+            # Update other fields
             for field, value in update_data.items():
-                if value is not None:
+                if value is not None and field not in ['assigned_to_id', 'assigned_to_name']:
                     setattr(action, field, value)
             
-            await self._update_audit_fields(action, updated_by_id)
+            action.updated_at = datetime.now()
+            action.updated_by_id = updated_by_id
+            
             await db.commit()
             await db.refresh(action)
             return action
@@ -675,6 +817,487 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.rollback()
             raise ValueError(f"Failed to update action: {str(e)}")
 
+
+    
+    async def get_action_with_details(self, db: AsyncSession, action_id: UUID) -> Optional[MeetingAction]:
+        """Get action with all relationships loaded"""
+        result = await db.execute(
+            select(MeetingAction)
+            .options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by),
+                selectinload(MeetingAction.created_by),
+                selectinload(MeetingAction.updated_by),
+                selectinload(MeetingAction.overall_status)
+            )
+            .where(MeetingAction.id == action_id, MeetingAction.is_active == True)
+        )
+        return result.scalar_one_or_none()
+
+
+
+    async def add_comment(
+        self, 
+        db: AsyncSession, 
+        action_id: UUID, 
+        comment_in: ActionCommentCreate, 
+        user_id: UUID
+    ) -> ActionComment:
+        """
+        Add a comment to an action item.
+        """
+        try:
+            # Check if action exists
+            action = await self.get(db, action_id)
+            if not action:
+                raise ValueError(f"Action with id {action_id} not found")
+            
+            # Create comment
+            comment = ActionComment(
+                action_id=action_id,
+                comment=comment_in.comment,
+                attachment_url=comment_in.attachment_url,
+                created_by_id=user_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            
+            db.add(comment)
+            await db.commit()
+            await db.refresh(comment)
+            
+            # Load creator info
+            await db.refresh(comment, attribute_names=["created_by"])
+            
+            return comment
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add comment: {str(e)}")
+    
+    async def get_comments(
+        self, 
+        db: AsyncSession, 
+        action_id: UUID, 
+        skip: int = 0, 
+        limit: int = 100
+    ) -> List[ActionComment]:
+        """
+        Get all comments for an action item with creator info.
+        """
+        try:
+            result = await db.execute(
+                select(ActionComment)
+                .options(
+                    selectinload(ActionComment.created_by)  # Load the creator
+                )
+                .where(
+                    ActionComment.action_id == action_id,
+                    ActionComment.is_active == True
+                )
+                .order_by(ActionComment.created_at.desc())
+                .offset(skip)
+                .limit(limit)
+            )
+            comments = result.scalars().all()
+            
+            # Optional: Log for debugging
+            for comment in comments:
+                if comment.created_by:
+                    print(f"Comment {comment.id} by {comment.created_by.username}")
+                else:
+                    print(f"Comment {comment.id} has no creator")
+                    
+            return comments
+        except Exception as e:
+            raise ValueError(f"Failed to fetch comments: {str(e)}")
+        
+    async def update_comment(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        comment_id: UUID,
+        comment_in: ActionCommentUpdate,
+        user_id: UUID
+    ) -> Optional[ActionComment]:
+        """
+        Update a comment.
+        """
+        try:
+            # Find the comment
+            result = await db.execute(
+                select(ActionComment)
+                .where(
+                    ActionComment.id == comment_id,
+                    ActionComment.action_id == action_id,
+                    ActionComment.is_active == True
+                )
+            )
+            comment = result.scalar_one_or_none()
+            
+            if not comment:
+                return None
+            
+            # Check if user is the creator
+            if comment.created_by_id != user_id:
+                # Check if user is admin
+                user_result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
+                if not is_admin:
+                    raise ValueError("Only the comment author or admin can update this comment")
+            
+            # Update comment
+            if comment_in.comment is not None:
+                comment.comment = comment_in.comment
+            if comment_in.attachment_url is not None:
+                comment.attachment_url = comment_in.attachment_url
+            
+            comment.updated_at = datetime.now()
+            comment.updated_by_id = user_id
+            
+            await db.commit()
+            await db.refresh(comment)
+            return comment
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update comment: {str(e)}")
+    
+    async def delete_comment(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        comment_id: UUID,
+        user_id: UUID
+    ) -> bool:
+        """
+        Soft delete a comment.
+        """
+        try:
+            # Find the comment
+            result = await db.execute(
+                select(ActionComment)
+                .where(
+                    ActionComment.id == comment_id,
+                    ActionComment.action_id == action_id,
+                    ActionComment.is_active == True
+                )
+            )
+            comment = result.scalar_one_or_none()
+            
+            if not comment:
+                return False
+            
+            # Check if user is the creator
+            if comment.created_by_id != user_id:
+                # Check if user is admin
+                user_result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
+                if not is_admin:
+                    raise ValueError("Only the comment author or admin can delete this comment")
+            
+            # Soft delete
+            comment.is_active = False
+            comment.updated_at = datetime.now()
+            comment.updated_by_id = user_id
+            
+            await db.commit()
+            return True
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete comment: {str(e)}")
+    
+    # ==================== HISTORY METHODS ====================
+    
+    async def get_status_history(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        skip: int = 0,
+        limit: int = 50
+    ) -> List[ActionStatusHistory]:
+        """
+        Get status change history for an action.
+        """
+        try:
+            result = await db.execute(
+                select(ActionStatusHistory)
+                .where(
+                    ActionStatusHistory.action_id == action_id,
+                    ActionStatusHistory.is_active == True
+                )
+                .order_by(ActionStatusHistory.created_at.desc())
+                .offset(skip)
+                .limit(limit)
+            )
+            return result.scalars().all()
+        except Exception as e:
+            raise ValueError(f"Failed to fetch status history: {str(e)}")
+    
+    async def add_status_history(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        status_id: UUID,
+        progress_percentage: int,
+        remarks: str,
+        user_id: UUID
+    ) -> ActionStatusHistory:
+        """
+        Add a status history entry.
+        """
+        try:
+            history = ActionStatusHistory(
+                action_id=action_id,
+                individual_status_id=status_id,
+                progress_percentage=progress_percentage,
+                remarks=remarks,
+                created_by_id=user_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            
+            db.add(history)
+            await db.commit()
+            await db.refresh(history)
+            return history
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add status history: {str(e)}")
+
+
+    async def update_progress(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        progress_update: ActionProgressUpdate,
+        user_id: UUID
+    ) -> Optional[MeetingAction]:
+        """
+        Update action progress percentage and status.
+        """
+        try:
+            # Get the action
+            action = await self.get(db, action_id)
+            if not action:
+                return None
+            
+            # Store old progress for history
+            old_progress = action.overall_progress_percentage
+            old_status_id = action.overall_status_id
+            
+            # Update progress
+            action.overall_progress_percentage = progress_update.progress_percentage
+            
+            # Update status if provided
+            if progress_update.individual_status_id:
+                action.overall_status_id = progress_update.individual_status_id
+            
+            # Handle completion status
+            if progress_update.progress_percentage >= 100:
+                if not action.completed_at:
+                    action.completed_at = datetime.now()
+            elif action.completed_at:
+                # Reopen if progress is less than 100 but was completed
+                action.completed_at = None
+            
+            # Set start date if not set and progress > 0
+            if progress_update.progress_percentage > 0 and not action.start_date:
+                action.start_date = datetime.now()
+            
+            # Update audit fields
+            action.updated_at = datetime.now()
+            action.updated_by_id = user_id
+            
+            # Add status history entry
+            status_history = ActionStatusHistory(
+                action_id=action_id,
+                individual_status_id=progress_update.individual_status_id,
+                progress_percentage=progress_update.progress_percentage,
+                remarks=progress_update.remarks or f"Progress updated from {old_progress}% to {progress_update.progress_percentage}%",
+                created_by_id=user_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            
+            db.add(status_history)
+            await db.commit()
+            await db.refresh(action)
+            
+            return action
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update progress: {str(e)}")
+
+    async def update_progress_remove(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        progress_update: ActionProgressUpdate,
+        user_id: UUID
+    ) -> Optional[MeetingAction]:
+        """
+        Update action progress percentage and status.
+        """
+        try:
+            # Get the action
+            action = await self.get(db, action_id)
+            if not action:
+                return None
+            
+            # Update progress
+            action.overall_progress_percentage = progress_update.progress_percentage
+            
+            # Update status if provided
+            if progress_update.individual_status_id:
+                action.overall_status_id = progress_update.individual_status_id
+            
+            # Mark as completed if progress is 100%
+            if progress_update.progress_percentage >= 100:
+                action.completed_at = datetime.now()
+            elif action.completed_at:
+                # If progress is less than 100 but was completed, reopen
+                action.completed_at = None
+            
+            # Set start date if not set and progress > 0
+            if progress_update.progress_percentage > 0 and not action.start_date:
+                action.start_date = datetime.now()
+            
+            # Update audit fields
+            action.updated_at = datetime.now()
+            action.updated_by_id = user_id
+            
+            # Add status history entry
+            status_history = ActionStatusHistory(
+                action_id=action_id,
+                individual_status_id=progress_update.individual_status_id,
+                progress_percentage=progress_update.progress_percentage,
+                remarks=progress_update.remarks,
+                created_by_id=user_id,
+                created_at=datetime.now(),
+                is_active=True
+            )
+            
+            db.add(status_history)
+            await db.commit()
+            await db.refresh(action)
+            
+            return action
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to update progress: {str(e)}")
+
+    async def soft_delete(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        user_id: UUID
+    ) -> bool:
+        """
+        Soft delete an action (set is_active to False).
+        """
+        try:
+            # Get the action
+            action = await self.get(db, action_id)
+            if not action:
+                return False
+            
+            # Check if user has permission (admin or creator)
+            if action.created_by_id != user_id:
+                # Check if user is admin
+                user_result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
+                if not is_admin:
+                    raise ValueError("Only the task creator or admin can delete this action")
+            
+            # Soft delete
+            action.is_active = False
+            action.updated_at = datetime.now()
+            action.updated_by_id = user_id
+            
+            # Also soft delete all comments
+            comments_result = await db.execute(
+                select(ActionComment).where(ActionComment.action_id == action_id)
+            )
+            comments = comments_result.scalars().all()
+            for comment in comments:
+                comment.is_active = False
+                comment.updated_at = datetime.now()
+                comment.updated_by_id = user_id
+            
+            # Also soft delete all status history
+            history_result = await db.execute(
+                select(ActionStatusHistory).where(ActionStatusHistory.action_id == action_id)
+            )
+            history_entries = history_result.scalars().all()
+            for entry in history_entries:
+                entry.is_active = False
+                entry.updated_at = datetime.now()
+                entry.updated_by_id = user_id
+            
+            await db.commit()
+            return True
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete action: {str(e)}")
+
+    async def hard_delete(
+        self,
+        db: AsyncSession,
+        action_id: UUID,
+        user_id: UUID
+    ) -> bool:
+        """
+        Hard delete an action and all related data.
+        """
+        try:
+            # Get the action
+            action = await self.get(db, action_id)
+            if not action:
+                return False
+            
+            # Check if user has permission (admin or creator)
+            if action.created_by_id != user_id:
+                # Check if user is admin
+                user_result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
+                if not is_admin:
+                    raise ValueError("Only the task creator or admin can delete this action")
+            
+            # Delete all comments first
+            await db.execute(
+                delete(ActionComment).where(ActionComment.action_id == action_id)
+            )
+            
+            # Delete all status history
+            await db.execute(
+                delete(ActionStatusHistory).where(ActionStatusHistory.action_id == action_id)
+            )
+            
+            # Delete the action
+            await db.delete(action)
+            
+            await db.commit()
+            return True
+            
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete action: {str(e)}")
+
+        
 
 # ============================================================================
 # MEETING MINUTES CRUD
@@ -785,7 +1408,7 @@ class CRUDMeetingParticipant(AuditMixin):
             .order_by(MeetingParticipant.is_chairperson.desc(), MeetingParticipant.name)
         )
         return result.scalars().all()
-
+    
 
 # ============================================================================
 # DASHBOARD CRUD

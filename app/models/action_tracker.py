@@ -319,6 +319,16 @@ class MeetingMinutes(Base):
         lazy="selectin",
         order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()"
     )
+
+    # New relationship for active actions only
+    active_actions = relationship(
+        "MeetingAction", 
+        back_populates="minutes", 
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()",
+        primaryjoin="and_(MeetingMinutes.id == MeetingAction.minute_id, MeetingAction.is_active == True)"
+    )
     @property
     def recorded_by_name(self) -> Optional[str]:
         return self.recorded_by.username if self.recorded_by else None

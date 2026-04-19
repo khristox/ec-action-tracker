@@ -386,25 +386,32 @@ async def get_meeting_minutes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ):
+    
     """Get all minutes for a meeting with audit info"""
     # Eager load all relationships
     result = await db.execute(
-        select(MeetingMinutes)
-        .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
-        .options(
-            selectinload(MeetingMinutes.recorded_by),
-            selectinload(MeetingMinutes.created_by),
-            selectinload(MeetingMinutes.updated_by),
-            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_to),
-            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_by),
-            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.created_by),
-            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.updated_by),
-        )
-        .offset(skip)
-        .limit(limit)
-        .order_by(MeetingMinutes.timestamp.desc())
+    select(MeetingMinutes)
+    .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
+    .options(
+        selectinload(MeetingMinutes.recorded_by),
+        selectinload(MeetingMinutes.created_by),
+        selectinload(MeetingMinutes.updated_by),
+        selectinload(MeetingMinutes.active_actions)  # Use active_actions instead of actions
+            .selectinload(MeetingAction.assigned_to),
+        selectinload(MeetingMinutes.active_actions).selectinload(MeetingAction.assigned_by),
+        selectinload(MeetingMinutes.active_actions).selectinload(MeetingAction.created_by),
+        selectinload(MeetingMinutes.active_actions).selectinload(MeetingAction.updated_by),
+    )
+    .offset(skip)
+    .limit(limit)
+    .order_by(MeetingMinutes.timestamp.desc())
     )
     minutes_list = result.scalars().all()
+
+    for minute in minutes_list:
+        if minute.actions:
+            minute.actions = [action for action in minute.actions if action.is_active]
+
     #print(json.dumps([minute.__dict__ for minute in minutes_list], default=str, indent=2))
 
     
@@ -550,7 +557,7 @@ async def get_meeting_participants(
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
-    return await meeting_participant.get_meeting_participants(db, meeting_id)
+    return await meeting_participant.get_by_meeting(db, meeting_id)
 
 
 @router.patch("/{meeting_id}/participants/{participant_id}", response_model=MeetingParticipantResponse)

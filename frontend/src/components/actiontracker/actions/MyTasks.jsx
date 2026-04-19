@@ -14,7 +14,7 @@ import {
   Warning as WarningIcon, CheckCircle as CheckCircleIcon,
   Pending as PendingIcon
 } from '@mui/icons-material';
-import { fetchMyTasks } from '../../../store/slices/actionTracker/actionSlice';
+import { fetchMyTasks, selectMyTasks, selectActionsLoading, selectActionsError } from '../../../store/slices/actionTracker/actionSlice';
 import api from '../../../services/api';
 
 // ==================== Custom Hooks ====================
@@ -63,7 +63,11 @@ const formatDate = (dateString) => {
 const MyTasks = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { myTasks, loading, error } = useSelector((state) => state.actions);
+  
+  // Use selectors to get data from Redux
+  const myTasksData = useSelector(selectMyTasks);
+  const loading = useSelector(selectActionsLoading);
+  const error = useSelector(selectActionsError);
 
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -75,6 +79,13 @@ const MyTasks = () => {
   const limit = 10;
   const debouncedSearch = useDebounce(searchTerm, 500);
 
+  // Debug logging
+  useEffect(() => {
+    console.log('MyTasks - myTasksData:', myTasksData);
+    console.log('MyTasks - loading:', loading);
+    console.log('MyTasks - error:', error);
+  }, [myTasksData, loading, error]);
+
   // Fetch status options (run once)
   useEffect(() => {
     const fetchStatusOptions = async () => {
@@ -84,10 +95,10 @@ const MyTasks = () => {
         const allAttributes = response.data.items || response.data.data || response.data || [];
 
         const actionStatuses = allAttributes
-          .filter(attr => attr.code !== 'ACTION_STATUS' && attr.code.startsWith('ACTION_STATUS_'))
+          .filter(attr => attr.code !== 'ACTION_STATUS' && attr.code?.startsWith('ACTION_STATUS_'))
           .map(attr => ({
             value: (attr.short_name || attr.code).toLowerCase().replace('action_status_', ''),
-            label: attr.name.replace('Action Status - ', ''),
+            label: attr.name?.replace('Action Status - ', '') || attr.name,
             code: attr.code,
             shortName: attr.short_name,
             sortOrder: attr.sort_order,
@@ -124,14 +135,17 @@ const MyTasks = () => {
     fetchStatusOptions();
   }, []);
 
-  // Reset page to 1 when filters change (use immediate values)
+  // Reset page to 1 when filters change
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, statusFilter, priorityFilter]);
 
   // Fetch tasks
   const fetchTasks = useCallback(() => {
-    const params = { page, limit };
+    const params = { 
+      skip: (page - 1) * limit,  // Backend uses skip for pagination
+      limit: limit 
+    };
 
     if (debouncedSearch?.trim()) {
       params.search = debouncedSearch.trim();
@@ -143,6 +157,7 @@ const MyTasks = () => {
       params.priority = Number(priorityFilter);
     }
 
+    console.log('Fetching tasks with params:', params);
     dispatch(fetchMyTasks(params));
   }, [dispatch, page, limit, debouncedSearch, statusFilter, priorityFilter]);
 
@@ -156,7 +171,8 @@ const MyTasks = () => {
     navigate(`/actions/${taskId}`);
   };
 
-  const tasks = myTasks?.items || [];
+  const tasks = myTasksData?.items || [];
+  const totalPages = myTasksData?.totalPages || 1;
 
   const stats = {
     total: tasks.length,
@@ -166,8 +182,8 @@ const MyTasks = () => {
   };
 
   const getStatusDisplay = (task) => {
-    if (task.completed_at) return { label: 'Completed', color: '#10B981', icon: <CheckCircleIcon /> };
-    if (task.is_overdue) return { label: 'Overdue', color: '#EF4444', icon: <WarningIcon /> };
+    if (task.completed_at) return { label: 'Completed', color: '#10B981', icon: <CheckCircleIcon fontSize="small" /> };
+    if (task.is_overdue) return { label: 'Overdue', color: '#EF4444', icon: <WarningIcon fontSize="small" /> };
 
     const option = statusOptions.find(opt =>
       opt.value === (task.status || '').toLowerCase() ||
@@ -176,38 +192,64 @@ const MyTasks = () => {
     );
 
     if (option) {
-      return { label: option.label, color: option.color, icon: <PendingIcon /> };
+      return { label: option.label, color: option.color, icon: <PendingIcon fontSize="small" /> };
     }
 
     return task.overall_progress_percentage === 0
-      ? { label: 'Pending', color: '#F59E0B', icon: <PendingIcon /> }
-      : { label: 'In Progress', color: '#3B82F6', icon: <PendingIcon /> };
+      ? { label: 'Pending', color: '#F59E0B', icon: <PendingIcon fontSize="small" /> }
+      : { label: 'In Progress', color: '#3B82F6', icon: <PendingIcon fontSize="small" /> };
   };
+
+  if (loading && tasks.length === 0) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
+        <CircularProgress />
+        <Typography sx={{ mt: 2 }}>Loading your tasks...</Typography>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* Header & Stats Cards (unchanged) */}
+      {/* Header & Stats Cards */}
       <Box mb={3}>
         <Typography variant="h4" fontWeight={700} gutterBottom>My Tasks</Typography>
         <Typography variant="body2" color="text.secondary">Manage and track your assigned action items</Typography>
       </Box>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {['Total Tasks', 'Overdue', 'In Progress', 'Completed'].map((label, i) => {
-          const values = [stats.total, stats.overdue, stats.inProgress, stats.completed];
-          const colors = ['#2563EB', '#DC2626', '#CA8A04', '#059669'];
-          const bg = ['#EFF6FF', '#FEF2F2', '#FEFCE8', '#ECFDF5'];
-          return (
-            <Grid item xs={6} sm={3} key={i}>
-              <Card sx={{ bgcolor: bg[i], border: '1px solid', borderColor: bg[i].replace('FF', 'FE') }}>
-                <CardContent>
-                  <Typography variant="h3" fontWeight={800} color={colors[i]}>{values[i]}</Typography>
-                  <Typography variant="body2" color="text.secondary">{label}</Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#2563EB">{stats.total}</Typography>
+              <Typography variant="body2" color="text.secondary">Total Tasks</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#FEF2F2', border: '1px solid #FEE2E2' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#DC2626">{stats.overdue}</Typography>
+              <Typography variant="body2" color="text.secondary">Overdue</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#FEFCE8', border: '1px solid #FEF08A' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#CA8A04">{stats.inProgress}</Typography>
+              <Typography variant="body2" color="text.secondary">In Progress</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Card sx={{ bgcolor: '#ECFDF5', border: '1px solid #D1FAE5' }}>
+            <CardContent>
+              <Typography variant="h3" fontWeight={800} color="#059669">{stats.completed}</Typography>
+              <Typography variant="body2" color="text.secondary">Completed</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       {/* Filters */}
@@ -296,8 +338,16 @@ const MyTasks = () => {
                         '&:hover': { bgcolor: isOverdue ? '#FEE2E2' : 'action.hover' }
                       }}
                     >
-                      <TableCell><Typography variant="body2" fontWeight={500}>{task.description || task.title || 'Untitled'}</Typography></TableCell>
-                      <TableCell><Typography variant="body2" color="text.secondary">{task.meeting_title || '—'}</Typography></TableCell>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={500}>
+                          {task.description || task.title || 'Untitled'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {task.meeting_title || '—'}
+                        </Typography>
+                      </TableCell>
                       <TableCell>
                         <Chip
                           label={statusDisplay.label}
@@ -313,7 +363,9 @@ const MyTasks = () => {
                         </Stack>
                         {isOverdue && <Typography variant="caption" color="error">Overdue</Typography>}
                       </TableCell>
-                      <TableCell><Chip label={priority.label} color={priority.color} size="small" /></TableCell>
+                      <TableCell>
+                        <Chip label={priority.label} color={priority.color} size="small" />
+                      </TableCell>
                       <TableCell>
                         <Box display="flex" alignItems="center" gap={1}>
                           <Box sx={{ flex: 1, bgcolor: '#E5E7EB', borderRadius: 2, height: 6 }}>
@@ -336,10 +388,10 @@ const MyTasks = () => {
             </Table>
           </TableContainer>
 
-          {myTasks?.totalPages > 1 && (
+          {totalPages > 1 && (
             <Stack alignItems="center" mt={3}>
               <Pagination
-                count={myTasks.totalPages}
+                count={totalPages}
                 page={page}
                 onChange={(_, val) => setPage(val)}
                 color="primary"

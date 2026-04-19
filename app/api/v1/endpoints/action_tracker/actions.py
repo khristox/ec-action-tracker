@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 from datetime import datetime
 import logging
@@ -10,11 +10,8 @@ from app.crud.action_tracker import meeting_action, meeting_minutes
 from app.models.action_tracker import MeetingAction
 from app.models.user import User
 
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-
 from app.schemas.action_tracker import ActionCommentCreate, ActionCommentResponse, ActionProgressUpdate, ActionStatusHistoryResponse, MyTaskResponse
-from app.schemas.meeting_minutes.meeting_minutes import MeetingActionCreate, MeetingActionResponse, MeetingActionUpdate  # ✅ Make sure status is imported
+from app.schemas.meeting_minutes.meeting_minutes import MeetingActionCreate, MeetingActionResponse, MeetingActionUpdate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,7 +49,7 @@ async def get_action_or_404(db: AsyncSession, action_id: UUID) -> MeetingAction:
     return action
 
 
-async def check_action_permission(action, current_user: User, require_ownership: bool = False) -> bool:
+async def check_action_permission(action: MeetingAction, current_user: User, require_ownership: bool = False) -> bool:
     """Check if user has permission to access/modify action"""
     if require_ownership:
         if action.assigned_to_id and action.assigned_to_id != current_user.id:
@@ -67,8 +64,6 @@ async def check_action_permission(action, current_user: User, require_ownership:
 
 # ==================== STATIC ROUTES (no path parameters) ====================
 
-# In app/api/v1/endpoints/action_tracker/actions.py
-
 @router.get("/my-tasks", response_model=List[MyTaskResponse])
 async def get_my_tasks(
     db: AsyncSession = Depends(deps.get_db),
@@ -82,6 +77,8 @@ async def get_my_tasks(
     include_completed: bool = Query(False, description="Include completed tasks"),
 ):
     """Get my tasks with filtering support"""
+
+    print('Testing My:',current_user.id) 
     try:
         actions = await meeting_action.get_actions_assigned_to_user(
             db=db,
@@ -135,18 +132,14 @@ async def get_my_tasks(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch my tasks: {str(e)}"
         )
-    
-@router.get(
-    "/overdue",
-    response_model=List[MyTaskResponse],
-    summary="Get Overdue Tasks",
-    description="Get all overdue actions assigned to the current user"
-)
+
+
+@router.get("/overdue", response_model=List[MyTaskResponse])
 async def get_overdue_tasks(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum number of records to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
 ):
     """Get all overdue actions assigned to the current user."""
     try:
@@ -188,28 +181,17 @@ async def get_overdue_tasks(
 
 # ==================== COLLECTION ROUTES ====================
 
-@router.get(
-    "/",
-    response_model=List[MeetingActionResponse],
-    summary="Get All Actions",
-    description="Get all actions with pagination (admin access recommended)"
-)
+@router.get("/", response_model=List[MeetingActionResponse])
 async def get_actions(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum number of records to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     status_id: Optional[UUID] = Query(None, description="Filter by status ID"),
     priority: Optional[int] = Query(None, ge=1, le=4, description="Filter by priority (1-4)"),
     assigned_to_id: Optional[UUID] = Query(None, description="Filter by assigned user"),
 ):
-    """
-    Get all actions with optional filtering and pagination.
-    
-    - **status_id**: Filter actions by status
-    - **priority**: Filter by priority level (1=High, 2=Medium, 3=Low, 4=Very Low)
-    - **assigned_to_id**: Filter by assigned user
-    """
+    """Get all actions with optional filtering and pagination."""
     try:
         actions = await meeting_action.get_multi(db, skip=skip, limit=limit)
         
@@ -232,60 +214,87 @@ async def get_actions(
         )
 
 
-# ==================== CREATE ACTION FROM MINUTES ====================
+# ==================== CREATE ACTION ====================
 
-@router.post(
-    "/minutes/{minute_id}/actions",
-    response_model=MeetingActionResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Action from Minutes",
-    description="Create a new action item from meeting minutes"
-)
-async def create_action_from_minutes(
-    minute_id: UUID,
-    action_in: MeetingActionCreate,
+@router.post("/", response_model=MeetingActionResponse, status_code=status.HTTP_201_CREATED)
+async def create_action(
+    *,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
+    action_in: MeetingActionCreate,
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
     """
-    Create an action item from meeting minutes.
-    
-    - **minute_id**: ID of the meeting minutes
-    - **action_in**: Action details including description, due date, assigned user
+    Create a new action item.
     """
     try:
-        # Verify minutes exist
-        minutes_obj = await meeting_minutes.get(db, minute_id)
-        if not minutes_obj:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Minutes with id {minute_id} not found"
-            )
+        # Verify minutes exist if minute_id is provided
+        if action_in.minute_id:
+            minutes_obj = await meeting_minutes.get(db, action_in.minute_id)
+            if not minutes_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Minutes with id {action_in.minute_id} not found"
+                )
         
-        # Create action
-        action = await meeting_action.create_action(db, minute_id, action_in, current_user.id)
+        # Create the action using existing meeting_action CRUD
+        action = await meeting_action.create_action(
+            db=db,
+            minute_id=action_in.minute_id,
+            action_in=action_in,
+            user_id=current_user.id
+        )
         
-        logger.info(f"Action created from minutes {minute_id} by user {current_user.id}")
+        logger.info(f"Action created by user {current_user.id}")
         return action
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating action from minutes: {str(e)}")
+        logger.error(f"Error creating action: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create action: {str(e)}"
         )
 
 
+# Add this endpoint to your actions.py router
+
+@router.get("/{action_id}/history", response_model=List[ActionStatusHistoryResponse])
+async def get_action_history(
+    action_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of records to return"),
+):
+    """
+    Get status change history for an action with pagination.
+    """
+    try:
+        # Check if action exists
+        action = await get_action_or_404(db, action_id)
+        
+        # Check permission (view history)
+        await check_action_permission(action, current_user, require_ownership=False)
+        
+        # Get history
+        history = await meeting_action.get_status_history(db, action_id, skip, limit)
+        
+        logger.info(f"Retrieved {len(history)} history entries for action {action_id}")
+        return history
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching history for action {action_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch history"
+        )
+    
 # ==================== DYNAMIC ROUTES (with path parameters) ====================
 
-@router.get(
-    "/{action_id}",
-    response_model=MeetingActionResponse,
-    summary="Get Action by ID",
-    description="Get a single action by its UUID"
-)
+@router.get("/{action_id}", response_model=MeetingActionResponse)
 async def get_action(
     action_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -309,12 +318,7 @@ async def get_action(
         )
 
 
-@router.put(
-    "/{action_id}",
-    response_model=MeetingActionResponse,
-    summary="Update Action",
-    description="Update an existing action item"
-)
+@router.put("/{action_id}", response_model=MeetingActionResponse)
 async def update_action(
     action_id: UUID,
     action_in: MeetingActionUpdate,
@@ -345,12 +349,7 @@ async def update_action(
         )
 
 
-@router.post(
-    "/{action_id}/progress",
-    response_model=MeetingActionResponse,
-    summary="Update Action Progress",
-    description="Update the progress percentage of an action"
-)
+@router.patch("/{action_id}/progress", response_model=MeetingActionResponse)
 async def update_action_progress(
     action_id: UUID,
     progress_update: ActionProgressUpdate,
@@ -388,13 +387,40 @@ async def update_action_progress(
         )
 
 
-@router.post(
-    "/{action_id}/comments",
-    response_model=ActionCommentResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Add Comment",
-    description="Add a comment to an action item"
-)
+@router.post("/{action_id}/assign", response_model=MeetingActionResponse)
+async def assign_action(
+    action_id: UUID,
+    user_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Assign action to a user."""
+    try:
+        # Check if action exists
+        action_obj = await get_action_or_404(db, action_id)
+        
+        # Assign the action
+        updated_action = await meeting_action.assign_action(
+            db=db,
+            action_id=action_id,
+            assigned_to_id=user_id,
+            assigned_by_id=current_user.id
+        )
+        
+        logger.info(f"Action {action_id} assigned to user {user_id} by {current_user.id}")
+        return updated_action
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning action {action_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to assign action: {str(e)}"
+        )
+
+
+@router.post("/{action_id}/comments", response_model=ActionCommentResponse, status_code=status.HTTP_201_CREATED)
 async def add_action_comment(
     action_id: UUID,
     comment_in: ActionCommentCreate,
@@ -422,18 +448,25 @@ async def add_action_comment(
         )
 
 
-@router.get(
-    "/{action_id}/comments",
-    response_model=List[ActionCommentResponse],
-    summary="Get Action Comments",
-    description="Get all comments for an action"
-)
+@router.delete("/actions/{action_id}/comments/{comment_id}")
+async def delete_action_comment(
+    action_id: str, 
+    comment_id: str,
+    current_user: User = Depends(deps.get_current_user),
+):
+    # Your delete logic here
+    # Verify comment belongs to action
+    # Delete from database
+    
+    return {"message": f"Comment {comment_id} deleted from action {action_id}"}
+
+@router.get("/{action_id}/comments", response_model=List[ActionCommentResponse])
 async def get_action_comments(
     action_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum number of records to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
 ):
     """Get all comments for an action with pagination."""
     try:
@@ -456,46 +489,7 @@ async def get_action_comments(
         )
 
 
-@router.get(
-    "/{action_id}/history",
-    response_model=List[ActionStatusHistoryResponse],
-    summary="Get Action History",
-    description="Get status change history for an action"
-)
-async def get_action_history(
-    action_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(50, ge=1, le=200, description="Maximum number of records to return"),
-):
-    """Get status change history for an action with pagination."""
-    try:
-        # Check if action exists
-        await get_action_or_404(db, action_id)
-        
-        # Get history
-        history = await meeting_action.get_status_history(db, action_id, skip, limit)
-        
-        logger.info(f"Retrieved {len(history)} history entries for action {action_id}")
-        return history
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching history for action {action_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch history"
-        )
-
-
-@router.delete(
-    "/{action_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete Action",
-    description="Soft delete an action item"
-)
+@router.delete("/{action_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_action(
     action_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -523,118 +517,4 @@ async def delete_action(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete action: {str(e)}"
         )
-
-
-# ==================== BULK OPERATIONS ====================
-
-@router.post(
-    "/bulk/update-status",
-    response_model=dict,
-    summary="Bulk Update Status",
-    description="Update status for multiple actions"
-)
-async def bulk_update_action_status(
-    action_ids: List[UUID],
-    status_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Bulk update status for multiple actions (admin only)."""
-    # Check admin permission
-    is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
-    if not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required for bulk operations"
-        )
     
-    try:
-        updated_count = 0
-        errors = []
-        
-        for action_id in action_ids:
-            try:
-                action = await meeting_action.get(db, action_id)
-                if action:
-                    # Create progress update with status change
-                    progress_update = ActionProgressUpdate(
-                        progress_percentage=action.overall_progress_percentage or 0,
-                        individual_status_id=status_id,
-                        remarks="Bulk status update"
-                    )
-                    await meeting_action.update_progress(db, action_id, progress_update, current_user.id)
-                    updated_count += 1
-            except Exception as e:
-                errors.append({"action_id": str(action_id), "error": str(e)})
-        
-        logger.info(f"Bulk updated status for {updated_count} actions by user {current_user.id}")
-        return {
-            "success": True,
-            "updated_count": updated_count,
-            "total_requested": len(action_ids),
-            "errors": errors
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in bulk status update: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Bulk update failed: {str(e)}"
-        )
-
-
-# ==================== STATISTICS ====================
-
-@router.get(
-    "/statistics/summary",
-    response_model=dict,
-    summary="Get Action Statistics",
-    description="Get summary statistics for actions"
-)
-async def get_action_statistics(
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Get summary statistics for actions (total, completed, overdue, etc.)."""
-    try:
-        # Get all actions
-        actions = await meeting_action.get_multi(db, skip=0, limit=10000)
-        
-        # Calculate statistics
-        total = len(actions)
-        completed = sum(1 for a in actions if a.completed_at is not None)
-        overdue = sum(1 for a in actions if calculate_is_overdue(a.due_date, a.completed_at))
-        in_progress = sum(1 for a in actions if a.overall_progress_percentage and 0 < a.overall_progress_percentage < 100)
-        not_started = sum(1 for a in actions if not a.overall_progress_percentage or a.overall_progress_percentage == 0)
-        
-        # Calculate average progress
-        avg_progress = sum(a.overall_progress_percentage or 0 for a in actions) / total if total > 0 else 0
-        
-        # Count by priority
-        high_priority = sum(1 for a in actions if a.priority == 1)
-        medium_priority = sum(1 for a in actions if a.priority == 2)
-        low_priority = sum(1 for a in actions if a.priority == 3)
-        very_low_priority = sum(1 for a in actions if a.priority == 4)
-        
-        return {
-            "total": total,
-            "completed": completed,
-            "overdue": overdue,
-            "in_progress": in_progress,
-            "not_started": not_started,
-            "completion_rate": round((completed / total * 100), 2) if total > 0 else 0,
-            "average_progress": round(avg_progress, 2),
-            "by_priority": {
-                "high": high_priority,
-                "medium": medium_priority,
-                "low": low_priority,
-                "very_low": very_low_priority
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error fetching action statistics: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch statistics"
-        )

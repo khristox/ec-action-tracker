@@ -25,8 +25,8 @@ class Environment(str, Enum):
 
 class Settings(BaseSettings):
     # App settings
-    PROJECT_NAME: str = "RENT MANAGEMENT SYSTEM"
-    PROJECT_TAGLINE: str = "Remt Management System"  # Optional tagline
+    PROJECT_NAME: str = "Action Tracker API"
+    PROJECT_TAGLINE: str = "Action Tracker System"  # Optional tagline
 
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
         description="Default from email address"
     )
     EMAIL_FROM_NAME: str = Field(
-        default="RentMGS",
+        default="Action Tracker System",
         description="Default from name"
     )
     

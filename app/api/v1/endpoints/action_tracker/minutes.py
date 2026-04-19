@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import db
 from app.api import deps
 from app.crud.action_tracker import meeting, meeting_action, meeting_minutes
 from app.models.user import User
@@ -18,9 +19,11 @@ from app.schemas.meeting_minutes.meeting_minutes import (
     MeetingActionResponse,
     MeetingMinutesCreate,
     MeetingMinutesResponse,
-    MeetingMinutesUpdate,
-    PaginatedMinutesResponse
+    MeetingMinutesUpdate
 )
+
+from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesCreate, MeetingMinutesUpdate, MeetingMinutesResponse
+
 
 router = APIRouter()
 
@@ -104,6 +107,14 @@ async def get_minutes(
     summary="Update minutes",
     description="Update an existing minutes entry"
 )
+# In app/api/v1/endpoints/action_tracker/minutes.py
+
+@router.put(
+    "/{minute_id}",
+    response_model=MeetingMinutesResponse,
+    summary="Update minutes",
+    description="Update an existing minutes entry"
+)
 async def update_minutes(
     minute_id: UUID,
     minutes_in: MeetingMinutesUpdate,
@@ -130,12 +141,31 @@ async def update_minutes(
             detail=f"Minutes {minute_id} not found"
         )
     
-    # Update minutes with audit fields
+    # Check permission (only creator or admin can update)
+    if minutes.created_by_id != current_user.id:
+        is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to update this minute"
+            )
+    
+    # Update minutes - make sure to pass the correct parameters
     updated_minutes = await meeting_minutes.update(
-        db, minutes, minutes_in, current_user.id
+        db=db, 
+        id=minute_id, 
+        obj_in=minutes_in, 
+        updated_by_id=current_user.id
     )
+    
+    # Ensure we return the updated object
+    if not updated_minutes:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update minutes"
+        )
+    
     return updated_minutes
-
 
 @router.delete(
     "/{minute_id}",
@@ -255,3 +285,45 @@ async def get_actions_for_minutes(
         return []
     
     return minutes_with_actions.actions[skip:skip + limit]
+
+
+@router.delete(
+    "/meetings/{meeting_id}/minutes/{minute_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete minutes by meeting",
+    description="Soft delete minutes using meeting context"
+)
+async def delete_meeting_minute(
+    meeting_id: UUID,
+    minute_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> None:
+    """
+    Soft delete minutes by ID with meeting validation.
+    """
+    # Verify minutes exists and belongs to the meeting
+    minutes = await meeting_minutes.get(db, minute_id)
+    if not minutes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Minutes {minute_id} not found"
+        )
+    
+    if str(minutes.meeting_id) != str(meeting_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Minutes {minute_id} not found for meeting {meeting_id}"
+        )
+    
+    # Check permission
+    if minutes.created_by_id != current_user.id:
+        is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to delete this minute"
+            )
+    
+    # Use the CRUD soft_delete method
+    await meeting_minutes.soft_delete(db, minute_id, current_user.id)

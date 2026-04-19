@@ -8,23 +8,25 @@ import {
   List, ListItem, ListItemText, Dialog, DialogTitle,
   DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Skeleton, Alert, Collapse,
-  useTheme, useMediaQuery
+  useTheme, useMediaQuery, Tooltip
 } from '@mui/material';
 import {
   ArrowBack, Edit, Delete, Comment, History, Person, Schedule,
   Description, Send, OpenInNew, AccessTime, Event, Info,
   PriorityHigh, CheckCircle, Cancel, PlayCircle, Pending,
-  ExpandMore, ExpandLess, TaskAlt, Error as ErrorIcon
+  ExpandMore, ExpandLess, TaskAlt, Error as ErrorIcon,
+  MoreVert
 } from '@mui/icons-material';
 
 import {
   fetchActionById,
   updateActionProgress,
   addActionComment,
+  deleteAction,
   clearCurrentAction,
   clearError
 } from '../../../store/slices/actionTracker/actionSlice';
-import api from '../../../services/api'; // ✅ ADD THIS IMPORT
+import api from '../../../services/api';
 
 const PRIORITY = {
   1: { label: 'High', color: 'error', icon: <PriorityHigh /> },
@@ -44,6 +46,7 @@ const ActionDetail = () => {
 
   // Redux state
   const { currentAction, loading, updatingProgress, error: reduxError } = useSelector((state) => state.actions);
+  const currentUser = useSelector((state) => state.auth?.user);
 
   // Local UI state
   const [comments, setComments] = useState([]);
@@ -62,6 +65,12 @@ const ActionDetail = () => {
   });
   const [showProgressDialog, setShowProgressDialog] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [showDeleteCommentDialog, setShowDeleteCommentDialog] = useState(false);
+  const [showDeleteTaskDialog, setShowDeleteTaskDialog] = useState(false);
+  const [selectedComment, setSelectedComment] = useState(null);
+  const [deletingComment, setDeletingComment] = useState(false);
+  const [deletingTask, setDeletingTask] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
 
   // Validate ID
   useEffect(() => {
@@ -96,11 +105,20 @@ const ActionDetail = () => {
         api.get('/attribute-groups/ACTION_TRACKER/attributes').catch(() => ({ data: { items: [] } })),
       ]);
 
-      setComments(commentsRes.data || []);
-      setHistory(historyRes.data || []);
+      const commentsData = (commentsRes.data || []).map(comment => ({
+        ...comment,
+        created_by_name: comment.created_by_name || comment.created_by?.username || 'System',
+        created_by: comment.created_by || { username: comment.created_by_name || 'System' }
+      }));
+      setComments(commentsData);
+
+      const historyData = (historyRes.data || []).map(entry => ({
+        ...entry,
+        created_by_name: entry.created_by_name || entry.created_by?.username || 'System'
+      }));
+      setHistory(historyData);
 
       const attributes = attrRes.data?.items || attrRes.data || [];
-      // Filter for ACTION_STATUS_* attributes
       const actionStatuses = attributes.filter(attr => 
         attr.code?.startsWith('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
       );
@@ -122,12 +140,15 @@ const ActionDetail = () => {
     if (currentAction) {
       setProgress(currentAction.overall_progress_percentage || 0);
       setSelectedStatusId(currentAction.overall_status_id || '');
-      // Find status name from current action
       if (currentAction.overall_status_name) {
         setSelectedStatusName(currentAction.overall_status_name);
       }
     }
   }, [currentAction]);
+
+  const handleGoBack = () => {
+    window.history.back();
+  };
 
   const handleUpdateProgress = async () => {
     if (!selectedStatusId && !selectedStatusName) {
@@ -136,9 +157,9 @@ const ActionDetail = () => {
     }
 
     setLocalError('');
+    setIsActionInProgress(true);
     
     try {
-      // Find the selected status option to get the correct ID
       const selectedOption = statusOptions.find(opt => 
         opt.id === selectedStatusId || 
         opt.short_name === selectedStatusName ||
@@ -161,10 +182,12 @@ const ActionDetail = () => {
       await dispatch(updateActionProgress({ id, progressData: payload })).unwrap();
       setShowProgressDialog(false);
       setProgressRemarks('');
-      fetchAction(); // Refresh action data
-      fetchSupplementaryData(); // Refresh history
+      // Go back after successful update
+      handleGoBack();
     } catch (err) {
       setLocalError(err.message || 'Failed to update progress');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
@@ -181,6 +204,8 @@ const ActionDetail = () => {
       return;
     }
 
+    setIsActionInProgress(true);
+
     try {
       const payload = {
         progress_percentage: 100,
@@ -190,22 +215,60 @@ const ActionDetail = () => {
 
       await dispatch(updateActionProgress({ id, progressData: payload })).unwrap();
       setShowCompleteConfirm(false);
-      fetchAction(); // Refresh action data
-      fetchSupplementaryData(); // Refresh history
+      // Go back after successful completion
+      handleGoBack();
     } catch (err) {
       setLocalError(err.message || 'Failed to mark as completed');
+    } finally {
+      setIsActionInProgress(false);
+    }
+  };
+
+  const handleDeleteTask = async () => {
+    setIsActionInProgress(true);
+    try {
+      await dispatch(deleteAction(id)).unwrap();
+      setShowDeleteTaskDialog(false);
+      // Go back after successful deletion
+      handleGoBack();
+    } catch (err) {
+      console.error('Failed to delete task:', err);
+      setLocalError(err.message || 'Failed to delete task');
+      setShowDeleteTaskDialog(false);
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
   const handleAddComment = async () => {
     if (!newComment.trim()) return;
 
+    setIsActionInProgress(true);
     try {
       await dispatch(addActionComment({ id, commentData: { comment: newComment } })).unwrap();
       setNewComment('');
-      fetchSupplementaryData(); // Refresh comments
+      await fetchSupplementaryData();
     } catch (err) {
       setLocalError('Failed to add comment');
+    } finally {
+      setIsActionInProgress(false);
+    }
+  };
+
+  const handleDeleteComment = async () => {
+    if (!selectedComment) return;
+    
+    setDeletingComment(true);
+    try {
+      await api.delete(`/action-tracker/actions/${id}/comments/${selectedComment.id}`);
+      setComments(comments.filter(c => c.id !== selectedComment.id));
+      setShowDeleteCommentDialog(false);
+      setSelectedComment(null);
+    } catch (err) {
+      console.error('Failed to delete comment:', err);
+      setLocalError('Failed to delete comment');
+    } finally {
+      setDeletingComment(false);
     }
   };
 
@@ -226,6 +289,17 @@ const ActionDetail = () => {
   const statusColor = isCompleted ? 'success' 
     : currentAction?.is_overdue ? 'error' 
     : currentAction?.overall_progress_percentage > 0 ? 'info' : 'warning';
+
+  // Check if user can delete comment (creator or admin)
+  const canDeleteComment = (comment) => {
+    return currentUser && (comment.created_by_id === currentUser.id || currentUser.is_admin);
+  };
+
+  // Check if user can delete task (admin or creator)
+  const canDeleteTask = () => {
+    if (!currentUser || !currentAction) return false;
+    return currentUser.is_admin || currentAction.created_by_id === currentUser.id;
+  };
 
   // Early returns
   if (loading && !currentAction) {
@@ -252,10 +326,10 @@ const ActionDetail = () => {
           <Button 
             variant="contained" 
             startIcon={<ArrowBack />} 
-            onClick={() => navigate('/actions/my-tasks')}
+            onClick={handleGoBack}
             sx={{ mt: 2 }}
           >
-            Back to My Tasks
+            Go Back
           </Button>
         </Paper>
       </Container>
@@ -264,23 +338,27 @@ const ActionDetail = () => {
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 }, pb: isMobile ? 10 : 4 }}>
-      {/* Header */}
+      {/* Header - Back button and Delete button */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <IconButton onClick={() => navigate('/actions/my-tasks')} size={isMobile ? 'medium' : 'large'}>
-          <ArrowBack />
-        </IconButton>
+        <Tooltip title="Go Back">
+          <IconButton onClick={handleGoBack} size={isMobile ? 'medium' : 'large'}>
+            <ArrowBack />
+          </IconButton>
+        </Tooltip>
         <Typography variant="h6" fontWeight={700} sx={{ flex: 1, textAlign: 'center' }}>
           Task Details
         </Typography>
-        {!isCompleted && (
-          <Stack direction="row" spacing={1}>
-            <IconButton color="primary" onClick={() => navigate(`/actions/${id}/edit`)}>
-              <Edit />
-            </IconButton>
-            <IconButton color="error">
+        {canDeleteTask() && !isCompleted && (
+          <Tooltip title="Delete Task">
+            <IconButton 
+              color="error" 
+              onClick={() => setShowDeleteTaskDialog(true)}
+              size={isMobile ? 'medium' : 'large'}
+              disabled={isActionInProgress}
+            >
               <Delete />
             </IconButton>
-          </Stack>
+          </Tooltip>
         )}
       </Stack>
 
@@ -336,7 +414,12 @@ const ActionDetail = () => {
 
         {!isCompleted && (
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <Button fullWidth={isMobile} variant="outlined" onClick={() => setShowProgressDialog(true)}>
+            <Button 
+              fullWidth={isMobile} 
+              variant="outlined" 
+              onClick={() => setShowProgressDialog(true)}
+              disabled={isActionInProgress}
+            >
               Update Progress
             </Button>
             <Button 
@@ -345,6 +428,7 @@ const ActionDetail = () => {
               color="success" 
               startIcon={<TaskAlt />} 
               onClick={() => setShowCompleteConfirm(true)}
+              disabled={isActionInProgress}
             >
               Mark as Completed
             </Button>
@@ -352,8 +436,7 @@ const ActionDetail = () => {
         )}
       </Paper>
 
-
-  {/* Status History Section */}
+      {/* Status History Section */}
       <Paper sx={{ p: 3, mb: 3, borderRadius: 3 }}>
         <Stack 
           direction="row" 
@@ -384,21 +467,19 @@ const ActionDetail = () => {
           ) : (
             <List>
               {history.map((entry, index) => {
-                // Find status option for this history entry
                 const statusOption = statusOptions.find(opt => opt.id === entry.individual_status_id);
                 const statusName = statusOption?.name?.replace('Action Status - ', '') || 
                                   statusOption?.short_name || 
                                   entry.status_name || 
                                   'Unknown';
                 
-                // Get status color (you can map based on status name)
                 const getStatusColor = (status) => {
                   if (status === 'COMPLETED' || status?.toLowerCase().includes('completed')) return '#10B981';
                   if (status === 'IN_PROGRESS' || status?.toLowerCase().includes('in_progress')) return '#3B82F6';
                   if (status === 'OVERDUE') return '#EF4444';
                   if (status === 'BLOCKED') return '#6B7280';
                   if (status === 'CANCELLED') return '#EF4444';
-                  return '#F59E0B'; // Pending default
+                  return '#F59E0B';
                 };
                 
                 return (
@@ -431,7 +512,7 @@ const ActionDetail = () => {
                             <Stack direction="row" spacing={1} alignItems="center">
                               <Person sx={{ fontSize: 14, color: 'text.secondary' }} />
                               <Typography variant="caption" color="text.secondary">
-                                {entry.created_by?.full_name || entry.created_by?.username || 'System'}
+                                {entry.created_by_name || entry.created_by?.full_name || entry.created_by?.username || 'System'}
                               </Typography>
                               <AccessTime sx={{ fontSize: 14, color: 'text.secondary', ml: 1 }} />
                               <Typography variant="caption" color="text.secondary">
@@ -484,11 +565,12 @@ const ActionDetail = () => {
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleAddComment()}
+              disabled={isActionInProgress}
             />
             <IconButton 
               color="primary" 
               onClick={handleAddComment}
-              disabled={!newComment.trim()}
+              disabled={!newComment.trim() || isActionInProgress}
             >
               <Send />
             </IconButton>
@@ -511,15 +593,33 @@ const ActionDetail = () => {
                         </Typography>
                       }
                       secondary={
-                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
-                          <Person sx={{ fontSize: 14, color: 'text.secondary' }} />
-                          <Typography variant="caption" color="text.secondary">
-                            {comment.created_by?.full_name || comment.created_by?.username || 'System'}
-                          </Typography>
-                          <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
-                          <Typography variant="caption" color="text.secondary">
-                            {comment.created_at ? new Date(comment.created_at).toLocaleString() : 'Unknown date'}
-                          </Typography>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem' }}>
+                              {(comment.created_by_name || 'S')[0].toUpperCase()}
+                            </Avatar>
+                            <Typography variant="caption" fontWeight={500}>
+                              {comment.created_by_name || comment.created_by?.full_name || comment.created_by?.username || 'System'}
+                            </Typography>
+                            <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
+                            <Typography variant="caption" color="text.secondary">
+                              {comment.created_at ? new Date(comment.created_at).toLocaleString() : 'Unknown date'}
+                            </Typography>
+                          </Stack>
+                          {canDeleteComment(comment) && (
+                            <Tooltip title="Delete comment">
+                              <IconButton 
+                                size="small" 
+                                color="error"
+                                onClick={() => {
+                                  setSelectedComment(comment);
+                                  setShowDeleteCommentDialog(true);
+                                }}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       }
                     />
@@ -531,8 +631,6 @@ const ActionDetail = () => {
           )}
         </Collapse>
       </Paper>
-
-
 
       {/* Progress Dialog */}
       <Dialog open={showProgressDialog} onClose={() => setShowProgressDialog(false)} fullWidth maxWidth="sm">
@@ -583,14 +681,14 @@ const ActionDetail = () => {
           <Button 
             variant="contained" 
             onClick={handleUpdateProgress} 
-            disabled={updatingProgress || !selectedStatusId}
+            disabled={updatingProgress || !selectedStatusId || isActionInProgress}
           >
             Save Progress
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Complete Confirmation */}
+      {/* Complete Confirmation Dialog */}
       <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)}>
         <DialogTitle>Mark as Completed?</DialogTitle>
         <DialogContent>
@@ -601,8 +699,61 @@ const ActionDetail = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowCompleteConfirm(false)}>Cancel</Button>
-          <Button color="success" variant="contained" onClick={handleMarkAsCompleted}>
+          <Button 
+            color="success" 
+            variant="contained" 
+            onClick={handleMarkAsCompleted}
+            disabled={isActionInProgress}
+          >
             Yes, Complete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Task Confirmation Dialog */}
+      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)}>
+        <DialogTitle>Delete Task</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this task?</Typography>
+          <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+            This action cannot be undone. All comments and history will be permanently deleted.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDeleteTaskDialog(false)} disabled={deletingTask || isActionInProgress}>
+            Cancel
+          </Button>
+          <Button 
+            color="error" 
+            variant="contained" 
+            onClick={handleDeleteTask}
+            disabled={deletingTask || isActionInProgress}
+          >
+            {deletingTask ? 'Deleting...' : 'Delete Task'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Comment Confirmation Dialog */}
+      <Dialog open={showDeleteCommentDialog} onClose={() => setShowDeleteCommentDialog(false)}>
+        <DialogTitle>Delete Comment</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this comment?</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDeleteCommentDialog(false)} disabled={deletingComment}>
+            Cancel
+          </Button>
+          <Button 
+            color="error" 
+            variant="contained" 
+            onClick={handleDeleteComment}
+            disabled={deletingComment}
+          >
+            {deletingComment ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

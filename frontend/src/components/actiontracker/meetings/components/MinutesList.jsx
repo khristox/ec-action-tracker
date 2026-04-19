@@ -1,7 +1,7 @@
 // src/components/actiontracker/meetings/MeetingActionsList.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Paper, Typography, Box, Stack, Button, IconButton,
   Chip, Alert, CircularProgress, Table, TableBody,
@@ -153,11 +153,14 @@ const TableSkeleton = () => (
         {[1, 2, 3].map((i) => (
           <TableRow key={i}>
             <TableCell><Skeleton variant="text" width="100%" /></TableCell>
-            <TableCell><Skeleton variant="circular width={28} height={28} /><Skeleton variant="text" width={80} /></TableCell>
+            <TableCell>
+              <Skeleton variant="circular" width={28} height={28} />
+              <Skeleton variant="text" width={80} />
+            </TableCell>
             <TableCell><Skeleton variant="text" width={100} /></TableCell>
             <TableCell><Skeleton variant="rounded" width={90} height={26} /></TableCell>
             <TableCell><Skeleton variant="rounded" width={120} height={30} /></TableCell>
-            <TableCell><Skeleton variant="circular width={28} height={28} /></TableCell>
+            <TableCell><Skeleton variant="circular" width={28} height={28} /></TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -314,9 +317,19 @@ const EmptyState = ({ onRefresh }) => (
 );
 
 // ==================== Main Component ====================
-const MeetingActionsList = ({ meetingId, onRefresh }) => {
+const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { id: urlMeetingId } = useParams();
+  
+  // Use meetingId from props or from URL as fallback
+  const meetingId = propMeetingId || urlMeetingId;
+  
+  // Debug logging
+  console.log('MeetingActionsList - propMeetingId:', propMeetingId);
+  console.log('MeetingActionsList - urlMeetingId:', urlMeetingId);
+  console.log('MeetingActionsList - final meetingId:', meetingId);
+  
   const { updatingProgress } = useSelector((state) => state.actions || {});
   
   const [actions, setActions] = useState([]);
@@ -352,7 +365,7 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   // Fetch actions
   const fetchActions = useCallback(async () => {
     if (!meetingId) {
-      console.error('No meetingId provided to MeetingActionsList');
+      console.error('No meetingId available');
       return;
     }
     
@@ -421,6 +434,8 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   };
 
   const handleAssignAction = (action) => {
+    console.log('handleAssignAction - action:', action);
+    console.log('handleAssignAction - meetingId:', meetingId);
     setSelectedAction(action);
     setShowAssignDialog(true);
   };
@@ -727,6 +742,7 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
         <AssignUserDialog
           open={showAssignDialog}
           action={selectedAction}
+          meetingId={meetingId}
           onClose={() => {
             setShowAssignDialog(false);
             setSelectedAction(null);

@@ -3,12 +3,44 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-  Container, Paper, Typography, Box, Stack, Chip, Button,
-  IconButton, Divider, Skeleton, Alert, CircularProgress,
-  Grid, Avatar, Tooltip, Tabs, Tab,
-  Menu, MenuItem, ListItemIcon, ListItemText, Dialog,
-  DialogTitle, DialogContent, DialogActions, TextField,
-  FormControl, InputLabel, Select
+  Box,
+  Container,
+  Paper,
+  Typography,
+  Stack,
+  Chip,
+  Button,
+  IconButton,
+  Divider,
+  Skeleton,
+  Alert,
+  CircularProgress,
+  Grid,
+  Avatar,
+  Tooltip,
+  Tabs,
+  Tab,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  AppBar,
+  Toolbar,
+  useMediaQuery,
+  useTheme,
+  Badge,
+  List,
+  Checkbox,
+  Snackbar,
+  FormControlLabel
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -25,6 +57,15 @@ import {
   Pending as PendingIcon,
   Schedule as ScheduleIcon,
   Cancel as CancelIcon,
+  MoreVert as MoreVertIcon,
+  VideoCall as VideoCallIcon,
+  Link as LinkIcon,
+  NotificationsActive as NotificationsIcon,
+  Send as SendIcon,
+  Close as CloseIcon,
+  Email as EmailIcon,
+  WhatsApp as WhatsAppIcon,
+  Sms as SmsIcon
 } from '@mui/icons-material';
 import { 
   fetchMeetingById, 
@@ -40,6 +81,7 @@ import {
 import MeetingMinutes from './MeetingMinutes';
 import MeetingActionsList from './MeetingActionsList';
 import MeetingDocuments from './MeetingDocuments';
+import api from '../../../services/api';
 
 // ==================== Rich Text Content Component ====================
 const RichTextContent = ({ content }) => {
@@ -99,10 +141,227 @@ const TabPanel = ({ children, value, index, ...other }) => (
   </div>
 );
 
+// Notification Dialog Component
+const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
+  const [selectedParticipants, setSelectedParticipants] = useState([]);
+  const [notificationType, setNotificationType] = useState(['email']);
+  const [customMessage, setCustomMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [selectAll, setSelectAll] = useState(false);
+
+  useEffect(() => {
+    if (open && participants) {
+      setSelectedParticipants(participants.map(p => p.id));
+      setSelectAll(true);
+    }
+  }, [open, participants]);
+
+  const handleToggleParticipant = (participantId) => {
+    setSelectedParticipants(prev => 
+      prev.includes(participantId) 
+        ? prev.filter(id => id !== participantId)
+        : [...prev, participantId]
+    );
+    setSelectAll(selectedParticipants.length === participants?.length - 1);
+  };
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedParticipants([]);
+    } else {
+      setSelectedParticipants(participants.map(p => p.id));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await onSend({
+        participant_ids: selectedParticipants,
+        notification_type: notificationType,
+        custom_message: customMessage
+      });
+      onClose();
+    } catch (error) {
+      console.error('Failed to send notifications:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ pb: 1 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Badge badgeContent={selectedParticipants.length} color="primary">
+              <NotificationsIcon color="primary" />
+            </Badge>
+            <Typography variant="h6" fontWeight={700}>Send Meeting Notifications</Typography>
+          </Stack>
+          <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
+        </Stack>
+      </DialogTitle>
+      
+      <DialogContent dividers>
+        <Stack spacing={3}>
+          {/* Meeting Info */}
+          <Paper variant="outlined" sx={{ p: 2.5, bgcolor: '#f8fafc', borderRadius: 2 }}>
+            <Typography variant="subtitle2" fontWeight={700} gutterBottom color="primary">
+              {meeting?.title}
+            </Typography>
+            <Stack direction="row" spacing={2} flexWrap="wrap">
+              <Typography variant="caption" color="text.secondary">
+                📅 {new Date(meeting?.meeting_date).toLocaleDateString()}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ⏰ {new Date(meeting?.meeting_date).toLocaleTimeString()}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                👥 {participants?.length || 0} participants
+              </Typography>
+            </Stack>
+          </Paper>
+
+          {/* Notification Types */}
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom>Send via</Typography>
+            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+              <Chip
+                icon={<EmailIcon />}
+                label="Email"
+                color={notificationType.includes('email') ? 'primary' : 'default'}
+                onClick={() => {
+                  if (notificationType.includes('email')) {
+                    setNotificationType(notificationType.filter(t => t !== 'email'));
+                  } else {
+                    setNotificationType([...notificationType, 'email']);
+                  }
+                }}
+                sx={{ py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
+              />
+              <Chip
+                icon={<WhatsAppIcon />}
+                label="WhatsApp"
+                color={notificationType.includes('whatsapp') ? 'primary' : 'default'}
+                onClick={() => {
+                  if (notificationType.includes('whatsapp')) {
+                    setNotificationType(notificationType.filter(t => t !== 'whatsapp'));
+                  } else {
+                    setNotificationType([...notificationType, 'whatsapp']);
+                  }
+                }}
+                sx={{ py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
+              />
+              <Chip
+                icon={<SmsIcon />}
+                label="SMS"
+                color={notificationType.includes('sms') ? 'primary' : 'default'}
+                onClick={() => {
+                  if (notificationType.includes('sms')) {
+                    setNotificationType(notificationType.filter(t => t !== 'sms'));
+                  } else {
+                    setNotificationType([...notificationType, 'sms']);
+                  }
+                }}
+                sx={{ py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
+              />
+            </Stack>
+          </Box>
+
+          {/* Participants Selection */}
+          <Box>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" fontWeight={600}>Select Participants</Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={selectAll}
+                    onChange={handleSelectAll}
+                    size="small"
+                  />
+                }
+                label="Select All"
+                sx={{ '& .MuiTypography-root': { fontSize: '0.8rem', fontWeight: 500 } }}
+              />
+            </Stack>
+            
+            <Paper variant="outlined" sx={{ maxHeight: 320, overflow: 'auto', borderRadius: 2 }}>
+              {participants?.map((participant) => (
+                <Stack
+                  key={participant.id}
+                  direction="row"
+                  alignItems="center"
+                  spacing={1}
+                  sx={{ 
+                    p: 1.5, 
+                    borderBottom: '1px solid #f0f0f0',
+                    '&:hover': { bgcolor: '#fafafa' }
+                  }}
+                >
+                  <Checkbox
+                    checked={selectedParticipants.includes(participant.id)}
+                    onChange={() => handleToggleParticipant(participant.id)}
+                    size="small"
+                  />
+                  <Avatar sx={{ width: 36, height: 36, bgcolor: '#6366f1', color: 'white' }}>
+                    {participant.full_name?.[0] || participant.username?.[0] || '?'}
+                  </Avatar>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="body2" fontWeight={600}>
+                      {participant.full_name || participant.username}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {participant.email}
+                    </Typography>
+                  </Box>
+                </Stack>
+              ))}
+            </Paper>
+          </Box>
+
+          {/* Custom Message */}
+          <TextField
+            label="Custom Message (Optional)"
+            multiline
+            rows={3}
+            value={customMessage}
+            onChange={(e) => setCustomMessage(e.target.value)}
+            placeholder="Add any additional information for participants..."
+            fullWidth
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+          />
+        </Stack>
+      </DialogContent>
+      
+      <DialogActions sx={{ p: 2.5 }}>
+        <Button onClick={onClose} variant="outlined">Cancel</Button>
+        <Button
+          variant="contained"
+          onClick={handleSend}
+          disabled={sending || selectedParticipants.length === 0}
+          startIcon={sending ? <CircularProgress size={20} /> : <SendIcon />}
+          sx={{ 
+            bgcolor: '#6366f1',
+            '&:hover': { bgcolor: '#4f46e5' },
+            px: 3
+          }}
+        >
+          {sending ? 'Sending...' : `Send to ${selectedParticipants.length} Participant(s)`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 const MeetingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   
   const currentMeeting = useSelector(selectCurrentMeeting);
   const loading = useSelector(selectMeetingsLoading);
@@ -118,6 +377,12 @@ const MeetingDetail = () => {
   const [statusComment, setStatusComment] = useState('');
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [moreAnchorEl, setMoreAnchorEl] = useState(null);
+  
+  // Notification state
+  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [meetingParticipants, setMeetingParticipants] = useState([]);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   // Fetch meeting details
   const fetchMeeting = useCallback(() => {
@@ -176,6 +441,14 @@ const MeetingDetail = () => {
     setStatusAnchorEl(null);
   };
 
+  const handleMoreMenuOpen = (event) => {
+    setMoreAnchorEl(event.currentTarget);
+  };
+
+  const handleMoreMenuClose = () => {
+    setMoreAnchorEl(null);
+  };
+
   const handleStatusSelect = (status) => {
     setSelectedStatus(status);
     setStatusComment('');
@@ -203,6 +476,39 @@ const MeetingDetail = () => {
       setLocalError(err.message || 'Failed to update meeting status');
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  // Notification handlers
+  const handleNotifyClick = async () => {
+    setNotificationDialogOpen(true);
+    try {
+      const response = await api.get(`/action-tracker/meetings/${id}/participants`);
+      setMeetingParticipants(response.data?.items || response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch participants:', error);
+      setMeetingParticipants([]);
+    }
+  };
+
+  const handleSendNotifications = async (notificationData) => {
+    try {
+      const response = await api.post(
+        `/action-tracker/meetings/${id}/notify-participants`,
+        notificationData
+      );
+      
+      setSnackbar({
+        open: true,
+        message: `✅ Notifications sent to ${response.data.sent} participants successfully!`,
+        severity: 'success'
+      });
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.detail || '❌ Failed to send notifications',
+        severity: 'error'
+      });
     }
   };
 
@@ -267,75 +573,129 @@ const MeetingDetail = () => {
     return status.short_name || status.value || '';
   };
 
+  const isOnlineMeeting = currentMeeting?.platform && currentMeeting.platform !== 'physical';
+  const hasMeetingLink = currentMeeting?.meeting_link;
+  const participantCount = currentMeeting?.participants?.length || 0;
+
   if (loading && !currentMeeting) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Stack spacing={3}>
-          <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 2 }} />
-          <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 2 }} />
-        </Stack>
-      </Container>
+      <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', p: { xs: 2, sm: 3, md: 4 } }}>
+        <Container maxWidth="xl">
+          <Stack spacing={3}>
+            <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 2 }} />
+            <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 2 }} />
+          </Stack>
+        </Container>
+      </Box>
     );
   }
 
   if (!currentMeeting && !loading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h5" color="error" gutterBottom>
-            Meeting Not Found
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            The meeting you're looking for doesn't exist or has been deleted.
-          </Typography>
-          <Button variant="contained" onClick={handleBack}>
-            Back to Meetings
-          </Button>
-        </Paper>
-      </Container>
+      <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Container maxWidth="sm">
+          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
+            <Typography variant="h5" color="error" gutterBottom fontWeight={700}>
+              Meeting Not Found
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+              The meeting you're looking for doesn't exist or has been deleted.
+            </Typography>
+            <Button variant="contained" onClick={handleBack} size="large">
+              Back to Meetings
+            </Button>
+          </Paper>
+        </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* Header */}
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }} flexWrap="wrap" gap={2}>
-        <Stack direction="row" alignItems="center" spacing={2}>
-          <IconButton onClick={handleBack}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
+      {/* Header Bar */}
+      <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'white', borderBottom: '1px solid #e2e8f0' }}>
+        <Toolbar sx={{ px: { xs: 2, sm: 3, md: 4 } }}>
+          <IconButton edge="start" onClick={handleBack} sx={{ mr: 2 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" fontWeight={700}>
+          <Typography variant="h6" sx={{ flex: 1, fontWeight: 700, color: '#0f172a' }}>
             Meeting Details
           </Typography>
-        </Stack>
-        <Stack direction="row" spacing={1}>
-          <Tooltip title="Update Status">
-            <Button
-              variant="outlined"
-              startIcon={getStatusIcon(getStatusValue())}
-              onClick={handleStatusMenuOpen}
-              size="small"
-            >
-              Status: {getStatusDisplay()}
-            </Button>
-          </Tooltip>
-          <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh}>
-              <RefreshIcon />
+          {!isMobile && (
+            <Stack direction="row" spacing={1}>
+              {/* Send Notification Button */}
+              <Tooltip title="Send Notifications">
+                <IconButton onClick={handleNotifyClick} color="primary" size="small">
+                  <Badge badgeContent={participantCount} color="error">
+                    <NotificationsIcon />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Refresh">
+                <IconButton onClick={handleRefresh} size="small">
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Edit Meeting">
+                <IconButton onClick={handleEdit} color="primary" size="small">
+                  <EditIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Update Status">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={getStatusIcon(getStatusValue())}
+                  onClick={handleStatusMenuOpen}
+                  sx={{ textTransform: 'none' }}
+                >
+                  {getStatusDisplay()}
+                </Button>
+              </Tooltip>
+              <Tooltip title="More Options">
+                <IconButton onClick={handleMoreMenuOpen} size="small">
+                  <MoreVertIcon />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          )}
+          {isMobile && (
+            <IconButton onClick={handleMoreMenuOpen}>
+              <MoreVertIcon />
             </IconButton>
-          </Tooltip>
-          <Tooltip title="Edit Meeting">
-            <IconButton onClick={handleEdit} color="primary">
-              <EditIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete Meeting">
-            <IconButton onClick={() => setShowDeleteDialog(true)} color="error">
-              <DeleteIcon />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Stack>
+          )}
+        </Toolbar>
+      </AppBar>
+
+      {/* More Options Menu */}
+      <Menu
+        anchorEl={moreAnchorEl}
+        open={Boolean(moreAnchorEl)}
+        onClose={handleMoreMenuClose}
+        PaperProps={{ sx: { borderRadius: 2, minWidth: 180 } }}
+      >
+        <MenuItem onClick={() => { handleMoreMenuClose(); handleNotifyClick(); }}>
+          <ListItemIcon><NotificationsIcon fontSize="small" color="primary" /></ListItemIcon>
+          <ListItemText>Send Notifications</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { handleMoreMenuClose(); handleRefresh(); }}>
+          <ListItemIcon><RefreshIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Refresh</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { handleMoreMenuClose(); handleEdit(); }}>
+          <ListItemIcon><EditIcon fontSize="small" color="primary" /></ListItemIcon>
+          <ListItemText>Edit Meeting</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { handleMoreMenuClose(); handleStatusMenuOpen(); }}>
+          <ListItemIcon>{getStatusIcon(getStatusValue())}</ListItemIcon>
+          <ListItemText>Update Status</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { handleMoreMenuClose(); setShowDeleteDialog(true); }} sx={{ color: 'error.main' }}>
+          <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
+          <ListItemText>Delete Meeting</ListItemText>
+        </MenuItem>
+      </Menu>
 
       {/* Status Update Menu */}
       <Menu
@@ -377,7 +737,9 @@ const MeetingDetail = () => {
 
       {/* Status Update Dialog */}
       <Dialog open={showStatusDialog} onClose={() => setShowStatusDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Update Meeting Status</DialogTitle>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Typography variant="h6" fontWeight={700}>Update Meeting Status</Typography>
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth>
@@ -414,7 +776,7 @@ const MeetingDetail = () => {
             />
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ p: 2.5 }}>
           <Button onClick={() => setShowStatusDialog(false)}>Cancel</Button>
           <Button
             variant="contained"
@@ -428,26 +790,28 @@ const MeetingDetail = () => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onClose={() => setShowDeleteDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete Meeting</DialogTitle>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Typography variant="h6" fontWeight={700}>Delete Meeting</Typography>
+        </DialogTitle>
         <DialogContent>
           <Typography variant="body1" gutterBottom>
             Are you sure you want to delete this meeting?
           </Typography>
-          <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+          <Alert severity="error" sx={{ mt: 2 }}>
             <strong>Warning:</strong> This action cannot be undone. All minutes, actions, and documents will also be deleted.
-          </Typography>
-          <Box sx={{ mt: 2, p: 2, bgcolor: '#fef2f2', borderRadius: 1 }}>
-            <Typography variant="body2">
-              <strong>Meeting:</strong> {currentMeeting?.title}
+          </Alert>
+          <Box sx={{ mt: 3, p: 2, bgcolor: '#fef2f2', borderRadius: 2, border: '1px solid #fee2e2' }}>
+            <Typography variant="body2" fontWeight={600} gutterBottom>
+              Meeting: {currentMeeting?.title}
             </Typography>
             {currentMeeting?.meeting_date && (
-              <Typography variant="body2">
-                <strong>Date:</strong> {formatDate(currentMeeting.meeting_date)}
+              <Typography variant="body2" color="text.secondary">
+                Date: {formatDate(currentMeeting.meeting_date)}
               </Typography>
             )}
           </Box>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ p: 2.5 }}>
           <Button onClick={() => setShowDeleteDialog(false)} disabled={deleting}>
             Cancel
           </Button>
@@ -465,163 +829,217 @@ const MeetingDetail = () => {
 
       {/* Error Alert */}
       {(error || localError) && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => { setLocalError(null); dispatch(clearMeetingState()); }}>
-          {typeof error === 'string' ? error : (localError || 'Failed to load meeting')}
-        </Alert>
+        <Container maxWidth="xl" sx={{ mt: 2 }}>
+          <Alert severity="error" onClose={() => { setLocalError(null); dispatch(clearMeetingState()); }}>
+            {typeof error === 'string' ? error : (localError || 'Failed to load meeting')}
+          </Alert>
+        </Container>
       )}
 
-      {/* Meeting Details Card */}
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="h4" fontWeight={700} gutterBottom>
-              {currentMeeting?.title}
-            </Typography>
-            {currentMeeting?.description && (
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-                {currentMeeting.description}
+      {/* Main Content */}
+      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
+        {/* Meeting Details Card */}
+        <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, mb: 4, borderRadius: 3 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant={isMobile ? "h5" : "h4"} fontWeight={800} gutterBottom>
+                {currentMeeting?.title}
               </Typography>
-            )}
-          </Box>
-          <Chip
-            label={getStatusDisplay()}
-            color={getStatusColor(getStatusValue())}
-            icon={getStatusIcon(getStatusValue())}
-            sx={{ fontWeight: 500, px: 1 }}
-          />
-        </Stack>
-
-        <Divider sx={{ my: 2 }} />
-
-        <Grid container spacing={3}>
-          {/* Date and Time */}
-          <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Avatar sx={{ bgcolor: 'primary.main' }}>
-                <CalendarIcon />
-              </Avatar>
-              <Box>
-                <Typography variant="caption" color="text.secondary">
-                  Date & Time
+              {currentMeeting?.description && (
+                <Typography variant="body1" color="text.secondary">
+                  {currentMeeting.description}
                 </Typography>
-                <Typography variant="body2" fontWeight={500}>
-                  {formatDate(currentMeeting?.meeting_date)}
-                </Typography>
-                {currentMeeting?.start_time && (
-                  <Typography variant="caption" color="text.secondary">
-                    {formatTime(currentMeeting.start_time)}
-                    {currentMeeting?.end_time && ` - ${formatTime(currentMeeting.end_time)}`}
+              )}
+            </Box>
+            <Chip
+              label={getStatusDisplay()}
+              color={getStatusColor(getStatusValue())}
+              icon={getStatusIcon(getStatusValue())}
+              sx={{ fontWeight: 600, px: 1, py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
+            />
+          </Stack>
+
+          <Divider sx={{ my: 3 }} />
+
+          <Grid container spacing={3}>
+            {/* Date and Time */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48 }}>
+                  <CalendarIcon />
+                </Avatar>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                    DATE & TIME
                   </Typography>
-                )}
-              </Box>
-            </Stack>
+                  <Typography variant="body1" fontWeight={600}>
+                    {formatDate(currentMeeting?.meeting_date)}
+                  </Typography>
+                  {currentMeeting?.start_time && (
+                    <Typography variant="body2" color="text.secondary">
+                      {formatTime(currentMeeting.start_time)}
+                      {currentMeeting?.end_time && ` - ${formatTime(currentMeeting.end_time)}`}
+                    </Typography>
+                  )}
+                </Box>
+              </Stack>
+            </Grid>
+
+            {/* Location / Meeting Platform */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Avatar sx={{ bgcolor: 'secondary.main', width: 48, height: 48 }}>
+                  {isOnlineMeeting ? <VideoCallIcon /> : <LocationIcon />}
+                </Avatar>
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                    {isOnlineMeeting ? 'MEETING PLATFORM' : 'LOCATION'}
+                  </Typography>
+                  <Typography variant="body1" fontWeight={600}>
+                    {isOnlineMeeting 
+                      ? (currentMeeting?.platform === 'zoom' ? 'Zoom' :
+                         currentMeeting?.platform === 'google_meet' ? 'Google Meet' :
+                         currentMeeting?.platform === 'microsoft_teams' ? 'Microsoft Teams' :
+                         'Online Meeting')
+                      : (currentMeeting?.location_text || 'Not specified')}
+                  </Typography>
+                  {hasMeetingLink && (
+                    <Button
+                      size="small"
+                      startIcon={<LinkIcon />}
+                      href={currentMeeting.meeting_link}
+                      target="_blank"
+                      sx={{ mt: 0.5, textTransform: 'none' }}
+                    >
+                      Join Meeting
+                    </Button>
+                  )}
+                </Box>
+              </Stack>
+            </Grid>
+
+            {/* Facilitator */}
+            {currentMeeting?.facilitator && (
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Avatar sx={{ bgcolor: 'info.main', width: 48, height: 48 }}>
+                    <PeopleIcon />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                      FACILITATOR
+                    </Typography>
+                    <Typography variant="body1" fontWeight={600}>
+                      {currentMeeting.facilitator}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Grid>
+            )}
+
+            {/* Chairperson */}
+            {currentMeeting?.chairperson_name && (
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Avatar sx={{ bgcolor: 'warning.main', width: 48, height: 48 }}>
+                    <PeopleIcon />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                      CHAIRPERSON
+                    </Typography>
+                    <Typography variant="body1" fontWeight={600}>
+                      {currentMeeting.chairperson_name}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Grid>
+            )}
           </Grid>
 
-          {/* Location */}
-          {currentMeeting?.location_text && (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: 'secondary.main' }}>
-                  <LocationIcon />
+          {/* Agenda Section */}
+          {currentMeeting?.agenda && (
+            <Box sx={{ mt: 4 }}>
+              <Divider sx={{ mb: 3 }} />
+              <Stack direction="row" spacing={2} alignItems="flex-start">
+                <Avatar sx={{ bgcolor: 'success.main', width: 48, height: 48 }}>
+                  <DescriptionIcon />
                 </Avatar>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Location
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+                    Agenda
                   </Typography>
-                  <Typography variant="body2" fontWeight={500}>
-                    {currentMeeting.location_text}
-                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 2 }}>
+                    <RichTextContent content={currentMeeting.agenda} />
+                  </Paper>
                 </Box>
               </Stack>
-            </Grid>
+            </Box>
           )}
+        </Paper>
 
-          {/* Facilitator */}
-          {currentMeeting?.facilitator && (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: 'info.main' }}>
-                  <PeopleIcon />
-                </Avatar>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Facilitator
-                  </Typography>
-                  <Typography variant="body2" fontWeight={500}>
-                    {currentMeeting.facilitator}
-                  </Typography>
-                </Box>
-              </Stack>
-            </Grid>
-          )}
+        {/* Tabs Section */}
+        <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
+            variant={isMobile ? "fullWidth" : "standard"}
+            sx={{ 
+              borderBottom: 1, 
+              borderColor: 'divider',
+              bgcolor: 'white',
+              '& .MuiTab-root': { py: 2, fontWeight: 600 }
+            }}
+          >
+            <Tab icon={<DescriptionIcon />} iconPosition="start" label="Minutes" />
+            <Tab icon={<AssignmentIcon />} iconPosition="start" label="Actions" />
+            <Tab icon={<DescriptionIcon />} iconPosition="start" label="Documents" />
+          </Tabs>
 
-          {/* Chairperson */}
-          {currentMeeting?.chairperson_name && (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: 'warning.main' }}>
-                  <PeopleIcon />
-                </Avatar>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Chairperson
-                  </Typography>
-                  <Typography variant="body2" fontWeight={500}>
-                    {currentMeeting.chairperson_name}
-                  </Typography>
-                </Box>
-              </Stack>
-            </Grid>
-          )}
-        </Grid>
+          <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            <TabPanel value={tabValue} index={0}>
+              <MeetingMinutes meetingId={id} onRefresh={handleRefresh} />
+            </TabPanel>
 
-        {/* ==================== RICH TEXT AGENDA ==================== */}
-        {currentMeeting?.agenda && (
-          <Box sx={{ mt: 4 }}>
-            <Divider sx={{ mb: 2 }} />
-            <Stack direction="row" spacing={2} alignItems="flex-start">
-              <Avatar sx={{ bgcolor: 'success.main' }}>
-                <DescriptionIcon />
-              </Avatar>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-                  Agenda
-                </Typography>
-                <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 2 }}>
-                  <RichTextContent content={currentMeeting.agenda} />
-                </Paper>
-              </Box>
-            </Stack>
+            <TabPanel value={tabValue} index={1}>
+              <MeetingActionsList meetingId={id} onRefresh={handleRefresh} />
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={2}>
+              <MeetingDocuments meetingId={id} onRefresh={handleRefresh} />
+            </TabPanel>
           </Box>
-        )}
-      </Paper>
+        </Paper>
+      </Container>
 
-      {/* Tabs Section */}
-      <Paper sx={{ borderRadius: 2 }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          variant="fullWidth"
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
+      {/* Notification Dialog */}
+      <NotificationDialog
+        open={notificationDialogOpen}
+        onClose={() => {
+          setNotificationDialogOpen(false);
+          setMeetingParticipants([]);
+        }}
+        meeting={currentMeeting}
+        participants={meetingParticipants}
+        onSend={handleSendNotifications}
+      />
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          variant="filled"
         >
-          <Tab icon={<DescriptionIcon />} iconPosition="start" label="Minutes" />
-          <Tab icon={<AssignmentIcon />} iconPosition="start" label="Actions" />
-          <Tab icon={<DescriptionIcon />} iconPosition="start" label="Documents" />
-        </Tabs>
-
-        <TabPanel value={tabValue} index={0}>
-          <MeetingMinutes meetingId={id} onRefresh={handleRefresh} />
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={1}>
-          <MeetingActionsList meetingId={id} onRefresh={handleRefresh} />
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={2}>
-          <MeetingDocuments meetingId={id} onRefresh={handleRefresh} />
-        </TabPanel>
-      </Paper>
-    </Container>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 };
 

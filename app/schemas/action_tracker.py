@@ -3,7 +3,10 @@ from typing import Optional, List, Any, Dict, Union
 from uuid import UUID
 from datetime import datetime
 
+from sqlalchemy import Enum
+
 from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesResponse
+from typing import Literal
 
 
 
@@ -461,3 +464,100 @@ class MyTaskResponse(ORMBase):
 MeetingMinutesResponse.model_rebuild()
 MeetingResponse.model_rebuild()
 MeetingStatusHistoryResponse.model_rebuild()
+
+
+
+
+class NotificationType(str, Enum):
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+    SMS = "sms"
+
+class NotificationRequest(BaseModel):
+    """Request schema for sending meeting notifications"""
+    participant_ids: List[UUID] = Field(..., description="List of participant user IDs")
+    notification_type: List[str] = Field(default=["email"], description="Types of notifications to send: email, whatsapp, sms")
+    custom_message: Optional[str] = Field(None, description="Optional custom message to include")
+    meeting_details: Optional[Dict[str, Any]] = Field(None, description="Meeting details to include in notification")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "participant_ids": ["123e4567-e89b-12d3-a456-426614174000"],
+                "notification_type": ["email", "whatsapp"],
+                "custom_message": "Please join the meeting on time.",
+                "meeting_details": {
+                    "title": "Weekly Sprint Planning",
+                    "date": "2024-01-15T10:00:00",
+                    "platform": "zoom",
+                    "meeting_link": "https://zoom.us/j/123456789"
+                }
+            }
+        }
+
+class NotificationResponse(BaseModel):
+    """Response schema for notification sending"""
+    success: bool
+    total_participants: int
+    sent: int
+    results: List[Dict[str, Any]] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+class ZoomMeetingCreate(BaseModel):
+    """Request schema for creating Zoom meeting"""
+    topic: str = Field(..., description="Meeting topic")
+    start_time: datetime = Field(..., description="Meeting start time")
+    duration: int = Field(60, description="Meeting duration in minutes")
+    timezone: str = Field("UTC", description="Meeting timezone")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "topic": "Project Review",
+                "start_time": "2024-01-15T10:00:00",
+                "duration": 60,
+                "timezone": "UTC"
+            }
+        }
+
+class ZoomMeetingResponse(BaseModel):
+    """Response schema for Zoom meeting creation"""
+    join_url: str
+    id: str
+    password: Optional[str] = None
+    start_url: Optional[str] = None
+
+# ==================== Meeting Platform Schemas ====================
+
+class MeetingPlatform(str, Enum):
+    ZOOM = "zoom"
+    GOOGLE_MEET = "google_meet"
+    MICROSOFT_TEAMS = "microsoft_teams"
+    PHYSICAL = "physical"
+    OTHER = "other"
+
+class DialInNumber(BaseModel):
+    """Schema for dial-in numbers"""
+    number: str = Field(..., description="Phone number")
+    instructions: Optional[str] = Field(None, description="Additional instructions")
+
+class MeetingPlatformInfo(BaseModel):
+    """Schema for meeting platform information"""
+    platform: Literal["zoom", "google_meet", "microsoft_teams", "physical", "other"] = Field(
+        ..., description="Meeting platform type"
+    )
+    meeting_link: Optional[str] = None
+    meeting_id: Optional[str] = None
+    passcode: Optional[str] = None
+    dial_in_numbers: Optional[List[Dict[str, str]]] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "platform": "zoom",
+                "meeting_link": "https://zoom.us/j/123456789",
+                "meeting_id": "123456789",
+                "passcode": "123456"
+            }
+        }
+# ==================== Participant Schemas ====================

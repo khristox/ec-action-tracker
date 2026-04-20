@@ -5,7 +5,7 @@ import asyncio
 import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 import jwt
 import logging
@@ -616,6 +616,300 @@ class EmailService:
             logger.error(f"Failed to send confirmation: {e}")
             return False
 
+
+
+# app/services/email_service.py (continued)
+
+async def send_meeting_invitation_email(
+    self,
+    to_email: str,
+    participant_name: str,
+    meeting_details: Dict[str, Any],
+    custom_message: Optional[str] = None,
+    background_tasks: Optional[BackgroundTasks] = None
+) -> bool:
+    """
+    Send meeting invitation email to a single participant using template
+    """
+    if not to_email or not self._is_configured():
+        return False
+    
+    try:
+        # Format meeting datetime
+        meeting_date = meeting_details.get("date")
+        if isinstance(meeting_date, datetime):
+            meeting_datetime = meeting_date.strftime("%B %d, %Y at %I:%M %p")
+        else:
+            meeting_datetime = str(meeting_date) if meeting_date else "TBD"
+        
+        # Prepare context for template
+        context = {
+            "participant_name": participant_name,
+            "meeting_title": meeting_details.get("title", "Meeting"),
+            "meeting_datetime": meeting_datetime,
+            "platform": meeting_details.get("platform", "physical"),
+            "location": meeting_details.get("location"),
+            "meeting_link": meeting_details.get("meeting_link"),
+            "meeting_id": meeting_details.get("meeting_id"),
+            "passcode": meeting_details.get("passcode"),
+            "dial_in_numbers": meeting_details.get("dial_in_numbers", []),
+            "custom_message": custom_message,
+            "organizer_name": meeting_details.get("organizer_name", "Meeting Organizer"),
+        }
+        
+        # Render template
+        html_content = self._render_template("meeting_invitation.html", context)
+        subject = f"Meeting Invitation: {meeting_details.get('title', 'Meeting')}"
+        
+        # Send email (sync or async)
+        if background_tasks:
+            background_tasks.add_task(self._send_email, to_email, subject, html_content)
+            logger.info(f"✅ Meeting invitation queued for {to_email}")
+        else:
+            success = self._send_email(to_email, subject, html_content)
+            logger.info(f"✅ Meeting invitation sent to {to_email}: {success}")
+            return success
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to send meeting invitation to {to_email}: {e}")
+        return False
+
+
+async def send_bulk_meeting_invitations(
+    self,
+    participants: List[Any],
+    meeting_details: Dict[str, Any],
+    custom_message: Optional[str] = None,
+    background_tasks: Optional[BackgroundTasks] = None
+) -> List[Dict[str, Any]]:
+    """
+    Send meeting invitations to multiple participants using templates
+    
+    Args:
+        participants: List of participant objects (User model)
+        meeting_details: Dictionary with meeting information
+        custom_message: Optional custom message to include
+        background_tasks: FastAPI BackgroundTasks for async sending
+    
+    Returns:
+        List of results with status for each participant
+    """
+    results = []
+    
+    for participant in participants:
+        try:
+            # Skip if no email address
+            if not participant.email:
+                results.append({
+                    "participant_id": str(participant.id),
+                    "participant_email": None,
+                    "type": "email",
+                    "status": "skipped",
+                    "message": "No email address available"
+                })
+                continue
+            
+            # Get participant name
+            participant_name = (
+                participant.full_name or 
+                participant.username or 
+                participant.email.split('@')[0] if participant.email else "Participant"
+            )
+            
+            # Send invitation
+            success = await self.send_meeting_invitation_email(
+                to_email=participant.email,
+                participant_name=participant_name,
+                meeting_details=meeting_details,
+                custom_message=custom_message,
+                background_tasks=background_tasks
+            )
+            
+            results.append({
+                "participant_id": str(participant.id),
+                "participant_email": participant.email,
+                "participant_name": participant_name,
+                "type": "email",
+                "status": "sent" if success else "failed",
+                "message": None if success else "Failed to send email"
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process participant {getattr(participant, 'id', 'unknown')}: {e}")
+            results.append({
+                "participant_id": str(getattr(participant, 'id', 'unknown')),
+                "participant_email": getattr(participant, 'email', None),
+                "type": "email",
+                "status": "error",
+                "message": str(e)
+            })
+    
+    # Log summary
+    sent_count = len([r for r in results if r.get("status") == "sent"])
+    logger.info(f"📧 Bulk meeting invitations: {sent_count}/{len(participants)} sent successfully")
+    
+    return results
+
+
+async def send_meeting_reminder_email(
+    self,
+    to_email: str,
+    participant_name: str,
+    meeting_details: Dict[str, Any],
+    time_until: str,
+    background_tasks: Optional[BackgroundTasks] = None
+) -> bool:
+    """
+    Send meeting reminder email to a single participant
+    """
+    if not to_email or not self._is_configured():
+        return False
+    
+    try:
+        # Format meeting datetime
+        meeting_date = meeting_details.get("date")
+        if isinstance(meeting_date, datetime):
+            meeting_datetime = meeting_date.strftime("%B %d, %Y at %I:%M %p")
+        else:
+            meeting_datetime = str(meeting_date) if meeting_date else "TBD"
+        
+        # Prepare context for template
+        context = {
+            "participant_name": participant_name,
+            "meeting_title": meeting_details.get("title", "Meeting"),
+            "meeting_datetime": meeting_datetime,
+            "time_until": time_until,
+            "platform": meeting_details.get("platform", "physical"),
+            "location": meeting_details.get("location"),
+            "meeting_link": meeting_details.get("meeting_link"),
+            "meeting_id": meeting_details.get("meeting_id"),
+            "passcode": meeting_details.get("passcode"),
+        }
+        
+        # Render template
+        html_content = self._render_template("meeting_reminder.html", context)
+        subject = f"Reminder: {meeting_details.get('title', 'Meeting')} starts in {time_until}"
+        
+        # Send email
+        if background_tasks:
+            background_tasks.add_task(self._send_email, to_email, subject, html_content)
+            logger.info(f"✅ Meeting reminder queued for {to_email}")
+        else:
+            success = self._send_email(to_email, subject, html_content)
+            return success
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to send meeting reminder to {to_email}: {e}")
+        return False
+
+
+    async def send_email_notifications(
+        self,
+        participants: List[Any],
+        notification_content: Dict[str, Any],
+        background_tasks: Optional[BackgroundTasks] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Send email notifications to meeting participants using templates
+        
+        This is the main method that should be called from the API endpoint.
+        
+        Args:
+            participants: List of participant objects (User model)
+            notification_content: Dictionary containing:
+                - subject: Email subject line
+                - meeting_details: Meeting information dictionary
+                - custom_message: Optional custom message
+                - notification_type: 'invitation' or 'reminder' (default: 'invitation')
+                - time_until: For reminders, how long until meeting starts
+        """
+        results = []
+        
+        if not self._is_configured():
+            logger.warning("Email service not configured, skipping notifications")
+            for participant in participants:
+                results.append({
+                    "participant_id": str(getattr(participant, 'id', 'unknown')),
+                    "participant_email": getattr(participant, 'email', None),
+                    "type": "email",
+                    "status": "skipped",
+                    "message": "Email service not configured"
+                })
+            return results
+        
+        notification_type = notification_content.get("notification_type", "invitation")
+        meeting_details = notification_content.get("meeting_details", {})
+        custom_message = notification_content.get("custom_message")
+        time_until = notification_content.get("time_until", "soon")
+        
+        for participant in participants:
+            try:
+                # Skip if no email address
+                if not participant.email:
+                    results.append({
+                        "participant_id": str(participant.id),
+                        "participant_email": None,
+                        "type": "email",
+                        "status": "skipped",
+                        "message": "No email address available"
+                    })
+                    continue
+                
+                # Get participant name
+                participant_name = (
+                    participant.full_name or 
+                    participant.username or 
+                    participant.email.split('@')[0] if participant.email else "Participant"
+                )
+                
+                success = False
+                
+                if notification_type == "reminder":
+                    success = await self.send_meeting_reminder_email(
+                        to_email=participant.email,
+                        participant_name=participant_name,
+                        meeting_details=meeting_details,
+                        time_until=time_until,
+                        background_tasks=background_tasks
+                    )
+                else:  # invitation
+                    success = await self.send_meeting_invitation_email(
+                        to_email=participant.email,
+                        participant_name=participant_name,
+                        meeting_details=meeting_details,
+                        custom_message=custom_message,
+                        background_tasks=background_tasks
+                    )
+                
+                results.append({
+                    "participant_id": str(participant.id),
+                    "participant_email": participant.email,
+                    "participant_name": participant_name,
+                    "type": "email",
+                    "notification_type": notification_type,
+                    "status": "sent" if success else "failed",
+                    "message": None if success else "Failed to send email"
+                })
+                
+            except Exception as e:
+                logger.error(f"Failed to send email to {getattr(participant, 'email', 'unknown')}: {e}")
+                results.append({
+                    "participant_id": str(getattr(participant, 'id', 'unknown')),
+                    "participant_email": getattr(participant, 'email', None),
+                    "type": "email",
+                    "status": "error",
+                    "message": str(e)
+                })
+        
+        # Log summary
+        sent_count = len([r for r in results if r.get("status") == "sent"])
+        logger.info(f"📧 Email notifications: {sent_count}/{len(participants)} sent successfully")
+        
+        return results
 
 # Create singleton instance
 email_service = EmailService()

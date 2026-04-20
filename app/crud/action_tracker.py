@@ -367,6 +367,38 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
 class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
     """CRUD operations for Meeting entity"""
 
+    
+    async def add_minutes(
+        self, 
+        db: AsyncSession, 
+        meeting_id: UUID, 
+        minutes_in: MeetingMinutesCreate, 
+        created_by_id: UUID
+    ) -> MeetingMinutes:
+        """Add minutes to a meeting"""
+        try:
+            # Verify meeting exists
+            meeting = await self.get(db, id=meeting_id)
+            if not meeting:
+                raise ValueError(f"Meeting with id {meeting_id} not found")
+            
+            # Create minutes
+            minutes_data = minutes_in.dict()
+            minutes = MeetingMinutes(
+                meeting_id=meeting_id,
+                **minutes_data
+            )
+            minutes.created_by_id = created_by_id
+            minutes.updated_by_id = created_by_id
+            
+            db.add(minutes)
+            await db.commit()
+            await db.refresh(minutes)
+            return minutes
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to add minutes: {str(e)}")
+        
     async def create_with_participants(
         self,
         db: AsyncSession,
@@ -1520,6 +1552,76 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
             raise ValueError(f"Failed to delete minutes: {str(e)}")
 
 
+    async def get_meeting_minutes(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[MeetingMinutes]:
+        """
+        Get all minutes for a specific meeting
+        """
+        result = await db.execute(
+            select(MeetingMinutes)
+            .where(MeetingMinutes.meeting_id == meeting_id)
+            .where(MeetingMinutes.is_active == True)
+            .offset(skip)
+            .limit(limit)
+            .order_by(MeetingMinutes.created_at.desc())
+        )
+        return result.scalars().all()
+    
+    async def get_minutes_with_actions(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[MeetingMinutes]:
+        """
+        Get minutes with their actions eagerly loaded
+        """
+        from sqlalchemy.orm import selectinload
+        
+        result = await db.execute(
+            select(MeetingMinutes)
+            .where(MeetingMinutes.meeting_id == meeting_id)
+            .where(MeetingMinutes.is_active == True)
+            .options(
+                selectinload(MeetingMinutes.actions),
+                selectinload(MeetingMinutes.recorded_by),
+                selectinload(MeetingMinutes.created_by),
+                selectinload(MeetingMinutes.updated_by)
+            )
+            .offset(skip)
+            .limit(limit)
+            .order_by(MeetingMinutes.created_at.desc())
+        )
+        return result.scalars().all()
+    
+    async def get_minute_by_id_with_actions(
+        self,
+        db: AsyncSession,
+        minute_id: UUID
+    ) -> Optional[MeetingMinutes]:
+        """
+        Get a single minute with its actions
+        """
+        from sqlalchemy.orm import selectinload
+        
+        result = await db.execute(
+            select(MeetingMinutes)
+            .where(MeetingMinutes.id == minute_id)
+            .where(MeetingMinutes.is_active == True)
+            .options(
+                selectinload(MeetingMinutes.actions),
+                selectinload(MeetingMinutes.recorded_by),
+                selectinload(MeetingMinutes.created_by),
+                selectinload(MeetingMinutes.updated_by)
+            )
+        )
+        return result.scalar_one_or_none()
 # ============================================================================
 # MEETING PARTICIPANT CRUD
 # ============================================================================
@@ -1635,7 +1737,7 @@ from uuid import uuid4
 
 participant = CRUDParticipant(Participant)
 participant_list = CRUDParticipantList(ParticipantList)
-meeting = CRUDMeeting(Meeting)
+meeting_crud = CRUDMeeting(Meeting)
 meeting_minutes = CRUDMeetingMinutes(MeetingMinutes)
 meeting_action = CRUDMeetingAction(MeetingAction)
 meeting_document = CRUDMeetingDocument(MeetingDocument)
@@ -1649,7 +1751,7 @@ dashboard = CRUDDashboard()
 __all__ = [
     "participant",
     "participant_list",
-    "meeting",
+    "meeting_crud",
     "meeting_minutes",
     "meeting_action",
     "meeting_document",

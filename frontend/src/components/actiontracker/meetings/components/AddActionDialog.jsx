@@ -4,13 +4,35 @@ import {
   TextField, Button, LinearProgress, Alert,
   FormControl, InputLabel, Select, MenuItem,
   useMediaQuery, useTheme, IconButton, Typography,
-  Stack, Box
+  Stack, Box, Chip, Divider
 } from '@mui/material';
-import { Close as CloseIcon, Description as DescriptionIcon } from '@mui/icons-material';
+import { 
+  Close as CloseIcon, 
+  Description as DescriptionIcon, 
+  AccessTime as AccessTimeIcon,
+  Person as PersonIcon,
+  CheckCircle as CheckCircleIcon,
+  Schedule as ScheduleIcon
+} from '@mui/icons-material';
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { addMinutes } from 'date-fns';
+import { addMinutes, format } from 'date-fns';
 import AssignToSelector from './AssignToSelector';
+
+// Helper function to strip HTML tags for preview
+const stripHtmlTags = (html) => {
+  if (!html) return '';
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = html;
+  return tempDiv.textContent || tempDiv.innerText || '';
+};
+
+// Helper to get plain text preview
+const getPlainTextPreview = (html, maxLength = 100) => {
+  const plainText = stripHtmlTags(html);
+  if (plainText.length <= maxLength) return plainText;
+  return plainText.substring(0, maxLength) + '...';
+};
 
 const AddActionDialog = ({ 
   open, 
@@ -186,14 +208,39 @@ const AddActionDialog = ({
   };
 
   // Get the selected minute details for display
-  const getSelectedMinuteText = () => {
+  const getSelectedMinuteDetails = () => {
     if (!formData.minute_id) return null;
     const minute = minutes.find(m => m.id === formData.minute_id);
     if (!minute) return null;
-    
-    const minuteText = minute.minute_text || minute.description || '';
-    return minuteText.length > 100 ? minuteText.substring(0, 100) + '...' : minuteText;
+    return minute;
   };
+
+  const selectedMinute = getSelectedMinuteDetails();
+
+  // Get minute preview text
+  const getMinutePreview = (minute) => {
+    if (minute.topic) return minute.topic;
+    if (minute.title) return minute.title;
+    if (minute.minute_text) return getPlainTextPreview(minute.minute_text, 80);
+    if (minute.discussion) return getPlainTextPreview(minute.discussion, 80);
+    return 'Untitled Minute';
+  };
+
+  // Get action count display
+  const getActionCountDisplay = (minute) => {
+    const count = minute.actions?.length || 0;
+    if (count === 0) return 'No actions';
+    return `${count} action${count !== 1 ? 's' : ''}`;
+  };
+
+  // Get completion status
+  const getCompletionStatus = (minute) => {
+    const actions = minute.actions || [];
+    if (actions.length === 0) return null;
+    const completed = actions.filter(a => a.completed_at || a.overall_progress_percentage >= 100).length;
+    return `${completed}/${actions.length} completed`;
+  };
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Dialog 
@@ -228,62 +275,188 @@ const AddActionDialog = ({
           <Stack spacing={3} sx={{ mt: 0.5 }}>
             
             {/* Minute Selection - Only show for new actions */}
-            {!editingAction && minutes.length > 0 && (
-              <FormControl fullWidth required>
-                <InputLabel>Associated Minute</InputLabel>
-                <Select
-                  value={formData.minute_id || ''}
-                  onChange={(e) => setFormData({ ...formData, minute_id: e.target.value })}
-                  label="Associated Minute"
-                >
-                  {minutes.map((minute) => (
-                    <MenuItem key={minute.id} value={minute.id}>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <DescriptionIcon fontSize="small" color="primary" />
-                        <Box>
-                          <Typography variant="body2">
-                            {minute.topic?.substring(0, 80) || minute.description?.substring(0, 80) || 'Untitled Minute'}
-                            {(minute.topic?.length > 80 || minute.description?.length > 80) && '...'}
-                          </Typography>
-                          {minute.created_at && (
-                            <Typography variant="caption" color="text.secondary">
-                              Created: {new Date(minute.created_at).toLocaleDateString()}
-                            </Typography>
-                          )}
-                        </Box>
-                      </Stack>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+            {!editingAction && (
+              <>
+                {minutes.length === 0 ? (
+                  <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                    <Typography variant="body2" gutterBottom>
+                      No minutes available for this meeting.
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Please add minutes to the meeting first before creating action items.
+                    </Typography>
+                  </Alert>
+                ) : (
+                  <FormControl fullWidth required>
+                    <InputLabel>Associated Minute *</InputLabel>
+                    <Select
+                      value={formData.minute_id || ''}
+                      onChange={(e) => setFormData({ ...formData, minute_id: e.target.value })}
+                      label="Associated Minute *"
+                      renderValue={(selected) => {
+                        const minute = minutes.find(m => m.id === selected);
+                        if (!minute) return "Select a minute";
+                        return (
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <DescriptionIcon fontSize="small" color="primary" />
+                            <Box>
+                              <Typography variant="body2" fontWeight={500}>
+                                {getMinutePreview(minute)}
+                              </Typography>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Typography variant="caption" color="text.secondary">
+                                  {format(new Date(minute.created_at), 'MMM d, yyyy')}
+                                </Typography>
+                                <Chip 
+                                  label={getActionCountDisplay(minute)} 
+                                  size="small" 
+                                  variant="outlined"
+                                />
+                              </Stack>
+                            </Box>
+                          </Stack>
+                        );
+                      }}
+                      MenuProps={{
+                        PaperProps: {
+                          style: {
+                            maxHeight: 400,
+                          },
+                        },
+                      }}
+                    >
+                      {minutes.map((minute) => {
+                        const actionCount = minute.actions?.length || 0;
+                        const completionStatus = getCompletionStatus(minute);
+                        const discussionPreview = getPlainTextPreview(minute.discussion, 120);
+                        const decisionsPreview = getPlainTextPreview(minute.decisions, 100);
+                        
+                        return (
+                          <MenuItem key={minute.id} value={minute.id}>
+                            <Stack spacing={1} sx={{ width: '100%', py: 0.5 }}>
+                              {/* Header */}
+                              <Stack direction="row" spacing={1.5} alignItems="center">
+                                <DescriptionIcon fontSize="small" color="primary" />
+                                <Typography variant="subtitle2" fontWeight={600}>
+                                  {minute.topic || minute.title || 'Untitled Minute'}
+                                </Typography>
+                              </Stack>
+                              
+                              {/* Metadata */}
+                              <Stack direction="row" spacing={2} alignItems="center" sx={{ ml: 4 }}>
+                                <Stack direction="row" spacing={0.5} alignItems="center">
+                                  <AccessTimeIcon fontSize="small" color="action" sx={{ fontSize: 14 }} />
+                                  <Typography variant="caption" color="text.secondary">
+                                    {format(new Date(minute.created_at), 'MMM d, yyyy')}
+                                  </Typography>
+                                </Stack>
+                                
+                                <Chip 
+                                  label={`${actionCount} action${actionCount !== 1 ? 's' : ''}`} 
+                                  size="small" 
+                                  variant="outlined"
+                                />
+                                
+                                {completionStatus && (
+                                  <Chip 
+                                    label={completionStatus} 
+                                    size="small" 
+                                    color={completionStatus.includes('completed') ? 'success' : 'default'}
+                                    variant="outlined"
+                                  />
+                                )}
+                              </Stack>
+                              
+                              {/* Discussion Preview */}
+                              {discussionPreview && (
+                                <Box sx={{ ml: 4, mt: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                    <strong>Discussion:</strong> {discussionPreview}
+                                  </Typography>
+                                </Box>
+                              )}
+                              
+                              {/* Decisions Preview */}
+                              {decisionsPreview && decisionsPreview !== '<p></p>' && (
+                                <Box sx={{ ml: 4 }}>
+                                  <Typography variant="caption" color="success.main" sx={{ display: 'block' }}>
+                                    <strong>Decisions:</strong> {decisionsPreview}
+                                  </Typography>
+                                </Box>
+                              )}
+                              
+                              <Divider sx={{ mt: 1 }} />
+                            </Stack>
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                  </FormControl>
+                )}
+              </>
             )}
 
             {/* Display selected minute for editing */}
-            {editingAction && formData.minute_id && (
+            {editingAction && selectedMinute && (
               <Box sx={{ 
-                p: 1.5, 
+                p: 2, 
                 bgcolor: '#f5f5f5', 
-                borderRadius: 1,
+                borderRadius: 2,
                 border: '1px solid #e0e0e0'
               }}>
-                <Typography variant="caption" color="text.secondary" gutterBottom>
-                  Associated Minute:
-                </Typography>
-                <Typography variant="body2">
-                  {getSelectedMinuteText() || 'Minute not found'}
-                </Typography>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                  <DescriptionIcon fontSize="small" color="primary" />
+                  <Typography variant="subtitle2" fontWeight={600}>
+                    Associated Minute:
+                  </Typography>
+                </Stack>
+                
+                <Stack spacing={1} sx={{ ml: 4 }}>
+                  <Typography variant="body2" fontWeight={500}>
+                    {selectedMinute.topic || selectedMinute.title || 'Untitled Minute'}
+                  </Typography>
+                  
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Typography variant="caption" color="text.secondary">
+                      Created: {format(new Date(selectedMinute.created_at), 'MMM d, yyyy')}
+                    </Typography>
+                    <Chip 
+                      label={`${selectedMinute.actions?.length || 0} actions`} 
+                      size="small" 
+                      variant="outlined"
+                    />
+                  </Stack>
+                  
+                  {selectedMinute.discussion && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        <strong>Discussion preview:</strong>
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                        {getPlainTextPreview(selectedMinute.discussion, 150)}
+                      </Typography>
+                    </Box>
+                  )}
+                </Stack>
               </Box>
+            )}
+
+            {/* Show warning if minute not found for editing */}
+            {editingAction && formData.minute_id && !selectedMinute && (
+              <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                Associated minute not found. The minute may have been deleted.
+              </Alert>
             )}
 
             <TextField
               fullWidth
-              label="Task Description"
+              label="Task Description *"
               multiline
               rows={3}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               required
-              placeholder="Describe the action item..."
+              placeholder="Describe the action item in detail..."
             />
 
             <AssignToSelector
@@ -315,10 +488,30 @@ const AddActionDialog = ({
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                 label="Priority"
               >
-                <MenuItem value={1}>🔴 High - Urgent</MenuItem>
-                <MenuItem value={2}>🟠 Medium - Normal</MenuItem>
-                <MenuItem value={3}>🟢 Low - Flexible</MenuItem>
-                <MenuItem value={4}>⚪ Very Low - Info Only</MenuItem>
+                <MenuItem value={1}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <span>🔴</span>
+                    <span>High - Urgent</span>
+                  </Stack>
+                </MenuItem>
+                <MenuItem value={2}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <span>🟠</span>
+                    <span>Medium - Normal</span>
+                  </Stack>
+                </MenuItem>
+                <MenuItem value={3}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <span>🟢</span>
+                    <span>Low - Flexible</span>
+                  </Stack>
+                </MenuItem>
+                <MenuItem value={4}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <span>⚪</span>
+                    <span>Very Low - Info Only</span>
+                  </Stack>
+                </MenuItem>
               </Select>
             </FormControl>
 
@@ -329,7 +522,7 @@ const AddActionDialog = ({
               rows={2}
               value={formData.remarks}
               onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-              placeholder="Additional notes or context..."
+              placeholder="Additional notes or context for this action item..."
             />
           </Stack>
         </DialogContent>
@@ -343,7 +536,7 @@ const AddActionDialog = ({
             fullWidth={isMobile}
             variant="contained"
             onClick={handleSave}
-            disabled={loading || !formData.description.trim() || (!editingAction && !formData.minute_id)}
+            disabled={loading || !formData.description.trim() || (!editingAction && minutes.length > 0 && !formData.minute_id)}
             sx={{ order: isMobile ? 1 : 2, py: isMobile ? 1.5 : 1 }}
           >
             {editingAction ? 'Update Action' : 'Create Action'}

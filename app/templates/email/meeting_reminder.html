@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+<p>Dear <strong>{{ participant_name }}</strong>,</p>
+
+<p>This is a friendly reminder about your upcoming meeting:</p>
+
+<div class="meeting-details">
+    <h3>{{ meeting_title }}</h3>
+    
+    <div class="detail-row">
+        <span class="detail-label">⏰ Starts in:</span>
+        <span class="detail-value">{{ time_until }}</span>
+    </div>
+    
+    <div class="detail-row">
+        <span class="detail-label">📅 Date & Time:</span>
+        <span class="detail-value">{{ meeting_datetime }}</span>
+    </div>
+    
+    {% if platform == 'physical' %}
+        <div class="detail-row">
+            <span class="detail-label">📍 Location:</span>
+            <span class="detail-value">{{ location }}</span>
+        </div>
+    {% else %}
+        {% if meeting_link %}
+            <div class="detail-row">
+                <span class="detail-label">🔗 Meeting Link:</span>
+                <span class="detail-value">
+                    <a href="{{ meeting_link }}">{{ meeting_link }}</a>
+                </span>
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+{% if meeting_link %}
+<div style="text-align: center;">
+    <a href="{{ meeting_link }}" class="button">Join Meeting Now</a>
+</div>
+{% endif %}
+
+<p>Please don't forget to:</p>
+<ul>
+    <li>✓ Prepare any necessary materials</li>
+    <li>✓ Test your audio/video setup (for online meetings)</li>
+    <li>✓ Review the agenda</li>
+</ul>
+
+<p>We look forward to your participation!</p>
+
+<p>Best regards,<br>
+<strong>{{ project_name }} Team</strong></p>
+{% endblock %}

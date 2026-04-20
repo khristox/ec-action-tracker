@@ -23,7 +23,22 @@ import {
   Chip,
   Fade,
   Tooltip,
-  Zoom
+  Zoom,
+  Drawer,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Checkbox,
+  FormControlLabel,
+  Switch,
+  Alert,
+  Snackbar
 } from '@mui/material';
 
 import {
@@ -47,7 +62,13 @@ import {
   Refresh as RefreshIcon,
   Clear as ClearIcon,
   CalendarToday as CalendarIcon,
-  AccessTime as AccessTimeIcon
+  AccessTime as AccessTimeIcon,
+  NotificationsActive as NotificationsIcon,
+  Email as EmailIcon,
+  WhatsApp as WhatsAppIcon,
+  Sms as SmsIcon,
+  Send as SendIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 
 import {
@@ -66,6 +87,8 @@ import {
   selectUpcomingMeetings,
   selectMeetingsStatistics
 } from '../../../store/slices/actionTracker/meetingSlice';
+
+import api from '../../../services/api';
 
 const COLORS = {
   primary: '#6366f1',
@@ -131,7 +154,190 @@ const LabelValue = ({ label, value, icon: Icon, iconColor, isDescription = false
   );
 };
 
-const MeetingCard = ({ meeting, statusOptions, onView, onEdit }) => {
+// Notification Dialog Component
+const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
+  const [selectedParticipants, setSelectedParticipants] = useState([]);
+  const [notificationType, setNotificationType] = useState(['email']);
+  const [customMessage, setCustomMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [selectAll, setSelectAll] = useState(false);
+
+  useEffect(() => {
+    if (open && participants) {
+      setSelectedParticipants(participants.map(p => p.id));
+      setSelectAll(true);
+    }
+  }, [open, participants]);
+
+  const handleToggleParticipant = (participantId) => {
+    setSelectedParticipants(prev => 
+      prev.includes(participantId) 
+        ? prev.filter(id => id !== participantId)
+        : [...prev, participantId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedParticipants([]);
+    } else {
+      setSelectedParticipants(participants.map(p => p.id));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await onSend({
+        participant_ids: selectedParticipants,
+        notification_type: notificationType,
+        custom_message: customMessage
+      });
+      onClose();
+    } catch (error) {
+      console.error('Failed to send notifications:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" spacing={1} alignItems="center">
+            <NotificationsIcon color="primary" />
+            <Typography variant="h6">Send Meeting Notifications</Typography>
+          </Stack>
+          <IconButton onClick={onClose}><CloseIcon /></IconButton>
+        </Stack>
+      </DialogTitle>
+      
+      <DialogContent dividers>
+        <Stack spacing={3}>
+          {/* Meeting Info */}
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc' }}>
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+              Meeting: {meeting?.title}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {new Date(meeting?.meeting_date).toLocaleString()}
+            </Typography>
+          </Paper>
+
+          {/* Notification Types */}
+          <Box>
+            <Typography variant="subtitle2" gutterBottom>Send via</Typography>
+            <Stack direction="row" spacing={2}>
+              <Chip
+                icon={<EmailIcon />}
+                label="Email"
+                color={notificationType.includes('email') ? 'primary' : 'default'}
+                onClick={() => {
+                  if (notificationType.includes('email')) {
+                    setNotificationType(notificationType.filter(t => t !== 'email'));
+                  } else {
+                    setNotificationType([...notificationType, 'email']);
+                  }
+                }}
+              />
+              <Chip
+                icon={<WhatsAppIcon />}
+                label="WhatsApp"
+                color={notificationType.includes('whatsapp') ? 'primary' : 'default'}
+                onClick={() => {
+                  if (notificationType.includes('whatsapp')) {
+                    setNotificationType(notificationType.filter(t => t !== 'whatsapp'));
+                  } else {
+                    setNotificationType([...notificationType, 'whatsapp']);
+                  }
+                }}
+              />
+              <Chip
+                icon={<SmsIcon />}
+                label="SMS"
+                color={notificationType.includes('sms') ? 'primary' : 'default'}
+                onClick={() => {
+                  if (notificationType.includes('sms')) {
+                    setNotificationType(notificationType.filter(t => t !== 'sms'));
+                  } else {
+                    setNotificationType([...notificationType, 'sms']);
+                  }
+                }}
+              />
+            </Stack>
+          </Box>
+
+          {/* Participants Selection */}
+          <Box>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Typography variant="subtitle2">Select Participants</Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={selectAll}
+                    onChange={handleSelectAll}
+                    size="small"
+                  />
+                }
+                label="Select All"
+              />
+            </Stack>
+            
+            <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+              <List dense>
+                {participants?.map((participant) => (
+                  <ListItem key={participant.id} dense>
+                    <Checkbox
+                      checked={selectedParticipants.includes(participant.id)}
+                      onChange={() => handleToggleParticipant(participant.id)}
+                      size="small"
+                    />
+                    <ListItemAvatar>
+                      <Avatar sx={{ width: 32, height: 32 }}>
+                        {participant.full_name?.[0] || participant.username?.[0]}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={participant.full_name || participant.username}
+                      secondary={participant.email}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Paper>
+          </Box>
+
+          {/* Custom Message */}
+          <TextField
+            label="Custom Message (Optional)"
+            multiline
+            rows={3}
+            value={customMessage}
+            onChange={(e) => setCustomMessage(e.target.value)}
+            placeholder="Add any additional information for participants..."
+            fullWidth
+          />
+        </Stack>
+      </DialogContent>
+      
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          onClick={handleSend}
+          disabled={sending || selectedParticipants.length === 0}
+          startIcon={sending ? <CircularProgress size={20} /> : <SendIcon />}
+        >
+          {sending ? 'Sending...' : `Send to ${selectedParticipants.length} Participant(s)`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const MeetingCard = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
   // Find status option from Redux state
   let statusOption = null;
   const meetingStatus = meeting.status;
@@ -246,6 +452,11 @@ const MeetingCard = ({ meeting, statusOptions, onView, onEdit }) => {
               <EditIcon sx={{ fontSize: 18 }} />
             </IconButton>
           </Tooltip>
+          <Tooltip title="Send Notifications">
+            <IconButton size="small" sx={{ color: COLORS.primary }} onClick={(e) => { e.stopPropagation(); onNotify(meeting); }}>
+              <NotificationsIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="View Details">
             <Button 
               size="small" 
@@ -286,6 +497,10 @@ const Meetings = () => {
   const [anchorEl, setAnchorEl] = useState(null);
   const [sortAnchorEl, setSortAnchorEl] = useState(null);
   const [showUpcomingOnly, setShowUpcomingOnly] = useState(false);
+  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [selectedMeeting, setSelectedMeeting] = useState(null);
+  const [meetingParticipants, setMeetingParticipants] = useState([]);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   
   const itemsPerPage = 12;
 
@@ -354,6 +569,41 @@ const Meetings = () => {
     setSortAnchorEl(null);
   };
 
+  const handleNotifyClick = async (meeting) => {
+    setSelectedMeeting(meeting);
+    setNotificationDialogOpen(true);
+    
+    // Fetch participants for this meeting
+    try {
+      const response = await api.get(`/action-tracker/meetings/${meeting.id}/participants`);
+      setMeetingParticipants(response.data?.items || response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch participants:', error);
+      setMeetingParticipants([]);
+    }
+  };
+
+  const handleSendNotifications = async (notificationData) => {
+    try {
+      const response = await api.post(
+        `/action-tracker/meetings/${selectedMeeting.id}/notify-participants`,
+        notificationData
+      );
+      
+      setSnackbar({
+        open: true,
+        message: `Notifications sent to ${response.data.sent} participants successfully!`,
+        severity: 'success'
+      });
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.detail || 'Failed to send notifications',
+        severity: 'error'
+      });
+    }
+  };
+
   const getStatusFilterLabel = () => {
     if (statusFilter === 'all') return 'All Status';
     const option = statusOptions.find(opt => opt.value === statusFilter);
@@ -371,7 +621,12 @@ const Meetings = () => {
   };
 
   return (
-    <Box sx={{ width: '100%', p: 0 }}>
+    <Box sx={{ 
+      width: '100%', 
+      minHeight: 'calc(100vh - 64px)', // Fill entire screen minus navbar
+      p: { xs: 2, sm: 3, md: 4 },
+      bgcolor: '#f8fafc'
+    }}>
       {/* Header Section */}
       <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={3} spacing={2}>
         <Box>
@@ -686,6 +941,7 @@ const Meetings = () => {
                   statusOptions={statusOptions}
                   onView={(id) => navigate(`/meetings/${id}`)} 
                   onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
+                  onNotify={handleNotifyClick}
                 />
               </Box>
             ))}
@@ -720,6 +976,35 @@ const Meetings = () => {
           <CircularProgress size={32} sx={{ color: COLORS.primary }} />
         </Box>
       )}
+
+      {/* Notification Dialog */}
+      <NotificationDialog
+        open={notificationDialogOpen}
+        onClose={() => {
+          setNotificationDialogOpen(false);
+          setSelectedMeeting(null);
+          setMeetingParticipants([]);
+        }}
+        meeting={selectedMeeting}
+        participants={meetingParticipants}
+        onSend={handleSendNotifications}
+      />
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

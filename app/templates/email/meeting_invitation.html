@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block content %}
+<p>Dear <strong>{{ participant_name }}</strong>,</p>
+
+<p>You have been invited to a meeting. Please find the details below:</p>
+
+<div class="meeting-details">
+    <h3>{{ meeting_title }}</h3>
+    
+    <div class="detail-row">
+        <span class="detail-label">📅 Date & Time:</span>
+        <span class="detail-value">{{ meeting_datetime }}</span>
+    </div>
+    
+    {% if platform == 'physical' %}
+        <div class="detail-row">
+            <span class="detail-label">📍 Location:</span>
+            <span class="detail-value">{{ location }}</span>
+        </div>
+    {% else %}
+        {% if meeting_link %}
+            <div class="detail-row">
+                <span class="detail-label">🔗 Meeting Link:</span>
+                <span class="detail-value">
+                    <a href="{{ meeting_link }}">{{ meeting_link }}</a>
+                </span>
+            </div>
+        {% endif %}
+        
+        {% if meeting_id %}
+            <div class="detail-row">
+                <span class="detail-label">🆔 Meeting ID:</span>
+                <span class="detail-value">{{ meeting_id }}</span>
+            </div>
+        {% endif %}
+        
+        {% if passcode %}
+            <div class="detail-row">
+                <span class="detail-label">🔐 Passcode:</span>
+                <span class="detail-value">{{ passcode }}</span>
+            </div>
+        {% endif %}
+    {% endif %}
+    
+    {% if dial_in_numbers %}
+        <div class="detail-row">
+            <span class="detail-label">📞 Dial-in:</span>
+            <span class="detail-value">
+                {% for number in dial_in_numbers %}
+                    {{ number.number }}{% if number.instructions %} ({{ number.instructions }}){% endif %}<br>
+                {% endfor %}
+            </span>
+        </div>
+    {% endif %}
+</div>
+
+{% if custom_message %}
+<div class="info-box">
+    <strong>📝 Additional Information:</strong><br>
+    {{ custom_message }}
+</div>
+{% endif %}
+
+{% if meeting_link %}
+<div style="text-align: center;">
+    <a href="{{ meeting_link }}" class="button">Join Meeting</a>
+</div>
+{% endif %}
+
+<div class="divider"></div>
+
+<p><strong>What to expect:</strong></p>
+<ul>
+    <li>Please join 5 minutes before the scheduled time</li>
+    <li>Ensure your microphone and camera are working</li>
+    <li>Review the agenda beforehand if available</li>
+</ul>
+
+<p>If you have any questions or conflicts, please contact the meeting organizer.</p>
+
+<p>Best regards,<br>
+<strong>{{ project_name }} Team</strong></p>
+{% endblock %}

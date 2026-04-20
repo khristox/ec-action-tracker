@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
-from app.crud.action_tracker import meeting, meeting_document
+from app.crud.action_tracker import meeting_crud, meeting_document
 from app.models.general.dynamic_attribute import Attribute, AttributeGroup
 from app.models.user import User
 from app.models.action_tracker import MeetingDocument
@@ -93,7 +93,7 @@ async def upload_document(
     logger.info("=" * 60)
     
     # Verify meeting exists
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
@@ -183,7 +183,7 @@ async def upload_document_alt(
     logger.info("=" * 60)
     
     # Verify meeting exists
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     

@@ -1,5 +1,4 @@
 # app/api/v1/endpoints/action_tracker/meetings.py
-import json
 import uuid
 from datetime import datetime
 from typing import List, Optional
@@ -12,20 +11,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
-from app.crud.action_tracker import meeting, meeting_action, meeting_minutes, meeting_participant
+from app.core.security import get_current_user
+from app.crud.action_tracker import meeting_crud, meeting_action, meeting_minutes, meeting_participant
 
+from app.db.session import get_db
 from app.models.general.dynamic_attribute import Attribute
 from app.models.user import User
 from app.models.action_tracker import Meeting, MeetingAction, MeetingDocument, MeetingParticipant, MeetingQuery, MeetingStatus, MeetingStatusHistory, MeetingMinutes
-from app.schemas.action_tracker import MeetingCreate, MeetingCreateResponse, MeetingListResponse, MeetingPaginationResponse, MeetingParticipantResponse, MeetingParticipantUpdate, MeetingResponse, MeetingStatusHistoryResponse, MeetingUpdate
-from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesCreate, MeetingMinutesResponse
+from app.schemas.action_tracker import (
+    MeetingCreateResponse,  MeetingMinutesResponse, MeetingPaginationResponse, MeetingCreate, MeetingParticipantResponse, MeetingParticipantUpdate, 
+    MeetingStatusHistoryResponse, MeetingUpdate, MeetingResponse, MeetingListResponse, NotificationRequest, ZoomMeetingCreate
+)
+from app.schemas.meeting_minutes.meeting_minutes import (
+    MeetingActionCreate,
+    MeetingActionResponse,
+    MeetingMinutesCreate,
+    MeetingMinutesResponse,
+    MeetingMinutesUpdate
+)
 
 from .status_utils import get_status_id_by_short_name, get_status_by_short_name, get_valid_status_short_names
 from .utils import build_meeting_response
+from app.services.email_service import EmailService, email_service
+
 
 router = APIRouter()
 
-# ==================== CREATE MEET`ING ====================
+# ==================== CREATE MEETING ====================
 @router.post("/", response_model=MeetingCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_meeting(
     meeting_in: MeetingCreate,
@@ -41,7 +53,7 @@ async def create_meeting(
         # Ensure created_by_id is set
         meeting_data = meeting_in.model_dump()
         
-        result = await meeting.create_with_participants(db, meeting_in, current_user.id)
+        result = await meeting_crud.create_with_participants(db, meeting_in, current_user.id)
         
         print(f"Meeting created successfully: {result.id}")
         
@@ -238,7 +250,7 @@ async def update_meeting(
     """Update meeting with audit fields (updated_by_id, updated_at)"""
     print("Full incoming payload:", meeting_in.model_dump(exclude_unset=True))
     
-    db_obj = await meeting.get(db, meeting_id)
+    db_obj = await meeting_crud.get(db, meeting_id)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Meeting not found")
 
@@ -284,7 +296,7 @@ async def update_meeting(
     await db.refresh(db_obj)
     
     # Reload with all relationships
-    updated = await meeting.get_meeting_with_details(db, meeting_id)
+    updated = await meeting_crud.get_meeting_with_details(db, meeting_id)
     return build_meeting_response(updated)
 
 
@@ -304,7 +316,7 @@ async def update_meeting_status(
         raise HTTPException(400, f"Invalid status. Use: {', '.join(valid)}")
     
     new_status_id = UUID(status_info["id"])
-    db_obj = await meeting.get(db, meeting_id)
+    db_obj = await meeting_crud.get(db, meeting_id)
     
     if not db_obj:
         raise HTTPException(404, f"Meeting {meeting_id} not found")
@@ -335,7 +347,7 @@ async def update_meeting_status(
         await db.commit()
     
     # Reload with all relationships
-    result = await meeting.get_meeting_with_details(db, meeting_id)
+    result = await meeting_crud.get_meeting_with_details(db, meeting_id)
     return build_meeting_response(result)
 
 
@@ -359,12 +371,12 @@ async def add_meeting_minutes(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Add minutes to meeting with audit fields"""
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
     # Create minutes with audit fields
-    minutes = await meeting.add_minutes(db, meeting_id, minutes_in, current_user.id)
+    minutes = await meeting_crud.add_minutes(db, meeting_id, minutes_in, current_user.id)
     
     # Reload with actions to ensure complete response
     query = select(MeetingMinutes).options(
@@ -381,45 +393,49 @@ async def add_meeting_minutes(
 @router.get("/{meeting_id}/minutes", response_model=List[MeetingMinutesResponse])
 async def get_meeting_minutes(
     meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    skip: int = 0,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    """Get all minutes for a meeting"""
     
-    """Get all minutes for a meeting with audit info"""
-    # Eager load all relationships
-    result = await db.execute(
-    select(MeetingMinutes)
-    .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
-    .options(
-        selectinload(MeetingMinutes.recorded_by),
-        selectinload(MeetingMinutes.created_by),
-        selectinload(MeetingMinutes.updated_by),
-        selectinload(MeetingMinutes.active_actions)  # Use active_actions instead of actions
-            .selectinload(MeetingAction.assigned_to),
-        selectinload(MeetingMinutes.active_actions).selectinload(MeetingAction.assigned_by),
-        selectinload(MeetingMinutes.active_actions).selectinload(MeetingAction.created_by),
-        selectinload(MeetingMinutes.active_actions).selectinload(MeetingAction.updated_by),
+    # Check if meeting exists
+    meeting = await meeting_crud.get(db, id=meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    # Get minutes using the CRUD method
+    minutes_list = await meeting_minutes.get_meeting_minutes(
+        db=db,
+        meeting_id=meeting_id,
+        skip=skip,
+        limit=limit
     )
-    .offset(skip)
-    .limit(limit)
-    .order_by(MeetingMinutes.timestamp.desc())
-    )
-    minutes_list = result.scalars().all()
-
+    
+    # Create response objects - don't modify the original models
+    response_data = []
     for minute in minutes_list:
-        if minute.actions:
-            minute.actions = [action for action in minute.actions if action.is_active]
-
-    #print(json.dumps([minute.__dict__ for minute in minutes_list], default=str, indent=2))
-
+        response_data.append({
+            "id": minute.id,
+            "meeting_id": minute.meeting_id,
+            "topic": minute.topic,
+            "discussion": minute.discussion,
+            "decisions": minute.decisions,
+            "timestamp": minute.timestamp,
+            "recorded_by_id": minute.recorded_by_id,
+            "recorded_by_name": minute.recorded_by.username if minute.recorded_by else None,
+            "created_by_id": minute.created_by_id,
+            "created_by_name": minute.created_by.username if minute.created_by else None,
+            "created_at": minute.created_at,
+            "updated_by_id": minute.updated_by_id,
+            "updated_by_name": minute.updated_by.username if minute.updated_by else None,
+            "updated_at": minute.updated_at,
+            "is_active": minute.is_active,
+            "actions": minute.actions if hasattr(minute, 'actions') else []
+        })
     
-    # Simply return the ORM objects - Pydantic will use from_attributes=True
-    # and automatically call the properties for the response
-    return minutes_list
-
-
+    return response_data
 # ==================== DELETE MEETING ====================
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_meeting(
@@ -428,7 +444,7 @@ async def delete_meeting(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Soft delete meeting (set is_active=False) with audit"""
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
@@ -451,7 +467,7 @@ async def get_meeting_status_history(
 ):
     """Get status change history for a meeting with audit info"""
     # Check if meeting exists
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
@@ -503,7 +519,7 @@ async def get_latest_meeting_status_history(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Get the latest status change for a meeting"""
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
@@ -553,11 +569,11 @@ async def get_meeting_participants(
 ):
     """Get all participants for a meeting"""
     # Check if meeting exists
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
-    return await meeting_participant.get_by_meeting(db, meeting_id)
+    return await meeting_participant.get_meeting_participants(db, meeting_id)
 
 
 @router.patch("/{meeting_id}/participants/{participant_id}", response_model=MeetingParticipantResponse)
@@ -570,7 +586,7 @@ async def update_participant_attendance(
 ):
     """Update participant attendance status"""
     # Check if meeting exists
-    meeting_obj = await meeting.get(db, meeting_id)
+    meeting_obj = await meeting_crud.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
@@ -583,3 +599,69 @@ async def update_participant_attendance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
     
     return participant
+
+
+# app/api/v1/endpoints/action_tracker/meetings.py
+
+@router.post("/{meeting_id}/notify-participants")
+async def notify_meeting_participants(
+    meeting_id: UUID,
+    notification_data: NotificationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Send notifications to meeting participants"""
+    
+    # Get meeting details
+    meeting = await meeting_crud.get(db, id=meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    # Get participants
+    User.get_extended_attribute()
+    participants = await current_user.get_multi_by_ids(db, ids=notification_data.participant_ids)
+    
+    # Prepare notification content
+    notification_content = {
+        "subject": f"Meeting Invitation: {meeting.title}",
+        "meeting_details": notification_data.meeting_details,
+        "custom_message": notification_data.custom_message
+    }
+    
+    # Send notifications based on type
+    results = []
+    if "email" in notification_data.notification_type:
+        email_results = await email_service.send_email_notifications(participants, notification_content)
+        results.extend(email_results)
+    
+    """ if "whatsapp" in notification_data.notification_type:
+        whatsapp_results = await send_whatsapp_notifications(participants, notification_content)
+        results.extend(whatsapp_results)
+    
+    if "sms" in notification_data.notification_type:
+        sms_results = await send_sms_notifications(participants, notification_content)
+        results.extend(sms_results) """
+    
+    return {"success": True, "sent": len(results), "results": results}
+
+@router.post("/create-zoom-meeting")
+async def create_zoom_meeting(
+    meeting_data: ZoomMeetingCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a Zoom meeting using Zoom API"""
+    
+    # Implement Zoom API integration
+    # You'll need Zoom API credentials
+    zoom_client = ZoomClient()
+    meeting = await zoom_client.create_meeting(
+        topic=meeting_data.topic,
+        start_time=meeting_data.start_time,
+        duration=meeting_data.duration
+    )
+    
+    return {
+        "join_url": meeting.join_url,
+        "id": meeting.id,
+        "password": meeting.password
+    }

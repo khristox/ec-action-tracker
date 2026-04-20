@@ -108,7 +108,7 @@ const RichTextContent = ({ content }) => {
   return (
     <Box
       sx={{
-        textAlign: 'left',                    // Fixed: Ensure left alignment
+        textAlign: 'left',
         lineHeight: 1.7,
         color: 'text.primary',
         '& p': {
@@ -444,9 +444,10 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
       setShowAddMinutesDialog(false);
       setNewMinutes({ topic: '', discussion: '', decisions: '' });
       setSnackbar({ open: true, message: 'Minutes added successfully!', severity: 'success' });
+      fetchMinutes(); // Refresh the list
       if (onRefresh) onRefresh();
     } catch (err) {
-      setSnackbar({ open: true, message: 'Failed to add minutes', severity: 'error' });
+      setSnackbar({ open: true, message: err.message || 'Failed to add minutes', severity: 'error' });
     } finally {
       setSubmitting(false);
     }
@@ -509,7 +510,7 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
       await api.delete(`/action-tracker/minutes/${selectedMinute.id}`);
       handleMenuClose();
       setSnackbar({ open: true, message: 'Minutes deleted successfully!', severity: 'success' });
-      dispatch(fetchMeetingMinutes(meetingId));
+      fetchMinutes(); // Refresh the list
     } catch (err) {
       setSnackbar({ open: true, message: 'Failed to delete minutes', severity: 'error' });
     } finally {
@@ -521,27 +522,8 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
     setExpandedMinute(expandedMinute === minuteId ? null : minuteId);
   };
 
+  // Don't show loading skeleton when there are no minutes but still loading
   if (isLoading && minutesList.length === 0) return <LoadingSkeleton />;
-
-  if (!isLoading && minutesList.length === 0) {
-    return (
-      <Box>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-          <Typography variant="h6" fontWeight={700}>Meeting Minutes</Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowAddMinutesDialog(true)}>
-            Add Minutes
-          </Button>
-        </Stack>
-        <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
-          <AutoAwesomeIcon sx={{ fontSize: 80, color: '#cbd5e1', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">No Minutes Yet</Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowAddMinutesDialog(true)} sx={{ mt: 2 }}>
-            Add First Minutes
-          </Button>
-        </Paper>
-      </Box>
-    );
-  }
 
   return (
     <Box>
@@ -551,43 +533,83 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
         </Typography>
         <Stack direction="row" spacing={1}>
           <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh} disabled={isLoading}><RefreshIcon /></IconButton>
+            <IconButton onClick={handleRefresh} disabled={isLoading}>
+              <RefreshIcon />
+            </IconButton>
           </Tooltip>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowAddMinutesDialog(true)}>
+          <Button 
+            variant="contained" 
+            startIcon={<AddIcon />} 
+            onClick={() => setShowAddMinutesDialog(true)}
+          >
             Add Minutes
           </Button>
         </Stack>
       </Stack>
 
-      {error && <Alert severity="error" onClose={() => dispatch(clearMinutesError())}>{error}</Alert>}
+      {error && (
+        <Alert severity="error" onClose={() => dispatch(clearMinutesError())} sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
 
-      <Stack spacing={2}>
-        {minutesList.map((minute) => (
-          <MinutesCard
-            key={minute.id}
-            minute={minute}
-            expanded={expandedMinute === minute.id}
-            onToggle={() => handleToggleMinute(minute.id)}
-            onAddAction={handleAddAction}
-            onEditAction={handleEditAction}
-            onEditMinute={handleEditMinute}
-            onMenuOpen={handleMenuOpen}
-          />
-        ))}
-      </Stack>
+      {!isLoading && minutesList.length === 0 ? (
+        <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
+          <AutoAwesomeIcon sx={{ fontSize: 80, color: '#cbd5e1', mb: 2 }} />
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No Minutes Yet
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Start by adding the first meeting minutes
+          </Typography>
+          <Button 
+            variant="contained" 
+            startIcon={<AddIcon />} 
+            onClick={() => setShowAddMinutesDialog(true)}
+            size="large"
+          >
+            Add First Minutes
+          </Button>
+        </Paper>
+      ) : (
+        <Stack spacing={2}>
+          {minutesList.map((minute) => (
+            <MinutesCard
+              key={minute.id}
+              minute={minute}
+              expanded={expandedMinute === minute.id}
+              onToggle={() => handleToggleMinute(minute.id)}
+              onAddAction={handleAddAction}
+              onEditAction={handleEditAction}
+              onEditMinute={handleEditMinute}
+              onMenuOpen={handleMenuOpen}
+            />
+          ))}
+        </Stack>
+      )}
 
-      {/* Add Minutes Dialog with RichTextEditor */}
-      <Dialog open={showAddMinutesDialog} onClose={() => setShowAddMinutesDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Add Meeting Minutes</DialogTitle>
+      {/* Add Minutes Dialog */}
+      <Dialog 
+        open={showAddMinutesDialog} 
+        onClose={() => !submitting && setShowAddMinutesDialog(false)} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>
+          Add Meeting Minutes
+          {submitting && <LinearProgress sx={{ mt: 1 }} />}
+        </DialogTitle>
         <Divider />
         <DialogContent sx={{ pt: 3 }}>
           <Stack spacing={3}>
             <TextField
               fullWidth
-              label="Topic"
+              label="Topic *"
               value={newMinutes.topic}
               onChange={(e) => setNewMinutes({ ...newMinutes, topic: e.target.value })}
               required
+              disabled={submitting}
+              helperText="Required - A descriptive title for these minutes"
             />
             <Box>
               <Typography variant="subtitle2" gutterBottom>Discussion</Typography>
@@ -596,43 +618,122 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
                 onChange={(html) => setNewMinutes({ ...newMinutes, discussion: html })}
                 placeholder="Record discussion points..."
                 minHeight={220}
+                disabled={submitting}
               />
             </Box>
             <Box>
-              <Typography variant="subtitle2" gutterBottom>Decisions</Typography>
+              <Typography variant="subtitle2" gutterBottom>Decisions (Optional)</Typography>
               <RichTextEditor
                 value={newMinutes.decisions}
                 onChange={(html) => setNewMinutes({ ...newMinutes, decisions: html })}
-                placeholder="Record decisions made..."
+                placeholder="Record decisions made during the meeting..."
                 minHeight={160}
+                disabled={submitting}
               />
             </Box>
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowAddMinutesDialog(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleAddMinutes} disabled={submitting || !newMinutes.topic.trim()}>
+          <Button onClick={() => setShowAddMinutesDialog(false)} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={handleAddMinutes} 
+            disabled={submitting || !newMinutes.topic.trim()}
+          >
             {submitting ? 'Saving...' : 'Save Minutes'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Other dialogs and menu remain the same */}
-      <AddActionDialog open={showAddActionDialog} onClose={() => setShowAddActionDialog(false)} /* ... other props */ />
-      <EditActionDialog open={showEditActionDialog} action={selectedAction} onClose={() => setShowEditActionDialog(false)} onSave={handleActionUpdated} />
-      <EditMinuteDialog open={showEditMinuteDialog} minute={selectedMinute} onClose={() => setShowEditMinuteDialog(false)} onSave={handleMinuteUpdated} />
+      {/* Add Action Dialog */}
+     {/* Add Action Dialog */}
+{showAddActionDialog && (
+  <AddActionDialog 
+    open={showAddActionDialog} 
+    onClose={() => setShowAddActionDialog(false)}
+    meetingId={meetingId}
+    minutes={minutesList}  // Pass the minutes list
+    selectedMinuteId={selectedMinuteId}  // Use correct prop name
+    onSave={async (payload) => {
+      try {
+        // Use the minute-based endpoint
+        const response = await api.post(
+          `/action-tracker/minutes/${payload.minute_id}/actions`,
+          {
+            description: payload.description,
+            due_date: payload.due_date,
+            priority: payload.priority,
+            remarks: payload.remarks,
+            assigned_to_id: payload.assigned_to_id,
+            assigned_to_name: payload.assigned_to_name
+          }
+        );
+        handleActionCreated();
+        return response.data;
+      } catch (err) {
+        console.error('Error creating action:', err);
+        throw err;
+      }
+    }}
+    loading={submitting}
+    error={error}
+  />
+)}
 
+      {/* Edit Action Dialog */}
+      {showEditActionDialog && selectedAction && (
+        <EditActionDialog 
+          open={showEditActionDialog} 
+          action={selectedAction}
+          onClose={() => setShowEditActionDialog(false)} 
+          onSave={handleActionUpdated}
+          meetingId={meetingId}
+        />
+      )}
+
+      {/* Edit Minute Dialog */}
+      {showEditMinuteDialog && selectedMinute && (
+        <EditMinuteDialog 
+          open={showEditMinuteDialog} 
+          minute={selectedMinute}
+          onClose={() => setShowEditMinuteDialog(false)} 
+          onSave={handleMinuteUpdated}
+        />
+      )}
+
+      {/* Menu for minutes actions */}
       <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose}>
-        <MenuItem onClick={() => { handleMenuClose(); if (selectedMinute) handleAddAction(selectedMinute.id); }}>
+        <MenuItem 
+          onClick={() => { 
+            handleMenuClose(); 
+            if (selectedMinute) handleAddAction(selectedMinute.id); 
+          }}
+        >
+          <AssignmentIcon fontSize="small" sx={{ mr: 1 }} />
           Add Action Item
         </MenuItem>
         <MenuItem onClick={handleDeleteMinutes} sx={{ color: 'error.main' }}>
+          <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
           Delete Minutes
         </MenuItem>
       </Menu>
 
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-        <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
+      {/* Snackbar for notifications */}
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={4000} 
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          severity={snackbar.severity} 
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
       </Snackbar>
     </Box>
   );

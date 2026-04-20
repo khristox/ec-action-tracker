@@ -8,25 +8,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-
-# Add to your Dockerfile
-RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-spa \
-    tesseract-ocr-fra \
-    poppler-utils \
-    && rm -rf /var/lib/apt/lists/*
-
-# And in pip requirements
-RUN pip install pytesseract pdf2image Pillow
-
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     default-libmysqlclient-dev \
     pkg-config \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-spa \
+    tesseract-ocr-fra \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for better caching)
@@ -40,6 +32,17 @@ COPY . .
 
 # Create necessary directories
 RUN mkdir -p /app/static /app/logs /app/uploads
+
+# Copy static files if they exist in a separate directory
+# Option 1: If static files are in a 'static' folder at project root
+COPY static/ /app/static/
+
+# Option 2: If using frontend build output
+# COPY ./frontend/build /app/static
+
+# Option 3: If static files are in 'app/static'
+#COPY ./app/static /app/static/
+#COPY app/static /app/static/
 
 # Create a non-root user
 RUN addgroup --system app && \

@@ -1,0 +1,53 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ec_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    command: 
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - ec_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      timeout: 5s
+      retries: 10
+      interval: 10s
+
+  app:
+    image: khristox/ec-action-tracker:latest
+    container_name: ec_app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT}:8001"
+    # Mapping all variables from the .env file automatically
+    env_file:
+      - .env.local
+    environment:
+      # We construct the URL dynamically using variables from .env
+      DATABASE_URL: "mysql+aiomysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/${MYSQL_DATABASE}"
+      BACKEND_URL: "http://${SERVER_IP}:${BACKEND_PORT}"
+      API_BASE_URL: "http://${SERVER_IP}:${BACKEND_PORT}"
+    volumes:
+      - ./logs:/app/logs
+      - ./static:/app/static
+    networks:
+      - ec_network
+
+volumes:
+  mysql_data:
+
+networks:
+  ec_network:
+    driver: bridge

@@ -1,5 +1,7 @@
 # app/schemas/audit.py
 
+import json
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -181,18 +183,53 @@ class AuditLogExportRequest(BaseModel):
 
 # ==================== Response Schemas ====================
 
-class AuditLogResponse(AuditLogBase):
-    """Response schema for a single audit log"""
-    id: uuid.UUID = Field(..., description="Unique identifier")
-    user_id: Optional[uuid.UUID] = Field(None, description="ID of the user")
-    username: Optional[str] = Field(None, description="Username of the user")
-    user_email: Optional[str] = Field(None, description="Email of the user")
-    timestamp: datetime = Field(..., description="When the action occurred")
-    meeting_id: Optional[str] = Field(None, description="Associated meeting ID (if applicable)")
-    context: Optional[str] = Field(None, description="Additional context about the record")
+class AuditLogResponse(BaseModel):
+    """Audit log response schema"""
+    id: uuid.UUID
+    user_id: Optional[uuid.UUID] = None
+    username: Optional[str] = None
+    user_email: Optional[str] = None
+    action: str
+    table_name: str
+    record_id: Optional[str] = None
+    old_values: Optional[Dict[str, Any]] = None
+    new_values: Optional[Dict[str, Any]] = None
+    old_data: Optional[Dict[str, Any]] = None
+    new_data: Optional[Dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    endpoint: Optional[str] = None
+    request_id: Optional[str] = None
+    changes_summary: Optional[str] = None
+    status: str
+    extra_data: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    timestamp: datetime
     
-    model_config = ConfigDict(from_attributes=True)
-
+    @field_validator('status', mode='before')
+    @classmethod
+    def normalize_status(cls, v):
+        """Normalize status to lowercase"""
+        if v is None:
+            return "pending"
+        if hasattr(v, 'value'):
+            return v.value.lower()
+        # Convert any case to lowercase
+        return str(v).lower()
+    
+    @field_validator('old_values', 'new_values', 'old_data', 'new_data', 'extra_data', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        """Parse JSON string fields to dict"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except:
+                return None
+        return v
+    
+    class Config:
+        from_attributes = True
 
 class AuditLogListResponse(BaseModel):
     """Response schema for paginated audit logs"""

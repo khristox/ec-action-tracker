@@ -1,0 +1,1 @@
+{"version":3,"file":"ThemeContext-Cgjl9U3S.js","names":[],"sources":["../../src/context/ThemeContext.jsx"],"sourcesContent":["import { createContext } from 'react';\n\nexport const ThemeContext = createContext();"],"mappings":"iGAEA,IAAa,GAAA,WAAA,gBAA8B"}

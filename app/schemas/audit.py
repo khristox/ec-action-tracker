@@ -36,6 +36,16 @@ class AuditStatus(str, Enum):
     PARTIAL = "PARTIAL"
     PENDING = "PENDING"
 
+    @classmethod
+    def _missing_(cls, value):
+        """Handle case-insensitive lookups"""
+        if isinstance(value, str):
+            upper_value = value.upper()
+            for member in cls:
+                if member.value == upper_value:
+                    return member
+        return None
+
 
 class AuditTableName(str, Enum):
     """Valid table names for audit logs"""

@@ -1,13 +1,12 @@
+# app/schemas/action_tracker.py
+
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from typing import Optional, List, Any, Dict, Union
 from uuid import UUID
 from datetime import datetime
-
-from sqlalchemy import Enum
+from enum import Enum
 
 from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesResponse
-from typing import Literal
-
 
 
 # ==================== Shared Config ====================
@@ -28,8 +27,6 @@ class AssignedToInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-
-
 # ==================== Meeting Participant Schemas ====================
 
 class MeetingParticipantBase(ORMBase):
@@ -39,6 +36,7 @@ class MeetingParticipantBase(ORMBase):
     title: Optional[str] = None
     organization: Optional[str] = None
     is_chairperson: bool = False
+    is_secretary: bool = False  # New field
     attendance_status: Optional[str] = Field("pending", description="attended, missed, pending, excused")
     apology_comment: Optional[str] = None
 
@@ -54,8 +52,9 @@ class MeetingParticipantUpdate(ORMBase):
     title: Optional[str] = None
     organization: Optional[str] = None
     is_chairperson: Optional[bool] = None
+    is_secretary: Optional[bool] = None  # New field
     attendance_status: Optional[str] = None
-    apology_comment: Optional[str] = None  
+    apology_comment: Optional[str] = None
 
 
 class MeetingParticipantResponse(MeetingParticipantBase):
@@ -81,7 +80,6 @@ class AttributeResponse(ORMBase):
     description: Optional[str] = None
     extra_metadata: Optional[dict] = None
     
-    # Optional fields for UI
     color: Optional[str] = None
     sort_order: Optional[int] = None
 
@@ -89,10 +87,8 @@ class AttributeResponse(ORMBase):
 # ==================== Meeting Schemas ====================
 
 class MeetingBase(ORMBase):
-    """
-    Input-only base. Does NOT include `status` as a field because responses
-    receive an ORM Attribute object there, not a string.
-    """
+    """Input-only base. Does NOT include `status` as a field because responses
+    receive an ORM Attribute object there, not a string."""
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
     location_id: Optional[UUID] = None
@@ -102,7 +98,7 @@ class MeetingBase(ORMBase):
     start_time: datetime
     end_time: Optional[datetime] = None
     agenda: Optional[str] = None
-    facilitator: Optional[str] = Field(None, max_length=255)
+    facilitator: Optional[str] = Field(None, max_length=255)  # Secretary name (backward compat)
     chairperson_name: Optional[str] = Field(None, max_length=255)
     status_id: Optional[UUID] = None
 
@@ -131,6 +127,23 @@ class MeetingCreate(MeetingBase):
     status: Optional[str] = None
     participant_list_id: Optional[UUID] = None
     custom_participants: List[MeetingParticipantCreate] = Field(default_factory=list)
+    
+    # Hybrid meeting fields
+    platform: Optional[str] = Field(None, description="Meeting platform (zoom, google_meet, etc.)")
+    meeting_link: Optional[str] = None
+    meeting_id_online: Optional[str] = Field(None, alias="meeting_id")
+    passcode: Optional[str] = None
+    dial_in_numbers: Optional[List[Dict[str, str]]] = None
+    has_online_meeting: bool = Field(False, description="Whether online meeting is available")
+    has_physical_meeting: bool = Field(False, description="Whether physical meeting is available")
+    venue: Optional[str] = Field(None, description="Venue name for physical meetings")
+    address: Optional[str] = Field(None, description="Full address for physical meetings")
+    location_instructions: Optional[str] = Field(None, description="Special instructions for location")
+    send_reminders: bool = Field(True, description="Whether to send email reminders")
+    reminder_minutes_before: int = Field(30, description="Minutes before meeting to send reminders")
+    
+    class Config:
+        populate_by_name = True
 
 
 class MeetingUpdate(ORMBase):
@@ -138,13 +151,37 @@ class MeetingUpdate(ORMBase):
     description: Optional[str] = None
     location_id: Optional[UUID] = None
     location_text: Optional[str] = None
+    
+    # Online meeting fields
+    platform: Optional[str] = None
+    meeting_link: Optional[str] = None
+    meeting_id_online: Optional[str] = Field(None, alias="meeting_id")
+    passcode: Optional[str] = None
+    dial_in_numbers: Optional[List[Dict[str, str]]] = None
+    
+    # Physical meeting fields
+    has_online_meeting: Optional[bool] = None
+    has_physical_meeting: Optional[bool] = None
+    venue: Optional[str] = None
+    address: Optional[str] = None
+    location_instructions: Optional[str] = None
+    
+    # Role fields
+    chairperson_id: Optional[UUID] = None
+    secretary_id: Optional[UUID] = None
+    facilitator: Optional[str] = None  # Secretary name
+    chairperson_name: Optional[str] = None
+    
+    # Notification settings
+    send_reminders: Optional[bool] = None
+    reminder_minutes_before: Optional[int] = None
+    
+    # Other fields
     gps_coordinates: Optional[str] = None
     meeting_date: Optional[datetime] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     agenda: Optional[str] = None
-    facilitator: Optional[str] = None
-    chairperson_name: Optional[str] = None
     status_id: Optional[UUID] = None
     status: Optional[str] = Field(
         None, description="Meeting status slug e.g. pending/started/ended/closed/cancelled"
@@ -152,6 +189,31 @@ class MeetingUpdate(ORMBase):
     is_active: Optional[bool] = None
     status_comment: Optional[str] = Field(None, description="Comment explaining the status change")
     status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
+    
+    @field_validator('platform', 'meeting_link', 'meeting_id_online', 'passcode', mode='before')
+    @classmethod
+    def convert_tuple_to_string(cls, v: Any) -> Any:
+        """Convert tuple to string if needed (fix for SQLAlchemy tuple issue)"""
+        if v is None:
+            return None
+        if isinstance(v, tuple):
+            return v[0] if v and len(v) > 0 else None
+        if isinstance(v, list):
+            return v[0] if v else None
+        return v
+    
+    @field_validator('dial_in_numbers', mode='before')
+    @classmethod
+    def convert_tuple_to_list(cls, v: Any) -> Any:
+        """Convert tuple to list if needed"""
+        if v is None:
+            return None
+        if isinstance(v, tuple):
+            return list(v) if v else None
+        return v
+    
+    class Config:
+        populate_by_name = True
 
 
 # ==================== Meeting Responses ====================
@@ -177,9 +239,6 @@ class MeetingCreateResponse(ORMBase):
     updated_at: Optional[datetime] = None
     is_active: bool = True
     message: str = "Meeting created successfully"
-
-    model_config = ConfigDict(from_attributes=True)
-
 
 
 class MeetingListResponse(ORMBase):
@@ -217,15 +276,43 @@ class MeetingResponse(MeetingBase):
     created_by_id: UUID
     created_by_name: Optional[str] = None
     created_at: datetime
+    
+    # Platform fields
+    platform: Optional[str] = None
+    meeting_link: Optional[str] = None
+    meeting_id_online: Optional[str] = Field(None, alias="meeting_id")
+    passcode: Optional[str] = None
+    
+    # Hybrid meeting fields
+    has_online_meeting: bool = False
+    has_physical_meeting: bool = False
+    venue: Optional[str] = None
+    address: Optional[str] = None
+    location_instructions: Optional[str] = None
+    
+    # Role fields
+    chairperson_id: Optional[UUID] = None
+    secretary_id: Optional[UUID] = None
+    
+    # Notification settings
+    dial_in_numbers: Optional[List[Dict[str, str]]] = None
+    send_reminders: bool = True
+    reminder_minutes_before: int = 30
+    
+    # Audit fields
     updated_by_id: Optional[UUID] = None
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
     is_active: bool = True
+    
+    # Status fields
     status_comment: Optional[str] = None
     status_date: Optional[datetime] = None
     status_name: Optional[str] = None
     location_name: Optional[str] = None
     status: Optional[AttributeResponse] = None
+    
+    # Relationships
     participants: List[MeetingParticipantResponse] = Field(default_factory=list)
     minutes: List['MeetingMinutesResponse'] = Field(default_factory=list)
     documents: List['MeetingDocumentResponse'] = Field(default_factory=list)
@@ -254,6 +341,9 @@ class MeetingResponse(MeetingBase):
         if self.status and not self.status_name:
             self.status_name = self.status.name
         return self
+    
+    class Config:
+        populate_by_name = True
 
 
 class MeetingPaginationResponse(ORMBase):
@@ -262,8 +352,6 @@ class MeetingPaginationResponse(ORMBase):
     page: int
     size: int
     pages: int = 0
-
-
 
 
 # ==================== Action Status History Schemas ====================
@@ -344,9 +432,6 @@ class MeetingDocumentCreate(BaseModel):
     document_type: Optional[str] = "attachment" 
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
 
 
 class MeetingDocumentUpdate(ORMBase):
@@ -364,10 +449,8 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     mime_type: Optional[str] = None
     description: Optional[str] = None
     document_type_id: Optional[UUID] = None 
-    document_type_name: Optional[str] = None  # ← Add this field
-
-    version: int = 1
     document_type_name: Optional[str] = None
+    version: int = 1
     uploaded_by_id: Optional[UUID] = None
     uploaded_by_name: Optional[str] = None
     uploaded_at: datetime
@@ -378,13 +461,10 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
     is_active: bool = True
-
     ocr_text: Optional[str] = None
     ocr_processed_at: Optional[datetime] = None
     ocr_language: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
+
 
 # ==================== Meeting Status History Schemas ====================
 
@@ -440,40 +520,24 @@ class MyTaskResponse(ORMBase):
     id: UUID
     description: str
     meeting_title: str
-    meeting_date: Optional[datetime] = None  # ✅ Make it optional
+    meeting_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     overall_progress_percentage: int = 0
     overall_status_name: Optional[str] = None
     priority: int = 2
-    is_overdue: bool = False  # Default to False
+    is_overdue: bool = False
     assigned_by_name: Optional[str] = None
     assigned_at: Optional[datetime] = None
-    
-    model_config = ConfigDict(from_attributes=True)
-
-    @model_validator(mode='after')
-    def set_task_display_name(self) -> 'MyTaskResponse':
-        # If your CRUD passes the object, extract the name string here
-        if hasattr(self, 'assigned_to_name') and isinstance(self.assigned_to_name, dict):
-            self.assigned_to_display_name = self.assigned_to_name.get('name')
-        return self
+    assigned_to_display_name: Optional[str] = None
 
 
-# Add to app/schemas/action_tracker.py
-
-# ==================== Resolve Forward References ====================
-
-MeetingMinutesResponse.model_rebuild()
-MeetingResponse.model_rebuild()
-MeetingStatusHistoryResponse.model_rebuild()
-
-
-
+# ==================== Notification Schemas ====================
 
 class NotificationType(str, Enum):
     EMAIL = "email"
     WHATSAPP = "whatsapp"
     SMS = "sms"
+
 
 class NotificationRequest(BaseModel):
     """Request schema for sending meeting notifications"""
@@ -481,21 +545,7 @@ class NotificationRequest(BaseModel):
     notification_type: List[str] = Field(default=["email"], description="Types of notifications to send: email, whatsapp, sms")
     custom_message: Optional[str] = Field(None, description="Optional custom message to include")
     meeting_details: Optional[Dict[str, Any]] = Field(None, description="Meeting details to include in notification")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "participant_ids": ["123e4567-e89b-12d3-a456-426614174000"],
-                "notification_type": ["email", "whatsapp"],
-                "custom_message": "Please join the meeting on time.",
-                "meeting_details": {
-                    "title": "Weekly Sprint Planning",
-                    "date": "2024-01-15T10:00:00",
-                    "platform": "zoom",
-                    "meeting_link": "https://zoom.us/j/123456789"
-                }
-            }
-        }
+
 
 class NotificationResponse(BaseModel):
     """Response schema for notification sending"""
@@ -505,22 +555,16 @@ class NotificationResponse(BaseModel):
     results: List[Dict[str, Any]] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
 
+
+# ==================== Zoom Meeting Schemas ====================
+
 class ZoomMeetingCreate(BaseModel):
     """Request schema for creating Zoom meeting"""
     topic: str = Field(..., description="Meeting topic")
     start_time: datetime = Field(..., description="Meeting start time")
     duration: int = Field(60, description="Meeting duration in minutes")
     timezone: str = Field("UTC", description="Meeting timezone")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "topic": "Project Review",
-                "start_time": "2024-01-15T10:00:00",
-                "duration": 60,
-                "timezone": "UTC"
-            }
-        }
+
 
 class ZoomMeetingResponse(BaseModel):
     """Response schema for Zoom meeting creation"""
@@ -528,6 +572,7 @@ class ZoomMeetingResponse(BaseModel):
     id: str
     password: Optional[str] = None
     start_url: Optional[str] = None
+
 
 # ==================== Meeting Platform Schemas ====================
 
@@ -538,28 +583,18 @@ class MeetingPlatform(str, Enum):
     PHYSICAL = "physical"
     OTHER = "other"
 
-class DialInNumber(BaseModel):
-    """Schema for dial-in numbers"""
-    number: str = Field(..., description="Phone number")
-    instructions: Optional[str] = Field(None, description="Additional instructions")
 
 class MeetingPlatformInfo(BaseModel):
     """Schema for meeting platform information"""
-    platform: Literal["zoom", "google_meet", "microsoft_teams", "physical", "other"] = Field(
-        ..., description="Meeting platform type"
-    )
+    platform: str = Field(..., description="Meeting platform type")
     meeting_link: Optional[str] = None
     meeting_id: Optional[str] = None
     passcode: Optional[str] = None
     dial_in_numbers: Optional[List[Dict[str, str]]] = None
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "platform": "zoom",
-                "meeting_link": "https://zoom.us/j/123456789",
-                "meeting_id": "123456789",
-                "passcode": "123456"
-            }
-        }
-# ==================== Participant Schemas ====================
+
+
+# ==================== Resolve Forward References ====================
+
+MeetingMinutesResponse.model_rebuild()
+MeetingResponse.model_rebuild()
+MeetingStatusHistoryResponse.model_rebuild()

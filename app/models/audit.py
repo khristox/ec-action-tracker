@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
 import enum
 from app.db.types import UUID as CustomUUID
+from sqlalchemy import Enum as SQLEnum
 
 
 from app.db.base import Base
@@ -50,4 +51,9 @@ class AuditLog(Base):
         Index('idx_audit_logs_timestamp', 'timestamp'),
         Index('idx_audit_logs_record_id', 'record_id'),
         Index('idx_audit_logs_status', 'status'),
+    )
+    status = Column(
+        SQLEnum(AuditStatus, values_callable=lambda x: [e.value for e in x]),
+        default=AuditStatus.SUCCESS,
+        nullable=False
     )

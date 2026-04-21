@@ -230,7 +230,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     
     async def get_multi(
         self, 
-        db: AsyncSession, 
+        db: AsyncSession,
+        location_mode: Optional[str] = None,
         *, 
         skip: int = 0, 
         limit: int = 100,

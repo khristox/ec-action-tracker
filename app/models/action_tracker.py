@@ -127,6 +127,8 @@ class Meeting(Base):
     agenda = Column(Text, nullable=True)
     facilitator = Column(String(255), nullable=True)
     chairperson_name = Column(String(255), nullable=True)
+    chairperson_id = Column(CustomUUID, ForeignKey("meeting_participants.id"), nullable=True)  # New
+    secretary_id = Column(CustomUUID, ForeignKey("meeting_participants.id"), nullable=True)   # New
     
     status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     
@@ -177,6 +179,34 @@ class Meeting(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
+    
+
+    chairperson_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
+    secretary_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
+    
+    # Relationships - specify foreign_keys to resolve ambiguity
+    participants = relationship(
+        "MeetingParticipant",
+        foreign_keys="MeetingParticipant.meeting_id",  # Specify which foreign key to use
+        back_populates="meeting",
+        lazy="noload"
+    )
+    
+    chairperson = relationship(
+        "MeetingParticipant",
+        foreign_keys=[chairperson_id],
+        remote_side="MeetingParticipant.id",
+        back_populates="chairperson_of",
+        lazy="noload"
+    )
+    
+    secretary = relationship(
+        "MeetingParticipant",
+        foreign_keys=[secretary_id],
+        remote_side="MeetingParticipant.id",
+        back_populates="secretary_of",
+        lazy="noload"
+    )
 
 
 # app/models/action_tracker.py
@@ -215,6 +245,7 @@ class MeetingParticipant(Base):
     title = Column(String(255), nullable=True)
     organization = Column(String(255), nullable=True)
     is_chairperson = Column(Boolean, default=False, nullable=False)
+    is_secretary = Column(Boolean, default=False) 
     attendance_status = Column(String(50), nullable=True, default='pending')  # attended, missed, pending, excused
     
     apology_comment = Column(Text, nullable=True)  
@@ -239,6 +270,32 @@ class MeetingParticipant(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
 
+
+    meeting_id = Column(CustomUUID  , ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    
+    # Relationships
+    meeting = relationship(
+        "Meeting",
+        foreign_keys=[meeting_id],  # Specify foreign key
+        back_populates="participants",
+        lazy="noload"
+    )
+    
+    chairperson_of = relationship(
+        "Meeting",
+        foreign_keys="Meeting.chairperson_id",
+        back_populates="chairperson",
+        lazy="noload",
+        uselist=False
+    )
+    
+    secretary_of = relationship(
+        "Meeting",
+        foreign_keys="Meeting.secretary_id",
+        back_populates="secretary",
+        lazy="noload",
+        uselist=False
+    )
 
 class MeetingStatusHistory(Base):
     """Tracks the lifecycle of a meeting"""
@@ -297,7 +354,7 @@ class MeetingMinutes(Base):
     decisions = Column(Text, nullable=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    # Who recorded/took the minutes (this is the missing relationship!)
+    # Who recorded/took the minutes
     recorded_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     
     # Audit fields
@@ -309,11 +366,11 @@ class MeetingMinutes(Base):
     
     # Relationships
     meeting = relationship("Meeting", back_populates="minutes")
-    recorded_by = relationship("User", foreign_keys=[recorded_by_id], lazy="selectin")  # ADD THIS!
+    recorded_by = relationship("User", foreign_keys=[recorded_by_id], lazy="selectin")
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     
-    # One-to-many with cascade and eager loading
+    # All actions (read-write) - primary relationship
     actions = relationship(
         "MeetingAction", 
         back_populates="minutes", 
@@ -322,15 +379,16 @@ class MeetingMinutes(Base):
         order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()"
     )
 
-    # New relationship for active actions only
+    # Active actions only (read-only) - filtered view
     active_actions = relationship(
         "MeetingAction", 
-        back_populates="minutes", 
-        cascade="all, delete-orphan",
+        primaryjoin="and_(MeetingMinutes.id == MeetingAction.minute_id, MeetingAction.is_active == True)",
+        viewonly=True,  # CRITICAL: Makes this relationship read-only
+        overlaps="actions",  # Tells SQLAlchemy this intentionally overlaps with 'actions'
         lazy="selectin",
-        order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()",
-        primaryjoin="and_(MeetingMinutes.id == MeetingAction.minute_id, MeetingAction.is_active == True)"
+        order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()"
     )
+    
     @property
     def recorded_by_name(self) -> Optional[str]:
         return self.recorded_by.username if self.recorded_by else None
@@ -342,6 +400,10 @@ class MeetingMinutes(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
+    
+
+
+
 class MeetingAction(Base):
     """Depends on MeetingMinutes, User, Attribute"""
     __tablename__ = "meeting_actions"

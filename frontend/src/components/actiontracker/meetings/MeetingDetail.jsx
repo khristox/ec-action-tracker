@@ -60,7 +60,7 @@ import {
   Update as UpdateIcon,
   Close as CloseIcon,
   ContentCopy as ContentCopyIcon,
-  Save as SaveIcon  // Added SaveIcon
+  Save as SaveIcon
 } from '@mui/icons-material';
 import { 
   fetchMeetingById, 
@@ -76,9 +76,10 @@ import {
 import MeetingMinutes from './MeetingMinutes';
 import MeetingActionsList from './MeetingActionsList';
 import MeetingDocuments from './MeetingDocuments';
-import MeetingHistory from './components/MeetingHistory';  // Correct import path
+import MeetingHistory from './components/MeetingHistory';
 import ParticipantsTab from './components/ParticipantsTab';
 import NotificationDialog from './components/NotificationDialog';
+import UpdateMeetingLinkDialog from './components/UpdateMeetingLinkDialog';
 import {
   sendMeetingNotifications,
   fetchMeetingParticipants,
@@ -92,7 +93,6 @@ import {
 } from '../../../store/slices/actionTracker/notificationSlice';
 import api from '../../../services/api';
 import MeetingAudit from './MeetingAudit';
-
 
 // ==================== Memoized Rich Text Content Component ====================
 const RichTextContent = memo(({ content }) => {
@@ -156,281 +156,21 @@ const TabPanel = memo(({ children, value, index, ...other }) => (
 
 TabPanel.displayName = 'TabPanel';
 
-// ==================== Update Meeting Link Dialog Component ====================
-const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
-  const [platform, setPlatform] = useState(meeting?.platform || 'zoom');
-  const [meetingLink, setMeetingLink] = useState(meeting?.meeting_link || '');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const platformOptions = [
-    { value: 'zoom', label: 'Zoom', icon: '🔵', color: '#0B5CFF' },
-    { value: 'google_meet', label: 'Google Meet', icon: '🟢', color: '#0F9D58' },
-    { value: 'microsoft_teams', label: 'Microsoft Teams', icon: '🟣', color: '#464EB8' },
-    { value: 'webex', label: 'Cisco Webex', icon: '🔴', color: '#E31C3D' },
-    { value: 'physical', label: 'Physical Meeting', icon: '📍', color: '#6B7280' },
-    { value: 'other', label: 'Other', icon: '🌐', color: '#8B5CF6' }
-  ];
-
-  const handleCopyLink = () => {
-    if (meetingLink) {
-      navigator.clipboard.writeText(meetingLink);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (platform !== 'physical' && !meetingLink.trim()) {
-      setError('Please enter a meeting link for online meetings');
-      return;
-    }
-
-    if (platform !== 'physical' && meetingLink.trim()) {
-      const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
-      if (!urlPattern.test(meetingLink)) {
-        setError('Please enter a valid URL (e.g., https://zoom.us/j/123456789)');
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccess(false);
-
-    try {
-      const payload = {
-        platform: platform,
-        ...(platform !== 'physical' && { meeting_link: meetingLink }),
-        ...(platform === 'physical' && { meeting_link: null, location_text: meeting?.location_text || 'Physical Meeting' })
-      };
-
-      const response = await api.patch(`/action-tracker/meetings/${meeting.id}`, payload);
-
-      setSuccess(true);
-      if (onUpdate) {
-        onUpdate(response.data);
-      }
-      
-      setTimeout(() => {
-        onClose();
-      }, 1500);
-    } catch (err) {
-      console.error('Failed to update meeting link:', err);
-      setError(err.response?.data?.detail || 'Failed to update meeting information');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTestLink = () => {
-    if (meetingLink && meetingLink.trim()) {
-      let url = meetingLink.trim();
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
-      }
-      window.open(url, '_blank');
-    }
-  };
-
-  const selectedPlatform = platformOptions.find(opt => opt.value === platform);
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ pb: 1, bgcolor: '#f8fafc' }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Avatar sx={{ bgcolor: selectedPlatform?.color || '#6366f1', width: 40, height: 40 }}>
-              <VideoCallIcon />
-            </Avatar>
-            <Box>
-              <Typography variant="h6" fontWeight={700}>
-                Update Meeting Information
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Change meeting platform or link
-              </Typography>
-            </Box>
-          </Stack>
-          <IconButton onClick={onClose} size="small" disabled={loading}>
-            <CloseIcon />
-          </IconButton>
-        </Stack>
-      </DialogTitle>
-      
-      <DialogContent dividers sx={{ pt: 3 }}>
-        <Stack spacing={3}>
-          {/* Current Meeting Info */}
-          <Alert severity="info" sx={{ borderRadius: 2 }}>
-            <Typography variant="body2" fontWeight={600}>
-              Current Meeting: {meeting?.title}
-            </Typography>
-            {meeting?.meeting_link && (
-              <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <LinkIcon fontSize="small" />
-                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
-                  Current Link: {meeting.meeting_link}
-                </Typography>
-                <IconButton size="small" onClick={() => {
-                  navigator.clipboard.writeText(meeting.meeting_link);
-                }}>
-                  <ContentCopyIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            )}
-          </Alert>
-
-          {/* Platform Selection - Card Style */}
-          <Box>
-            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-              Meeting Type
-            </Typography>
-            <Grid container spacing={1.5}>
-              {platformOptions.map((opt) => (
-                <Grid size={{ xs: 6, sm: 4 }} key={opt.value}>
-                  <Paper
-                    variant={platform === opt.value ? 'elevation' : 'outlined'}
-                    elevation={platform === opt.value ? 2 : 0}
-                    onClick={() => !loading && setPlatform(opt.value)}
-                    sx={{
-                      p: 1.5,
-                      cursor: loading ? 'not-allowed' : 'pointer',
-                      bgcolor: platform === opt.value ? `${opt.color}10` : 'transparent',
-                      borderColor: platform === opt.value ? opt.color : '#e0e0e0',
-                      borderWidth: platform === opt.value ? 2 : 1,
-                      transition: 'all 0.2s',
-                      '&:hover': {
-                        bgcolor: loading ? 'transparent' : `${opt.color}10`,
-                        transform: loading ? 'none' : 'translateY(-2px)'
-                      }
-                    }}
-                  >
-                    <Stack alignItems="center" spacing={1}>
-                      <Typography variant="h4">{opt.icon}</Typography>
-                      <Typography variant="body2" fontWeight={platform === opt.value ? 600 : 400}>
-                        {opt.label}
-                      </Typography>
-                    </Stack>
-                  </Paper>
-                </Grid>
-              ))}
-            </Grid>
-          </Box>
-
-          {/* Meeting Link Input - Only for online meetings */}
-          {platform !== 'physical' && (
-            <Box>
-              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-                Meeting Link
-              </Typography>
-              <Stack direction="row" spacing={1}>
-                <TextField
-                  fullWidth
-                  placeholder="https://zoom.us/j/123456789"
-                  value={meetingLink}
-                  onChange={(e) => setMeetingLink(e.target.value)}
-                  disabled={loading}
-                  error={!!error}
-                  helperText={error || "Enter the full meeting URL"}
-                  InputProps={{
-                    startAdornment: (
-                      <Box component="span" sx={{ mr: 1, fontSize: '1.2rem' }}>
-                        {selectedPlatform?.icon}
-                      </Box>
-                    ),
-                  }}
-                />
-                <Tooltip title="Copy Link">
-                  <IconButton 
-                    onClick={handleCopyLink} 
-                    disabled={!meetingLink || loading}
-                    sx={{ bgcolor: '#f0f0f0' }}
-                  >
-                    {copied ? <CheckCircleIcon color="success" /> : <ContentCopyIcon />}
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-            </Box>
-          )}
-
-          {/* Physical Meeting Location */}
-          {platform === 'physical' && (
-            <Box>
-              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-                Location Details
-              </Typography>
-              <TextField
-                fullWidth
-                placeholder="Enter physical meeting location"
-                value={meeting?.location_text || ''}
-                onChange={(e) => {
-                  // Handle location change if needed
-                }}
-                disabled={loading}
-                helperText="e.g., Conference Room A, 2nd Floor"
-              />
-            </Box>
-          )}
-
-          {/* Quick Tips */}
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 2 }}>
-            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-              💡 Quick Tips
-            </Typography>
-            <Stack spacing={1}>
-              <Typography variant="body2" color="text.secondary">
-                • Zoom: https://zoom.us/j/123456789
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                • Google Meet: https://meet.google.com/xxx-xxxx-xxx
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                • Microsoft Teams: https://teams.microsoft.com/l/meetup-join/...
-              </Typography>
-            </Stack>
-          </Paper>
-
-          {/* Success/Error Messages */}
-          {success && (
-            <Alert severity="success" sx={{ borderRadius: 2 }}>
-              ✓ Meeting information updated successfully!
-            </Alert>
-          )}
-        </Stack>
-      </DialogContent>
-      
-      <DialogActions sx={{ p: 2.5, bgcolor: '#f8fafc' }}>
-        <Button onClick={onClose} disabled={loading}>
-          Cancel
-        </Button>
-        {platform !== 'physical' && meetingLink && (
-          <Button
-            variant="outlined"
-            onClick={handleTestLink}
-            disabled={loading}
-            startIcon={<LinkIcon />}
-          >
-            Test Link
-          </Button>
-        )}
-        <Button
-          variant="contained"
-          onClick={handleSubmit}
-          disabled={loading || (platform !== 'physical' && !meetingLink.trim())}
-          startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
-          sx={{ minWidth: 120 }}
-        >
-          {loading ? 'Updating...' : 'Update Meeting'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-};
-
 // ==================== Memoized Meeting Info Card ====================
-const MeetingInfoCard = memo(({ meeting, isMobile, formatDate, formatTime, getStatusDisplay, getStatusColor, getStatusIcon, getStatusValue, isOnlineMeeting, hasMeetingLink, onUpdateLink }) => (
+const MeetingInfoCard = memo(({ 
+  meeting, 
+  isMobile, 
+  formatDate, 
+  formatTime, 
+  getStatusDisplay, 
+  getStatusColor, 
+  getStatusIcon, 
+  getStatusValue, 
+  isOnlineMeeting, 
+  hasMeetingLink, 
+  onUpdateLink,
+  onJoinMeeting
+}) => (
   <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, mb: 4, borderRadius: 3 }}>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2}>
       <Box sx={{ flex: 1 }}>
@@ -505,22 +245,31 @@ const MeetingInfoCard = memo(({ meeting, isMobile, formatDate, formatTime, getSt
                 </IconButton>
               </Tooltip>
             </Stack>
-            {hasMeetingLink && (
+            {(isOnlineMeeting && hasMeetingLink) && (
               <Button
                 size="small"
                 startIcon={<LinkIcon />}
-                href={meeting.meeting_link}
-                target="_blank"
+                onClick={onJoinMeeting}
                 sx={{ mt: 0.5, textTransform: 'none' }}
               >
                 Join Meeting
+              </Button>
+            )}
+            {(!isOnlineMeeting && meeting?.location_text) && (
+              <Button
+                size="small"
+                startIcon={<LocationIcon />}
+                onClick={onJoinMeeting}
+                sx={{ mt: 0.5, textTransform: 'none' }}
+              >
+                View Location
               </Button>
             )}
           </Box>
         </Stack>
       </Grid>
 
-      {/* Facilitator */}
+      {/* Secretary */}
       {meeting?.facilitator && (
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Stack direction="row" spacing={2} alignItems="center">
@@ -767,6 +516,52 @@ const MeetingDetail = () => {
     currentMeeting?.meeting_link, 
     [currentMeeting?.meeting_link]
   );
+
+  // Calculate meeting start time
+  const meetingStartTime = useMemo(() => {
+    if (!currentMeeting) return null;
+    if (currentMeeting.start_time) {
+      return currentMeeting.start_time;
+    }
+    if (currentMeeting.meeting_date && currentMeeting.start_time) {
+      const date = new Date(currentMeeting.meeting_date);
+      const [hours, minutes] = currentMeeting.start_time.split(':');
+      date.setHours(parseInt(hours), parseInt(minutes));
+      return date.toISOString();
+    }
+    return null;
+  }, [currentMeeting]);
+
+  // Handle Join Meeting
+  const handleJoinMeeting = useCallback(() => {
+    if (!currentMeeting) return;
+    
+    if (isOnlineMeeting && hasMeetingLink) {
+      let meetingUrl = currentMeeting.meeting_link;
+      if (!meetingUrl.startsWith('http://') && !meetingUrl.startsWith('https://')) {
+        meetingUrl = 'https://' + meetingUrl;
+      }
+      window.open(meetingUrl, '_blank');
+    } else if (!isOnlineMeeting && currentMeeting.location_text) {
+      setUiState(prev => ({
+        ...prev,
+        snackbar: {
+          open: true,
+          message: `📍 Physical Location: ${currentMeeting.location_text}`,
+          severity: 'info'
+        }
+      }));
+    } else {
+      setUiState(prev => ({
+        ...prev,
+        snackbar: {
+          open: true,
+          message: 'No meeting link or location available',
+          severity: 'warning'
+        }
+      }));
+    }
+  }, [currentMeeting, isOnlineMeeting, hasMeetingLink]);
 
   const fetchMeeting = useCallback(() => {
     if (id) dispatch(fetchMeetingById(id));
@@ -1208,6 +1003,7 @@ const MeetingDetail = () => {
           isOnlineMeeting={isOnlineMeeting}
           hasMeetingLink={hasMeetingLink}
           onUpdateLink={handleUpdateLinkClick}
+          onJoinMeeting={handleJoinMeeting}
         />
 
         {/* Tabs Section */}
@@ -1244,11 +1040,13 @@ const MeetingDetail = () => {
 
             <TabPanel value={uiState.tabValue} index={2}>
               <ParticipantsTab 
-                meetingId={id} 
-                participants={participants} 
-                loading={loadingParticipants}
-                meetingStatus={meetingStatus} 
+                meetingId={id}
+                participants={participants}
                 onRefresh={fetchParticipants}
+                meetingStatus={meetingStatus}
+                meetingStartTime={meetingStartTime}
+                currentChairpersonId={currentMeeting?.chairperson_id}
+                currentSecretaryId={currentMeeting?.secretary_id}
               />
             </TabPanel>
 

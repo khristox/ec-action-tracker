@@ -19,6 +19,13 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 
+
+
+
+
+
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Set up Jinja2 template environment
@@ -115,6 +122,19 @@ class EmailConfig:
         return True
 
 
+# app/services/email_service.py - Cleaned up version
+
+
+
+logger = logging.getLogger(__name__)
+
+# Setup Jinja2 template environment
+template_env = Environment(
+    loader=FileSystemLoader("app/templates/email"),
+    autoescape=True
+)
+
+
 class EmailService:
     """Enhanced service for sending emails with improved reliability"""
     
@@ -130,6 +150,8 @@ class EmailService:
         
         if self.config.is_configured:
             self._test_and_log_connection()
+    
+    # ==================== INITIALIZATION & CONFIGURATION ====================
     
     def _get_secret_key(self) -> str:
         """Extract secret key as string from settings"""
@@ -176,6 +198,8 @@ class EmailService:
     def _is_configured(self) -> bool:
         """Check if email service is configured"""
         return self.config.is_configured
+    
+    # ==================== NETWORK & CONNECTION METHODS ====================
     
     def resolve_hostname(self, hostname: str) -> Tuple[bool, list]:
         """Resolve hostname to IP addresses with timeout"""
@@ -291,13 +315,15 @@ class EmailService:
             logger.error(f"❌ SMTP connection failed: {e}")
             raise
     
+    # ==================== CORE EMAIL SENDING ====================
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type((smtplib.SMTPServerDisconnected, socket.timeout))
     )
     def _send_email_sync(self, to_email: str, subject: str, html_content: str) -> Tuple[bool, str]:
-        """Send email using SMTP with retry logic"""
+        """Send email using SMTP with retry logic - ONLY accepts html_content"""
         if not self.config.is_configured:
             return False, "Email service not configured"
         
@@ -334,16 +360,123 @@ class EmailService:
                 except:
                     pass
     
-    def _send_email(self, to_email: str, subject: str, html_content: str) -> bool:
-        """Send email (synchronous wrapper)"""
-        success, _ = self._send_email_sync(to_email, subject, html_content)
-        return success
+    # PUBLIC METHOD - Use this for sending emails
+    def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
+        """
+        Send email (synchronous wrapper)
+        This is the MAIN method to call for sending emails
+        """
+        if not to_email:
+            logger.warning("No recipient email provided")
+            return False
+        
+        if not self._is_configured():
+            logger.warning("Email service not configured, skipping email send")
+            return False
+        
+        try:
+            success, error = self._send_email_sync(to_email, subject, html_content)
+            if success:
+                logger.info(f"✅ Email sent to {to_email}")
+            else:
+                logger.error(f"❌ Failed to send email to {to_email}: {error}")
+            return success
+        except Exception as e:
+            logger.error(f"❌ Unexpected error sending email to {to_email}: {e}")
+            return False
+    
+    # Async version
+    async def send_email_async(self, to_email: str, subject: str, html_content: str) -> bool:
+        """Send email asynchronously"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, 
+            self.send_email, 
+            to_email, 
+            subject, 
+            html_content
+        )
+    
+    # Meeting notification method
+    async def send_meeting_notification(
+        self,
+        to_email: str,
+        meeting_title: str,
+        meeting_date: str,
+        meeting_time: str,
+        participant_name: str,
+        meeting_location: str = None,
+        custom_message: str = None,
+        tracker_url: str = None
+    ) -> bool:
+        """Send meeting notification email to participant"""
+        if not to_email or not self._is_configured():
+            return False
+        
+        try:
+            subject = f"Meeting Notification: {meeting_title}"
+            
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Meeting Notification</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }}
+                    .content {{ padding: 20px; background: #f9fafb; border: 1px solid #e5e7eb; }}
+                    .meeting-details {{ background: white; padding: 15px; border-radius: 8px; margin: 15px 0; }}
+                    .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #6b7280; }}
+                    .button {{ display: inline-block; background: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h2>Meeting Notification</h2>
+                </div>
+                <div class="content">
+                    <p>Dear <strong>{participant_name}</strong>,</p>
+                    <p>This is a notification regarding the meeting: <strong>{meeting_title}</strong></p>
+                    
+                    <div class="meeting-details">
+                        <h3>Meeting Details:</h3>
+                        <ul>
+                            <li><strong>Date:</strong> {meeting_date}</li>
+                            <li><strong>Time:</strong> {meeting_time}</li>
+                            <li><strong>Location:</strong> {meeting_location or 'To be confirmed'}</li>
+                        </ul>
+                    </div>
+                    
+                    {f"<p><strong>Message:</strong> {custom_message}</p>" if custom_message else ""}
+                    
+                    <p>Please check the action tracker for more details.</p>
+                    
+                    <p style="margin-top: 20px;">
+                        <a href="{tracker_url or self._frontend_url}" class="button">View Action Tracker</a>
+                    </p>
+                </div>
+                <div class="footer">
+                    <p>&copy; {datetime.now().year} {getattr(settings, 'PROJECT_NAME', 'Action Tracker')}. All rights reserved.</p>
+                    <p>This is an automated message, please do not reply.</p>
+                </div>
+            </body>
+            </html>
+            """
+            
+            return self.send_email(to_email, subject, html_content)
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to send meeting notification to {to_email}: {e}")
+            return False
+    
+    # ==================== TEMPLATE RENDERING (Keep your existing methods) ====================
     
     def _render_template(self, template_name: str, context: Dict[str, Any]) -> str:
         """Render HTML template with context"""
         default_context = {
             "year": str(datetime.utcnow().year),
-            "project_name": getattr(settings, 'PROJECT_NAME', 'SWAHILLI'),
+            "project_name": getattr(settings, 'PROJECT_NAME', 'Action Tracker'),
             "support_email": self.config.from_email,
         }
         context = {**default_context, **(context or {})}
@@ -483,11 +616,7 @@ class EmailService:
         token: str,
         username: str
     ) -> Dict[str, Any]:
-        """Send verification email (for background tasks)"""
-        start_time = time.time()
-        
-        logger.info(f"📧 Sending verification email to: {to_email}")
-        
+        """Send verification email"""
         if not all([to_email, token]):
             return {"success": False, "message": "Missing required parameters"}
         
@@ -503,118 +632,25 @@ class EmailService:
             }
             
             html_content = self._render_template("verification.html", context)
-            success = self._send_email(
+            success = self.send_email(
                 to_email,
                 f"Verify Your Email Address - {settings.PROJECT_NAME}",
                 html_content
             )
             
-            elapsed = time.time() - start_time
             if success:
-                logger.info(f"✅ Verification email sent to {to_email} in {elapsed:.2f}s")
+                logger.info(f"✅ Verification email sent to {to_email}")
                 return {"success": True, "message": "Verification email sent"}
             else:
                 return {"success": False, "message": "Failed to send verification email"}
                 
         except Exception as e:
-            logger.error(f"❌ Failed to send: {e}")
+            logger.error(f"❌ Failed to send verification email: {e}")
             return {"success": False, "message": str(e)}
-    
-    async def send_welcome_email(
-        self,
-        to_email: str,
-        username: str,
-        background_tasks: BackgroundTasks
-    ) -> bool:
-        """Send welcome email after verification"""
-        if not to_email or not self._is_configured():
-            return False
-        
-        try:
-            context = {
-                "username": username or "User",
-                "login_url": f"{self._frontend_url}/login",
-            }
-            
-            html_content = self._render_template("welcome.html", context)
-            
-            background_tasks.add_task(
-                self._send_email,
-                to_email,
-                f"Welcome to {settings.PROJECT_NAME}!",
-                html_content
-            )
-            
-            logger.info(f"✅ Welcome email queued for {to_email}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send welcome email: {e}")
-            return False
-    
-    async def send_password_reset_email(
-        self,
-        to_email: str,
-        token: str,
-        username: str,
-        background_tasks: BackgroundTasks
-    ) -> bool:
-        """Send password reset email"""
-        if not to_email or not self._is_configured():
-            return False
-        
-        try:
-            reset_url = f"{self._frontend_url}/reset-password?token={token}"
-            context = {
-                "username": username or "User",
-                "reset_url": reset_url,
-                "expires_in_hours": str(settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS),
-            }
-            
-            html_content = self._render_template("password_reset.html", context)
-            
-            background_tasks.add_task(
-                self._send_email,
-                to_email,
-                f"Reset Your Password - {settings.PROJECT_NAME}",
-                html_content
-            )
-            
-            logger.info(f"✅ Password reset email queued for {to_email}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send password reset email: {e}")
-            return False
-    
-    async def send_password_reset_confirmation_email(
-        self,
-        to_email: str,
-        username: str,
-        background_tasks: BackgroundTasks
-    ) -> bool:
-        """Send confirmation email after password reset"""
-        if not to_email or not self._is_configured():
-            return False
-        
-        try:
-            context = {
-                "username": username or "User",
-                "login_url": f"{self._frontend_url}/login",
-            }
-            
-            html_content = self._render_template("password_reset_confirmation.html", context)
-            
-            background_tasks.add_task(
-                self._send_email,
-                to_email,
-                f"Password Reset Confirmation - {settings.PROJECT_NAME}",
-                html_content
-            )
-            
-            logger.info(f"✅ Password reset confirmation queued for {to_email}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send confirmation: {e}")
-            return False
+
+
+# Create singleton instance
+email_service = EmailService()
 
 
 

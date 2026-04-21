@@ -34,6 +34,8 @@
     "fix": "^0.0.3",
     "formik": "^2.4.9",
     "framer-motion": "^12.38.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "notistack": "^3.0.2",
     "npm": "^11.12.1",
     "react": "^19.2.4",
@@ -43,7 +45,9 @@
     "react-quill-new": "^3.7.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^7.13.2",
+    "react-syntax-highlighter": "^16.1.1",
     "recharts": "^3.8.1",
+    "xlsx": "^0.18.5",
     "yup": "^1.7.1"
   },
   "devDependencies": {

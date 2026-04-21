@@ -51,7 +51,8 @@ import {
   PersonAdd as PersonAddIcon,
   Add as AddIcon,
   Save as SaveIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  Lock as LockIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { updateActionProgress } from '../../../store/slices/actionTracker/actionSlice';
@@ -70,6 +71,14 @@ const PROGRESS_PRESETS = [
   { value: 100, label: 'Complete', color: '#10B981', icon: <CheckCircleIcon fontSize="small" /> }
 ];
 
+// Check if meeting allows editing actions
+const canEditActions = (meetingStatus) => {
+  if (!meetingStatus) return false;
+  const statusLower = String(meetingStatus).toLowerCase();
+  const allowedStatuses = ['started', 'ongoing', 'in_progress', 'in progress', 'completed'];
+  return allowedStatuses.some(status => statusLower.includes(status));
+};
+
 const formatDate = (dateString) => {
   if (!dateString) return 'No due date';
   return format(new Date(dateString), 'MMM d, yyyy');
@@ -85,7 +94,7 @@ const getStatusConfig = (action) => {
   return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" />, bgColor: '#FEF3C7', textColor: '#92400E' };
 };
 
-const MeetingActionsList = ({ meetingId, onRefresh }) => {
+const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { updatingProgress } = useSelector((state) => state.actions || {});
@@ -106,6 +115,23 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   const [selectedStatusId, setSelectedStatusId] = useState('');
   const [selectedStatusName, setSelectedStatusName] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+
+  // Check if user can edit actions based on meeting status
+  const canEdit = canEditActions(meetingStatus);
+  
+  // Get status display message
+  const getStatusMessage = () => {
+    //alert("Meeting status message",meetingStatus);
+    if (!meetingStatus) return null;
+    const statusLower = String(meetingStatus).toLowerCase();
+    if (statusLower === 'scheduled' || statusLower === 'pending') {
+      return "Meeting hasn't started yet. Actions can only be created and edited once the meeting is in progress.";
+    }
+    if (statusLower === 'cancelled') {
+      return "Meeting has been cancelled. Actions cannot be created or edited.";
+    }
+    return null;
+  };
 
   // Fetch minutes for the meeting
   const fetchMinutes = useCallback(async () => {
@@ -202,9 +228,8 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
     console.log('Meeting ID from action:', meetingIdFromAction);
     setSelectedAction({
       ...action,
-      _meetingId: meetingIdFromAction  // Store it in the action
+      _meetingId: meetingIdFromAction
     });
-   
     setShowAssignDialog(true);
   };
 
@@ -291,6 +316,7 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
   };
 
   const isUpdating = localUpdating || updatingProgress;
+  const statusMessage = getStatusMessage();
 
   if (loading && actions.length === 0) {
     return (
@@ -312,7 +338,9 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
             No action items found for this meeting.
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Actions can be added from the Minutes tab by expanding a minute and clicking "Add Action".
+            {canEdit 
+              ? "Actions can be added from the Minutes tab by expanding a minute and clicking 'Add Action'."
+              : statusMessage || "Actions can only be created once the meeting is in progress."}
           </Typography>
           <Button
             variant="outlined"
@@ -335,14 +363,19 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
             Action Items ({actions.length})
           </Typography>
           <Stack direction="row" spacing={1}>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setShowAddActionDialog(true)}
-              size="small"
-            >
-              Add Action
-            </Button>
+            <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to add actions") : "Add new action item"}>
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={!canEdit ? <LockIcon /> : <AddIcon />}
+                  onClick={() => setShowAddActionDialog(true)}
+                  size="small"
+                  disabled={!canEdit}
+                >
+                  Add Action
+                </Button>
+              </span>
+            </Tooltip>
             <Tooltip title="Refresh">
               <IconButton onClick={handleRefresh} size="small" disabled={loading}>
                 <RefreshIcon />
@@ -350,6 +383,13 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
             </Tooltip>
           </Stack>
         </Stack>
+
+        {/* Status message when meeting hasn't started */}
+        {statusMessage && (
+          <Alert severity="info" icon={<LockIcon />} sx={{ mb: 3, borderRadius: 2 }}>
+            {statusMessage}
+          </Alert>
+        )}
 
         {successMessage && (
           <Alert 
@@ -466,32 +506,41 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
                     </TableCell>
                     <TableCell align="center">
                       <Stack direction="row" spacing={0.5} justifyContent="center">
-                        <Tooltip title="Update Progress">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => handleOpenProgressDialog(action)} 
-                            color="primary"
-                          >
-                            <TrendingUpIcon fontSize="small" />
-                          </IconButton>
+                        <Tooltip title={canEdit ? "Update Progress" : "Meeting must be started to update progress"}>
+                          <span>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleOpenProgressDialog(action)} 
+                              color="primary"
+                              disabled={!canEdit}
+                            >
+                              <TrendingUpIcon fontSize="small" />
+                            </IconButton>
+                          </span>
                         </Tooltip>
-                        <Tooltip title="Edit Action">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => handleEditAction(action)} 
-                            color="secondary"
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
+                        <Tooltip title={canEdit ? "Edit Action" : "Meeting must be started to edit actions"}>
+                          <span>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleEditAction(action)} 
+                              color="secondary"
+                              disabled={!canEdit}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </span>
                         </Tooltip>
-                        <Tooltip title="Assign User">
-                          <IconButton 
-                            size="small" 
-                            onClick={() => handleAssignAction(action)} 
-                            color="success"
-                          >
-                            <PersonAddIcon fontSize="small" />
-                          </IconButton>
+                        <Tooltip title={canEdit ? "Assign User" : "Meeting must be started to assign users"}>
+                          <span>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleAssignAction(action)} 
+                              color="success"
+                              disabled={!canEdit}
+                            >
+                              <PersonAddIcon fontSize="small" />
+                            </IconButton>
+                          </span>
                         </Tooltip>
                         <Tooltip title="View Details">
                           <IconButton 
@@ -512,38 +561,35 @@ const MeetingActionsList = ({ meetingId, onRefresh }) => {
         </TableContainer>
 
         {/* Add Action Dialog */}
-      
-
-      <AddActionDialog
-        open={showAddActionDialog}
-        onClose={() => setShowAddActionDialog(false)}
-        meetingId={meetingId}
-        minutes={minutes}
-        selectedMinuteId={null}
-        onSave={async (payload) => {
-          try {
-            // Use the minute-based endpoint that exists in your backend
-            const response = await api.post(
-              `/action-tracker/minutes/${payload.minute_id}/actions`,
-              {
-                description: payload.description,
-                due_date: payload.due_date,
-                priority: payload.priority,
-                remarks: payload.remarks,
-                assigned_to_id: payload.assigned_to_id,
-                assigned_to_name: payload.assigned_to_name
-              }
-            );
-            handleActionCreated();
-            return response.data;
-          } catch (err) {
-            console.error('Error creating action:', err);
-            throw err;
-          }
-        }}
-        loading={loading}
-        error={error}
-      />
+        <AddActionDialog
+          open={showAddActionDialog}
+          onClose={() => setShowAddActionDialog(false)}
+          meetingId={meetingId}
+          minutes={minutes}
+          selectedMinuteId={null}
+          onSave={async (payload) => {
+            try {
+              const response = await api.post(
+                `/action-tracker/minutes/${payload.minute_id}/actions`,
+                {
+                  description: payload.description,
+                  due_date: payload.due_date,
+                  priority: payload.priority,
+                  remarks: payload.remarks,
+                  assigned_to_id: payload.assigned_to_id,
+                  assigned_to_name: payload.assigned_to_name
+                }
+              );
+              handleActionCreated();
+              return response.data;
+            } catch (err) {
+              console.error('Error creating action:', err);
+              throw err;
+            }
+          }}
+          loading={loading}
+          error={error}
+        />
 
         {/* Progress Update Dialog */}
         <Dialog 

@@ -85,9 +85,12 @@ def get_retry_config() -> Dict[str, Any]:
 # ==================== CONFIGURATION ====================
 
 class SeedConfig:
-    DEFAULT_BASE_URL = getattr(settings, 'BACKEND_URL', 'http://127.0.0.1:8001')
-    DEFAULT_USERNAME = os.getenv('ADMIN_USERNAME', getattr(settings, 'ADMIN_USERNAME', 'admin'))
-    DEFAULT_PASSWORD = os.getenv('ADMIN_PASSWORD', getattr(settings, 'ADMIN_PASSWORD', 'Admin123!'))
+    # API configuration (for shell scripts that need to call the API)
+    DEFAULT_API_BASE_URL = getattr(settings, 'BACKEND_URL', 'http://127.0.0.1:8001')
+    DEFAULT_API_USERNAME = os.getenv('ADMIN_USERNAME', getattr(settings, 'ADMIN_USERNAME', 'admin'))
+    DEFAULT_API_PASSWORD = os.getenv('ADMIN_PASSWORD', getattr(settings, 'ADMIN_PASSWORD', 'Admin123!'))
+    
+    # Database connection uses DATABASE_URL from .env automatically
     PASSWORD_MAX_LENGTH = 72
     SKIP_SEED = os.getenv('SKIP_SEED', 'false').lower() == 'true'
     SEED_ONLY_IF_EMPTY = os.getenv('SEED_ONLY_IF_EMPTY', 'true').lower() == 'true'
@@ -136,47 +139,54 @@ def retry_on_failure(max_retries: int = None, delay: int = None, backoff: float 
 
 # ==================== CONFIGURATION PROMPTS ====================
 
-def get_config_from_user(base_url: Optional[str] = None,
-                         username: Optional[str] = None,
-                         password: Optional[str] = None) -> Tuple[str, str, str]:
-    """Get configuration with Docker-aware defaults"""
+def get_config_from_user(api_base_url: Optional[str] = None,
+                         api_username: Optional[str] = None,
+                         api_password: Optional[str] = None) -> Tuple[str, str, str]:
+    """
+    Get API configuration for shell scripts (not database connection).
+    Database connection always uses DATABASE_URL from .env file.
+    """
     is_interactive = sys.stdin.isatty() and not is_running_in_docker()
     
     # Use provided values first
-    if base_url:
-        final_base_url = base_url
+    if api_base_url:
+        final_api_base_url = api_base_url
     elif not is_interactive:
-        final_base_url = SeedConfig.DEFAULT_BASE_URL
+        final_api_base_url = SeedConfig.DEFAULT_API_BASE_URL
     else:
-        default_url = SeedConfig.DEFAULT_BASE_URL
+        default_url = SeedConfig.DEFAULT_API_BASE_URL
         print("\n" + "=" * 60)
         print("  Action Tracker - SEED CONFIGURATION")
         print(f"  Environment: {get_environment()}")
         print("=" * 60)
-        final_base_url = input(f"Enter API base URL [{default_url}]: ").strip() or default_url
+        print(f"\n📌 NOTE: Database connection will use DATABASE_URL from .env file")
+        print(f"   Current DATABASE_URL: {settings.DATABASE_URL}")
+        print(f"\n📡 API Configuration (for shell scripts that need to call the API):")
+        final_api_base_url = input(f"   Enter API base URL [{default_url}]: ").strip() or default_url
     
-    if username:
-        final_username = username
+    if api_username:
+        final_api_username = api_username
     elif not is_interactive:
-        final_username = SeedConfig.DEFAULT_USERNAME
+        final_api_username = SeedConfig.DEFAULT_API_USERNAME
     else:
-        default_username = SeedConfig.DEFAULT_USERNAME
-        final_username = input(f"Enter admin username [{default_username}]: ").strip() or default_username
+        default_username = SeedConfig.DEFAULT_API_USERNAME
+        final_api_username = input(f"   Enter admin username for API calls [{default_username}]: ").strip() or default_username
     
-    if password:
-        final_password = truncate_password(password)
+    if api_password:
+        final_api_password = truncate_password(api_password)
     elif not is_interactive:
-        final_password = truncate_password(SeedConfig.DEFAULT_PASSWORD)
+        final_api_password = truncate_password(SeedConfig.DEFAULT_API_PASSWORD)
     else:
-        default_password = SeedConfig.DEFAULT_PASSWORD
-        pwd = getpass.getpass(f"Enter admin password [{default_password}]: ") or default_password
-        final_password = truncate_password(pwd)
+        default_password = SeedConfig.DEFAULT_API_PASSWORD
+        pwd = getpass.getpass(f"   Enter admin password for API calls [{default_password}]: ") or default_password
+        final_api_password = truncate_password(pwd)
     
-    logger.info(f"📁 Base URL: {final_base_url}")
-    logger.info(f"👤 Username: {final_username}")
-    logger.info(f"🔒 Password: {'*' * len(final_password)}")
+    print()  # Empty line for spacing
+    logger.info(f"🌐 API Base URL: {final_api_base_url}")
+    logger.info(f"👤 API Username: {final_api_username}")
+    logger.info(f"🔒 API Password: {'*' * len(final_api_password)}")
     
-    return final_base_url, final_username, final_password
+    return final_api_base_url, final_api_username, final_api_password
 
 
 # ==================== FILE LOADERS ====================
@@ -324,6 +334,7 @@ class DatabaseCreator:
         """Create database if it doesn't exist with retry logic"""
         db_type = DatabaseType.detect()
         logger.info(f"🔍 Database type detected: {db_type} (Environment: {get_environment()})")
+        logger.info(f"📁 Using DATABASE_URL from .env: {settings.DATABASE_URL}")
         
         if db_type == DatabaseType.POSTGRESQL:
             await DatabaseCreator._create_postgresql(settings.DATABASE_URL)
@@ -370,12 +381,13 @@ class DatabaseCreator:
         password = parsed.password or ''
         
         logger.info(f"🐬 Checking MySQL database '{db_name}'...")
+        logger.info(f"   Host: {host}:{port}")
+        logger.info(f"   User: {user}")
         
         try:
             conn = await aiomysql.connect(
                 host=host, port=port, user=user, password=password,
-                db='information_schema', charset='utf8mb4',
-                autocommit=True, connect_timeout=10
+                charset='utf8mb4', autocommit=True, connect_timeout=10
             )
             async with conn.cursor() as cursor:
                 await cursor.execute(
@@ -386,7 +398,7 @@ class DatabaseCreator:
                 if not exists:
                     logger.info(f"Creating database '{db_name}'...")
                     await cursor.execute(
-                        f"CREATE DATABASE `{db_name}` "
+                        f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
                         f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
                     )
                     logger.info(f"✅ MySQL database '{db_name}' created")
@@ -395,6 +407,7 @@ class DatabaseCreator:
             conn.close()
         except Exception as e:
             logger.error(f"❌ Failed to create MySQL database: {e}")
+            logger.error(f"   Please ensure MySQL is running and credentials are correct")
             raise
     
     @staticmethod
@@ -447,7 +460,6 @@ class TableManager:
             missing = [t for t in metadata_tables if t not in created_tables]
             if missing:
                 logger.warning(f"⚠️ Missing tables after creation: {missing}")
-                # Don't return False, as some tables might be created later
             else:
                 logger.info("✅ All tables created successfully")
             
@@ -619,7 +631,7 @@ class UserSeeder:
 
 # ==================== DOCKER-OPTIMIZED SCRIPT RUNNER ====================
 
-async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, password: str):
+async def run_shell_scripts(scripts_dir: Path, api_base_url: str, api_username: str, api_password: str):
     """Run all .sh scripts with Docker-optimized execution"""
     if not scripts_dir.exists():
         logger.warning(f"Scripts directory not found: {scripts_dir}")
@@ -632,6 +644,8 @@ async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, pas
         return
     
     logger.info(f"\n📁 Found {len(sh_scripts)} shell scripts to run")
+    logger.info(f"🌐 Scripts will use API: {api_base_url}")
+    logger.info(f"👤 Scripts will use user: {api_username}")
     
     for script_path in sh_scripts:
         script_name = script_path.name
@@ -645,15 +659,15 @@ async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, pas
             # Set environment variables for scripts
             env = os.environ.copy()
             env.update({
-                'API_BASE_URL': base_url,
-                'ADMIN_USERNAME': username,
-                'ADMIN_PASSWORD': password,
+                'API_BASE_URL': api_base_url,
+                'ADMIN_USERNAME': api_username,
+                'ADMIN_PASSWORD': api_password,
                 'DOCKER_ENV': str(is_running_in_docker()),
                 'APP_ENV': get_environment()
             })
             
             process = await asyncio.create_subprocess_exec(
-                str(script_path), base_url, username, password,
+                str(script_path), api_base_url, api_username, api_password,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env
@@ -697,6 +711,7 @@ class SummaryReporter:
         logger.info("=" * 60)
         logger.info(f"  - Environment: {get_environment()}")
         logger.info(f"  - Docker: {'Yes' if is_running_in_docker() else 'No'}")
+        logger.info(f"  - Database URL: {settings.DATABASE_URL}")
         logger.info(f"  - Roles: {role_count}")
         logger.info(f"  - Users: {user_count}")
         
@@ -723,8 +738,10 @@ async def health_check() -> bool:
 
 # ==================== MAIN INITIALIZATION ====================
 
-async def init_db(drop_existing: bool = None, base_url: str = None, 
-                  username: str = None, password: str = None) -> None:
+async def init_db(drop_existing: bool = None, 
+                  api_base_url: str = None, 
+                  api_username: str = None, 
+                  api_password: str = None) -> None:
     """Main database initialization with Docker optimizations"""
     start_time = time.time()
     
@@ -732,6 +749,7 @@ async def init_db(drop_existing: bool = None, base_url: str = None,
     logger.info("🚀 Action Tracker - DATABASE INITIALIZATION")
     logger.info(f"   Environment: {get_environment()}")
     logger.info(f"   Docker: {'Yes' if is_running_in_docker() else 'No'}")
+    logger.info(f"   Database URL: {settings.DATABASE_URL}")
     logger.info(f"   Skip Seed: {SeedConfig.SKIP_SEED}")
     logger.info("=" * 60)
     
@@ -820,11 +838,11 @@ async def init_db(drop_existing: bool = None, base_url: str = None,
             logger.info("📜 RUNNING SHELL SCRIPTS")
             logger.info("=" * 60)
             
-            final_base_url = base_url or SeedConfig.DEFAULT_BASE_URL
-            final_username = username or SeedConfig.DEFAULT_USERNAME
-            final_password = password or SeedConfig.DEFAULT_PASSWORD
+            final_api_base_url = api_base_url or SeedConfig.DEFAULT_API_BASE_URL
+            final_api_username = api_username or SeedConfig.DEFAULT_API_USERNAME
+            final_api_password = api_password or SeedConfig.DEFAULT_API_PASSWORD
             
-            await run_shell_scripts(scripts_dir, final_base_url, final_username, final_password)
+            await run_shell_scripts(scripts_dir, final_api_base_url, final_api_username, final_api_password)
         else:
             logger.info("Shell scripts skipped (SKIP_SEED=true)")
         
@@ -847,8 +865,10 @@ async def init_db(drop_existing: bool = None, base_url: str = None,
         await async_engine.dispose()
 
 
-async def main(drop_existing: bool = False, base_url: str = None, 
-               username: str = None, password: str = None) -> None:
+async def main(drop_existing: bool = False, 
+               api_base_url: str = None, 
+               api_username: str = None, 
+               api_password: str = None) -> None:
     """Main entry point with signal handling for Docker"""
     
     # Handle graceful shutdown in Docker
@@ -860,9 +880,15 @@ async def main(drop_existing: bool = False, base_url: str = None,
     signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
     signal.signal(signal.SIGINT, lambda s, f: signal_handler())
     
-    base_url, username, password = get_config_from_user(base_url, username, password)
-    await init_db(drop_existing=drop_existing, base_url=base_url, 
-                  username=username, password=password)
+    api_base_url, api_username, api_password = get_config_from_user(
+        api_base_url, api_username, api_password
+    )
+    await init_db(
+        drop_existing=drop_existing, 
+        api_base_url=api_base_url, 
+        api_username=api_username, 
+        api_password=api_password
+    )
 
 
 if __name__ == "__main__":
@@ -872,9 +898,9 @@ if __name__ == "__main__":
     parser.add_argument("username", nargs="?", type=str, help="Admin username (positional argument)")
     parser.add_argument("password", nargs="?", type=str, help="Admin password (positional argument)")
     parser.add_argument("--drop", action="store_true", help="Drop existing tables before creating")
-    parser.add_argument("--baseurl", type=str, help="API base URL for scripts (alternative to positional)")
-    parser.add_argument("--username-opt", type=str, dest="username_opt", help="Admin username for scripts (alternative to positional)")
-    parser.add_argument("--password-opt", type=str, dest="password_opt", help="Admin password for scripts (alternative to positional)")
+    parser.add_argument("--api-baseurl", type=str, help="API base URL for shell scripts (alternative to positional)")
+    parser.add_argument("--api-username", type=str, dest="api_username", help="Admin username for API calls (alternative to positional)")
+    parser.add_argument("--api-password", type=str, dest="api_password", help="Admin password for API calls (alternative to positional)")
     parser.add_argument("--skip-seed", action="store_true", help="Skip database seeding")
     parser.add_argument("--force", action="store_true", help="Force seeding even if data exists")
     args = parser.parse_args()
@@ -885,14 +911,6 @@ if __name__ == "__main__":
     if args.force:
         os.environ['SEED_ONLY_IF_EMPTY'] = 'false'
     
-    # Determine base_url, username, password from positional or named arguments
-    base_url = args.url or args.baseurl
-    username = args.username or args.username_opt
-    password = args.password or args.password_opt
-    
-    asyncio.run(main(
-        drop_existing=args.drop,
-        base_url=base_url,
-        username=username,
-        password=password
-    ))
+    # Determine API credentials from positional or named arguments
+    api_base_url = args.url or args.api_baseurl
+    api_username = args.username or args.api_username

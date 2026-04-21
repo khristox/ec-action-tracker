@@ -12,10 +12,11 @@ from datetime import datetime
 from venv import logger
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select, and_, or_, func, case
+from sqlalchemy import delete, select, and_, or_, func, case, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.v1.endpoints.action_tracker.audit_logger import log_audit
 from app.crud.base import CRUDBase
 from app.models.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
@@ -1644,7 +1645,134 @@ class CRUDMeetingParticipant(AuditMixin):
             .order_by(MeetingParticipant.is_chairperson.desc(), MeetingParticipant.name)
         )
         return result.scalars().all()
-    
+
+    async def update_attendance(
+        self, 
+        db: AsyncSession, 
+        participant_id: UUID, 
+        attendance_status: str, 
+        user_id: UUID,
+        apology_comment: str = None,
+        ip_address: str = None,
+        user_agent: str = None,
+        endpoint: str = None,
+        request_id: str = None
+    ) -> Optional[MeetingParticipant]:
+        """Update participant attendance status with audit logging"""
+        
+        # Get old data and meeting_id
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == participant_id,
+                MeetingParticipant.is_active == True
+            )
+        )
+        old_participant = result.scalar_one_or_none()
+        
+        if not old_participant:
+            await log_audit(
+                db=db, 
+                action="UPDATE_ATTENDANCE", 
+                table_name="meeting_participants",
+                record_id=str(participant_id), 
+                user_id=str(user_id) if user_id else None, 
+                status="failure",
+                error_message="Participant not found", 
+                ip_address=ip_address,
+                user_agent=user_agent, 
+                endpoint=endpoint, 
+                request_id=request_id
+            )
+            raise ValueError(f"Participant with id {participant_id} not found")
+        
+        # Store meeting_id
+        meeting_id = str(old_participant.meeting_id)
+        
+        old_values = {
+            "attendance_status": old_participant.attendance_status,
+            "apology_comment": old_participant.apology_comment if hasattr(old_participant, 'apology_comment') else None
+        }
+        
+        try:
+            # Prepare update values
+            update_values = {
+                "attendance_status": attendance_status,
+                "updated_at": datetime.now(),
+                "updated_by_id": user_id
+            }
+            
+            if apology_comment is not None:
+                update_values["apology_comment"] = apology_comment
+            
+            # Execute update
+            await db.execute(
+                update(MeetingParticipant)
+                .where(
+                    MeetingParticipant.id == participant_id,
+                    MeetingParticipant.is_active == True
+                )
+                .values(**update_values)
+            )
+            
+            # Get updated record
+            result = await db.execute(
+                select(MeetingParticipant).where(
+                    MeetingParticipant.id == participant_id,
+                    MeetingParticipant.is_active == True
+                )
+            )
+            updated_participant = result.scalar_one_or_none()
+            
+            new_values = {
+                "attendance_status": updated_participant.attendance_status if updated_participant else attendance_status,
+                "apology_comment": updated_participant.apology_comment if updated_participant and hasattr(updated_participant, 'apology_comment') else apology_comment
+            }
+            
+            # Log success
+            await log_audit(
+                db=db,
+                action="UPDATE_ATTENDANCE", 
+                table_name="meeting_participants",
+                record_id=str(participant_id), 
+                user_id=str(user_id) if user_id else None,
+                old_values=old_values, 
+                new_values=new_values, 
+                status="success",
+                ip_address=ip_address, 
+                user_agent=user_agent, 
+                endpoint=endpoint,
+                request_id=request_id, 
+                meeting_id=meeting_id
+            )
+            
+            # Commit the main transaction
+            await db.commit()
+            
+            return updated_participant
+            
+        except Exception as e:
+            await db.rollback()
+            
+            # Log failure
+            await log_audit(
+                db=db,
+                action="UPDATE_ATTENDANCE", 
+                table_name="meeting_participants",
+                record_id=str(participant_id), 
+                user_id=str(user_id) if user_id else None,
+                old_values=old_values, 
+                status="failure", 
+                error_message=str(e),
+                ip_address=ip_address, 
+                user_agent=user_agent, 
+                endpoint=endpoint,
+                request_id=request_id, 
+                meeting_id=meeting_id
+            )
+            await db.commit()
+            
+            raise ValueError(f"Failed to update attendance: {str(e)}")    
+
 
 # ============================================================================
 # DASHBOARD CRUD

@@ -1,5 +1,4 @@
-// src/components/actiontracker/meetings/MeetingDetail.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -37,17 +36,13 @@ import {
   useMediaQuery,
   useTheme,
   Badge,
-  List,
-  Checkbox,
-  Snackbar,
-  FormControlLabel
+  Snackbar
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   LocationOn as LocationIcon,
-  AccessTime as AccessTimeIcon,
   People as PeopleIcon,
   Description as DescriptionIcon,
   CalendarToday as CalendarIcon,
@@ -60,12 +55,12 @@ import {
   MoreVert as MoreVertIcon,
   VideoCall as VideoCallIcon,
   Link as LinkIcon,
-  NotificationsActive as NotificationsIcon,
-  Send as SendIcon,
+  Notifications as NotificationsIcon,
+  History as HistoryIcon,
+  Update as UpdateIcon,
   Close as CloseIcon,
-  Email as EmailIcon,
-  WhatsApp as WhatsAppIcon,
-  Sms as SmsIcon
+  ContentCopy as ContentCopyIcon,
+  Save as SaveIcon  // Added SaveIcon
 } from '@mui/icons-material';
 import { 
   fetchMeetingById, 
@@ -81,10 +76,26 @@ import {
 import MeetingMinutes from './MeetingMinutes';
 import MeetingActionsList from './MeetingActionsList';
 import MeetingDocuments from './MeetingDocuments';
+import MeetingHistory from './components/MeetingHistory';  // Correct import path
+import ParticipantsTab from './components/ParticipantsTab';
+import NotificationDialog from './components/NotificationDialog';
+import {
+  sendMeetingNotifications,
+  fetchMeetingParticipants,
+  selectNotificationParticipants,
+  selectNotificationLoading,
+  selectNotificationSending,
+  selectNotificationError,
+  selectLastNotificationResult,
+  clearNotificationError,
+  clearLastNotificationResult,
+} from '../../../store/slices/actionTracker/notificationSlice';
 import api from '../../../services/api';
+import MeetingAudit from './MeetingAudit';
 
-// ==================== Rich Text Content Component ====================
-const RichTextContent = ({ content }) => {
+
+// ==================== Memoized Rich Text Content Component ====================
+const RichTextContent = memo(({ content }) => {
   if (!content || content.trim() === '' || content === '<p></p>') {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
@@ -126,10 +137,12 @@ const RichTextContent = ({ content }) => {
       dangerouslySetInnerHTML={{ __html: content }}
     />
   );
-};
+});
 
-// Tab Panel Component
-const TabPanel = ({ children, value, index, ...other }) => (
+RichTextContent.displayName = 'RichTextContent';
+
+// ==================== Memoized Tab Panel Component ====================
+const TabPanel = memo(({ children, value, index, ...other }) => (
   <div
     role="tabpanel"
     hidden={value !== index}
@@ -139,380 +152,552 @@ const TabPanel = ({ children, value, index, ...other }) => (
   >
     {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
   </div>
-);
+));
 
-// Notification Dialog Component
-const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
-  const [selectedParticipants, setSelectedParticipants] = useState([]);
-  const [notificationType, setNotificationType] = useState(['email']);
-  const [customMessage, setCustomMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const [selectAll, setSelectAll] = useState(false);
+TabPanel.displayName = 'TabPanel';
 
-  useEffect(() => {
-    if (open && participants) {
-      setSelectedParticipants(participants.map(p => p.id));
-      setSelectAll(true);
+// ==================== Update Meeting Link Dialog Component ====================
+const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
+  const [platform, setPlatform] = useState(meeting?.platform || 'zoom');
+  const [meetingLink, setMeetingLink] = useState(meeting?.meeting_link || '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const platformOptions = [
+    { value: 'zoom', label: 'Zoom', icon: '🔵', color: '#0B5CFF' },
+    { value: 'google_meet', label: 'Google Meet', icon: '🟢', color: '#0F9D58' },
+    { value: 'microsoft_teams', label: 'Microsoft Teams', icon: '🟣', color: '#464EB8' },
+    { value: 'webex', label: 'Cisco Webex', icon: '🔴', color: '#E31C3D' },
+    { value: 'physical', label: 'Physical Meeting', icon: '📍', color: '#6B7280' },
+    { value: 'other', label: 'Other', icon: '🌐', color: '#8B5CF6' }
+  ];
+
+  const handleCopyLink = () => {
+    if (meetingLink) {
+      navigator.clipboard.writeText(meetingLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
-  }, [open, participants]);
-
-  const handleToggleParticipant = (participantId) => {
-    setSelectedParticipants(prev => 
-      prev.includes(participantId) 
-        ? prev.filter(id => id !== participantId)
-        : [...prev, participantId]
-    );
-    setSelectAll(selectedParticipants.length === participants?.length - 1);
   };
 
-  const handleSelectAll = () => {
-    if (selectAll) {
-      setSelectedParticipants([]);
-    } else {
-      setSelectedParticipants(participants.map(p => p.id));
+  const handleSubmit = async () => {
+    if (platform !== 'physical' && !meetingLink.trim()) {
+      setError('Please enter a meeting link for online meetings');
+      return;
     }
-    setSelectAll(!selectAll);
-  };
 
-  const handleSend = async () => {
-    setSending(true);
+    if (platform !== 'physical' && meetingLink.trim()) {
+      const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
+      if (!urlPattern.test(meetingLink)) {
+        setError('Please enter a valid URL (e.g., https://zoom.us/j/123456789)');
+        return;
+      }
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(false);
+
     try {
-      await onSend({
-        participant_ids: selectedParticipants,
-        notification_type: notificationType,
-        custom_message: customMessage
-      });
-      onClose();
-    } catch (error) {
-      console.error('Failed to send notifications:', error);
+      const payload = {
+        platform: platform,
+        ...(platform !== 'physical' && { meeting_link: meetingLink }),
+        ...(platform === 'physical' && { meeting_link: null, location_text: meeting?.location_text || 'Physical Meeting' })
+      };
+
+      const response = await api.patch(`/action-tracker/meetings/${meeting.id}`, payload);
+
+      setSuccess(true);
+      if (onUpdate) {
+        onUpdate(response.data);
+      }
+      
+      setTimeout(() => {
+        onClose();
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to update meeting link:', err);
+      setError(err.response?.data?.detail || 'Failed to update meeting information');
     } finally {
-      setSending(false);
+      setLoading(false);
     }
   };
+
+  const handleTestLink = () => {
+    if (meetingLink && meetingLink.trim()) {
+      let url = meetingLink.trim();
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+      }
+      window.open(url, '_blank');
+    }
+  };
+
+  const selectedPlatform = platformOptions.find(opt => opt.value === platform);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ pb: 1 }}>
+      <DialogTitle sx={{ pb: 1, bgcolor: '#f8fafc' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={1.5} alignItems="center">
-            <Badge badgeContent={selectedParticipants.length} color="primary">
-              <NotificationsIcon color="primary" />
-            </Badge>
-            <Typography variant="h6" fontWeight={700}>Send Meeting Notifications</Typography>
+            <Avatar sx={{ bgcolor: selectedPlatform?.color || '#6366f1', width: 40, height: 40 }}>
+              <VideoCallIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="h6" fontWeight={700}>
+                Update Meeting Information
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Change meeting platform or link
+              </Typography>
+            </Box>
           </Stack>
-          <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
+          <IconButton onClick={onClose} size="small" disabled={loading}>
+            <CloseIcon />
+          </IconButton>
         </Stack>
       </DialogTitle>
       
-      <DialogContent dividers>
+      <DialogContent dividers sx={{ pt: 3 }}>
         <Stack spacing={3}>
-          {/* Meeting Info */}
-          <Paper variant="outlined" sx={{ p: 2.5, bgcolor: '#f8fafc', borderRadius: 2 }}>
-            <Typography variant="subtitle2" fontWeight={700} gutterBottom color="primary">
-              {meeting?.title}
+          {/* Current Meeting Info */}
+          <Alert severity="info" sx={{ borderRadius: 2 }}>
+            <Typography variant="body2" fontWeight={600}>
+              Current Meeting: {meeting?.title}
             </Typography>
-            <Stack direction="row" spacing={2} flexWrap="wrap">
-              <Typography variant="caption" color="text.secondary">
-                📅 {new Date(meeting?.meeting_date).toLocaleDateString()}
+            {meeting?.meeting_link && (
+              <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <LinkIcon fontSize="small" />
+                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                  Current Link: {meeting.meeting_link}
+                </Typography>
+                <IconButton size="small" onClick={() => {
+                  navigator.clipboard.writeText(meeting.meeting_link);
+                }}>
+                  <ContentCopyIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            )}
+          </Alert>
+
+          {/* Platform Selection - Card Style */}
+          <Box>
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+              Meeting Type
+            </Typography>
+            <Grid container spacing={1.5}>
+              {platformOptions.map((opt) => (
+                <Grid size={{ xs: 6, sm: 4 }} key={opt.value}>
+                  <Paper
+                    variant={platform === opt.value ? 'elevation' : 'outlined'}
+                    elevation={platform === opt.value ? 2 : 0}
+                    onClick={() => !loading && setPlatform(opt.value)}
+                    sx={{
+                      p: 1.5,
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      bgcolor: platform === opt.value ? `${opt.color}10` : 'transparent',
+                      borderColor: platform === opt.value ? opt.color : '#e0e0e0',
+                      borderWidth: platform === opt.value ? 2 : 1,
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        bgcolor: loading ? 'transparent' : `${opt.color}10`,
+                        transform: loading ? 'none' : 'translateY(-2px)'
+                      }
+                    }}
+                  >
+                    <Stack alignItems="center" spacing={1}>
+                      <Typography variant="h4">{opt.icon}</Typography>
+                      <Typography variant="body2" fontWeight={platform === opt.value ? 600 : 400}>
+                        {opt.label}
+                      </Typography>
+                    </Stack>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+
+          {/* Meeting Link Input - Only for online meetings */}
+          {platform !== 'physical' && (
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                Meeting Link
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                ⏰ {new Date(meeting?.meeting_date).toLocaleTimeString()}
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  fullWidth
+                  placeholder="https://zoom.us/j/123456789"
+                  value={meetingLink}
+                  onChange={(e) => setMeetingLink(e.target.value)}
+                  disabled={loading}
+                  error={!!error}
+                  helperText={error || "Enter the full meeting URL"}
+                  InputProps={{
+                    startAdornment: (
+                      <Box component="span" sx={{ mr: 1, fontSize: '1.2rem' }}>
+                        {selectedPlatform?.icon}
+                      </Box>
+                    ),
+                  }}
+                />
+                <Tooltip title="Copy Link">
+                  <IconButton 
+                    onClick={handleCopyLink} 
+                    disabled={!meetingLink || loading}
+                    sx={{ bgcolor: '#f0f0f0' }}
+                  >
+                    {copied ? <CheckCircleIcon color="success" /> : <ContentCopyIcon />}
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Box>
+          )}
+
+          {/* Physical Meeting Location */}
+          {platform === 'physical' && (
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                Location Details
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                👥 {participants?.length || 0} participants
+              <TextField
+                fullWidth
+                placeholder="Enter physical meeting location"
+                value={meeting?.location_text || ''}
+                onChange={(e) => {
+                  // Handle location change if needed
+                }}
+                disabled={loading}
+                helperText="e.g., Conference Room A, 2nd Floor"
+              />
+            </Box>
+          )}
+
+          {/* Quick Tips */}
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 2 }}>
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+              💡 Quick Tips
+            </Typography>
+            <Stack spacing={1}>
+              <Typography variant="body2" color="text.secondary">
+                • Zoom: https://zoom.us/j/123456789
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                • Google Meet: https://meet.google.com/xxx-xxxx-xxx
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                • Microsoft Teams: https://teams.microsoft.com/l/meetup-join/...
               </Typography>
             </Stack>
           </Paper>
 
-          {/* Notification Types */}
-          <Box>
-            <Typography variant="subtitle2" fontWeight={600} gutterBottom>Send via</Typography>
-            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-              <Chip
-                icon={<EmailIcon />}
-                label="Email"
-                color={notificationType.includes('email') ? 'primary' : 'default'}
-                onClick={() => {
-                  if (notificationType.includes('email')) {
-                    setNotificationType(notificationType.filter(t => t !== 'email'));
-                  } else {
-                    setNotificationType([...notificationType, 'email']);
-                  }
-                }}
-                sx={{ py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
-              />
-              <Chip
-                icon={<WhatsAppIcon />}
-                label="WhatsApp"
-                color={notificationType.includes('whatsapp') ? 'primary' : 'default'}
-                onClick={() => {
-                  if (notificationType.includes('whatsapp')) {
-                    setNotificationType(notificationType.filter(t => t !== 'whatsapp'));
-                  } else {
-                    setNotificationType([...notificationType, 'whatsapp']);
-                  }
-                }}
-                sx={{ py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
-              />
-              <Chip
-                icon={<SmsIcon />}
-                label="SMS"
-                color={notificationType.includes('sms') ? 'primary' : 'default'}
-                onClick={() => {
-                  if (notificationType.includes('sms')) {
-                    setNotificationType(notificationType.filter(t => t !== 'sms'));
-                  } else {
-                    setNotificationType([...notificationType, 'sms']);
-                  }
-                }}
-                sx={{ py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
-              />
-            </Stack>
-          </Box>
-
-          {/* Participants Selection */}
-          <Box>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" fontWeight={600}>Select Participants</Typography>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={selectAll}
-                    onChange={handleSelectAll}
-                    size="small"
-                  />
-                }
-                label="Select All"
-                sx={{ '& .MuiTypography-root': { fontSize: '0.8rem', fontWeight: 500 } }}
-              />
-            </Stack>
-            
-            <Paper variant="outlined" sx={{ maxHeight: 320, overflow: 'auto', borderRadius: 2 }}>
-              {participants?.map((participant) => (
-                <Stack
-                  key={participant.id}
-                  direction="row"
-                  alignItems="center"
-                  spacing={1}
-                  sx={{ 
-                    p: 1.5, 
-                    borderBottom: '1px solid #f0f0f0',
-                    '&:hover': { bgcolor: '#fafafa' }
-                  }}
-                >
-                  <Checkbox
-                    checked={selectedParticipants.includes(participant.id)}
-                    onChange={() => handleToggleParticipant(participant.id)}
-                    size="small"
-                  />
-                  <Avatar sx={{ width: 36, height: 36, bgcolor: '#6366f1', color: 'white' }}>
-                    {participant.full_name?.[0] || participant.username?.[0] || '?'}
-                  </Avatar>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="body2" fontWeight={600}>
-                      {participant.full_name || participant.username}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {participant.email}
-                    </Typography>
-                  </Box>
-                </Stack>
-              ))}
-            </Paper>
-          </Box>
-
-          {/* Custom Message */}
-          <TextField
-            label="Custom Message (Optional)"
-            multiline
-            rows={3}
-            value={customMessage}
-            onChange={(e) => setCustomMessage(e.target.value)}
-            placeholder="Add any additional information for participants..."
-            fullWidth
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
+          {/* Success/Error Messages */}
+          {success && (
+            <Alert severity="success" sx={{ borderRadius: 2 }}>
+              ✓ Meeting information updated successfully!
+            </Alert>
+          )}
         </Stack>
       </DialogContent>
       
-      <DialogActions sx={{ p: 2.5 }}>
-        <Button onClick={onClose} variant="outlined">Cancel</Button>
+      <DialogActions sx={{ p: 2.5, bgcolor: '#f8fafc' }}>
+        <Button onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>
+        {platform !== 'physical' && meetingLink && (
+          <Button
+            variant="outlined"
+            onClick={handleTestLink}
+            disabled={loading}
+            startIcon={<LinkIcon />}
+          >
+            Test Link
+          </Button>
+        )}
         <Button
           variant="contained"
-          onClick={handleSend}
-          disabled={sending || selectedParticipants.length === 0}
-          startIcon={sending ? <CircularProgress size={20} /> : <SendIcon />}
-          sx={{ 
-            bgcolor: '#6366f1',
-            '&:hover': { bgcolor: '#4f46e5' },
-            px: 3
-          }}
+          onClick={handleSubmit}
+          disabled={loading || (platform !== 'physical' && !meetingLink.trim())}
+          startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
+          sx={{ minWidth: 120 }}
         >
-          {sending ? 'Sending...' : `Send to ${selectedParticipants.length} Participant(s)`}
+          {loading ? 'Updating...' : 'Update Meeting'}
         </Button>
       </DialogActions>
     </Dialog>
   );
 };
 
+// ==================== Memoized Meeting Info Card ====================
+const MeetingInfoCard = memo(({ meeting, isMobile, formatDate, formatTime, getStatusDisplay, getStatusColor, getStatusIcon, getStatusValue, isOnlineMeeting, hasMeetingLink, onUpdateLink }) => (
+  <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, mb: 4, borderRadius: 3 }}>
+    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2}>
+      <Box sx={{ flex: 1 }}>
+        <Typography variant={isMobile ? "h5" : "h4"} fontWeight={800} gutterBottom>
+          {meeting?.title}
+        </Typography>
+        {meeting?.description && (
+          <Typography variant="body1" color="text.secondary">
+            {meeting.description}
+          </Typography>
+        )}
+      </Box>
+      <Stack direction="row" spacing={1}>
+        <Chip
+          label={getStatusDisplay()}
+          color={getStatusColor(getStatusValue())}
+          icon={getStatusIcon(getStatusValue())}
+          sx={{ fontWeight: 600, px: 1, py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
+        />
+      </Stack>
+    </Stack>
+
+    <Divider sx={{ my: 3 }} />
+
+    <Grid container spacing={3}>
+      {/* Date and Time */}
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48 }}>
+            <CalendarIcon />
+          </Avatar>
+          <Box>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              DATE & TIME
+            </Typography>
+            <Typography variant="body1" fontWeight={600}>
+              {formatDate(meeting?.meeting_date)}
+            </Typography>
+            {meeting?.start_time && (
+              <Typography variant="body2" color="text.secondary">
+                {formatTime(meeting.start_time)}
+                {meeting?.end_time && ` - ${formatTime(meeting.end_time)}`}
+              </Typography>
+            )}
+          </Box>
+        </Stack>
+      </Grid>
+
+      {/* Location / Meeting Platform */}
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Avatar sx={{ bgcolor: 'secondary.main', width: 48, height: 48 }}>
+            {isOnlineMeeting ? <VideoCallIcon /> : <LocationIcon />}
+          </Avatar>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              {isOnlineMeeting ? 'MEETING PLATFORM' : 'LOCATION'}
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="body1" fontWeight={600}>
+                {isOnlineMeeting 
+                  ? (meeting?.platform === 'zoom' ? 'Zoom' :
+                     meeting?.platform === 'google_meet' ? 'Google Meet' :
+                     meeting?.platform === 'microsoft_teams' ? 'Microsoft Teams' :
+                     meeting?.platform === 'webex' ? 'Cisco Webex' :
+                     'Online Meeting')
+                  : (meeting?.location_text || 'Not specified')}
+              </Typography>
+              <Tooltip title="Update Meeting Link">
+                <IconButton size="small" onClick={onUpdateLink} color="primary">
+                  <UpdateIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+            {hasMeetingLink && (
+              <Button
+                size="small"
+                startIcon={<LinkIcon />}
+                href={meeting.meeting_link}
+                target="_blank"
+                sx={{ mt: 0.5, textTransform: 'none' }}
+              >
+                Join Meeting
+              </Button>
+            )}
+          </Box>
+        </Stack>
+      </Grid>
+
+      {/* Facilitator */}
+      {meeting?.facilitator && (
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Avatar sx={{ bgcolor: 'info.main', width: 48, height: 48 }}>
+              <PeopleIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                SECRETARY
+              </Typography>
+              <Typography variant="body1" fontWeight={600}>
+                {meeting.facilitator}
+              </Typography>
+            </Box>
+          </Stack>
+        </Grid>
+      )}
+
+      {/* Chairperson */}
+      {meeting?.chairperson_name && (
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Avatar sx={{ bgcolor: 'warning.main', width: 48, height: 48 }}>
+              <PeopleIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                CHAIRPERSON
+              </Typography>
+              <Typography variant="body1" fontWeight={600}>
+                {meeting.chairperson_name}
+              </Typography>
+            </Box>
+          </Stack>
+        </Grid>
+      )}
+    </Grid>
+
+    {/* Agenda Section */}
+    {meeting?.agenda && (
+      <Box sx={{ mt: 4 }}>
+        <Divider sx={{ mb: 3 }} />
+        <Stack direction="row" spacing={2} alignItems="flex-start">
+          <Avatar sx={{ bgcolor: 'success.main', width: 48, height: 48 }}>
+            <DescriptionIcon />
+          </Avatar>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+              Agenda
+            </Typography>
+            <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 2 }}>
+              <RichTextContent content={meeting.agenda} />
+            </Paper>
+          </Box>
+        </Stack>
+      </Box>
+    )}
+  </Paper>
+));
+
+MeetingInfoCard.displayName = 'MeetingInfoCard';
+
+// ==================== Memoized Header Bar ====================
+const HeaderBar = memo(({ onBack, onNotify, onRefresh, onEdit, onStatusMenuOpen, onMoreMenuOpen, onUpdateLink, participantCount, getStatusIcon, getStatusValue, getStatusDisplay, isMobile }) => (
+  <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'white', borderBottom: '1px solid #e2e8f0' }}>
+    <Toolbar sx={{ px: { xs: 2, sm: 3, md: 4 } }}>
+      <IconButton edge="start" onClick={onBack} sx={{ mr: 2 }}>
+        <ArrowBackIcon />
+      </IconButton>
+      <Typography variant="h6" sx={{ flex: 1, fontWeight: 700, color: '#0f172a' }}>
+        Meeting Details
+      </Typography>
+      {!isMobile && (
+        <Stack direction="row" spacing={1}>
+          <Tooltip title="Update Meeting Link">
+            <IconButton onClick={onUpdateLink} color="info" size="small">
+              <UpdateIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Send Notifications">
+            <IconButton onClick={onNotify} color="primary" size="small">
+              <Badge badgeContent={participantCount} color="error">
+                <NotificationsIcon />
+              </Badge>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <IconButton onClick={onRefresh} size="small">
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Edit Meeting">
+            <IconButton onClick={onEdit} color="primary" size="small">
+              <EditIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Update Status">
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={getStatusIcon(getStatusValue())}
+              onClick={onStatusMenuOpen}
+              sx={{ textTransform: 'none' }}
+            >
+              {getStatusDisplay()}
+            </Button>
+          </Tooltip>
+          <Tooltip title="More Options">
+            <IconButton onClick={onMoreMenuOpen} size="small">
+              <MoreVertIcon />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+      )}
+      {isMobile && (
+        <IconButton onClick={onMoreMenuOpen}>
+          <MoreVertIcon />
+        </IconButton>
+      )}
+    </Toolbar>
+  </AppBar>
+));
+
+HeaderBar.displayName = 'HeaderBar';
+
+// ==================== Main Component ====================
 const MeetingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   
+  // Meeting selectors
   const currentMeeting = useSelector(selectCurrentMeeting);
   const loading = useSelector(selectMeetingsLoading);
   const error = useSelector(selectMeetingsError);
   const statusOptions = useSelector(selectMeetingStatusOptions);
   
-  const [tabValue, setTabValue] = useState(0);
-  const [localError, setLocalError] = useState(null);
-  const [statusAnchorEl, setStatusAnchorEl] = useState(null);
-  const [showStatusDialog, setShowStatusDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [selectedStatus, setSelectedStatus] = useState('');
-  const [statusComment, setStatusComment] = useState('');
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [moreAnchorEl, setMoreAnchorEl] = useState(null);
+  // Notification selectors
+  const participants = useSelector(selectNotificationParticipants);
+  const loadingParticipants = useSelector(selectNotificationLoading);
+  const sendingNotifications = useSelector(selectNotificationSending);
+  const notificationError = useSelector(selectNotificationError);
+  const lastNotificationResult = useSelector(selectLastNotificationResult);
   
-  // Notification state
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
-  const [meetingParticipants, setMeetingParticipants] = useState([]);
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  // Local UI state
+  const [uiState, setUiState] = useState({
+    tabValue: 0,
+    notificationDialogOpen: false,
+    updateLinkDialogOpen: false,
+    showDeleteDialog: false,
+    snackbar: { open: false, message: '', severity: 'success' }
+  });
+  
+  const [statusState, setStatusState] = useState({
+    anchorEl: null,
+    showDialog: false,
+    selectedStatus: '',
+    comment: '',
+    updating: false
+  });
+  
+  const [moreAnchorEl, setMoreAnchorEl] = useState(null);
+  const [localError, setLocalError] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Fetch meeting details
-  const fetchMeeting = useCallback(() => {
-    if (id) {
-      dispatch(fetchMeetingById(id));
-    }
-  }, [id, dispatch]);
+  const meetingStatus = useMemo(() => {
+    const status = currentMeeting?.status;
+    if (!status) return null;
+    if (typeof status === 'string') return status;
+    return status.short_name || status.name || null;
+  }, [currentMeeting?.status]);
 
-  useEffect(() => {
-    if (id) {
-      fetchMeeting();
-      dispatch(fetchActionTrackerAttributes());
-    }
-    
-    return () => {
-      dispatch(clearMeetingState());
-    };
-  }, [id, dispatch, fetchMeeting]);
+  const participantCount = useMemo(() => participants.length, [participants]);
 
-  const handleRefresh = () => {
-    fetchMeeting();
-  };
-
-  const handleBack = () => {
-    navigate('/meetings');
-  };
-
-  const handleEdit = () => {
-    navigate(`/meetings/${id}/edit/`);
-  };
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      await dispatch(deleteMeeting(id)).unwrap();
-      setShowDeleteDialog(false);
-      navigate('/meetings');
-    } catch (err) {
-      console.error('Error deleting meeting:', err);
-      setLocalError(err.message || 'Failed to delete meeting');
-      setShowDeleteDialog(false);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
-  };
-
-  const handleStatusMenuOpen = (event) => {
-    setStatusAnchorEl(event.currentTarget);
-  };
-
-  const handleStatusMenuClose = () => {
-    setStatusAnchorEl(null);
-  };
-
-  const handleMoreMenuOpen = (event) => {
-    setMoreAnchorEl(event.currentTarget);
-  };
-
-  const handleMoreMenuClose = () => {
-    setMoreAnchorEl(null);
-  };
-
-  const handleStatusSelect = (status) => {
-    setSelectedStatus(status);
-    setStatusComment('');
-    setShowStatusDialog(true);
-    handleStatusMenuClose();
-  };
-
-  const handleStatusUpdate = async () => {
-    if (!selectedStatus) return;
-    
-    setUpdatingStatus(true);
-    try {
-      await dispatch(updateMeetingStatus({
-        id: id,
-        status: selectedStatus,
-        comment: statusComment
-      })).unwrap();
-      
-      setShowStatusDialog(false);
-      setSelectedStatus('');
-      setStatusComment('');
-      fetchMeeting();
-    } catch (err) {
-      console.error('Error updating status:', err);
-      setLocalError(err.message || 'Failed to update meeting status');
-    } finally {
-      setUpdatingStatus(false);
-    }
-  };
-
-  // Notification handlers
-  const handleNotifyClick = async () => {
-    setNotificationDialogOpen(true);
-    try {
-      const response = await api.get(`/action-tracker/meetings/${id}/participants`);
-      setMeetingParticipants(response.data?.items || response.data || []);
-    } catch (error) {
-      console.error('Failed to fetch participants:', error);
-      setMeetingParticipants([]);
-    }
-  };
-
-  const handleSendNotifications = async (notificationData) => {
-    try {
-      const response = await api.post(
-        `/action-tracker/meetings/${id}/notify-participants`,
-        notificationData
-      );
-      
-      setSnackbar({
-        open: true,
-        message: `✅ Notifications sent to ${response.data.sent} participants successfully!`,
-        severity: 'success'
-      });
-    } catch (error) {
-      setSnackbar({
-        open: true,
-        message: error.response?.data?.detail || '❌ Failed to send notifications',
-        severity: 'error'
-      });
-    }
-  };
-
-  const formatDate = (dateString) => {
+  const formatDate = useCallback((dateString) => {
     if (!dateString) return 'Date not set';
     try {
       const date = new Date(dateString);
@@ -525,9 +710,9 @@ const MeetingDetail = () => {
     } catch {
       return 'Invalid date';
     }
-  };
+  }, []);
 
-  const formatTime = (dateString) => {
+  const formatTime = useCallback((dateString) => {
     if (!dateString) return 'Time not set';
     try {
       const date = new Date(dateString);
@@ -538,9 +723,9 @@ const MeetingDetail = () => {
     } catch {
       return 'Invalid time';
     }
-  };
+  }, []);
 
-  const getStatusColor = (status) => {
+  const getStatusColor = useCallback((status) => {
     if (!status) return 'default';
     const statusLower = status.toLowerCase();
     if (statusLower === 'completed' || statusLower === 'ended') return 'success';
@@ -548,34 +733,243 @@ const MeetingDetail = () => {
     if (statusLower === 'in_progress' || statusLower === 'ongoing') return 'info';
     if (statusLower === 'pending' || statusLower === 'scheduled') return 'warning';
     return 'default';
-  };
+  }, []);
 
-  const getStatusIcon = (status) => {
+  const getStatusIcon = useCallback((status) => {
     if (!status) return <ScheduleIcon />;
     const statusLower = status.toLowerCase();
     if (statusLower === 'completed' || statusLower === 'ended') return <CheckCircleIcon />;
     if (statusLower === 'cancelled') return <CancelIcon />;
     if (statusLower === 'in_progress' || statusLower === 'ongoing') return <PendingIcon />;
     return <ScheduleIcon />;
-  };
+  }, []);
 
-  const getStatusDisplay = () => {
+  const getStatusDisplay = useCallback(() => {
     const status = currentMeeting?.status;
     if (!status) return 'Unknown';
     if (typeof status === 'string') return status;
     return status.short_name || status.name || 'Unknown';
-  };
+  }, [currentMeeting?.status]);
 
-  const getStatusValue = () => {
+  const getStatusValue = useCallback(() => {
     const status = currentMeeting?.status;
     if (!status) return '';
     if (typeof status === 'string') return status;
     return status.short_name || status.value || '';
-  };
+  }, [currentMeeting?.status]);
 
-  const isOnlineMeeting = currentMeeting?.platform && currentMeeting.platform !== 'physical';
-  const hasMeetingLink = currentMeeting?.meeting_link;
-  const participantCount = currentMeeting?.participants?.length || 0;
+  const isOnlineMeeting = useMemo(() => 
+    currentMeeting?.platform && currentMeeting.platform !== 'physical', 
+    [currentMeeting?.platform]
+  );
+  
+  const hasMeetingLink = useMemo(() => 
+    currentMeeting?.meeting_link, 
+    [currentMeeting?.meeting_link]
+  );
+
+  const fetchMeeting = useCallback(() => {
+    if (id) dispatch(fetchMeetingById(id));
+  }, [id, dispatch]);
+
+  const fetchParticipants = useCallback(() => {
+    if (id) dispatch(fetchMeetingParticipants(id));
+  }, [id, dispatch]);
+
+  useEffect(() => {
+    if (id) {
+      fetchMeeting();
+      fetchParticipants();
+      dispatch(fetchActionTrackerAttributes());
+    }
+    
+    return () => {
+      dispatch(clearMeetingState());
+      dispatch(clearNotificationError());
+      dispatch(clearLastNotificationResult());
+    };
+  }, [id, dispatch, fetchMeeting, fetchParticipants]);
+
+  useEffect(() => {
+    if (lastNotificationResult) {
+      setUiState(prev => ({
+        ...prev,
+        snackbar: {
+          open: true,
+          message: `✅ Notifications sent to ${lastNotificationResult.sent} participants successfully!`,
+          severity: 'success'
+        },
+        notificationDialogOpen: false
+      }));
+      dispatch(clearLastNotificationResult());
+    }
+  }, [lastNotificationResult, dispatch]);
+
+  useEffect(() => {
+    if (notificationError) {
+      setUiState(prev => ({
+        ...prev,
+        snackbar: {
+          open: true,
+          message: notificationError,
+          severity: 'error'
+        }
+      }));
+      dispatch(clearNotificationError());
+    }
+  }, [notificationError, dispatch]);
+
+  const handleRefresh = useCallback(() => {
+    fetchMeeting();
+    fetchParticipants();
+  }, [fetchMeeting, fetchParticipants]);
+
+  const handleBack = useCallback(() => {
+    navigate('/meetings');
+  }, [navigate]);
+
+  const handleEdit = useCallback(() => {
+    navigate(`/meetings/${id}/edit/`);
+  }, [navigate, id]);
+
+  const handleTabChange = useCallback((event, newValue) => {
+    setUiState(prev => ({ ...prev, tabValue: newValue }));
+  }, []);
+
+  const handleStatusMenuOpen = useCallback((event) => {
+    setStatusState(prev => ({ ...prev, anchorEl: event.currentTarget }));
+  }, []);
+
+  const handleStatusMenuClose = useCallback(() => {
+    setStatusState(prev => ({ ...prev, anchorEl: null }));
+  }, []);
+
+  const handleMoreMenuOpen = useCallback((event) => {
+    setMoreAnchorEl(event.currentTarget);
+  }, []);
+
+  const handleMoreMenuClose = useCallback(() => {
+    setMoreAnchorEl(null);
+  }, []);
+
+  const handleStatusSelect = useCallback((status) => {
+    setStatusState(prev => ({
+      ...prev,
+      selectedStatus: status,
+      comment: '',
+      showDialog: true,
+      anchorEl: null
+    }));
+  }, []);
+
+  const handleStatusDialogClose = useCallback(() => {
+    setStatusState(prev => ({ ...prev, showDialog: false, selectedStatus: '', comment: '' }));
+  }, []);
+
+  const handleStatusCommentChange = useCallback((e) => {
+    setStatusState(prev => ({ ...prev, comment: e.target.value }));
+  }, []);
+
+  const handleStatusChange = useCallback((e) => {
+    setStatusState(prev => ({ ...prev, selectedStatus: e.target.value }));
+  }, []);
+
+  const handleStatusUpdate = useCallback(async () => {
+    if (!statusState.selectedStatus) return;
+    
+    setStatusState(prev => ({ ...prev, updating: true }));
+    try {
+      await dispatch(updateMeetingStatus({
+        id: id,
+        status: statusState.selectedStatus,
+        comment: statusState.comment
+      })).unwrap();
+      
+      setStatusState(prev => ({
+        ...prev,
+        showDialog: false,
+        selectedStatus: '',
+        comment: '',
+        updating: false
+      }));
+      fetchMeeting();
+    } catch (err) {
+      console.error('Error updating status:', err);
+      setLocalError(err.message || 'Failed to update meeting status');
+      setStatusState(prev => ({ ...prev, updating: false }));
+    }
+  }, [id, dispatch, statusState.selectedStatus, statusState.comment, fetchMeeting]);
+
+  const handleDeleteClick = useCallback(() => {
+    setUiState(prev => ({ ...prev, showDeleteDialog: true }));
+    handleMoreMenuClose();
+  }, []);
+
+  const handleDeleteDialogClose = useCallback(() => {
+    setUiState(prev => ({ ...prev, showDeleteDialog: false }));
+  }, []);
+
+  const handleDelete = useCallback(async () => {
+    setDeleting(true);
+    try {
+      await dispatch(deleteMeeting(id)).unwrap();
+      setUiState(prev => ({ ...prev, showDeleteDialog: false }));
+      navigate('/meetings');
+    } catch (err) {
+      console.error('Error deleting meeting:', err);
+      setLocalError(err.message || 'Failed to delete meeting');
+      setUiState(prev => ({ ...prev, showDeleteDialog: false }));
+    } finally {
+      setDeleting(false);
+    }
+  }, [id, dispatch, navigate]);
+
+  const handleNotifyClick = useCallback(() => {
+    fetchParticipants();
+    setUiState(prev => ({ ...prev, notificationDialogOpen: true }));
+    handleMoreMenuClose();
+  }, [fetchParticipants]);
+
+  const handleNotificationDialogClose = useCallback(() => {
+    setUiState(prev => ({ ...prev, notificationDialogOpen: false }));
+  }, []);
+
+  const handleSendNotifications = useCallback((notificationData) => {
+    dispatch(sendMeetingNotifications({
+      meetingId: id,
+      notificationData
+    }));
+  }, [id, dispatch]);
+
+  const handleUpdateLinkClick = useCallback(() => {
+    setUiState(prev => ({ ...prev, updateLinkDialogOpen: true }));
+    handleMoreMenuClose();
+  }, []);
+
+  const handleUpdateLinkDialogClose = useCallback(() => {
+    setUiState(prev => ({ ...prev, updateLinkDialogOpen: false }));
+  }, []);
+
+  const handleMeetingLinkUpdate = useCallback((updatedMeeting) => {
+    fetchMeeting();
+    setUiState(prev => ({
+      ...prev,
+      snackbar: {
+        open: true,
+        message: '✅ Meeting information updated successfully!',
+        severity: 'success'
+      }
+    }));
+  }, [fetchMeeting]);
+
+  const handleSnackbarClose = useCallback(() => {
+    setUiState(prev => ({ ...prev, snackbar: { ...prev.snackbar, open: false } }));
+  }, []);
+
+  const handleErrorClose = useCallback(() => {
+    setLocalError(null);
+    dispatch(clearMeetingState());
+  }, [dispatch]);
 
   if (loading && !currentMeeting) {
     return (
@@ -612,60 +1006,20 @@ const MeetingDetail = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
-      {/* Header Bar */}
-      <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'white', borderBottom: '1px solid #e2e8f0' }}>
-        <Toolbar sx={{ px: { xs: 2, sm: 3, md: 4 } }}>
-          <IconButton edge="start" onClick={handleBack} sx={{ mr: 2 }}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h6" sx={{ flex: 1, fontWeight: 700, color: '#0f172a' }}>
-            Meeting Details
-          </Typography>
-          {!isMobile && (
-            <Stack direction="row" spacing={1}>
-              {/* Send Notification Button */}
-              <Tooltip title="Send Notifications">
-                <IconButton onClick={handleNotifyClick} color="primary" size="small">
-                  <Badge badgeContent={participantCount} color="error">
-                    <NotificationsIcon />
-                  </Badge>
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Refresh">
-                <IconButton onClick={handleRefresh} size="small">
-                  <RefreshIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Edit Meeting">
-                <IconButton onClick={handleEdit} color="primary" size="small">
-                  <EditIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Update Status">
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={getStatusIcon(getStatusValue())}
-                  onClick={handleStatusMenuOpen}
-                  sx={{ textTransform: 'none' }}
-                >
-                  {getStatusDisplay()}
-                </Button>
-              </Tooltip>
-              <Tooltip title="More Options">
-                <IconButton onClick={handleMoreMenuOpen} size="small">
-                  <MoreVertIcon />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-          )}
-          {isMobile && (
-            <IconButton onClick={handleMoreMenuOpen}>
-              <MoreVertIcon />
-            </IconButton>
-          )}
-        </Toolbar>
-      </AppBar>
+      <HeaderBar
+        onBack={handleBack}
+        onNotify={handleNotifyClick}
+        onRefresh={handleRefresh}
+        onEdit={handleEdit}
+        onStatusMenuOpen={handleStatusMenuOpen}
+        onMoreMenuOpen={handleMoreMenuOpen}
+        onUpdateLink={handleUpdateLinkClick}
+        participantCount={participantCount}
+        getStatusIcon={getStatusIcon}
+        getStatusValue={getStatusValue}
+        getStatusDisplay={getStatusDisplay}
+        isMobile={isMobile}
+      />
 
       {/* More Options Menu */}
       <Menu
@@ -674,24 +1028,28 @@ const MeetingDetail = () => {
         onClose={handleMoreMenuClose}
         PaperProps={{ sx: { borderRadius: 2, minWidth: 180 } }}
       >
-        <MenuItem onClick={() => { handleMoreMenuClose(); handleNotifyClick(); }}>
+        <MenuItem onClick={handleUpdateLinkClick}>
+          <ListItemIcon><UpdateIcon fontSize="small" color="info" /></ListItemIcon>
+          <ListItemText>Update Meeting Link</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleNotifyClick}>
           <ListItemIcon><NotificationsIcon fontSize="small" color="primary" /></ListItemIcon>
           <ListItemText>Send Notifications</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => { handleMoreMenuClose(); handleRefresh(); }}>
+        <MenuItem onClick={handleRefresh}>
           <ListItemIcon><RefreshIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Refresh</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => { handleMoreMenuClose(); handleEdit(); }}>
+        <MenuItem onClick={handleEdit}>
           <ListItemIcon><EditIcon fontSize="small" color="primary" /></ListItemIcon>
           <ListItemText>Edit Meeting</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => { handleMoreMenuClose(); handleStatusMenuOpen(); }}>
+        <MenuItem onClick={handleStatusMenuOpen}>
           <ListItemIcon>{getStatusIcon(getStatusValue())}</ListItemIcon>
           <ListItemText>Update Status</ListItemText>
         </MenuItem>
         <Divider />
-        <MenuItem onClick={() => { handleMoreMenuClose(); setShowDeleteDialog(true); }} sx={{ color: 'error.main' }}>
+        <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
           <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
           <ListItemText>Delete Meeting</ListItemText>
         </MenuItem>
@@ -699,8 +1057,8 @@ const MeetingDetail = () => {
 
       {/* Status Update Menu */}
       <Menu
-        anchorEl={statusAnchorEl}
-        open={Boolean(statusAnchorEl)}
+        anchorEl={statusState.anchorEl}
+        open={Boolean(statusState.anchorEl)}
         onClose={handleStatusMenuClose}
         PaperProps={{ sx: { borderRadius: 2, minWidth: 200 } }}
       >
@@ -736,7 +1094,7 @@ const MeetingDetail = () => {
       </Menu>
 
       {/* Status Update Dialog */}
-      <Dialog open={showStatusDialog} onClose={() => setShowStatusDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={statusState.showDialog} onClose={handleStatusDialogClose} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ pb: 1 }}>
           <Typography variant="h6" fontWeight={700}>Update Meeting Status</Typography>
         </DialogTitle>
@@ -745,9 +1103,9 @@ const MeetingDetail = () => {
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
               <Select
-                value={selectedStatus}
+                value={statusState.selectedStatus}
                 label="Status"
-                onChange={(e) => setSelectedStatus(e.target.value)}
+                onChange={handleStatusChange}
               >
                 {statusOptions && statusOptions.length > 0 ? (
                   statusOptions.map((status) => (
@@ -770,26 +1128,26 @@ const MeetingDetail = () => {
               label="Comment (Optional)"
               multiline
               rows={3}
-              value={statusComment}
-              onChange={(e) => setStatusComment(e.target.value)}
+              value={statusState.comment}
+              onChange={handleStatusCommentChange}
               placeholder="Add a comment about this status change..."
             />
           </Stack>
         </DialogContent>
         <DialogActions sx={{ p: 2.5 }}>
-          <Button onClick={() => setShowStatusDialog(false)}>Cancel</Button>
+          <Button onClick={handleStatusDialogClose}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleStatusUpdate}
-            disabled={updatingStatus || !selectedStatus}
+            disabled={statusState.updating || !statusState.selectedStatus}
           >
-            {updatingStatus ? <CircularProgress size={24} /> : 'Update Status'}
+            {statusState.updating ? <CircularProgress size={24} /> : 'Update Status'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteDialog} onClose={() => setShowDeleteDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={uiState.showDeleteDialog} onClose={handleDeleteDialogClose} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ pb: 1 }}>
           <Typography variant="h6" fontWeight={700}>Delete Meeting</Typography>
         </DialogTitle>
@@ -812,7 +1170,7 @@ const MeetingDetail = () => {
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2.5 }}>
-          <Button onClick={() => setShowDeleteDialog(false)} disabled={deleting}>
+          <Button onClick={handleDeleteDialogClose} disabled={deleting}>
             Cancel
           </Button>
           <Button
@@ -830,7 +1188,7 @@ const MeetingDetail = () => {
       {/* Error Alert */}
       {(error || localError) && (
         <Container maxWidth="xl" sx={{ mt: 2 }}>
-          <Alert severity="error" onClose={() => { setLocalError(null); dispatch(clearMeetingState()); }}>
+          <Alert severity="error" onClose={handleErrorClose}>
             {typeof error === 'string' ? error : (localError || 'Failed to load meeting')}
           </Alert>
         </Container>
@@ -838,175 +1196,72 @@ const MeetingDetail = () => {
 
       {/* Main Content */}
       <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
-        {/* Meeting Details Card */}
-        <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, mb: 4, borderRadius: 3 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2}>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant={isMobile ? "h5" : "h4"} fontWeight={800} gutterBottom>
-                {currentMeeting?.title}
-              </Typography>
-              {currentMeeting?.description && (
-                <Typography variant="body1" color="text.secondary">
-                  {currentMeeting.description}
-                </Typography>
-              )}
-            </Box>
-            <Chip
-              label={getStatusDisplay()}
-              color={getStatusColor(getStatusValue())}
-              icon={getStatusIcon(getStatusValue())}
-              sx={{ fontWeight: 600, px: 1, py: 2, '& .MuiChip-label': { fontWeight: 600 } }}
-            />
-          </Stack>
-
-          <Divider sx={{ my: 3 }} />
-
-          <Grid container spacing={3}>
-            {/* Date and Time */}
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48 }}>
-                  <CalendarIcon />
-                </Avatar>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    DATE & TIME
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {formatDate(currentMeeting?.meeting_date)}
-                  </Typography>
-                  {currentMeeting?.start_time && (
-                    <Typography variant="body2" color="text.secondary">
-                      {formatTime(currentMeeting.start_time)}
-                      {currentMeeting?.end_time && ` - ${formatTime(currentMeeting.end_time)}`}
-                    </Typography>
-                  )}
-                </Box>
-              </Stack>
-            </Grid>
-
-            {/* Location / Meeting Platform */}
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: 'secondary.main', width: 48, height: 48 }}>
-                  {isOnlineMeeting ? <VideoCallIcon /> : <LocationIcon />}
-                </Avatar>
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    {isOnlineMeeting ? 'MEETING PLATFORM' : 'LOCATION'}
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {isOnlineMeeting 
-                      ? (currentMeeting?.platform === 'zoom' ? 'Zoom' :
-                         currentMeeting?.platform === 'google_meet' ? 'Google Meet' :
-                         currentMeeting?.platform === 'microsoft_teams' ? 'Microsoft Teams' :
-                         'Online Meeting')
-                      : (currentMeeting?.location_text || 'Not specified')}
-                  </Typography>
-                  {hasMeetingLink && (
-                    <Button
-                      size="small"
-                      startIcon={<LinkIcon />}
-                      href={currentMeeting.meeting_link}
-                      target="_blank"
-                      sx={{ mt: 0.5, textTransform: 'none' }}
-                    >
-                      Join Meeting
-                    </Button>
-                  )}
-                </Box>
-              </Stack>
-            </Grid>
-
-            {/* Facilitator */}
-            {currentMeeting?.facilitator && (
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Stack direction="row" spacing={2} alignItems="center">
-                  <Avatar sx={{ bgcolor: 'info.main', width: 48, height: 48 }}>
-                    <PeopleIcon />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                      FACILITATOR
-                    </Typography>
-                    <Typography variant="body1" fontWeight={600}>
-                      {currentMeeting.facilitator}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </Grid>
-            )}
-
-            {/* Chairperson */}
-            {currentMeeting?.chairperson_name && (
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Stack direction="row" spacing={2} alignItems="center">
-                  <Avatar sx={{ bgcolor: 'warning.main', width: 48, height: 48 }}>
-                    <PeopleIcon />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                      CHAIRPERSON
-                    </Typography>
-                    <Typography variant="body1" fontWeight={600}>
-                      {currentMeeting.chairperson_name}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </Grid>
-            )}
-          </Grid>
-
-          {/* Agenda Section */}
-          {currentMeeting?.agenda && (
-            <Box sx={{ mt: 4 }}>
-              <Divider sx={{ mb: 3 }} />
-              <Stack direction="row" spacing={2} alignItems="flex-start">
-                <Avatar sx={{ bgcolor: 'success.main', width: 48, height: 48 }}>
-                  <DescriptionIcon />
-                </Avatar>
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                    Agenda
-                  </Typography>
-                  <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 2 }}>
-                    <RichTextContent content={currentMeeting.agenda} />
-                  </Paper>
-                </Box>
-              </Stack>
-            </Box>
-          )}
-        </Paper>
+        <MeetingInfoCard
+          meeting={currentMeeting}
+          isMobile={isMobile}
+          formatDate={formatDate}
+          formatTime={formatTime}
+          getStatusDisplay={getStatusDisplay}
+          getStatusColor={getStatusColor}
+          getStatusIcon={getStatusIcon}
+          getStatusValue={getStatusValue}
+          isOnlineMeeting={isOnlineMeeting}
+          hasMeetingLink={hasMeetingLink}
+          onUpdateLink={handleUpdateLinkClick}
+        />
 
         {/* Tabs Section */}
         <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
           <Tabs
-            value={tabValue}
+            value={uiState.tabValue}
             onChange={handleTabChange}
-            variant={isMobile ? "fullWidth" : "standard"}
+            variant={isMobile ? "scrollable" : "standard"}
+            scrollButtons={isMobile ? "auto" : false}
+            allowScrollButtonsMobile
             sx={{ 
               borderBottom: 1, 
               borderColor: 'divider',
               bgcolor: 'white',
-              '& .MuiTab-root': { py: 2, fontWeight: 600 }
+              '& .MuiTab-root': { py: 2, fontWeight: 600, minWidth: isMobile ? 'auto' : 120 }
             }}
           >
             <Tab icon={<DescriptionIcon />} iconPosition="start" label="Minutes" />
             <Tab icon={<AssignmentIcon />} iconPosition="start" label="Actions" />
+            <Tab icon={<PeopleIcon />} iconPosition="start" label="Participants" />
             <Tab icon={<DescriptionIcon />} iconPosition="start" label="Documents" />
+            <Tab icon={<HistoryIcon />} iconPosition="start" label="History" />
+            <Tab icon={<HistoryIcon />} iconPosition="start" label="Audit" />
           </Tabs>
 
           <Box sx={{ p: { xs: 2, sm: 3 } }}>
-            <TabPanel value={tabValue} index={0}>
-              <MeetingMinutes meetingId={id} onRefresh={handleRefresh} />
+            <TabPanel value={uiState.tabValue} index={0}>
+              <MeetingMinutes meetingId={id} meetingStatus={meetingStatus} onRefresh={handleRefresh} />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={1}>
-              <MeetingActionsList meetingId={id} onRefresh={handleRefresh} />
+            <TabPanel value={uiState.tabValue} index={1}>
+              <MeetingActionsList meetingId={id} meetingStatus={meetingStatus} onRefresh={handleRefresh} />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={2}>
+            <TabPanel value={uiState.tabValue} index={2}>
+              <ParticipantsTab 
+                meetingId={id} 
+                participants={participants} 
+                loading={loadingParticipants}
+                meetingStatus={meetingStatus} 
+                onRefresh={fetchParticipants}
+              />
+            </TabPanel>
+
+            <TabPanel value={uiState.tabValue} index={3}>
               <MeetingDocuments meetingId={id} onRefresh={handleRefresh} />
+            </TabPanel>
+
+            <TabPanel value={uiState.tabValue} index={4}>
+              <MeetingHistory meetingId={id} />
+            </TabPanel>
+
+            <TabPanel value={uiState.tabValue} index={5}>
+              <MeetingAudit meetingId={id} />
             </TabPanel>
           </Box>
         </Paper>
@@ -1014,29 +1269,35 @@ const MeetingDetail = () => {
 
       {/* Notification Dialog */}
       <NotificationDialog
-        open={notificationDialogOpen}
-        onClose={() => {
-          setNotificationDialogOpen(false);
-          setMeetingParticipants([]);
-        }}
+        open={uiState.notificationDialogOpen}
+        onClose={handleNotificationDialogClose}
         meeting={currentMeeting}
-        participants={meetingParticipants}
+        participants={participants}
         onSend={handleSendNotifications}
+        sending={sendingNotifications}
       />
 
-      {/* Snackbar for notifications */}
+      {/* Update Meeting Link Dialog */}
+      <UpdateMeetingLinkDialog
+        open={uiState.updateLinkDialogOpen}
+        onClose={handleUpdateLinkDialogClose}
+        meeting={currentMeeting}
+        onUpdate={handleMeetingLinkUpdate}
+      />
+
+      {/* Snackbar */}
       <Snackbar
-        open={snackbar.open}
+        open={uiState.snackbar.open}
         autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        onClose={handleSnackbarClose}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
         <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
+          onClose={handleSnackbarClose}
+          severity={uiState.snackbar.severity}
           variant="filled"
         >
-          {snackbar.message}
+          {uiState.snackbar.message}
         </Alert>
       </Snackbar>
     </Box>

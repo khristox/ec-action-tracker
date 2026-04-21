@@ -1,0 +1,610 @@
+<!-- app/templates/audit/audit_logs.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audit Logs - System Activity Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .modal {
+            transition: opacity 0.25s ease;
+        }
+        .json-viewer {
+            background: #f7f7f7;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+            overflow-x: auto;
+        }
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .status-success { background: #d1fae5; color: #065f46; }
+        .status-failure { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8 max-w-[1400px]">
+        <!-- Header -->
+        <div class="mb-8 bg-white rounded-lg shadow-sm p-6">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800">
+                        <i class="fas fa-history text-blue-600 mr-3"></i>
+                        Audit Logs
+                    </h1>
+                    <p class="text-gray-600 mt-2">Track and monitor all system activities and user actions</p>
+                </div>
+                <div class="flex space-x-3">
+                    <button onclick="exportLogs('csv')" 
+                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center">
+                        <i class="fas fa-file-csv mr-2"></i>Export CSV
+                    </button>
+                    <button onclick="exportLogs('json')" 
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center">
+                        <i class="fas fa-file-json mr-2"></i>Export JSON
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters Panel -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4 flex items-center">
+                <i class="fas fa-filter text-gray-600 mr-2"></i>
+                Filters
+                <button onclick="toggleFilters()" class="ml-auto text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-chevron-up" id="filterToggleIcon"></i>
+                </button>
+            </h2>
+            
+            <div id="filtersContent">
+                <form id="filterForm" onsubmit="applyFilters(event)" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <!-- User ID Filter -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">User</label>
+                            <select name="user_id" id="user_id" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <option value="">All Users</option>
+                            </select>
+                        </div>
+
+                        <!-- Action Filter -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Action</label>
+                            <select name="action" id="action" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <option value="">All Actions</option>
+                                <option value="CREATE">CREATE</option>
+                                <option value="UPDATE">UPDATE</option>
+                                <option value="DELETE">DELETE</option>
+                                <option value="UPDATE_ATTENDANCE">UPDATE_ATTENDANCE</option>
+                                <option value="LOGIN">LOGIN</option>
+                                <option value="LOGOUT">LOGOUT</option>
+                            </select>
+                        </div>
+
+                        <!-- Table Name Filter -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Table</label>
+                            <select name="table_name" id="table_name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <option value="">All Tables</option>
+                            </select>
+                        </div>
+
+                        <!-- Record ID Filter -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Record ID</label>
+                            <input type="text" name="record_id" id="record_id" 
+                                   placeholder="Search by record ID"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+
+                        <!-- Date Range -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                            <input type="datetime-local" name="start_date" id="start_date"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                            <input type="datetime-local" name="end_date" id="end_date"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+
+                        <!-- Limit -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Items per page</label>
+                            <select name="limit" id="limit" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <option value="20">20</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                                <option value="200">200</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end space-x-3 pt-4">
+                        <button type="button" onclick="resetFilters()"
+                                class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+                            <i class="fas fa-undo mr-2"></i>Reset
+                        </button>
+                        <button type="submit"
+                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                            <i class="fas fa-search mr-2"></i>Apply Filters
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6" id="summaryStats">
+            <!-- Stats loaded via JS -->
+        </div>
+
+        <!-- Results Table -->
+        <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Table</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Record ID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Changes</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditTableBody" class="bg-white divide-y divide-gray-200">
+                        <tr>
+                            <td colspan="8" class="px-6 py-4 text-center text-gray-500">
+                                <i class="fas fa-spinner fa-spin mr-2"></i>Loading...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">
+                <div class="text-sm text-gray-700" id="paginationInfo">
+                    Showing 0 to 0 of 0 results
+                </div>
+                <div class="flex space-x-2" id="paginationButtons">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Details -->
+    <div id="detailsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50 modal">
+        <div class="relative top-20 mx-auto p-5 border w-full max-w-4xl shadow-lg rounded-lg bg-white">
+            <div class="flex justify-between items-start mb-4">
+                <h3 class="text-xl font-semibold text-gray-900">Audit Log Details</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="modalContent">
+                <!-- Content loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let totalPages = 0;
+        let currentFilters = {};
+
+        // Load initial data
+        document.addEventListener('DOMContentLoaded', () => {
+            loadUsers();
+            loadTables();
+            loadSummary();
+            loadLogs();
+        });
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/v1/users?limit=1000');
+                const data = await response.json();
+                const userSelect = document.getElementById('user_id');
+                
+                data.items.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = `${user.username} (${user.email})`;
+                    userSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+
+        async function loadTables() {
+            // You might want to add an endpoint to get distinct table names
+            const tables = ['users', 'meetings', 'meeting_participants', 'action_items', 'meeting_minutes'];
+            const tableSelect = document.getElementById('table_name');
+            
+            tables.forEach(table => {
+                const option = document.createElement('option');
+                option.value = table;
+                option.textContent = table.toUpperCase();
+                tableSelect.appendChild(option);
+            });
+        }
+
+        async function loadSummary() {
+            try {
+                const response = await fetch('/api/v1/audit/summary?days=7');
+                const summary = await response.json();
+                
+                const statsHtml = `
+                    <div class="bg-white rounded-lg shadow-sm p-4">
+                        <div class="text-sm text-gray-600">Total Actions (7 days)</div>
+                        <div class="text-2xl font-bold text-gray-800">${summary.total_actions || 0}</div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-sm p-4">
+                        <div class="text-sm text-gray-600">Success Rate</div>
+                        <div class="text-2xl font-bold text-green-600">${summary.success_rate || 0}%</div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-sm p-4">
+                        <div class="text-sm text-gray-600">Failed Actions</div>
+                        <div class="text-2xl font-bold text-red-600">${summary.failed_actions || 0}</div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow-sm p-4">
+                        <div class="text-sm text-gray-600">Unique Users</div>
+                        <div class="text-2xl font-bold text-blue-600">${summary.unique_users || 0}</div>
+                    </div>
+                `;
+                document.getElementById('summaryStats').innerHTML = statsHtml;
+            } catch (error) {
+                console.error('Error loading summary:', error);
+            }
+        }
+
+        async function loadLogs(page = 1) {
+            currentPage = page;
+            const formData = new FormData(document.getElementById('filterForm'));
+            const params = new URLSearchParams();
+            
+            params.append('limit', formData.get('limit') || '50');
+            params.append('offset', (page - 1) * (formData.get('limit') || 50));
+            
+            const user_id = formData.get('user_id');
+            const action = formData.get('action');
+            const table_name = formData.get('table_name');
+            const record_id = formData.get('record_id');
+            const start_date = formData.get('start_date');
+            const end_date = formData.get('end_date');
+            
+            if (user_id) params.append('user_id', user_id);
+            if (action) params.append('action', action);
+            if (table_name) params.append('table_name', table_name);
+            if (record_id) params.append('record_id', record_id);
+            if (start_date) params.append('start_date', start_date);
+            if (end_date) params.append('end_date', end_date);
+            
+            try {
+                const response = await fetch(`/api/v1/audit/logs?${params.toString()}`);
+                const data = await response.json();
+                
+                totalPages = data.pages;
+                renderTable(data.items);
+                renderPagination(data);
+            } catch (error) {
+                console.error('Error loading logs:', error);
+                document.getElementById('auditTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="8" class="px-6 py-4 text-center text-red-500">
+                            <i class="fas fa-exclamation-triangle mr-2"></i>
+                            Error loading audit logs
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        function renderTable(logs) {
+            if (!logs || logs.length === 0) {
+                document.getElementById('auditTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="8" class="px-6 py-4 text-center text-gray-500">
+                            <i class="fas fa-inbox mr-2"></i>
+                            No audit logs found
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            const html = logs.map(log => `
+                <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${new Date(log.timestamp).toLocaleString()}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${log.username || 'System'}
+                        <div class="text-xs text-gray-500">${log.user_email || ''}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                        <span class="px-2 py-1 rounded-full text-xs font-semibold ${getActionColor(log.action)}">
+                            ${log.action}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${log.table_name}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900 font-mono">
+                        <span class="text-xs">${log.record_id ? log.record_id.substring(0, 8) + '...' : '-'}</span>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900 max-w-md truncate">
+                        ${log.changes_summary || '-'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                        <span class="status-badge ${log.status === 'success' ? 'status-success' : 'status-failure'}">
+                            ${log.status}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <button onclick="viewDetails('${log.id}')" 
+                                class="text-blue-600 hover:text-blue-800 mr-3">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button onclick="copyToClipboard('${log.id}')" 
+                                class="text-gray-600 hover:text-gray-800">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            document.getElementById('auditTableBody').innerHTML = html;
+        }
+
+        function getActionColor(action) {
+            const colors = {
+                'CREATE': 'bg-green-100 text-green-800',
+                'UPDATE': 'bg-blue-100 text-blue-800',
+                'DELETE': 'bg-red-100 text-red-800',
+                'UPDATE_ATTENDANCE': 'bg-purple-100 text-purple-800',
+                'LOGIN': 'bg-indigo-100 text-indigo-800',
+                'LOGOUT': 'bg-gray-100 text-gray-800'
+            };
+            return colors[action] || 'bg-gray-100 text-gray-800';
+        }
+
+        function renderPagination(data) {
+            const info = document.getElementById('paginationInfo');
+            const start = data.offset + 1;
+            const end = Math.min(data.offset + data.size, data.total);
+            info.textContent = `Showing ${start} to ${end} of ${data.total} results`;
+            
+            const buttons = document.getElementById('paginationButtons');
+            let html = '';
+            
+            if (currentPage > 1) {
+                html += `<button onclick="loadLogs(${currentPage - 1})" 
+                               class="px-3 py-1 border rounded-md hover:bg-gray-100">
+                            Previous
+                        </button>`;
+            }
+            
+            // Show page numbers
+            const maxButtons = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+            let endPage = Math.min(data.pages, startPage + maxButtons - 1);
+            
+            if (startPage > 1) {
+                html += `<button onclick="loadLogs(1)" class="px-3 py-1 border rounded-md hover:bg-gray-100">1</button>`;
+                if (startPage > 2) html += `<span class="px-2">...</span>`;
+            }
+            
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button onclick="loadLogs(${i})" 
+                               class="px-3 py-1 border rounded-md ${i === currentPage ? 'bg-blue-600 text-white' : 'hover:bg-gray-100'}">
+                            ${i}
+                        </button>`;
+            }
+            
+            if (endPage < data.pages) {
+                if (endPage < data.pages - 1) html += `<span class="px-2">...</span>`;
+                html += `<button onclick="loadLogs(${data.pages})" 
+                               class="px-3 py-1 border rounded-md hover:bg-gray-100">${data.pages}</button>`;
+            }
+            
+            if (currentPage < data.pages) {
+                html += `<button onclick="loadLogs(${currentPage + 1})" 
+                               class="px-3 py-1 border rounded-md hover:bg-gray-100">
+                            Next
+                        </button>`;
+            }
+            
+            buttons.innerHTML = html;
+        }
+
+        async function viewDetails(logId) {
+            try {
+                const response = await fetch(`/api/v1/audit/logs?record_id=${logId}&limit=1`);
+                const data = await response.json();
+                const log = data.items[0];
+                
+                if (!log) {
+                    throw new Error('Log not found');
+                }
+                
+                const modalContent = document.getElementById('modalContent');
+                modalContent.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">ID</label>
+                                <div class="text-sm font-mono">${log.id}</div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">Timestamp</label>
+                                <div class="text-sm">${new Date(log.timestamp).toLocaleString()}</div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">User</label>
+                                <div class="text-sm">${log.username || 'System'} (${log.user_email || 'N/A'})</div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">IP Address</label>
+                                <div class="text-sm font-mono">${log.ip_address || 'N/A'}</div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">Action</label>
+                                <div class="text-sm font-semibold">${log.action}</div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">Status</label>
+                                <div class="text-sm">
+                                    <span class="status-badge ${log.status === 'success' ? 'status-success' : 'status-failure'}">
+                                        ${log.status}
+                                    </span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">Table</label>
+                                <div class="text-sm">${log.table_name}</div>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-gray-500">Record ID</label>
+                                <div class="text-sm font-mono">${log.record_id || 'N/A'}</div>
+                            </div>
+                            ${log.endpoint ? `
+                            <div class="col-span-2">
+                                <label class="text-sm font-medium text-gray-500">Endpoint</label>
+                                <div class="text-sm font-mono">${log.endpoint}</div>
+                            </div>
+                            ` : ''}
+                            ${log.user_agent ? `
+                            <div class="col-span-2">
+                                <label class="text-sm font-medium text-gray-500">User Agent</label>
+                                <div class="text-sm">${log.user_agent}</div>
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        ${log.changes_summary ? `
+                        <div>
+                            <label class="text-sm font-medium text-gray-500">Changes Summary</label>
+                            <div class="text-sm mt-1 p-2 bg-gray-100 rounded">${log.changes_summary}</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${log.error_message ? `
+                        <div>
+                            <label class="text-sm font-medium text-red-500">Error Message</label>
+                            <div class="text-sm mt-1 p-2 bg-red-50 text-red-700 rounded">${log.error_message}</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${log.old_data ? `
+                        <div>
+                            <label class="text-sm font-medium text-gray-500">Old Values</label>
+                            <pre class="json-viewer mt-1">${JSON.stringify(JSON.parse(log.old_data), null, 2)}</pre>
+                        </div>
+                        ` : ''}
+                        
+                        ${log.new_data ? `
+                        <div>
+                            <label class="text-sm font-medium text-gray-500">New Values</label>
+                            <pre class="json-viewer mt-1">${JSON.stringify(JSON.parse(log.new_data), null, 2)}</pre>
+                        </div>
+                        ` : ''}
+                        
+                        ${log.extra_data ? `
+                        <div>
+                            <label class="text-sm font-medium text-gray-500">Extra Data</label>
+                            <pre class="json-viewer mt-1">${JSON.stringify(JSON.parse(log.extra_data), null, 2)}</pre>
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+                
+                document.getElementById('detailsModal').classList.remove('hidden');
+            } catch (error) {
+                console.error('Error loading log details:', error);
+                alert('Error loading log details');
+            }
+        }
+
+        function applyFilters(event) {
+            event.preventDefault();
+            loadLogs(1);
+        }
+
+        function resetFilters() {
+            document.getElementById('filterForm').reset();
+            loadLogs(1);
+        }
+
+        function closeModal() {
+            document.getElementById('detailsModal').classList.add('hidden');
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text);
+            // Optional: Show a toast notification
+            alert('ID copied to clipboard');
+        }
+
+        async function exportLogs(format) {
+            const formData = new FormData(document.getElementById('filterForm'));
+            const params = new URLSearchParams();
+            params.append('format', format);
+            
+            const user_id = formData.get('user_id');
+            const action = formData.get('action');
+            const table_name = formData.get('table_name');
+            const start_date = formData.get('start_date');
+            const end_date = formData.get('end_date');
+            
+            if (user_id) params.append('user_id', user_id);
+            if (action) params.append('action', action);
+            if (table_name) params.append('table_name', table_name);
+            if (start_date) params.append('start_date', start_date);
+            if (end_date) params.append('end_date', end_date);
+            
+            window.location.href = `/api/v1/audit/export?${params.toString()}`;
+        }
+
+        function toggleFilters() {
+            const content = document.getElementById('filtersContent');
+            const icon = document.getElementById('filterToggleIcon');
+            
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                icon.classList.remove('fa-chevron-down');
+                icon.classList.add('fa-chevron-up');
+            } else {
+                content.style.display = 'none';
+                icon.classList.remove('fa-chevron-up');
+                icon.classList.add('fa-chevron-down');
+            }
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('detailsModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>

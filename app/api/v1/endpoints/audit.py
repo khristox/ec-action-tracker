@@ -1,5 +1,10 @@
 # app/api/v1/endpoints/audit.py
+import csv
+from io import StringIO
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, List, Optional
 from datetime import datetime
@@ -7,6 +12,9 @@ from app.api import deps
 from app.services.audit_service import AuditService
 from app.schemas.audit import AuditLogResponse, AuditLogListResponse, AuditLogSummary
 from app.models.user import User
+from fastapi import Request
+
+templates = Jinja2Templates(directory="app/templates")
 
 router = APIRouter()
 
@@ -129,3 +137,86 @@ async def cleanup_old_logs(
         "message": f"Deleted {deleted} old logs",
         "retention_days": settings.AUDIT_LOG_RETENTION_DAYS
     }
+
+@router.get("/", response_class=HTMLResponse)
+async def audit_logs_page(
+    request: Request,
+    current_user: User = Depends(deps.require_admin)
+) -> Any:
+    """Render audit logs page (admin only)"""
+    return templates.TemplateResponse("audit/audit_logs.html", {"request": request})
+
+
+@router.get("/export")
+async def export_audit_logs(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.require_admin),
+    format: str = Query("csv", regex="^(csv|json)$"),
+    user_id: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    table_name: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None)
+) -> Any:
+    """Export audit logs to CSV or JSON"""
+    
+    audit_service = AuditService(db)
+    logs = await audit_service.get_logs(
+        user_id=user_id,
+        action=action,
+        table_name=table_name,
+        start_date=start_date,
+        end_date=end_date,
+        limit=10000  # Max export limit
+    )
+    
+    if format == "json":
+        import json
+        from fastapi.responses import JSONResponse
+        
+        data = []
+        for log in logs:
+            data.append({
+                "id": str(log.id),
+                "timestamp": log.timestamp.isoformat(),
+                "user": log.username,
+                "email": log.user_email,
+                "action": log.action,
+                "table": log.table_name,
+                "record_id": log.record_id,
+                "changes": log.changes_summary,
+                "status": log.status,
+                "ip": log.ip_address,
+                "endpoint": log.endpoint
+            })
+        
+        return JSONResponse(content=data)
+    
+    else:  # CSV
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write headers
+        writer.writerow(["Timestamp", "User", "Email", "Action", "Table", "Record ID", "Changes", "Status", "IP Address", "Endpoint"])
+        
+        # Write data
+        for log in logs:
+            writer.writerow([
+                log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                log.username or "System",
+                log.user_email or "",
+                log.action,
+                log.table_name,
+                log.record_id or "",
+                log.changes_summary or "",
+                log.status,
+                log.ip_address or "",
+                log.endpoint or ""
+            ])
+        
+        response = StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv"
+        )
+        response.headers["Content-Disposition"] = "attachment; filename=audit_logs.csv"
+        return response

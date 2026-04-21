@@ -40,6 +40,7 @@ class MeetingParticipantBase(ORMBase):
     organization: Optional[str] = None
     is_chairperson: bool = False
     attendance_status: Optional[str] = Field("pending", description="attended, missed, pending, excused")
+    apology_comment: Optional[str] = None
 
 
 class MeetingParticipantCreate(MeetingParticipantBase):
@@ -54,6 +55,7 @@ class MeetingParticipantUpdate(ORMBase):
     organization: Optional[str] = None
     is_chairperson: Optional[bool] = None
     attendance_status: Optional[str] = None
+    apology_comment: Optional[str] = None  
 
 
 class MeetingParticipantResponse(MeetingParticipantBase):

@@ -217,6 +217,8 @@ class MeetingParticipant(Base):
     is_chairperson = Column(Boolean, default=False, nullable=False)
     attendance_status = Column(String(50), nullable=True, default='pending')  # attended, missed, pending, excused
     
+    apology_comment = Column(Text, nullable=True)  
+    
     # Audit fields
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

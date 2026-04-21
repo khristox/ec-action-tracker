@@ -53,7 +53,8 @@ import {
   Save as SaveIcon,
   AccessTime as AccessTimeIcon,
   Notes as NotesIcon,
-  AutoAwesome as AutoAwesomeIcon
+  AutoAwesome as AutoAwesomeIcon,
+  Lock as LockIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import api from '../../../services/api';
@@ -93,6 +94,14 @@ const getStatusConfig = (action) => {
   if (isOverdue) return { label: 'Overdue', color: 'error', icon: <WarningIcon fontSize="small" /> };
   if (action.overall_status_name === 'in_progress') return { label: 'In Progress', color: 'info', icon: <PendingIcon fontSize="small" /> };
   return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" /> };
+};
+
+// Check if meeting allows adding/editing minutes
+const canEditMinutes = (meetingStatus) => {
+  if (!meetingStatus) return false;
+  const statusLower = String(meetingStatus).toLowerCase();
+  const allowedStatuses = ['started','started', 'ongoing', 'in_progress', 'in progress', 'completed'];
+  return allowedStatuses.some(status => statusLower.includes(status));
 };
 
 // ==================== Improved Rich Text Display ====================
@@ -168,7 +177,7 @@ const RichTextContent = ({ content }) => {
 };
 
 // ==================== Action Row Component ====================
-const ActionRow = ({ action, onEdit }) => {
+const ActionRow = ({ action, onEdit, canEdit }) => {
   const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
   const statusConfig = getStatusConfig(action);
   
@@ -235,10 +244,17 @@ const ActionRow = ({ action, onEdit }) => {
         </Stack>
       </TableCell>
       <TableCell align="center">
-        <Tooltip title="Edit Action">
-          <IconButton size="small" onClick={() => onEdit(action.id)} color="primary">
-            <EditIcon fontSize="small" />
-          </IconButton>
+        <Tooltip title={canEdit ? "Edit Action" : "Meeting must be started to edit actions"}>
+          <span>
+            <IconButton 
+              size="small" 
+              onClick={() => onEdit(action.id)} 
+              color="primary"
+              disabled={!canEdit}
+            >
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </span>
         </Tooltip>
       </TableCell>
     </TableRow>
@@ -246,7 +262,7 @@ const ActionRow = ({ action, onEdit }) => {
 };
 
 // ==================== Minutes Card Component ====================
-const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, onEditMinute, onDelete, onMenuOpen }) => {
+const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, onEditMinute, onDelete, onMenuOpen, canEdit }) => {
   const minuteId = minute.id;
   const title = minute.topic || minute.title || 'Untitled Minutes';
   const discussion = minute.discussion || minute.content || '';
@@ -289,16 +305,18 @@ const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, on
               />
             </Stack>
           </Box>
-          <Stack direction="row" spacing={0.5}>
-            <Tooltip title="Edit Minutes">
-              <IconButton size="small" onClick={(e) => { e.stopPropagation(); onEditMinute(minute); }}>
-                <EditIcon fontSize="small" />
+          {canEdit && (
+            <Stack direction="row" spacing={0.5}>
+              <Tooltip title="Edit Minutes">
+                <IconButton size="small" onClick={(e) => { e.stopPropagation(); onEditMinute(minute); }}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <IconButton size="small" onClick={(e) => { e.stopPropagation(); onMenuOpen(e, minute); }}>
+                <MoreVertIcon fontSize="small" />
               </IconButton>
-            </Tooltip>
-            <IconButton size="small" onClick={(e) => { e.stopPropagation(); onMenuOpen(e, minute); }}>
-              <MoreVertIcon fontSize="small" />
-            </IconButton>
-          </Stack>
+            </Stack>
+          )}
         </Stack>
       </AccordionSummary>
       
@@ -339,9 +357,11 @@ const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, on
                   <Chip label={`${completedActions}/${actionCount} completed`} size="small" color="success" variant="outlined" />
                 )}
               </Stack>
-              <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => onAddAction(minuteId)}>
-                Add Action
-              </Button>
+              {canEdit && (
+                <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => onAddAction(minuteId)}>
+                  Add Action
+                </Button>
+              )}
             </Stack>
 
             {actionCount > 0 ? (
@@ -359,7 +379,7 @@ const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, on
                   </TableHead>
                   <TableBody>
                     {minute.actions.map((action) => (
-                      <ActionRow key={action.id} action={action} onEdit={onEditAction} />
+                      <ActionRow key={action.id} action={action} onEdit={onEditAction} canEdit={canEdit} />
                     ))}
                   </TableBody>
                 </Table>
@@ -368,9 +388,11 @@ const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, on
               <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', bgcolor: '#fafafa' }}>
                 <AssignmentIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 2 }} />
                 <Typography variant="body2" color="text.secondary">No action items yet.</Typography>
-                <Button size="small" startIcon={<AddIcon />} onClick={() => onAddAction(minuteId)} sx={{ mt: 2 }}>
-                  Create First Action
-                </Button>
+                {canEdit && (
+                  <Button size="small" startIcon={<AddIcon />} onClick={() => onAddAction(minuteId)} sx={{ mt: 2 }}>
+                    Create First Action
+                  </Button>
+                )}
               </Paper>
             )}
           </Box>
@@ -398,7 +420,7 @@ const LoadingSkeleton = () => (
 );
 
 // ==================== Main Component ====================
-const MeetingMinutes = ({ meetingId, onRefresh }) => {
+const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
   
   const minutesList = useSelector(selectMeetingMinutes);
@@ -418,6 +440,22 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
   const [anchorEl, setAnchorEl] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [deleting, setDeleting] = useState(false);
+
+  // Check if user can edit minutes based on meeting status
+  const canEdit = canEditMinutes(meetingStatus);
+  
+  // Get status display message
+  const getStatusMessage = () => {
+    if (!meetingStatus) return null;
+    const statusLower = String(meetingStatus).toLowerCase();
+    if (statusLower === 'scheduled' || statusLower === 'pending') {
+      return "Meeting hasn't started yet. Minutes can only be added once the meeting is in progress.";
+    }
+    if (statusLower === 'cancelled') {
+      return "Meeting has been cancelled. Minutes cannot be added or edited.";
+    }
+    return null;
+  };
 
   const fetchMinutes = useCallback(() => {
     if (meetingId) dispatch(fetchMeetingMinutes(meetingId));
@@ -444,7 +482,7 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
       setShowAddMinutesDialog(false);
       setNewMinutes({ topic: '', discussion: '', decisions: '' });
       setSnackbar({ open: true, message: 'Minutes added successfully!', severity: 'success' });
-      fetchMinutes(); // Refresh the list
+      fetchMinutes();
       if (onRefresh) onRefresh();
     } catch (err) {
       setSnackbar({ open: true, message: err.message || 'Failed to add minutes', severity: 'error' });
@@ -510,7 +548,7 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
       await api.delete(`/action-tracker/minutes/${selectedMinute.id}`);
       handleMenuClose();
       setSnackbar({ open: true, message: 'Minutes deleted successfully!', severity: 'success' });
-      fetchMinutes(); // Refresh the list
+      fetchMinutes();
     } catch (err) {
       setSnackbar({ open: true, message: 'Failed to delete minutes', severity: 'error' });
     } finally {
@@ -522,7 +560,8 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
     setExpandedMinute(expandedMinute === minuteId ? null : minuteId);
   };
 
-  // Don't show loading skeleton when there are no minutes but still loading
+  const statusMessage = getStatusMessage();
+
   if (isLoading && minutesList.length === 0) return <LoadingSkeleton />;
 
   return (
@@ -537,15 +576,27 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
               <RefreshIcon />
             </IconButton>
           </Tooltip>
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />} 
-            onClick={() => setShowAddMinutesDialog(true)}
-          >
-            Add Minutes
-          </Button>
+          <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to add minutes") : "Add meeting minutes"}>
+            <span>
+              <Button 
+                variant="contained" 
+                startIcon={!canEdit ? <LockIcon /> : <AddIcon />} 
+                onClick={() => setShowAddMinutesDialog(true)}
+                disabled={!canEdit}
+              >
+                Add Minutes
+              </Button>
+            </span>
+          </Tooltip>
         </Stack>
       </Stack>
+
+      {/* Status message when meeting hasn't started */}
+      {statusMessage && (
+        <Alert severity="info" icon={<LockIcon />} sx={{ mb: 2 }}>
+          {statusMessage}
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" onClose={() => dispatch(clearMinutesError())} sx={{ mb: 2 }}>
@@ -560,16 +611,20 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
             No Minutes Yet
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Start by adding the first meeting minutes
+            {canEdit 
+              ? "Start by adding the first meeting minutes" 
+              : statusMessage || "Minutes can only be added once the meeting is in progress"}
           </Typography>
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />} 
-            onClick={() => setShowAddMinutesDialog(true)}
-            size="large"
-          >
-            Add First Minutes
-          </Button>
+          {canEdit && (
+            <Button 
+              variant="contained" 
+              startIcon={<AddIcon />} 
+              onClick={() => setShowAddMinutesDialog(true)}
+              size="large"
+            >
+              Add First Minutes
+            </Button>
+          )}
         </Paper>
       ) : (
         <Stack spacing={2}>
@@ -583,6 +638,8 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
               onEditAction={handleEditAction}
               onEditMinute={handleEditMinute}
               onMenuOpen={handleMenuOpen}
+              onDelete={handleDeleteMinutes}
+              canEdit={canEdit}
             />
           ))}
         </Stack>
@@ -648,39 +705,37 @@ const MeetingMinutes = ({ meetingId, onRefresh }) => {
       </Dialog>
 
       {/* Add Action Dialog */}
-     {/* Add Action Dialog */}
-{showAddActionDialog && (
-  <AddActionDialog 
-    open={showAddActionDialog} 
-    onClose={() => setShowAddActionDialog(false)}
-    meetingId={meetingId}
-    minutes={minutesList}  // Pass the minutes list
-    selectedMinuteId={selectedMinuteId}  // Use correct prop name
-    onSave={async (payload) => {
-      try {
-        // Use the minute-based endpoint
-        const response = await api.post(
-          `/action-tracker/minutes/${payload.minute_id}/actions`,
-          {
-            description: payload.description,
-            due_date: payload.due_date,
-            priority: payload.priority,
-            remarks: payload.remarks,
-            assigned_to_id: payload.assigned_to_id,
-            assigned_to_name: payload.assigned_to_name
-          }
-        );
-        handleActionCreated();
-        return response.data;
-      } catch (err) {
-        console.error('Error creating action:', err);
-        throw err;
-      }
-    }}
-    loading={submitting}
-    error={error}
-  />
-)}
+      {showAddActionDialog && (
+        <AddActionDialog 
+          open={showAddActionDialog} 
+          onClose={() => setShowAddActionDialog(false)}
+          meetingId={meetingId}
+          minutes={minutesList}
+          selectedMinuteId={selectedMinuteId}
+          onSave={async (payload) => {
+            try {
+              const response = await api.post(
+                `/action-tracker/minutes/${payload.minute_id}/actions`,
+                {
+                  description: payload.description,
+                  due_date: payload.due_date,
+                  priority: payload.priority,
+                  remarks: payload.remarks,
+                  assigned_to_id: payload.assigned_to_id,
+                  assigned_to_name: payload.assigned_to_name
+                }
+              );
+              handleActionCreated();
+              return response.data;
+            } catch (err) {
+              console.error('Error creating action:', err);
+              throw err;
+            }
+          }}
+          loading={submitting}
+          error={error}
+        />
+      )}
 
       {/* Edit Action Dialog */}
       {showEditActionDialog && selectedAction && (

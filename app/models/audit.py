@@ -30,6 +30,8 @@ class AuditLog(Base):
     record_id = Column(String(255), nullable=True)
     old_data = Column(JSON, nullable=True)
     new_data = Column(JSON, nullable=True)
+    old_values = Column(JSON, nullable=True)
+    new_values = Column(JSON, nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
     endpoint = Column(String(500), nullable=True)

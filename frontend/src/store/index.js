@@ -13,6 +13,7 @@ import userReducer from './slices/userSlice';
 import roleReducer from './slices/roleSlice';
 import profileReducer from './slices/profileSlice';
 import auditReducer from './slices/auditSlice'; // Add this import
+import notificationReducer from './slices/actionTracker/notificationSlice';
 
 
 export const store = configureStore({
@@ -27,6 +28,7 @@ export const store = configureStore({
     roles: roleReducer,
     dashboard: dashboardReducer,
     audit: auditReducer, 
+    notifications: notificationReducer,
     users: userReducer,
 
   },

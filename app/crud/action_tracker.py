@@ -13,6 +13,7 @@ from venv import logger
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import delete, select, and_, or_, func, case, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,7 +22,7 @@ from app.crud.base import CRUDBase
 from app.models.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
     Participant, ParticipantList, ActionStatusHistory, ActionComment, 
-    MeetingDocument, MeetingStatusHistory
+    MeetingDocument, MeetingStatusHistory,participant_list_members
 )
 from app.schemas.action_tracker_participants import (
     ParticipantCreate, ParticipantListCreate, ParticipantListUpdate, ParticipantUpdate
@@ -76,7 +77,6 @@ class AuditMixin:
 # ============================================================================
 # PARTICIPANT CRUD
 # ============================================================================
-
 class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate], AuditMixin):
     
     async def create(
@@ -229,24 +229,229 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             await db.rollback()
             raise ValueError(f"Failed to delete participant: {str(e)}")
 
+    async def search_participants(
+        self,  # <-- ADDED self parameter
+        db: AsyncSession, 
+        query: str, 
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Search participants by email, name, or telephone."""
+        try:
+            # Select only specific columns to avoid binary data
+            stmt = (
+                select(
+                    Participant.id,
+                    Participant.email,
+                    Participant.name,
+                    Participant.telephone,
+                    Participant.title,
+                    Participant.organization,
+                    
+                    Participant.is_active,
+                )
+                .where(
+                    or_(
+                        Participant.email.ilike(f"%{query}%"),
+                        Participant.name.ilike(f"%{query}%"),
+                        Participant.telephone.ilike(f"%{query}%")
+                    )
+                )
+                .order_by(Participant.name)
+                .limit(limit)
+            )
+            
+            result = await db.execute(stmt)
+            rows = result.all()
+            
+            # Convert to list of dictionaries
+            participants = []
+            for row in rows:
+                participant_dict = {
+                    "id": str(row.id) if hasattr(row, 'id') else None,  # Convert UUID to string
+                    "email": row.email,
+                    "name": row.name,
+                    "telephone": row.telephone,
+                    "title": row.title,
+                    "organization": row.organization,
+           
+                    "is_active": row.is_active if hasattr(row, 'is_active') else True,
+                }
+                participants.append(participant_dict)
+            
+            return participants
+            
+        except Exception as e:
+            print(f"Error searching participants: {str(e)}")
+            return []
 
+
+    async def search_participants_with_list_filter(
+        db: AsyncSession,
+        query: str,
+        limit: int = 10,
+        list_id: Optional[int] = None,
+        user_id: Optional[int] = None
+    ) -> List[dict]:
+        """
+        Search participants with optional list filtering.
+        More efficient as it uses a single query with conditional join.
+        """
+        search_pattern = f"%{query}%"
+        
+        # Start with base participant query
+        stmt = select(Participant).where(
+            Participant.is_active == True,
+            or_(
+                Participant.name.ilike(search_pattern),
+                Participant.email.ilike(search_pattern),
+                Participant.telephone.ilike(search_pattern),
+                Participant.organization.ilike(search_pattern),
+                Participant.title.ilike(search_pattern)
+            )
+        )
+        
+        # Apply list filter if provided
+        if list_id:
+            # Only include participants that are members of the specified list
+            stmt = stmt.join(
+                ParticipantList, participant_list_members.participant_id == Participant.id
+            ).where(
+                participant_list_members.list_id == list_id,
+                participant_list_members.is_active == True
+            )
+            
+            # Optional: Verify list exists and user has access
+            if user_id:
+                list_check = select(ParticipantList).where(
+                    ParticipantList.id == list_id,
+                    ParticipantList.is_active == True,
+                    ParticipantList.created_by == user_id
+                )
+                list_result = await db.execute(list_check)
+                if not list_result.scalar_one_or_none():
+                    return []  # Return empty if user doesn't have access
+        else:
+            # Apply user access filter for global search
+            if user_id:
+                stmt = stmt.where(
+                    or_(
+                        Participant.created_by == user_id,
+                        Participant.is_public == True
+                    )
+                )
+        
+        stmt = stmt.limit(limit).order_by(Participant.name)
+        
+        result = await db.execute(stmt)
+        participants = result.scalars().all()
+        
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "email": p.email,
+                "telephone": p.telephone,
+                "title": p.title,
+                "organization": p.organization,
+                "notes": p.notes,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            }
+            for p in participants
+        ]
+
+
+  
 # ============================================================================
 # PARTICIPANT LIST CRUD
 # ============================================================================
+# app/crud/action_tracker/participant_list.py
 
 class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, ParticipantListUpdate], AuditMixin):
     
+    # ==================== HELPER METHODS ====================
+    
+    def _participant_to_dict(self, participant: Participant) -> dict:
+        """Convert participant ORM to dictionary for API responses"""
+        return {
+            "id": str(participant.id),
+            "name": participant.name,
+            "email": participant.email,
+            "telephone": participant.telephone,
+            "title": participant.title,
+            "organization": participant.organization,
+            "notes": participant.notes,
+            "created_by_id": str(participant.created_by_id) if participant.created_by_id else None,
+            "created_at": participant.created_at.isoformat() if participant.created_at else None,
+            "updated_by_id": str(participant.updated_by_id) if participant.updated_by_id else None,
+            "updated_at": participant.updated_at.isoformat() if participant.updated_at else None,
+            "is_active": participant.is_active,
+            "created_by_name": None,
+            "updated_by_name": None,
+        }
+
+    def _list_to_dict(self, list_obj: ParticipantList, include_participants: bool = False) -> dict:
+        """Convert participant list ORM to dictionary with user names"""
+        
+        # Get created_by name
+        created_by_name = None
+        if list_obj.created_by:
+            created_by_name = list_obj.created_by.full_name or list_obj.created_by.username or list_obj.created_by.email
+        
+        # Get updated_by name
+        updated_by_name = None
+        if list_obj.updated_by:
+            updated_by_name = list_obj.updated_by.full_name or list_obj.updated_by.username or list_obj.updated_by.email
+        
+        result = {
+            "id": str(list_obj.id),
+            "name": list_obj.name,
+            "description": list_obj.description,
+            "is_global": list_obj.is_global,
+            "created_by_id": str(list_obj.created_by_id) if list_obj.created_by_id else None,
+            "created_by_name": created_by_name,
+            "created_at": list_obj.created_at.isoformat() if list_obj.created_at else None,
+            "updated_by_id": str(list_obj.updated_by_id) if list_obj.updated_by_id else None,
+            "updated_by_name": updated_by_name,
+            "updated_at": list_obj.updated_at.isoformat() if list_obj.updated_at else None,
+            "is_active": list_obj.is_active,
+            "member_count": len(list_obj.participants) if list_obj.participants else 0,
+            "participants": [],
+            "participant_count": len(list_obj.participants) if list_obj.participants else 0,
+        }
+        
+        if include_participants and list_obj.participants:
+            result["participants"] = [self._participant_to_dict(p) for p in list_obj.participants]
+            result["participant_count"] = len(list_obj.participants)
+        
+        return result
+
+    def _get_user_name(self, user) -> Optional[str]:
+        """Safely get user name from relationship"""
+        if user:
+            return user.full_name or user.username or user.email
+        return None
+    
+    # ==================== CREATE ====================
+    
     async def create(
-        self, db: AsyncSession, obj_in: ParticipantListCreate, created_by_id: UUID
-    ) -> ParticipantList:
+        self, 
+        db: AsyncSession, 
+        obj_in: ParticipantListCreate, 
+        created_by_id: UUID
+    ) -> dict:
         """Create participant list with audit fields"""
         try:
             participant_ids = getattr(obj_in, 'participant_ids', [])
             list_data = obj_in.model_dump(exclude={'participant_ids'})
             
             db_obj = ParticipantList(**list_data)
-            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
             
+            # Set audit fields
+            db_obj.created_by_id = created_by_id
+            db_obj.updated_by_id = created_by_id
+            
+            # Add participants if provided
             if participant_ids:
                 participants = await self._get_participants_by_ids(db, participant_ids)
                 db_obj.participants = participants
@@ -254,40 +459,315 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             db.add(db_obj)
             await db.commit()
             await db.refresh(db_obj)
-            return db_obj
+            
+            # Load participants relationship
+            await db.refresh(db_obj, attribute_names=['participants'])
+            
+            logger.info(f"✅ Created participant list: {db_obj.name} (ID: {db_obj.id})")
+            return self._list_to_dict(db_obj, include_participants=True)
+            
+        except SQLAlchemyError as e:
+            await db.rollback()
+            logger.error(f"Database error creating participant list: {e}")
+            raise ValueError(f"Failed to create participant list: {str(e)}")
         except Exception as e:
             await db.rollback()
+            logger.error(f"Unexpected error creating participant list: {e}")
             raise ValueError(f"Failed to create participant list: {str(e)}")
 
-    async def get(self, db: AsyncSession, id: UUID) -> Optional[ParticipantList]:
-        """Get a single participant list by ID"""
-        result = await db.execute(
-            select(ParticipantList)
-            .options(selectinload(ParticipantList.participants))
-            .where(ParticipantList.id == id, ParticipantList.is_active == True)
-        )
-        return result.scalar_one_or_none()
-
+    # ==================== READ ====================
+    
+    async def get(
+        self, 
+        db: AsyncSession, 
+        id: UUID,
+        include_participants: bool = True
+    ) -> Optional[dict]:
+        """Get a single participant list by ID as dictionary"""
+        try:
+            query = select(ParticipantList).where(
+                ParticipantList.id == id, 
+                ParticipantList.is_active == True
+            )
+            
+            if include_participants:
+                query = query.options(selectinload(ParticipantList.participants))
+            
+            result = await db.execute(query)
+            db_obj = result.scalar_one_or_none()
+            
+            if not db_obj:
+                return None
+            
+            return self._list_to_dict(db_obj, include_participants=include_participants)
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching list {id}: {e}")
+            return None
+    
     async def get_multi(
         self,
         db: AsyncSession,
         skip: int = DEFAULT_SKIP,
         limit: int = DEFAULT_LIMIT,
-        include_inactive: bool = False
-    ) -> List[ParticipantList]:
-        """Get multiple participant lists"""
-        query = select(ParticipantList).options(selectinload(ParticipantList.participants))
-        
-        if not include_inactive:
-            query = query.where(ParticipantList.is_active == True)
-        
-        query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(ParticipantList.name)
-        result = await db.execute(query)
-        return result.scalars().all()
+        include_inactive: bool = False,
+        include_participants: bool = False
+    ) -> Tuple[List[dict], int]:
+        """
+        Get multiple participant lists with pagination.
+        Returns tuple of (list_dicts, total_count)
+        """
+        try:
+            # Build query
+            query = select(ParticipantList)
+            
+            if include_participants:
+                query = query.options(selectinload(ParticipantList.participants))
+            
+            if not include_inactive:
+                query = query.where(ParticipantList.is_active == True)
+            
+            # Get total count
+            count_query = select(func.count()).select_from(query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Apply pagination and ordering
+            query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(ParticipantList.name)
+            result = await db.execute(query)
+            lists = result.scalars().all()
+            
+            # Convert to dictionaries
+            list_dicts = [self._list_to_dict(lst, include_participants=include_participants) for lst in lists]
+            
+            return list_dicts, total
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching lists: {e}")
+            return [], 0
+    
+    async def get_accessible_lists(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        search: Optional[str] = None
+    ) -> Tuple[List[dict], int]:
+        """
+        Get participant lists accessible to a user with pagination.
+        Returns tuple of (list_dicts, total_count)
+        """
+        try:
+            from sqlalchemy.orm import selectinload
+            
+            print(f"Fetching accessible lists for user {user_id} with search='{search}'")
 
+            query = select(ParticipantList).where(
+                or_(
+                    ParticipantList.is_global == True,
+                    ParticipantList.created_by_id == user_id
+                ),
+                ParticipantList.is_active == True
+            ).options(
+                selectinload(ParticipantList.created_by),
+                selectinload(ParticipantList.updated_by),
+                selectinload(ParticipantList.participants)
+            )
+            
+            # Apply search filter
+            if search and search.strip():
+                search_term = f"%{search.strip()}%"
+                query = query.where(
+                    or_(
+                        ParticipantList.name.ilike(search_term),
+                        ParticipantList.description.ilike(search_term)
+                    )
+                )
+            
+            # Get total count
+            count_query = select(func.count()).select_from(query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Apply pagination
+            query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(ParticipantList.name.asc())
+            result = await db.execute(query)
+            lists = result.scalars().all()
+            
+            # Convert to dictionaries (now participants will be loaded)
+            list_dicts = [self._list_to_dict(lst, include_participants=True) for lst in lists]
+            
+            return list_dicts, total
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching accessible lists: {e}")
+            return [], 0
+        
+    async def get_list_with_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID
+    ) -> Optional[dict]:
+        """
+        Get a list with all its participants.
+        Returns dictionary with list details and participants.
+        """
+        return await self.get(db, list_id, include_participants=True)
+    
+    # ==================== LIST MEMBERS ====================
+    
+    async def get_list_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        search: Optional[str] = None,
+        sort_by: str = "name",
+        sort_desc: bool = False
+    ) -> Tuple[List[dict], int]:
+        """
+        Get participants in a specific list with pagination and search.
+        Returns tuple of (participant_dicts, total_count)
+        """
+        try:
+            # Build query using the association table
+            query = select(Participant).join(
+                participant_list_members,
+                Participant.id == participant_list_members.c.participant_id
+            ).where(
+                participant_list_members.c.participant_list_id == list_id,
+                Participant.is_active == True
+            )
+            
+            # Apply search filter
+            if search and search.strip():
+                search_term = f"%{search.strip()}%"
+                query = query.where(
+                    or_(
+                        Participant.name.ilike(search_term),
+                        Participant.email.ilike(search_term),
+                        Participant.organization.ilike(search_term),
+                        Participant.telephone.ilike(search_term)
+                    )
+                )
+            
+            # Get total count
+            count_query = select(func.count()).select_from(query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Apply sorting
+            valid_sort_fields = ["name", "email", "organization", "title", "created_at"]
+            if sort_by in valid_sort_fields:
+                sort_column = getattr(Participant, sort_by)
+                if sort_desc:
+                    query = query.order_by(sort_column.desc())
+                else:
+                    query = query.order_by(sort_column.asc())
+            else:
+                query = query.order_by(Participant.name.asc())
+            
+            # Apply pagination
+            query = query.offset(skip).limit(min(limit, 1000))
+            result = await db.execute(query)
+            participants = result.scalars().all()
+            
+            # Convert to dictionaries
+            participant_dicts = [self._participant_to_dict(p) for p in participants]
+            
+            return participant_dicts, total
+            
+        except Exception as e:
+            logger.error(f"Error fetching participants for list {list_id}: {e}")
+            return [], 0
+    
+    # ==================== NEW METHOD: GET PARTICIPANTS NOT IN LIST (PAGINATED) ====================
+    
+    async def get_participants_not_in_list_paginated(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> tuple[List[Participant], int]:
+        """
+        Get participants that are not in a specific list with pagination
+        """
+        from sqlalchemy import select, func, and_, or_
+        from app.models.action_tracker import Participant, participant_list_members  # Import the association table
+        
+        # Build subquery for participants already in the list
+        # Use the actual column names from your association table
+        subquery = (
+            select(participant_list_members.c.participant_id)
+            .where(participant_list_members.c.participant_list_id == list_id)  # Adjust column name if needed
+        )
+        
+        query = select(Participant).where(
+            and_(
+                Participant.is_active == True,
+                Participant.id.not_in(subquery)
+            )
+        )
+        
+        # Apply search filter
+        if search and search.strip():
+            search_term = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    Participant.name.ilike(search_term),
+                    Participant.email.ilike(search_term),
+                    Participant.organization.ilike(search_term)
+                )
+            )
+        
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total = await db.scalar(count_query) or 0
+        
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+        result = await db.execute(query)
+        participants = result.scalars().all()
+        
+        return participants, total
+    # ==================== LEGACY METHOD (DEPRECATED - use paginated version) ====================
+    
+    async def get_participants_not_in_list(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        search: Optional[str] = None
+    ) -> Tuple[List[dict], int]:
+        """
+        DEPRECATED: Use get_participants_not_in_list_paginated instead.
+        Get participants that are NOT in the specified list.
+        """
+        return await self.get_participants_not_in_list_paginated(
+            db=db,
+            list_id=list_id,
+            skip=skip,
+            limit=limit,
+            search=search,
+            sort_by="name",
+            sort_desc=False,
+            include_inactive=False
+        )
+    
+    # ==================== UPDATE ====================
+    
     async def update(
-        self, db: AsyncSession, db_obj: ParticipantList, obj_in: ParticipantListUpdate, updated_by_id: UUID
-    ) -> ParticipantList:
+        self, 
+        db: AsyncSession, 
+        db_obj: ParticipantList, 
+        obj_in: ParticipantListUpdate, 
+        updated_by_id: UUID
+    ) -> dict:
         """Update participant list with audit fields"""
         try:
             update_data = obj_in.model_dump(exclude_unset=True)
@@ -300,67 +780,581 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
                 participants = await self._get_participants_by_ids(db, participant_ids)
                 db_obj.participants = participants
             
-            await self._update_audit_fields(db_obj, updated_by_id)
+            # Update audit fields
+            db_obj.updated_by_id = updated_by_id
+            
             await db.commit()
             await db.refresh(db_obj)
-            return db_obj
-        except Exception as e:
+            
+            logger.info(f"✅ Updated participant list: {db_obj.name} (ID: {db_obj.id})")
+            return self._list_to_dict(db_obj, include_participants=True)
+            
+        except SQLAlchemyError as e:
             await db.rollback()
+            logger.error(f"Database error updating list: {e}")
             raise ValueError(f"Failed to update participant list: {str(e)}")
-
+    
+    # ==================== DELETE ====================
+    
     async def soft_delete(
-        self, db: AsyncSession, id: UUID, deleted_by_id: UUID
-    ) -> Optional[ParticipantList]:
+        self, 
+        db: AsyncSession, 
+        id: UUID, 
+        deleted_by_id: UUID
+    ) -> bool:
         """Soft delete a participant list"""
         try:
-            db_obj = await self.get(db, id)
-            if db_obj:
-                db_obj.is_active = False
-                await self._update_audit_fields(db_obj, deleted_by_id)
-                await db.commit()
-                await db.refresh(db_obj)
-            return db_obj
-        except Exception as e:
+            result = await db.execute(
+                select(ParticipantList).where(ParticipantList.id == id)
+            )
+            db_obj = result.scalar_one_or_none()
+            
+            if not db_obj:
+                return False
+            
+            db_obj.is_active = False
+            db_obj.updated_by_id = deleted_by_id
+            
+            await db.commit()
+            
+            logger.info(f"✅ Soft deleted participant list: {db_obj.name} (ID: {id})")
+            return True
+            
+        except SQLAlchemyError as e:
             await db.rollback()
-            raise ValueError(f"Failed to delete participant list: {str(e)}")
-
-    async def _get_participants_by_ids(self, db: AsyncSession, participant_ids: List[UUID]) -> List[Participant]:
+            logger.error(f"Database error deleting list {id}: {e}")
+            return False
+    
+    # ==================== BATCH OPERATIONS ====================
+    
+    async def add_participants_to_list_batch(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        participant_ids: List[UUID],
+        updated_by_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Add multiple participants to a list with batch processing.
+        Returns result with added_count, skipped_count, and errors.
+        """
+        result = {
+            "added_count": 0,
+            "skipped_count": 0,
+            "skipped_ids": [],
+            "errors": []
+        }
+        
+        try:
+            # Get the list
+            list_result = await db.execute(
+                select(ParticipantList)
+                .options(selectinload(ParticipantList.participants))
+                .where(ParticipantList.id == list_id)
+            )
+            list_obj = list_result.scalar_one_or_none()
+            
+            if not list_obj:
+                result["errors"].append(f"List {list_id} not found")
+                return result
+            
+            # Get existing participant IDs
+            existing_ids = {p.id for p in list_obj.participants}
+            
+            # Filter new participants
+            new_ids = [pid for pid in participant_ids if pid not in existing_ids]
+            result["skipped_ids"] = [str(pid) for pid in participant_ids if pid in existing_ids]
+            result["skipped_count"] = len(result["skipped_ids"])
+            
+            if new_ids:
+                # Fetch new participants
+                participants = await self._get_participants_by_ids(db, new_ids)
+                
+                if participants:
+                    list_obj.participants.extend(participants)
+                    list_obj.updated_by_id = updated_by_id
+                    
+                    await db.commit()
+                    result["added_count"] = len(participants)
+                    
+                    logger.info(f"✅ Added {len(participants)} participants to list {list_id}")
+                else:
+                    result["errors"].append("No valid participants found")
+            
+            return result
+            
+        except SQLAlchemyError as e:
+            await db.rollback()
+            logger.error(f"Error adding participants to list {list_id}: {e}")
+            result["errors"].append(str(e))
+            return result
+    
+    # ==================== PRIVATE HELPERS ====================
+    
+    async def _get_participants_by_ids(
+        self, 
+        db: AsyncSession, 
+        participant_ids: List[UUID]
+    ) -> List[Participant]:
         """Helper to fetch participants by IDs"""
         if not participant_ids:
             return []
         
         result = await db.execute(
-            select(Participant).where(Participant.id.in_(participant_ids))
+            select(Participant)
+            .where(Participant.id.in_(participant_ids), Participant.is_active == True)
         )
         return result.scalars().all()
 
-    async def get_accessible_lists(
+
+    
+
+
+    async def get_list_participants_batch(
         self,
         db: AsyncSession,
-        user_id: UUID,
-        skip: int = 0,
-        limit: int = 100
-    ) -> List[ParticipantList]:
+        list_id: UUID,
+        batch_size: int = 500,
+        search: Optional[str] = None
+    ) -> List[dict]:
         """
-        Get participant lists accessible to a user.
+        Get all participants in a list in batches (for large lists).
+        Useful for exports or processing all participants at once.
+        
+        Args:
+            db: Database session
+            list_id: ID of the participant list
+            batch_size: Number of records to fetch per batch
+            search: Optional search term
+        
+        Returns:
+            List of all participant dictionaries
+        """
+        all_participants = []
+        skip = 0
+        
+        while True:
+            batch, total = await self.get_list_participants(
+                db, list_id, skip, batch_size, search
+            )
+            
+            if not batch:
+                break
+                
+            all_participants.extend(batch)
+            skip += batch_size
+            
+            if skip >= total:
+                break
+        
+        return all_participants
+
+
+    async def get_list_participants_count(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        search: Optional[str] = None,
+        include_inactive: bool = False
+    ) -> int:
+        """
+        Get the count of participants in a list (without fetching the data).
+        Useful for showing totals without loading all records.
+        
+        Args:
+            db: Database session
+            list_id: ID of the participant list
+            search: Optional search term
+            include_inactive: Whether to include inactive participants
+        
+        Returns:
+            Total count of participants matching the criteria
         """
         try:
+            from sqlalchemy import select, func, or_
+            
+            query = select(func.count()).select_from(Participant).join(
+                participant_list_members,
+                Participant.id == participant_list_members.c.participant_id
+            ).where(
+                participant_list_members.c.participant_list_id == list_id
+            )
+            
+            if not include_inactive:
+                query = query.where(Participant.is_active == True)
+            
+            if search and search.strip():
+                search_term = f"%{search.strip()}%"
+                search_conditions = [
+                    Participant.name.ilike(search_term),
+                    Participant.email.ilike(search_term),
+                    Participant.organization.ilike(search_term)
+                ]
+                query = query.where(or_(*search_conditions))
+            
+            result = await db.execute(query)
+            return result.scalar() or 0
+            
+        except Exception as e:
+            logger.error(f"Error counting participants for list {list_id}: {e}")
+            return 0
+
+
+    async def get_list_participants_grouped(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        group_by: str = "organization"
+    ) -> Dict[str, List[dict]]:
+        """
+        Get participants grouped by a specific field (e.g., organization).
+        Useful for displaying participants in categorized views.
+        
+        Args:
+            db: Database session
+            list_id: ID of the participant list
+            group_by: Field to group by (organization, title, etc.)
+        
+        Returns:
+            Dictionary with group names as keys and lists of participants as values
+        """
+        try:
+            participants, _ = await self.get_list_participants(
+                db, list_id, skip=0, limit=10000  # Get all for grouping
+            )
+            
+            grouped = {}
+            for p in participants:
+                key = p.get(group_by, "Uncategorized") or "Uncategorized"
+                if key not in grouped:
+                    grouped[key] = []
+                grouped[key].append(p)
+            
+            # Sort groups by name
+            return dict(sorted(grouped.items()))
+            
+        except Exception as e:
+            logger.error(f"Error grouping participants for list {list_id}: {e}")
+            return {}
+
+
+    async def export_list_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        format: str = "json",
+        search: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Export all participants in a list in various formats.
+        
+        Args:
+            db: Database session
+            list_id: ID of the participant list
+            format: Export format ('json' or 'csv')
+            search: Optional search term
+        
+        Returns:
+            Dictionary containing export data and metadata
+        """
+        try:
+            participants = await self.get_list_participants_batch(
+                db, list_id, batch_size=1000, search=search
+            )
+            
+            export_data = {
+                "list_id": str(list_id),
+                "exported_at": datetime.utcnow().isoformat(),
+                "total": len(participants),
+                "format": format,
+                "data": participants
+            }
+            
+            # Add summary statistics
+            if participants:
+                organizations = set(p.get("organization") for p in participants if p.get("organization"))
+                titles = set(p.get("title") for p in participants if p.get("title"))
+                
+                export_data["summary"] = {
+                    "unique_organizations": len(organizations),
+                    "unique_titles": len(titles),
+                    "has_email": sum(1 for p in participants if p.get("email")),
+                    "has_phone": sum(1 for p in participants if p.get("telephone")),
+                }
+            
+            return export_data
+            
+        except Exception as e:
+            logger.error(f"Error exporting participants for list {list_id}: {e}")
+            return {
+                "list_id": str(list_id),
+                "exported_at": datetime.utcnow().isoformat(),
+                "total": 0,
+                "format": format,
+                "data": [],
+                "error": str(e)
+            }    
+
+
+
+
+
+        async def add_participants_to_list(
+            self,
+            db: AsyncSession,
+            list_id: UUID,
+            participant_ids: List[UUID],
+            updated_by_id: UUID
+        ) -> ParticipantList:
+            """
+            Add participants to an existing list
+            """
+            try:
+                # Get the list with participants loaded
+                result = await db.execute(
+                    select(ParticipantList)
+                    .options(selectinload(ParticipantList.participants))
+                    .where(ParticipantList.id == list_id)
+                )
+                db_obj = result.scalar_one_or_none()
+                
+                if not db_obj:
+                    raise ValueError(f"Participant list {list_id} not found")
+                
+                # Get participants to add
+                participants = await self._get_participants_by_ids(db, participant_ids)
+                
+                # Add new participants (avoid duplicates)
+                existing_ids = {p.id for p in db_obj.participants}
+                new_participants = [p for p in participants if p.id not in existing_ids]
+                
+                db_obj.participants.extend(new_participants)
+                
+                # Update audit fields
+                await self._update_audit_fields(db_obj, updated_by_id)
+                
+                await db.commit()
+                await db.refresh(db_obj)
+                return db_obj
+                
+            except Exception as e:
+                await db.rollback()
+                raise ValueError(f"Failed to add participants to list: {str(e)}")
+
+        async def remove_participants_from_list(
+            self,
+            db: AsyncSession,
+            list_id: UUID,
+            participant_ids: List[UUID],
+            updated_by_id: UUID
+        ) -> ParticipantList:
+            """
+            Remove participants from a list
+            """
+            try:
+                # Get the list with participants loaded
+                result = await db.execute(
+                    select(ParticipantList)
+                    .options(selectinload(ParticipantList.participants))
+                    .where(ParticipantList.id == list_id)
+                )
+                db_obj = result.scalar_one_or_none()
+                
+                if not db_obj:
+                    raise ValueError(f"Participant list {list_id} not found")
+                
+                # Remove specified participants
+                participant_ids_set = set(participant_ids)
+                db_obj.participants = [p for p in db_obj.participants if p.id not in participant_ids_set]
+                
+                # Update audit fields
+                await self._update_audit_fields(db_obj, updated_by_id)
+                
+                await db.commit()
+                await db.refresh(db_obj)
+                return db_obj
+                
+            except Exception as e:
+                await db.rollback()
+                raise ValueError(f"Failed to remove participants from list: {str(e)}")
+
+        async def get_available_participants(
+            self,
+            db: AsyncSession,
+            list_id: UUID,
+            skip: int = 0,
+            limit: int = 100,
+            search: Optional[str] = None
+        ) -> tuple[List[Participant], int]:
+            """
+            Get participants not already in the specified list
+            """
+            try:
+                # Subquery to get participant IDs already in the list
+                subquery = select(ParticipantList.participants).where(
+                    ParticipantList.id == list_id
+                ).scalar_subquery()
+                
+                # Build main query
+                query = select(Participant).where(
+                    Participant.is_active == True,
+                    Participant.id.not_in(subquery)
+                )
+                
+                # Apply search filter
+                if search:
+                    search_term = f"%{search}%"
+                    query = query.where(
+                        or_(
+                            Participant.name.ilike(search_term),
+                            Participant.email.ilike(search_term),
+                            Participant.organization.ilike(search_term)
+                        )
+                    )
+                
+                # Get total count
+                count_query = select(func.count()).select_from(query.subquery())
+                count_result = await db.execute(count_query)
+                total = count_result.scalar() or 0
+                
+                # Apply pagination and ordering
+                query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(Participant.name)
+                
+                result = await db.execute(query)
+                participants = result.scalars().all()
+                
+                return participants, total
+                
+            except Exception as e:
+                logger.error(f"Error fetching available participants for list {list_id}: {e}")
+                return [], 0
+
+
+            await db.rollback()
+            logger.error(f"Error removing participant {participant_id} from list {list_id}: {e}", exc_info=True)
+            return False
+
+
+
+    async def remove_participant_from_list(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        participant_id: UUID,
+        updated_by_id: UUID
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """
+        Hard remove a participant from a list.
+        
+        Returns:
+            Tuple[bool, Optional[Dict]]: (success, audit_data)
+        """
+                # Add debug logging
+        logger.debug(f"remove_participant_from_list called with updated_by_id: {updated_by_id} (type: {type(updated_by_id)})")
+        logger.debug(f"updated_by_id is UUID? {isinstance(updated_by_id, UUID)}")
+
+        try:
+            # Get the list with participants loaded
             result = await db.execute(
                 select(ParticipantList)
-                .where(
-                    or_(
-                        ParticipantList.is_global == True,
-                        ParticipantList.created_by_id == user_id
-                    ),
-                    ParticipantList.is_active == True
-                )
-                .offset(skip)
-                .limit(limit)
-                .order_by(ParticipantList.name.asc())
+                .options(selectinload(ParticipantList.participants))
+                .where(ParticipantList.id == list_id)
             )
-            return result.scalars().all()
+            participant_list = result.scalar_one_or_none()
+            
+            if not participant_list:
+                logger.warning(f"ParticipantList {list_id} not found")
+                return False, None
+            
+            # Find the participant to remove
+            participant_to_remove = None
+            for p in participant_list.participants:
+                if p.id == participant_id:
+                    participant_to_remove = p
+                    break
+            
+            if not participant_to_remove:
+                logger.warning(f"Participant {participant_id} not found in list {list_id}")
+                return False, None
+            
+            # Capture audit data BEFORE removal
+            audit_data = {
+                "list_id": str(list_id),
+                "participant_id": str(participant_id),
+                "list_name": participant_list.name,
+                "participant_name": participant_to_remove.name,
+                "participant_Tel": getattr(participant_to_remove, 'telephone', None),
+                "participant_email": participant_to_remove.email,
+                "participant_role": getattr(participant_to_remove, 'role', None),  # If role exists on User
+                "removed_by_id": str(updated_by_id),
+                "removed_at": datetime.utcnow().isoformat()
+            }
+            
+            # Hard remove by filtering the participants list
+            # This triggers the association table deletion
+            original_count = len(participant_list.participants)
+            participant_list.participants = [
+                p for p in participant_list.participants 
+                if p.id != participant_id
+            ]
+            
+            if len(participant_list.participants) == original_count:
+                return False, None
+            
+            # Update audit fields on the list
+            participant_list.updated_by_id = updated_by_id
+            participant_list.updated_at = datetime.utcnow()
+            
+            await db.commit()
+            
+            logger.info(f"Successfully removed participant {participant_id} from list {list_id}")
+            return True, audit_data
+            
         except Exception as e:
-            raise ValueError(f"Failed to fetch accessible lists: {str(e)}")
+            await db.rollback()
+            logger.error(f"Error removing participant {participant_id} from list {list_id}: {e}", exc_info=True)
+            return False, None
+        
+    async def remove_participant_from_list1(
+            self,
+            db: AsyncSession,
+            list_id: UUID,
+            participant_id: UUID,
+            updated_by_id: UUID
+        ) -> bool:
+            """Remove a participant from a list"""
+            try:
+                # Get the list with participants loaded
+                result = await db.execute(
+                    select(ParticipantList)
+                    .options(selectinload(ParticipantList.participants))
+                    .where(ParticipantList.id == list_id)
+                )
+                db_obj = result.scalar_one_or_none()
+                
+                if not db_obj:
+                    return False
+                
+                # Check if participant is in the list
+                original_count = len(db_obj.participants)
+                db_obj.participants = [p for p in db_obj.participants if p.id != participant_id]
+                
+                if len(db_obj.participants) == original_count:
+                    return False  # Participant not found in list
+                
+                # Update audit fields
+                db_obj.updated_by_id = updated_by_id
+                db_obj.updated_at = datetime.now()
+                
+                await db.commit()
+                return True
+                
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Error removing participant from list: {e}")
+                return False
+
+        
 # ============================================================================
 # MEETING CRUD
 # ============================================================================

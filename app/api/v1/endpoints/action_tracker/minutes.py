@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import db
 from app.api import deps
-from app.crud.action_tracker import meeting_crud, meeting_action, meeting_minutes
+# from app.crud.action_tracker import meeting, meeting_action, meeting_minutes
+
+from . import participants, participant_lists, meetings, minutes, actions, documents, dashboard, import_export
+
 from app.models.user import User
 from app.schemas.meeting_minutes.meeting_minutes import (
     MeetingActionCreate,
@@ -58,7 +61,7 @@ async def add_meeting_minutes(
         Created minutes object
     """
     # Verify meeting exists
-    meeting_obj = await meeting_crud.get(db, meeting_id)
+    meeting_obj = await meeting.get(db, meeting_id)
     if not meeting_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -66,7 +69,7 @@ async def add_meeting_minutes(
         )
     
     # Create minutes
-    minutes = await meeting_crud.add_minutes(db, meeting_id, minutes_in, current_user.id)
+    minutes = await meeting.add_minutes(db, meeting_id, minutes_in, current_user.id)
     return minutes
 
 

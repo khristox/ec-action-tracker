@@ -38,7 +38,7 @@ services:
       - "8006:8001"
     volumes:
       - ./logs:/app/logs
-      - /home/chris/Chr/Apps/ECATMIS/static:/app/static
+      - /app/static
     networks:
       - ec_network
     environment:

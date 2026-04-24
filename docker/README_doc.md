@@ -80,3 +80,24 @@ docker exec ec_app python app/db/seed/seed_data.py
 docker exec -it ec_app /bin/sh
 docker exec -it ec_app /bin/bash
 
+
+docker compose run --rm app python app/db/seed/seed_data.py ec_app admin Admin123! --force
+
+
+ docker build -t khristox/ec-action-tracker:latest .
+
+
+docker exec -it --user root ec_app /bin/bash
+sleep 20
+apt-get update && apt-get install -y jq
+
+
+docker compose run --rm app uvicorn app.main:app --reload --port 8001
+
+docker compose run --rm app python app/db/seed/seed_data.py http://ec_app:8001 admin Admin123! --force
+
+
+
+  docker compose pull app
+  docker compose build --no-cache app --remove-orphans
+  docker compose up -d --force-recreate --no-deps app

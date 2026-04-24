@@ -92,7 +92,10 @@ const COMPONENT_IMPORTS = {
   'CreateMeeting': () => import('./components/actiontracker/meetings/CreateMeeting'),
   'MeetingDetail': () => import('./components/actiontracker/meetings/MeetingDetail'),
   'EditMeeting': () => import('./components/actiontracker/meetings/EditMeeting'),
+
+   'MeetingForm': () => import('./components/actiontracker/meetings/MeetingForm'),
   
+   
   // Action Tracker - Actions
   'ActionsList': () => import('./components/actiontracker/actions/ActionsList'),
   'MyTasks': () => import('./components/actiontracker/actions/MyTasks'),
@@ -116,6 +119,8 @@ const COMPONENT_IMPORTS = {
   // Action Tracker - Calendar & Settings
   'CalendarView': () => import('./components/actiontracker/calendar/CalendarView'),
   'Settings': () => import('./components/actiontracker/settings/Settings'),
+  'Locations': () => import('./components/address/LocationManager'),
+
   
   // Profile Components
   'Profile': () => import('./components/profile/Profile'),
@@ -244,7 +249,7 @@ const preloadCriticalComponents = async () => {
  */
 const preloadRoleBasedComponents = async (userRoles) => {
   const roleComponents = {
-    admin: ['UserManagement', 'RoleManagement', 'AuditLogs'],
+    admin: ['UserManagement', 'RoleManagement', 'AuditLogs','Locations'],
     user: ['Profile', 'ProfileSettings'],
     manager: ['ReportsList', 'CalendarView']
   };
@@ -281,6 +286,7 @@ const Dashboard = createLazyComponent('Dashboard', { preload: true });
 
 // Action Tracker - Meetings
 const Meetings = createLazyComponent('Meetings');
+const MeetingForm = createLazyComponent('MeetingForm');
 const CreateMeeting = createLazyComponent('CreateMeeting');
 const MeetingDetail = createLazyComponent('MeetingDetail');
 const EditMeeting = createLazyComponent('EditMeeting');
@@ -308,6 +314,7 @@ const ReportsList = createLazyComponent('ReportsList');
 // Action Tracker - Calendar & Settings
 const CalendarView = createLazyComponent('CalendarView');
 const Settings = createLazyComponent('Settings');
+const Locations = createLazyComponent('Locations');
 
 // Profile Components
 const Profile = createLazyComponent('Profile');
@@ -452,9 +459,9 @@ const routeConfig = {
   protectedRoutes: [
     { path: "dashboard", element: <Dashboard /> },
     { path: "meetings", element: <Meetings /> },
-    { path: "meetings/create", element: <CreateMeeting /> },
+    { path: "meetings/create", element: <MeetingForm /> },
     { path: "meetings/:id", element: <MeetingDetail /> },
-    { path: "meetings/:id/edit", element: <EditMeeting /> },
+    { path: "meetings/:id/edit", element: <MeetingForm /> },
     { path: "actions", element: <ActionsList /> },
     { path: "actions/all", element: <AllActions /> },
     { path: "actions/my-tasks", element: <MyTasks /> },
@@ -481,6 +488,7 @@ const routeConfig = {
     { path: "profile/:tab", element: <Profile /> },
     { path: "settings", element: <Settings /> },
     { path: "settings/profile", element: <ProfileSettings /> },
+    { path: "settings/locations", element: <Locations /> },
     { path: "settings/security", element: <SecuritySettings /> },
     { path: "settings/notifications", element: <NotificationSettings /> },
     { path: "settings/preferences", element: <PreferenceSettings /> },
@@ -636,6 +644,9 @@ const AppContent = () => {
           
           {/* Catch-all Route */}
           <Route path="*" element={<Navigate to="/404" replace />} />
+          // In your App.jsx or router configuration
+          <Route path="/actions/assign/minute/:minuteId" element={<AssignAction />} />
+          <Route path="/actions/edit/:id" element={<AssignAction />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

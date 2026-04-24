@@ -21,14 +21,27 @@ export const fetchParticipantById = createAsyncThunk(
   }
 );
 
+// src/store/slices/actionTracker/participantSlice.js
+
 export const createParticipant = createAsyncThunk(
-  'participants/createParticipant',
-  async (participantData) => {
-    const response = await api.post('/action-tracker/participants', participantData);
-    return response.data;
+  'participants/create',
+  async (participantData, { rejectWithValue }) => {
+    try {
+      const { _listId, ...data } = participantData;
+      
+      // Build URL with query parameter if listId is provided
+      let url = '/action-tracker/participants/';
+      if (_listId) {
+        url += `?participant_list_id=${_listId}`;
+      }
+      
+      const response = await api.post(url, data);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data || error.message);
+    }
   }
 );
-
 export const updateParticipant = createAsyncThunk(
   'participants/updateParticipant',
   async ({ id, data }) => {
@@ -204,7 +217,7 @@ export const importParticipants = createAsyncThunk(
 export const fetchMeetingParticipants = createAsyncThunk(
   'participants/fetchMeetingParticipants',
   async (meetingId) => {
-    const response = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
+    const response = await api.get(`/action-tracker/meetings/${meetingId}/participants/`);
     return response.data;
   }
 );
@@ -212,7 +225,7 @@ export const fetchMeetingParticipants = createAsyncThunk(
 export const addParticipantToMeeting = createAsyncThunk(
   'participants/addParticipantToMeeting',
   async ({ meetingId, participantData }) => {
-    const response = await api.post(`/action-tracker/meetings/${meetingId}/participants`, participantData);
+    const response = await api.post(`/action-tracker/meetings/${meetingId}/participants/`, participantData);
     return response.data;
   }
 );
@@ -562,7 +575,11 @@ const participantSlice = createSlice({
       })
       .addCase(fetchParticipantLists.fulfilled, (state, action) => {
         state.loading = false;
-        state.lists = Array.isArray(action.payload) ? action.payload : [];
+        // The API returns { items: [...], total, page, size, pages }
+        // Store the items array directly
+        state.lists = action.payload.items || action.payload || [];
+        state.listsTotal = action.payload.total || state.lists.length;
+        state.error = null;
       })
       .addCase(fetchParticipantLists.rejected, (state, action) => {
         state.loading = false;

@@ -2,6 +2,9 @@
 
 """
 Single table for hierarchical address structure using parent-child relationships
+Supports:
+- Address mode: Levels 1-7 (Country → Region → District → County → Subcounty → Parish → Village)
+- Buildings mode: Levels 11-14 (Office → Building → Room → Conference)
 """
 
 from typing import Optional, List, Dict, Any, Union
@@ -22,6 +25,7 @@ class Location(BaseModel):
     """
     Hierarchical location table that handles all address levels.
     Uses a self-referential parent-child relationship.
+    Supports both address (1-7) and buildings (11-14) level systems.
     """
     __tablename__ = "locations"
     __table_args__ = (
@@ -39,6 +43,7 @@ class Location(BaseModel):
     )
 
     # ==================== PRIMARY IDENTIFIERS ====================
+    id = Column(CustomUUID, primary_key=True, default=uuid.uuid4, index=True)
     code = Column(String(50), nullable=False, index=True)
     alt_code = Column(String(50), unique=True, nullable=True, index=True)
 
@@ -77,33 +82,64 @@ class Location(BaseModel):
     # ==================== METADATA ====================
     extra_metadata = Column(JSON, default=dict)
 
+    floor_number = Column(Integer, nullable=True, comment="Floor number (negative for basement)")
+    capacity = Column(Integer, nullable=True, comment="Maximum occupancy")
+    features = Column(Text, nullable=True, comment="Features and amenities")
+
+    # ==================== AUDIT FIELDS ====================
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    created_by = Column(CustomUUID, nullable=True)
+    updated_by = Column(CustomUUID, nullable=True)
+
     # ==================== RELATIONSHIPS ====================
     parent = relationship(
         "Location",
         remote_side=lambda: [Location.id],
         back_populates="children",
-        lazy="noload",
+        lazy="noload",   # we never need parent object, just parent_id
         foreign_keys=[parent_id],
     )
     children = relationship(
         "Location",
         back_populates="parent",
-        lazy="noload",
+        lazy="noload",   # never auto-load — prevents the greenlet error entirely
         foreign_keys=[parent_id],
     )
 
     # ==================== VALIDATION ====================
     @validates('level')
     def validate_level(self, key, value):
-        if value < 1 or value > 7:
-            raise ValueError(f"Level must be between 1 and 7, got {value}")
+        """Validate level based on location_mode"""
+        if hasattr(self, 'location_mode'):
+            if self.location_mode == 'address':
+                if value < 1 or value > 7:
+                    raise ValueError(f"Address mode level must be between 1 and 7, got {value}")
+            elif self.location_mode == 'buildings':
+                if value not in [11, 12, 13, 14]:
+                    raise ValueError(f"Buildings mode level must be 11, 12, 13, or 14, got {value}")
+        else:
+            # Default validation for address mode
+            if value < 1 or value > 7:
+                raise ValueError(f"Level must be between 1 and 7, got {value}")
         return value
 
     @validates('location_type')
     def validate_location_type(self, key, value):
-        valid_types = ['country', 'region', 'district', 'county', 'subcounty', 'parish', 'village']
-        if value and value not in valid_types:
-            raise ValueError(f"Location type must be one of {valid_types}, got {value}")
+        valid_address_types = ['country', 'region', 'district', 'county', 'subcounty', 'parish', 'village']
+        valid_building_types = ['office', 'building', 'room', 'conference', 'headquarters', 
+                                'branch', 'annex', 'office_space', 'meeting_room', 
+                                'training_room', 'boardroom']
+        
+        if value:
+            if hasattr(self, 'location_mode'):
+                if self.location_mode == 'address' and value not in valid_address_types:
+                    raise ValueError(f"Address location type must be one of {valid_address_types}, got {value}")
+                elif self.location_mode == 'buildings' and value not in valid_building_types:
+                    raise ValueError(f"Buildings location type must be one of {valid_building_types}, got {value}")
+            else:
+                if value not in valid_address_types:
+                    raise ValueError(f"Location type must be one of {valid_address_types}, got {value}")
         return value
 
     @validates('location_mode')
@@ -206,25 +242,59 @@ class Location(BaseModel):
     
     @property
     def level_name(self) -> str:
-        level_names = {
-            1: "Country",
-            2: "Region",
-            3: "District",
-            4: "County",
-            5: "SubCounty",
-            6: "Parish",
-            7: "Village"
-        }
-        return level_names.get(self.level, f"Level {self.level}")
+        """Get human-readable level name based on mode"""
+        if self.location_mode == 'buildings':
+            level_names = {
+                11: "Office",
+                12: "Building",
+                13: "Room",
+                14: "Conference"
+            }
+            return level_names.get(self.level, f"Level {self.level}")
+        else:
+            level_names = {
+                1: "Country",
+                2: "Region",
+                3: "District",
+                4: "County",
+                5: "SubCounty",
+                6: "Parish",
+                7: "Village"
+            }
+            return level_names.get(self.level, f"Level {self.level}")
 
     @property
     def mode_name(self) -> str:
+        """Get human-readable mode name"""
         mode_names = {
             'address': "Address Location",
             'buildings': "Building/Facility",
             'mixed': "Mixed Use"
         }
         return mode_names.get(self.location_mode, self.location_mode)
+
+    @property
+    def level_icon(self) -> str:
+        """Get icon for level based on mode"""
+        if self.location_mode == 'buildings':
+            level_icons = {
+                11: "💼",  # Office
+                12: "🏢",  # Building
+                13: "🚪",  # Room
+                14: "📊",  # Conference
+            }
+            return level_icons.get(self.level, "📍")
+        else:
+            level_icons = {
+                1: "🌍",   # Country
+                2: "🏛️",  # Region
+                3: "🏢",   # District
+                4: "🏘️",  # County
+                5: "🏠",   # Subcounty
+                6: "⛪",   # Parish
+                7: "🏡",   # Village
+            }
+            return level_icons.get(self.level, "📍")
 
     @property
     def is_address_mode(self) -> bool:
@@ -240,31 +310,47 @@ class Location(BaseModel):
 
     @property
     def is_country(self) -> bool:
-        return self.level == 1
+        return self.level == 1 and self.location_mode == 'address'
 
     @property
     def is_region(self) -> bool:
-        return self.level == 2
+        return self.level == 2 and self.location_mode == 'address'
 
     @property
     def is_district(self) -> bool:
-        return self.level == 3
+        return self.level == 3 and self.location_mode == 'address'
 
     @property
     def is_county(self) -> bool:
-        return self.level == 4
+        return self.level == 4 and self.location_mode == 'address'
 
     @property
     def is_subcounty(self) -> bool:
-        return self.level == 5
+        return self.level == 5 and self.location_mode == 'address'
 
     @property
     def is_parish(self) -> bool:
-        return self.level == 6
+        return self.level == 6 and self.location_mode == 'address'
 
     @property
     def is_village(self) -> bool:
-        return self.level == 7
+        return self.level == 7 and self.location_mode == 'address'
+
+    @property
+    def is_office(self) -> bool:
+        return self.level == 11 and self.location_mode == 'buildings'
+
+    @property
+    def is_building(self) -> bool:
+        return self.level == 12 and self.location_mode == 'buildings'
+
+    @property
+    def is_room(self) -> bool:
+        return self.level == 13 and self.location_mode == 'buildings'
+
+    @property
+    def is_conference(self) -> bool:
+        return self.level == 14 and self.location_mode == 'buildings'
 
     @property
     def display_name(self) -> str:
@@ -284,15 +370,17 @@ class Location(BaseModel):
 
     @property
     def hierarchical_path(self) -> str:
+        """Get full hierarchical path - safe without lazy loading"""
         try:
-            if self.parent_id:
-                return f"Level {self.level}: {self.name}"
+            if self.parent_id and hasattr(self, '_parent'):
+                return f"{self.parent.hierarchical_path} > {self.name}"
             return self.name
         except Exception:
             return self.name
 
     @property
     def ancestor_ids(self) -> List[UUID]:
+        """Get list of ancestor IDs - requires explicit query"""
         return []
 
     @property
@@ -395,6 +483,7 @@ class Location(BaseModel):
             "full_name": self.full_name,
             "level": self.level,
             "level_name": self.level_name,
+            "level_icon": self.level_icon,
             "location_type": self.location_type,
             "location_mode": self.location_mode,
             "mode_name": self.mode_name,
@@ -415,6 +504,17 @@ class Location(BaseModel):
             "is_address_mode": self.is_address_mode,
             "is_buildings_mode": self.is_buildings_mode,
             "is_mixed_mode": self.is_mixed_mode,
+            "is_country": self.is_country,
+            "is_region": self.is_region,
+            "is_district": self.is_district,
+            "is_county": self.is_county,
+            "is_subcounty": self.is_subcounty,
+            "is_parish": self.is_parish,
+            "is_village": self.is_village,
+            "is_office": self.is_office,
+            "is_building": self.is_building,
+            "is_room": self.is_room,
+            "is_conference": self.is_conference,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "created_by": str(self.created_by) if self.created_by else None,
@@ -491,36 +591,3 @@ class Location(BaseModel):
 
     def __str__(self) -> str:
         return self.display_name_with_mode if hasattr(self, 'location_mode') else self.display_name
-    
-    def to_dict(self) -> dict:
-        """Convert to dictionary - safe to call while session is active."""
-        return {
-            "id": str(self.id) if self.id else None,
-            "code": self.code,
-            "alt_code": self.alt_code,
-            "name": self.name,
-            "short_name": self.short_name,
-            "native_name": self.native_name,
-            "full_name": self.full_name,
-            "level": self.level,
-            "level_name": self.level_name,
-            "location_type": self.location_type,
-            "location_mode": self.location_mode,
-            "mode_name": self.mode_name,
-            "parent_id": str(self.parent_id) if self.parent_id else None,
-            "status": self.status,
-            "is_active": self.status == "active",
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "created_by": str(self.created_by) if self.created_by else None,
-            "updated_by": str(self.updated_by) if self.updated_by else None,
-            "display_name": self.display_name,
-            "hierarchical_path": self.hierarchical_path,
-            "has_children": False,  # Set this separately if needed
-            "child_count": 0,
-            "gps_coordinates": self.gps_coordinates,
-            "gps_geojson": self.gps_geojson,
-            "population": self.population,
-            "area": self.area,
-            "postal_code": self.postal_code,
-        }

@@ -690,6 +690,7 @@ class UserResponse(UserBase):
         None,
         description="Last login timestamp"
     )
+    message: Optional[str] = None 
     
     @property
     def full_name(self) -> str:
@@ -732,7 +733,11 @@ class UserResponse(UserBase):
         }
     )
 
-
+class RegistrationResponse(UserResponse):
+    """Response for registration endpoint with additional message"""
+    message: str
+    verification_sent: bool = False
+    
 class UserWithRoles(UserResponse):
     """
     Schema for user with associated roles

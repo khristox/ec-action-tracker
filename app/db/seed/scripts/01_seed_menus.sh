@@ -224,14 +224,14 @@ create_menu() {
 print_header "STEP 1: Creating Root Menus"
 echo ""
 
+# Reordered root menus - Dashboard first, then meetings, actions, participants, reports, settings, calendar last
 create_menu "dashboard" "Dashboard" "Dashboard" "mui" "mui" "#1976d2" "dashboard" 1 ""
 create_menu "meetings" "Meetings" "event" "material_symbols" "material-symbols-outlined" "#4caf50" "meetings" 2 ""
 create_menu "actions" "Actions" "fa-tasks" "fontawesome" "fas" "#ff9800" "actions" 3 ""
 create_menu "participants" "Participants" "People" "mui" "mui" "#9c27b0" "participants" 4 ""
-create_menu "documents" "Documents" "folder" "material_symbols" "material-symbols-outlined" "#2196f3" "documents" 5 ""
-create_menu "reports" "Reports" "fa-chart-bar" "fontawesome" "fas" "#f44336" "reports" 6 ""
+create_menu "reports" "Reports" "fa-chart-bar" "fontawesome" "fas" "#f44336" "reports" 5 ""
+create_menu "settings" "Settings" "fa-cog" "fontawesome" "fas" "#757575" "" 6 ""
 create_menu "calendar" "Calendar" "calendar_month" "material_symbols" "material-symbols-outlined" "#00bcd4" "calendar" 7 ""
-create_menu "settings" "Settings" "fa-cog" "fontawesome" "fas" "#757575" "" 8 ""
 
 echo ""
 
@@ -241,8 +241,6 @@ echo ""
 
 create_menu "meetings_list" "All Meetings" "List" "mui" "mui" "#4caf50" "meetings" 1 "meetings"
 create_menu "meetings_create" "Create Meeting" "Add" "mui" "mui" "#4caf50" "meetings/create" 2 "meetings"
-create_menu "meetings_minutes" "Meeting Minutes" "Description" "mui" "mui" "#4caf50" "meetings/minutes" 3 "meetings"
-create_menu "meetings_participants" "Meeting Participants" "People" "mui" "mui" "#4caf50" "meetings/participants" 4 "meetings"
 
 echo ""
 
@@ -254,7 +252,6 @@ create_menu "my_tasks" "My Tasks" "fa-tasks" "fontawesome" "fas" "#ff9800" "acti
 create_menu "all_actions" "All Actions" "fa-list" "fontawesome" "fas" "#ff9800" "actions/all" 2 "actions"
 create_menu "overdue_actions" "Overdue Actions" "fa-exclamation-triangle" "fontawesome" "fas" "#f44336" "actions/overdue" 3 "actions"
 create_menu "action_assign" "Assign Actions" "fa-user-plus" "fontawesome" "fas" "#ff9800" "actions/assign" 4 "actions"
-create_menu "action_progress" "Progress Updates" "fa-chart-line" "fontawesome" "fas" "#4caf50" "actions/progress" 5 "actions"
 
 echo ""
 
@@ -269,19 +266,8 @@ create_menu "participants_import" "Bulk Import" "Upload" "mui" "mui" "#9c27b0" "
 
 echo ""
 
-# ==================== STEP 5: DOCUMENTS SUBMENUS ====================
-print_header "STEP 5: Creating Documents Submenus"
-echo ""
-
-create_menu "documents_all" "All Documents" "Folder" "mui" "mui" "#2196f3" "documents" 1 "documents"
-create_menu "documents_agendas" "Agendas" "Article" "mui" "mui" "#2196f3" "documents/agendas" 2 "documents"
-create_menu "documents_minutes" "Minutes" "Description" "mui" "mui" "#2196f3" "documents/minutes" 3 "documents"
-create_menu "documents_reports" "Reports" "Assessment" "mui" "mui" "#2196f3" "documents/reports" 4 "documents"
-
-echo ""
-
-# ==================== STEP 6: REPORTS SUBMENUS ====================
-print_header "STEP 6: Creating Reports Submenus"
+# ==================== STEP 5: REPORTS SUBMENUS ====================
+print_header "STEP 5: Creating Reports Submenus"
 echo ""
 
 create_menu "reports_meetings" "Meeting Reports" "Event" "mui" "mui" "#f44336" "reports/meetings" 1 "reports"
@@ -291,8 +277,8 @@ create_menu "reports_export" "Export Data" "Download" "mui" "mui" "#f44336" "rep
 
 echo ""
 
-# ==================== STEP 7: SETTINGS SUBMENUS ====================
-print_header "STEP 7: Creating Settings Submenus"
+# ==================== STEP 6: SETTINGS SUBMENUS ====================
+print_header "STEP 6: Creating Settings Submenus"
 echo ""
 
 # User Profile & Account Settings
@@ -305,49 +291,15 @@ create_menu "users" "User Management" "fa-users" "fontawesome" "fas" "#3f51b5" "
 create_menu "roles" "Role Management" "fa-tag" "fontawesome" "fas" "#9c27b0" "settings/roles" 5 "settings"
 create_menu "audit" "Audit Logs" "fa-history" "fontawesome" "fas" "#607d8b" "settings/audit" 6 "settings"
 
-# Locations (under Settings) - Using Material Symbol
+# Locations - Single menu without tree
 create_menu "locations" "Locations" "location_on" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 7 "settings"
 
-echo ""
-
-# ==================== STEP 8: LOCATIONS SUBMENUS ====================
-print_header "STEP 8: Creating Locations Hierarchy (under Settings/Locations)"
-echo ""
-
-create_menu "locations_list" "All Locations" "list_alt" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 1 "locations"
-create_menu "locations_regions" "Regions" "map" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/regions" 2 "locations"
-create_menu "locations_districts" "Districts" "account_balance" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/districts" 3 "locations"
-create_menu "locations_constituencies" "Constituencies" "groups" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/constituencies" 4 "locations"
-create_menu "locations_parishes" "Parishes" "church" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/parishes" 5 "locations"
-create_menu "locations_villages" "Villages" "house" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations/villages" 6 "locations"
-
-echo ""
-
-# ==================== STEP 9: ADMIN STRUCTURES SUBMENUS ====================
-print_header "STEP 9: Creating Admin Structures Submenus (under Settings)"
-echo ""
-
+# Admin Structures - Single menu without tree
 create_menu "admin_structures" "Admin Structures" "fa-sitemap" "fontawesome" "fas" "#607d8b" "settings/admin-structures" 8 "settings"
-create_menu "structures_list" "All Structures" "list_alt" "material_symbols" "material-symbols-outlined" "#607d8b" "settings/admin-structures" 1 "admin_structures"
-create_menu "structures_departments" "Departments" "fa-building" "fontawesome" "fas" "#607d8b" "settings/admin-structures/departments" 2 "admin_structures"
-create_menu "structures_units" "Units" "groups" "material_symbols" "material-symbols-outlined" "#607d8b" "settings/admin-structures/units" 3 "admin_structures"
-create_menu "structures_divisions" "Divisions" "AccountTree" "mui" "mui" "#607d8b" "settings/admin-structures/divisions" 4 "admin_structures"
-create_menu "structures_positions" "Positions" "fa-id-badge" "fontawesome" "fas" "#607d8b" "settings/admin-structures/positions" 5 "admin_structures"
 
 echo ""
 
-# ==================== STEP 10: SOCIAL MEDIA ====================
-print_header "STEP 10: Creating Social Media Menus"
-echo ""
-
-create_menu "facebook" "Facebook" "fa-facebook" "fontawesome" "fab" "#1877f2" "" 15 ""
-
-echo ""
-
-print_info "Menu creation summary: Created: $CREATE_COUNT, Updated: $UPDATE_COUNT, Failed: $FAIL_COUNT"
-echo ""
-
-# ==================== ASSIGN PERMISSIONS ====================
+# ==================== STEP 7: ASSIGN PERMISSIONS ====================
 print_separator
 print_header "Assigning Menu Permissions to Roles"
 print_separator
@@ -356,35 +308,32 @@ echo ""
 declare -A ROLE_MENUS
 
 # Admin - Full access to everything
-ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,preferences,users,roles,audit,locations,locations_list,locations_regions,locations_districts,locations_constituencies,locations_parishes,locations_villages,admin_structures,structures_list,structures_departments,structures_units,structures_divisions,structures_positions,facebook"
-ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,all_actions,overdue_actions,action_assign,action_progress,participants,participants_list,participant_lists,participants_create,participants_import,documents,documents_all,documents_agendas,documents_minutes,documents_reports,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security,preferences,users,roles,audit,locations,locations_list,locations_regions,locations_districts,locations_constituencies,locations_parishes,locations_villages,admin_structures,structures_list,structures_departments,structures_units,structures_divisions,structures_positions,facebook"
+ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,audit,locations,admin_structures,calendar"
+ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,audit,locations,admin_structures,calendar"
 
 # Meeting Creator
-ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,meetings_minutes,meetings_participants,actions,my_tasks,participants,participants_list,participant_lists,documents,documents_all,calendar,settings,profile,security,preferences"
+ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,participants,participants_list,participant_lists,settings,profile,security,preferences,calendar"
 
 # Meeting Participant
-ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,meetings_minutes,actions,my_tasks,documents,documents_all,calendar,settings,profile,security"
+ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,actions,my_tasks,settings,profile,security,calendar"
 
 # Action Assigner
-ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,action_progress,participants,participants_list,participant_lists,reports,reports_actions,calendar,settings,profile,security,preferences"
+ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,participants,participants_list,participant_lists,reports,reports_actions,settings,profile,security,preferences,calendar"
 
 # Action Owner
-ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,action_progress,calendar,settings,profile,security"
+ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,settings,profile,security,calendar"
 
 # Action Viewer
-ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,reports,reports_actions,calendar,settings,profile,security"
+ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,reports,reports_actions,settings,profile,security,calendar"
 
 # Participant Manager
-ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,meetings_participants,calendar,settings,profile,security,preferences"
-
-# Document Manager
-ROLE_MENUS["document_manager"]="dashboard,documents,documents_all,documents_agendas,documents_minutes,documents_reports,meetings,meetings_list,calendar,settings,profile,security"
+ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,settings,profile,security,preferences,calendar"
 
 # Report Viewer
-ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,calendar,settings,profile,security"
+ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,calendar"
 
 # Basic User
-ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,calendar,settings,profile,security"
+ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,settings,profile,security,calendar"
 
 PERMISSION_SUCCESS=0
 PERMISSION_FAIL=0
@@ -452,63 +401,51 @@ echo ""
 
 echo -e "${CYAN}📊 Summary:${NC}"
 echo "  • Total menus created: ${CREATE_COUNT}"
-echo "  • Root menus: Dashboard, Meetings, Actions, Participants, Documents, Reports, Calendar, Settings"
-echo "  • Locations is under Settings with Material Symbols"
-echo "  • Admin Structures is under Settings with mixed icons"
-echo "  • Facebook uses FAB brand icon"
+echo "  • Root menu order: Dashboard → Meetings → Actions → Participants → Reports → Settings → Calendar"
+echo "  • Locations is a single menu under Settings"
+echo "  • Admin Structures is a single menu under Settings"
+echo "  • Calendar moved to last position"
 echo ""
 
-echo -e "${CYAN}📂 Complete Menu Hierarchy:${NC}"
+echo -e "${CYAN}📂 Complete Menu Hierarchy (New Order):${NC}"
 echo ""
-echo "📁 Dashboard [Dashboard] (MUI)"
-echo "📁 Meetings [event] (Material Symbol)"
+echo "📁 Dashboard [Dashboard] (MUI) - Sort Order: 1"
+echo "📁 Meetings [event] (Material Symbol) - Sort Order: 2"
 echo "  📄 All Meetings [List] (MUI)"
 echo "  📄 Create Meeting [Add] (MUI)"
-echo "  📄 Meeting Minutes [Description] (MUI)"
-echo "  📄 Meeting Participants [People] (MUI)"
-echo "📁 Actions [fa-tasks] (Font Awesome)"
+echo "📁 Actions [fa-tasks] (Font Awesome) - Sort Order: 3"
 echo "  📄 My Tasks [fa-tasks] (FA)"
 echo "  📄 All Actions [fa-list] (FA)"
 echo "  📄 Overdue Actions [fa-exclamation-triangle] (FA)"
 echo "  📄 Assign Actions [fa-user-plus] (FA)"
-echo "  📄 Progress Updates [fa-chart-line] (FA)"
-echo "📁 Participants [People] (MUI)"
+echo "📁 Participants [People] (MUI) - Sort Order: 4"
 echo "  📄 All Participants [List] (MUI)"
 echo "  📄 Participant Lists [Group] (MUI)"
 echo "  📄 Add Participant [PersonAdd] (MUI)"
 echo "  📄 Bulk Import [Upload] (MUI)"
-echo "📁 Documents [folder] (Material Symbol)"
-echo "  📄 All Documents [Folder] (MUI)"
-echo "  📄 Agendas [Article] (MUI)"
-echo "  📄 Minutes [Description] (MUI)"
-echo "  📄 Reports [Assessment] (MUI)"
-echo "📁 Reports [fa-chart-bar] (Font Awesome)"
+echo "📁 Reports [fa-chart-bar] (Font Awesome) - Sort Order: 5"
 echo "  📄 Meeting Reports [Event] (MUI)"
 echo "  📄 Action Reports [Assignment] (MUI)"
 echo "  📄 Participant Reports [People] (MUI)"
 echo "  📄 Export Data [Download] (MUI)"
-echo "📁 Calendar [calendar_month] (Material Symbol)"
-echo "📁 Settings [fa-cog] (Font Awesome)"
+echo "📁 Settings [fa-cog] (Font Awesome) - Sort Order: 6"
 echo "  📄 Profile [fa-user] (FA)"
 echo "  📄 Security [fa-shield-alt] (FA)"
 echo "  📄 Preferences [fa-sliders-h] (FA)"
 echo "  📄 User Management [fa-users] (FA)"
 echo "  📄 Role Management [fa-tag] (FA)"
 echo "  📄 Audit Logs [fa-history] (FA)"
-echo "  📁 Locations [location_on] (Material Symbol)"
-echo "    📄 All Locations [list_alt] (MS)"
-echo "    📄 Regions [map] (MS)"
-echo "    📄 Districts [account_balance] (MS)"
-echo "    📄 Constituencies [groups] (MS)"
-echo "    📄 Parishes [church] (MS)"
-echo "    📄 Villages [house] (MS)"
-echo "  📁 Admin Structures [fa-sitemap] (FA)"
-echo "    📄 All Structures [list_alt] (MS)"
-echo "    📄 Departments [fa-building] (FA)"
-echo "    📄 Units [groups] (MS)"
-echo "    📄 Divisions [AccountTree] (MUI)"
-echo "    📄 Positions [fa-id-badge] (FA)"
-echo "📁 Facebook [fa-facebook] (FAB Brand)"
+echo "  📄 Locations [location_on] (Material Symbol)"
+echo "  📄 Admin Structures [fa-sitemap] (FA)"
+echo "📁 Calendar [calendar_month] (Material Symbol) - Sort Order: 7"
 echo ""
 
-print_success "Done! Refresh your browser to see the updated menu structure with nice icons!"
+print_success "Done! Refresh your browser to see the updated menu structure!"
+
+# ==================== HELPER COMMANDS ====================
+echo ""
+print_info "💡 Quick Commands:"
+echo "  • Reset all menus: ./seed_menus.sh"
+echo "  • Check menu structure: curl ${API_URL}/menus/ | jq '.'"
+echo "  • Check role permissions: curl ${API_URL}/roles/ | jq '.'"
+echo ""

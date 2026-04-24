@@ -1,5 +1,4 @@
-// src/components/actiontracker/meetings/NotificationDialog.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -13,15 +12,13 @@ import {
   Box,
   Avatar,
   Checkbox,
-  FormControlLabel,
   TextField,
   Button,
   CircularProgress,
   Alert,
-  Badge,
-  LinearProgress,
-  Backdrop,
-  Fade
+  alpha,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -30,415 +27,213 @@ import {
   WhatsApp as WhatsAppIcon,
   Sms as SmsIcon,
   Send as SendIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon
+  Person as PersonIcon
 } from '@mui/icons-material';
 
 function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm')); // Detects mobile
+  
   const [selectedParticipants, setSelectedParticipants] = useState([]);
   const [notificationType, setNotificationType] = useState(['email']);
   const [customMessage, setCustomMessage] = useState('');
   const [sending, setSending] = useState(false);
-  const [selectAll, setSelectAll] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [sendProgress, setSendProgress] = useState(0);
-  const [sendStatus, setSendStatus] = useState('idle'); // idle, sending, success, error
-  const [errorMessage, setErrorMessage] = useState('');
 
-  useEffect(() => {
-    if (open && participants && participants.length > 0 && !isInitialized) {
-      setSelectedParticipants(participants.map(p => p.id));
-      setSelectAll(true);
-      setIsInitialized(true);
-      // Reset status when dialog opens
-      setSendStatus('idle');
-      setErrorMessage('');
-      setSendProgress(0);
-    }
-    
-    if (!open) {
-      setIsInitialized(false);
-      setCustomMessage('');
-      setNotificationType(['email']);
-      setSelectedParticipants([]);
-      setSelectAll(false);
-      setSendStatus('idle');
-      setErrorMessage('');
-      setSendProgress(0);
-    }
-  }, [open, participants, isInitialized]);
+  // Colors for a "Premium" Dark Mode
+  const primaryMain = theme.palette.primary.main;
+  const glassBg = theme.palette.mode === 'dark' 
+    ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)'
+    : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)';
 
-  useEffect(() => {
-    if (participants && participants.length > 0 && open) {
-      setSelectAll(selectedParticipants.length === participants.length);
-    }
-  }, [selectedParticipants, participants, open]);
-
-  // Simulate progress for better UX
-  useEffect(() => {
-    let interval;
-    if (sending) {
-      interval = setInterval(() => {
-        setSendProgress(prev => {
-          if (prev >= 90) return prev;
-          return prev + 10;
-        });
-      }, 300);
-    } else if (sendStatus === 'success') {
-      setSendProgress(100);
-    }
-    return () => clearInterval(interval);
-  }, [sending, sendStatus]);
-
-  const handleToggleParticipant = useCallback((participantId) => {
-    setSelectedParticipants(prev => 
-      prev.includes(participantId) 
-        ? prev.filter(id => id !== participantId)
-        : [...prev, participantId]
-    );
-  }, []);
-
-  const handleSelectAll = useCallback(() => {
-    if (selectAll) {
-      setSelectedParticipants([]);
-    } else {
-      setSelectedParticipants(participants.map(p => p.id));
-    }
-    setSelectAll(!selectAll);
-  }, [selectAll, participants]);
-
-  const handleNotificationTypeToggle = useCallback((type) => {
-    setNotificationType(prev => 
-      prev.includes(type) 
-        ? prev.filter(t => t !== type)
-        : [...prev, type]
-    );
-  }, []);
-
-  const handleCustomMessageChange = useCallback((e) => {
-    setCustomMessage(e.target.value);
-  }, []);
-
-  const handleSend = useCallback(async () => {
-    if (selectedParticipants.length === 0 || notificationType.length === 0) {
-      setErrorMessage('Please select participants and at least one notification method');
-      return;
-    }
-
-    const notificationData = {
-      participant_ids: selectedParticipants,
-      notification_type: notificationType,
-      custom_message: customMessage
-    };
-
+  const handleSend = async () => {
     setSending(true);
-    setSendStatus('sending');
-    setSendProgress(0);
-    setErrorMessage('');
-    
     try {
-      await onSend(notificationData);
-      setSendStatus('success');
-      setSendProgress(100);
-      
-      // Close dialog after 1.5 seconds on success
-      setTimeout(() => {
-        onClose();
-        // Reset after close
-        setSending(false);
-        setSendStatus('idle');
-        setSendProgress(0);
-      }, 1500);
-    } catch (error) {
-      console.error('Failed to send notifications:', error);
-      setSendStatus('error');
-      setErrorMessage(error.response?.data?.detail || error.message || 'Failed to send notifications');
+      await onSend({
+        participant_ids: selectedParticipants,
+        notification_type: notificationType,
+        custom_message: customMessage
+      });
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
       setSending(false);
-      
-      // Auto clear error after 5 seconds
-      setTimeout(() => {
-        setSendStatus('idle');
-        setErrorMessage('');
-      }, 5000);
     }
-  }, [selectedParticipants, notificationType, customMessage, onSend, onClose]);
-
-  // Safe check for participants
-  const hasParticipants = participants && Array.isArray(participants) && participants.length > 0;
+  };
 
   return (
     <Dialog 
       open={open} 
-      onClose={!sending ? onClose : null} 
-      maxWidth="md" 
+      onClose={onClose} 
+      fullScreen={isMobile} // FULL SCREEN ON MOBILE
+      maxWidth="sm"
       fullWidth
-      disableEscapeKeyDown={sending}
+      PaperProps={{
+        sx: {
+          borderRadius: isMobile ? 0 : 4,
+          background: glassBg,
+          backdropFilter: 'blur(10px)',
+          backgroundImage: 'none',
+          boxShadow: theme.palette.mode === 'dark' 
+            ? `0 8px 32px 0 ${alpha('#000', 0.8)}, inset 0 0 0 1px ${alpha(primaryMain, 0.1)}`
+            : theme.shadows[10]
+        }
+      }}
     >
-      {/* Loading Overlay */}
-      <Backdrop
-        sx={{
+      {/* Header with Gradient Accent */}
+      <DialogTitle sx={{ p: 3, position: 'relative', overflow: 'hidden' }}>
+        <Box sx={{
           position: 'absolute',
-          zIndex: 1,
-          color: '#fff',
-          borderRadius: 2,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)'
-        }}
-        open={sending && sendStatus === 'sending'}
-      >
-        <Fade in={sending && sendStatus === 'sending'}>
-          <Stack spacing={2} alignItems="center" sx={{ p: 3, textAlign: 'center' }}>
-            <CircularProgress size={48} />
-            <Typography variant="h6" sx={{ color: 'white' }}>
-              Sending Notifications...
-            </Typography>
-            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.8)' }}>
-              Please wait while we send notifications
-            </Typography>
-            <LinearProgress 
-              variant="determinate" 
-              value={sendProgress} 
-              sx={{ width: 200, bgcolor: 'rgba(255,255,255,0.3)', '& .MuiLinearProgress-bar': { bgcolor: 'white' } }}
-            />
-          </Stack>
-        </Fade>
-      </Backdrop>
-
-      <DialogTitle sx={{ pb: 1 }}>
+          top: 0, left: 0, right: 0, height: '4px',
+          background: `linear-gradient(90deg, ${primaryMain}, ${theme.palette.secondary.main})`
+        }} />
+        
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Badge badgeContent={selectedParticipants.length} color="primary">
-              <NotificationsIcon color="primary" />
-            </Badge>
-            <Typography variant="h6" fontWeight={700}>
-              Send Meeting Notifications
-            </Typography>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Avatar sx={{ 
+              bgcolor: alpha(primaryMain, 0.15), 
+              color: primaryMain,
+              width: 48, height: 48,
+              border: `1px solid ${alpha(primaryMain, 0.2)}`
+            }}>
+              <NotificationsIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: '-0.02em' }}>
+                Notify Team
+              </Typography>
+              <Typography variant="caption" color="text.secondary" fontWeight={500}>
+                {meeting?.title}
+              </Typography>
+            </Box>
           </Stack>
-          <IconButton onClick={onClose} size="small" disabled={sending}>
-            <CloseIcon />
+          <IconButton onClick={onClose} sx={{ bgcolor: alpha(theme.palette.action.active, 0.05) }}>
+            <CloseIcon fontSize="small" />
           </IconButton>
         </Stack>
       </DialogTitle>
       
-      <DialogContent dividers>
-        <Stack spacing={3}>
-          {/* Success Alert */}
-          {sendStatus === 'success' && (
-            <Alert 
-              icon={<CheckCircleIcon fontSize="inherit" />} 
-              severity="success"
-              sx={{ mb: 2 }}
-            >
-              <strong>Success!</strong> Notifications have been sent successfully!
-            </Alert>
-          )}
-
-          {/* Error Alert */}
-          {errorMessage && (
-            <Alert 
-              icon={<ErrorIcon fontSize="inherit" />} 
-              severity="error"
-              onClose={() => setErrorMessage('')}
-              sx={{ mb: 2 }}
-            >
-              <strong>Error:</strong> {errorMessage}
-            </Alert>
-          )}
-
-          {/* Meeting Info */}
-          <Paper variant="outlined" sx={{ p: 2.5, bgcolor: '#f8fafc', borderRadius: 2 }}>
-            <Typography variant="subtitle2" fontWeight={700} gutterBottom color="primary">
-              {meeting?.title || 'Meeting Title'}
-            </Typography>
-            <Stack direction="row" spacing={2} flexWrap="wrap">
-              <Typography variant="caption" color="text.secondary">
-                📅 {meeting?.meeting_date ? new Date(meeting.meeting_date).toLocaleDateString() : 'Date TBD'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                👥 {hasParticipants ? participants.length : 0} participant{hasParticipants && participants.length !== 1 ? 's' : ''}
-              </Typography>
-              {meeting?.meeting_link && (
-                <Typography variant="caption" color="text.secondary">
-                  🔗 Meeting link available
-                </Typography>
-              )}
-            </Stack>
-          </Paper>
-
-          {/* Notification Types */}
+      <DialogContent sx={{ p: 3 }}>
+        <Stack spacing={4}>
+          {/* Delivery Methods - Modern Pill Style */}
           <Box>
-            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-              Send via
+            <Typography variant="overline" color="primary" fontWeight={700} sx={{ mb: 1.5, display: 'block' }}>
+              Broadcast Channels
             </Typography>
-            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-              <Chip
-                icon={<EmailIcon />}
-                label="Email"
-                color={notificationType.includes('email') ? 'primary' : 'default'}
-                onClick={() => !sending && handleNotificationTypeToggle('email')}
-                disabled={sending}
-                sx={{ '& .MuiChip-label': { fontWeight: 600 } }}
-              />
-              <Chip
-                icon={<WhatsAppIcon />}
-                label="WhatsApp"
-                color={notificationType.includes('whatsapp') ? 'primary' : 'default'}
-                onClick={() => !sending && handleNotificationTypeToggle('whatsapp')}
-                disabled={sending}
-                sx={{ '& .MuiChip-label': { fontWeight: 600 } }}
-              />
-              <Chip
-                icon={<SmsIcon />}
-                label="SMS"
-                color={notificationType.includes('sms') ? 'primary' : 'default'}
-                onClick={() => !sending && handleNotificationTypeToggle('sms')}
-                disabled={sending}
-                sx={{ '& .MuiChip-label': { fontWeight: 600 } }}
-              />
-            </Stack>
-            {notificationType.length === 0 && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
-                Please select at least one notification method
-              </Alert>
-            )}
-          </Box>
-
-          {/* Participants Selection */}
-          <Box>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" fontWeight={600}>
-                Select Participants
-              </Typography>
-              {hasParticipants && (
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={selectAll}
-                      onChange={handleSelectAll}
-                      size="small"
-                      disabled={sending}
-                    />
-                  }
-                  label="Select All"
-                  sx={{ '& .MuiTypography-root': { fontSize: '0.8rem', fontWeight: 500 } }}
-                />
-              )}
-            </Stack>
-            
-            {!hasParticipants ? (
-              <Alert severity="info">
-                No participants found. Please add participants to the meeting first.
-              </Alert>
-            ) : (
-              <Paper variant="outlined" sx={{ maxHeight: 320, overflow: 'auto', borderRadius: 2 }}>
-                {participants.map((participant) => (
-                  <Stack
-                    key={participant.id}
-                    direction="row"
-                    alignItems="center"
-                    spacing={1.5}
-                    sx={{ 
-                      p: 1.5, 
-                      borderBottom: '1px solid #f0f0f0',
-                      '&:hover': { bgcolor: '#fafafa' },
-                      opacity: sending ? 0.6 : 1
-                    }}
-                  >
-                    <Checkbox
-                      checked={selectedParticipants.includes(participant.id)}
-                      onChange={() => !sending && handleToggleParticipant(participant.id)}
-                      size="small"
-                      disabled={sending}
-                    />
-                    <Avatar sx={{ width: 36, height: 36, bgcolor: '#6366f1', color: 'white' }}>
-                      {participant.full_name?.[0] || participant.name?.[0] || participant.username?.[0] || '?'}
-                    </Avatar>
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={600}>
-                        {participant.name || participant.full_name || participant.username || 'Unknown'}
-                      </Typography>
-                      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" sx={{ mt: 0.5 }}>
-                        {participant.email && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <EmailIcon sx={{ fontSize: 12, color: '#666' }} />
-                            <Typography variant="caption" color="text.secondary">
-                              {participant.email}
-                            </Typography>
-                          </Box>
-                        )}
-                        {(participant.telephone || participant.phone || participant.mobile) && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <SmsIcon sx={{ fontSize: 12, color: '#666' }} />
-                            <Typography variant="caption" color="text.secondary">
-                              {participant.telephone || participant.phone || participant.mobile}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Stack>
-                    </Box>
-                    {participant.is_chairperson && (
-                      <Chip 
-                        label="Chair" 
-                        size="small" 
-                        color="primary" 
-                        variant="outlined"
-                        sx={{ height: 20, fontSize: '0.7rem' }}
-                      />
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {[
+                { id: 'email', icon: <EmailIcon />, label: 'Email' },
+                { id: 'whatsapp', icon: <WhatsAppIcon />, label: 'WhatsApp' },
+                { id: 'sms', icon: <SmsIcon />, label: 'SMS' }
+              ].map((type) => {
+                const isActive = notificationType.includes(type.id);
+                return (
+                  <Chip
+                    key={type.id}
+                    icon={type.icon}
+                    label={type.label}
+                    onClick={() => setNotificationType(prev => 
+                      isActive ? prev.filter(t => t !== type.id) : [...prev, type.id]
                     )}
-                  </Stack>
-                ))}
-              </Paper>
-            )}
+                    sx={{ 
+                      borderRadius: '12px',
+                      height: '40px',
+                      px: 1,
+                      fontWeight: 600,
+                      transition: 'all 0.2s',
+                      bgcolor: isActive ? alpha(primaryMain, 0.2) : 'transparent',
+                      color: isActive ? primaryMain : 'text.secondary',
+                      border: `1.5px solid ${isActive ? primaryMain : alpha(theme.palette.divider, 0.1)}`,
+                      '&:hover': { bgcolor: alpha(primaryMain, 0.1) }
+                    }}
+                  />
+                );
+              })}
+            </Stack>
           </Box>
 
-          {/* Custom Message */}
+          {/* Participant List - High Contrast Surface */}
+          <Box>
+             <Typography variant="overline" color="primary" fontWeight={700} sx={{ mb: 1.5, display: 'block' }}>
+              Recipients ({selectedParticipants.length})
+            </Typography>
+            <Paper 
+              variant="outlined" 
+              sx={{ 
+                maxHeight: isMobile ? 'none' : 240, 
+                borderRadius: 3,
+                bgcolor: alpha(theme.palette.background.default, 0.5),
+                borderColor: alpha(theme.palette.divider, 0.1),
+                overflow: 'hidden'
+              }}
+            >
+              {participants?.map((p) => (
+                <Stack
+                  key={p.id}
+                  direction="row"
+                  alignItems="center"
+                  sx={{ 
+                    p: 2, 
+                    borderBottom: `1px solid ${alpha(theme.palette.divider, 0.05)}`,
+                    transition: 'background 0.2s',
+                    '&:hover': { bgcolor: alpha(primaryMain, 0.03) }
+                  }}
+                >
+                  <Checkbox
+                    checked={selectedParticipants.includes(p.id)}
+                    onChange={() => setSelectedParticipants(prev => 
+                      prev.includes(p.id) ? prev.filter(i => i !== p.id) : [...prev, p.id]
+                    )}
+                    sx={{ color: alpha(theme.palette.text.primary, 0.2) }}
+                  />
+                  <Avatar sx={{ width: 32, height: 32, fontSize: '0.8rem', bgcolor: alpha(primaryMain, 0.1), color: primaryMain }}>
+                    {p.name?.[0] || <PersonIcon fontSize="small" />}
+                  </Avatar>
+                  <Box sx={{ ml: 2, flex: 1 }}>
+                    <Typography variant="body2" fontWeight={700}>{p.name || p.full_name}</Typography>
+                    <Typography variant="caption" color="text.secondary">{p.email || p.phone}</Typography>
+                  </Box>
+                </Stack>
+              ))}
+            </Paper>
+          </Box>
+
           <TextField
-            label="Custom Message (Optional)"
+            fullWidth
+            label="Personalized Note"
             multiline
             rows={3}
+            variant="outlined"
             value={customMessage}
-            onChange={handleCustomMessageChange}
-            placeholder="Add any additional information for participants..."
-            fullWidth
-            disabled={sending}
-            helperText="This message will be included along with the meeting details"
+            onChange={(e) => setCustomMessage(e.target.value)}
+            sx={{ 
+              '& .MuiOutlinedInput-root': { 
+                borderRadius: 3,
+                bgcolor: alpha(theme.palette.background.default, 0.5)
+              } 
+            }}
           />
-
-          {/* Summary */}
-          {selectedParticipants.length > 0 && notificationType.length > 0 && !sending && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              <strong>Summary:</strong> Will send {notificationType.join(', ')} notification(s) to {selectedParticipants.length} participant(s).
-              {customMessage && ' Custom message will be included.'}
-            </Alert>
-          )}
-
-          {/* Sending Indicator (inline) */}
-          {sending && sendStatus === 'sending' && (
-            <Box sx={{ mt: 2 }}>
-              <LinearProgress variant="determinate" value={sendProgress} />
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
-                Sending... {sendProgress}%
-              </Typography>
-            </Box>
-          )}
         </Stack>
       </DialogContent>
       
-      <DialogActions sx={{ p: 2.5 }}>
-        <Button 
-          onClick={onClose} 
-          variant="outlined" 
-          disabled={sending}
-        >
-          Cancel
+      <DialogActions sx={{ p: 3, bgcolor: alpha(theme.palette.background.default, 0.3) }}>
+        <Button onClick={onClose} sx={{ color: 'text.secondary', fontWeight: 600 }}>
+          Dismiss
         </Button>
         <Button
           variant="contained"
           onClick={handleSend}
-          disabled={sending || selectedParticipants.length === 0 || notificationType.length === 0}
-          startIcon={sending ? <CircularProgress size={20} /> : <SendIcon />}
-          sx={{ minWidth: 180 }}
+          disabled={sending || selectedParticipants.length === 0}
+          sx={{ 
+            borderRadius: '12px', 
+            px: 4, py: 1.5, 
+            fontWeight: 800,
+            textTransform: 'none',
+            fontSize: '1rem',
+            boxShadow: `0 8px 20px ${alpha(primaryMain, 0.3)}`
+          }}
         >
-          {sending ? 'Sending...' : `Send to ${selectedParticipants.length} Participant(s)`}
+          {sending ? <CircularProgress size={24} color="inherit" /> : 'Send Broadcast'}
         </Button>
       </DialogActions>
     </Dialog>

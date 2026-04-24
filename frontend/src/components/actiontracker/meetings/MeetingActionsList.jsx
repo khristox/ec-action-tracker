@@ -36,7 +36,8 @@ import {
   MenuItem,
   Card,
   CardContent,
-  Divider
+  Divider,
+  useTheme
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -62,13 +63,13 @@ import EditActionDialog from './components/EditActionDialog';
 import AssignUserDialog from './components/AssignUserDialog';
 import AddActionDialog from './components/AddActionDialog';
 
-// Progress presets for the slider
+// Progress presets for the slider - theme aware
 const PROGRESS_PRESETS = [
-  { value: 0, label: 'Not Started', color: '#6B7280', icon: <ScheduleIcon fontSize="small" /> },
-  { value: 25, label: '25%', color: '#3B82F6', icon: <PendingIcon fontSize="small" /> },
-  { value: 50, label: '50%', color: '#F59E0B', icon: <TrendingUpIcon fontSize="small" /> },
-  { value: 75, label: '75%', color: '#8B5CF6', icon: <TrendingUpIcon fontSize="small" /> },
-  { value: 100, label: 'Complete', color: '#10B981', icon: <CheckCircleIcon fontSize="small" /> }
+  { value: 0, label: 'Not Started', colorKey: 'grey', icon: <ScheduleIcon fontSize="small" /> },
+  { value: 25, label: '25%', colorKey: 'primary', icon: <PendingIcon fontSize="small" /> },
+  { value: 50, label: '50%', colorKey: 'warning', icon: <TrendingUpIcon fontSize="small" /> },
+  { value: 75, label: '75%', colorKey: 'secondary', icon: <TrendingUpIcon fontSize="small" /> },
+  { value: 100, label: 'Complete', colorKey: 'success', icon: <CheckCircleIcon fontSize="small" /> }
 ];
 
 // Check if meeting allows editing actions
@@ -84,19 +85,50 @@ const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy');
 };
 
-const getStatusConfig = (action) => {
+const getStatusConfig = (action, theme) => {
   const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
   const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
   
-  if (isCompleted) return { label: 'Completed', color: 'success', icon: <CheckCircleIcon fontSize="small" />, bgColor: '#D1FAE5', textColor: '#065F46' };
-  if (isOverdue) return { label: 'Overdue', color: 'error', icon: <WarningIcon fontSize="small" />, bgColor: '#FEE2E2', textColor: '#991B1B' };
-  if (action.overall_status_name === 'in_progress') return { label: 'In Progress', color: 'info', icon: <PendingIcon fontSize="small" />, bgColor: '#DBEAFE', textColor: '#1E40AF' };
-  return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" />, bgColor: '#FEF3C7', textColor: '#92400E' };
+  if (isCompleted) {
+    return { 
+      label: 'Completed', 
+      color: 'success', 
+      icon: <CheckCircleIcon fontSize="small" />, 
+      bgColor: 'success.50',
+      textColor: 'success.900'
+    };
+  }
+  if (isOverdue) {
+    return { 
+      label: 'Overdue', 
+      color: 'error', 
+      icon: <WarningIcon fontSize="small" />, 
+      bgColor: 'error.50',
+      textColor: 'error.900'
+    };
+  }
+  if (action.overall_status_name === 'in_progress') {
+    return { 
+      label: 'In Progress', 
+      color: 'info', 
+      icon: <PendingIcon fontSize="small" />, 
+      bgColor: 'info.50',
+      textColor: 'info.900'
+    };
+  }
+  return { 
+    label: 'Pending', 
+    color: 'warning', 
+    icon: <ScheduleIcon fontSize="small" />, 
+    bgColor: 'warning.50',
+    textColor: 'warning.900'
+  };
 };
 
 const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const theme = useTheme();
   const { updatingProgress } = useSelector((state) => state.actions || {});
   
   const [actions, setActions] = useState([]);
@@ -121,7 +153,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   
   // Get status display message
   const getStatusMessage = () => {
-    //alert("Meeting status message",meetingStatus);
     if (!meetingStatus) return null;
     const statusLower = String(meetingStatus).toLowerCase();
     if (statusLower === 'scheduled' || statusLower === 'pending') {
@@ -308,11 +339,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   };
 
   const getProgressColor = (value) => {
-    if (value >= 100) return '#10B981';
-    if (value >= 75) return '#8B5CF6';
-    if (value >= 50) return '#F59E0B';
-    if (value >= 25) return '#3B82F6';
-    return '#6B7280';
+    if (value >= 100) return 'success.main';
+    if (value >= 75) return 'secondary.main';
+    if (value >= 50) return 'warning.main';
+    if (value >= 25) return 'primary.main';
+    return 'grey.500';
   };
 
   const isUpdating = localUpdating || updatingProgress;
@@ -333,7 +364,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     return (
       <Grow in timeout={500}>
         <Box sx={{ textAlign: 'center', py: 4 }}>
-          <AssignmentIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+          <AssignmentIcon sx={{ fontSize: 64, color: 'action.disabled', mb: 2 }} />
           <Typography variant="body1" color="text.secondary" gutterBottom>
             No action items found for this meeting.
           </Typography>
@@ -407,21 +438,33 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           </Alert>
         )}
 
-        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+        <TableContainer 
+          component={Paper} 
+          variant="outlined" 
+          sx={{ 
+            borderRadius: 2,
+            bgcolor: 'background.paper'
+          }}
+        >
           <Table>
             <TableHead>
-              <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-                <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+              <TableRow sx={{ 
+                bgcolor: 'action.hover',
+                '& .MuiTableCell-head': {
+                  borderColor: 'divider'
+                }
+              }}>
+                <TableCell sx={{ fontWeight: 700, borderColor: 'divider' }}>Description</TableCell>
+                <TableCell sx={{ fontWeight: 700, borderColor: 'divider' }}>Assigned To</TableCell>
+                <TableCell sx={{ fontWeight: 700, borderColor: 'divider' }}>Due Date</TableCell>
+                <TableCell sx={{ fontWeight: 700, borderColor: 'divider' }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: 700, borderColor: 'divider' }}>Progress</TableCell>
+                <TableCell sx={{ fontWeight: 700, borderColor: 'divider' }} align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {actions.map((action) => {
-                const statusConfig = getStatusConfig(action);
+                const statusConfig = getStatusConfig(action, theme);
                 const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
                 let assignedToName = 'Unassigned';
                 if (action.assigned_to?.full_name) {
@@ -437,8 +480,8 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                 const progressColor = getProgressColor(progress);
                 
                 return (
-                  <TableRow key={action.id} hover>
-                    <TableCell>
+                  <TableRow key={action.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
+                    <TableCell sx={{ borderColor: 'divider' }}>
                       <Typography variant="body2" fontWeight={500}>
                         {action.description}
                       </Typography>
@@ -448,23 +491,29 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ borderColor: 'divider' }}>
                       <Stack direction="row" alignItems="center" spacing={1}>
-                        <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.light', fontSize: '0.75rem' }}>
+                        <Avatar sx={{ 
+                          width: 28, 
+                          height: 28, 
+                          bgcolor: 'primary.light', 
+                          fontSize: '0.75rem',
+                          color: 'primary.contrastText'
+                        }}>
                           {assignedToName?.[0]?.toUpperCase() || '?'}
                         </Avatar>
                         <Typography variant="body2">{assignedToName}</Typography>
                       </Stack>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ borderColor: 'divider' }}>
                       <Stack direction="row" alignItems="center" spacing={1}>
                         <ScheduleIcon fontSize="small" color={isOverdue ? 'error' : 'action'} />
-                        <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
+                        <Typography variant="body2" color={isOverdue ? 'error' : 'text.primary'}>
                           {formatDate(action.due_date)}
                         </Typography>
                       </Stack>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ borderColor: 'divider' }}>
                       <Chip
                         size="small"
                         label={statusConfig.label}
@@ -473,20 +522,18 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         sx={{ 
                           height: 26, 
                           fontWeight: 500,
-                          bgcolor: statusConfig.bgColor,
-                          color: statusConfig.textColor,
-                          '& .MuiChip-icon': { color: statusConfig.textColor }
+                          '& .MuiChip-icon': { color: 'inherit' }
                         }}
                       />
                     </TableCell>
-                    <TableCell sx={{ minWidth: 150 }}>
+                    <TableCell sx={{ minWidth: 150, borderColor: 'divider' }}>
                       <Stack spacing={0.5}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Typography variant="caption" fontWeight={500} color={progressColor}>
                             {progress}%
                           </Typography>
                           {progress === 100 && (
-                            <CheckCircleIcon sx={{ fontSize: 14, color: '#10B981' }} />
+                            <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
                           )}
                         </Box>
                         <LinearProgress
@@ -495,7 +542,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           sx={{
                             height: 6,
                             borderRadius: 3,
-                            bgcolor: '#e2e8f0',
+                            bgcolor: 'action.disabledBackground',
                             '& .MuiLinearProgress-bar': {
                               bgcolor: progressColor,
                               borderRadius: 3
@@ -504,7 +551,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         />
                       </Stack>
                     </TableCell>
-                    <TableCell align="center">
+                    <TableCell align="center" sx={{ borderColor: 'divider' }}>
                       <Stack direction="row" spacing={0.5} justifyContent="center">
                         <Tooltip title={canEdit ? "Update Progress" : "Meeting must be started to update progress"}>
                           <span>
@@ -613,7 +660,14 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           <Divider />
           <DialogContent sx={{ pt: 2 }}>
             <Stack spacing={3}>
-              <Card variant="outlined" sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}>
+              <Card 
+                variant="outlined" 
+                sx={{ 
+                  bgcolor: 'action.hover',
+                  borderColor: 'divider',
+                  borderRadius: 2 
+                }}
+              >
                 <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                   <Stack direction="row" spacing={1.5} alignItems="center">
                     <AssignmentIcon color="primary" />
@@ -651,11 +705,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                       fullWidth
                       variant={progressValue === preset.value ? 'contained' : 'outlined'}
                       onClick={() => setProgressValue(preset.value)}
+                      color={preset.colorKey}
                       sx={{
                         py: 1,
-                        borderColor: preset.color,
-                        color: progressValue === preset.value ? '#fff' : preset.color,
-                        bgcolor: progressValue === preset.value ? preset.color : 'transparent',
                       }}
                     >
                       <Stack direction="row" spacing={0.5} alignItems="center">

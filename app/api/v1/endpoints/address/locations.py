@@ -1,16 +1,11 @@
 # app/api/v1/endpoints/address/locations.py
-
-"""
-Location API endpoints
-"""
-from sqlalchemy import select
-
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any  # Add Dict and Any here
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.api import deps
 from app.crud.address.location import location as location_crud
@@ -24,6 +19,7 @@ from app.schemas.address.location import (
     LocationListResponse,
     LocationBreadcrumb,
 )
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -100,79 +96,134 @@ def _validate_location_mode(mode: str) -> bool:
 # ─────────────────────────────────────────────
 # PUBLIC — list / search
 # ─────────────────────────────────────────────
-
 @router.get("/", response_model=LocationListResponse)
 async def list_locations(
     db: AsyncSession = Depends(deps.get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
-    level: Optional[int] = Query(None, ge=1, le=7),
+    level: Optional[int] = Query(None, ge=1, le=14),  # Allow all levels (1-7 for addresses, 11-14 for buildings)
     location_type: Optional[str] = Query(None),
-    location_mode: Optional[str] = Query(None, description="Filter by location mode: address, buildings"),
+    location_mode: Optional[str] = Query(None, description="Filter by location mode: address, buildings, or 'all' for both"),
     parent_id: Optional[UUID] = Query(None),
     search: Optional[str] = Query(None),
     include_inactive: bool = Query(False),
 ) -> LocationListResponse:
     """List locations with filtering and pagination (public)."""
     try:
-        # Validate location_mode if provided
-        if location_mode and not _validate_location_mode(location_mode):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid location_mode. Must be one of: {', '.join(VALID_LOCATION_MODES)}"
-            )
+        # Log all received parameters
+        logger.info("=" * 60)
+        logger.info("LIST_LOCATIONS CALLED WITH PARAMETERS:")
+        logger.info(f"  skip: {skip}")
+        logger.info(f"  limit: {limit}")
+        logger.info(f"  level: {level}")
+        logger.info(f"  location_type: {location_type}")
+        logger.info(f"  location_mode: {location_mode}")
+        logger.info(f"  parent_id: {parent_id}")
+        logger.info(f"  search: {search}")
+        logger.info(f"  include_inactive: {include_inactive}")
+        logger.info("=" * 60)
+        
+        # Validate and handle location_mode (mandatory - defaults to 'address' if not provided)
+        if not location_mode:
+            location_mode = "address"  # Default to address mode
+            logger.info(f"location_mode not provided, defaulting to: {location_mode}")
+        
+        filter_mode = None
+        if location_mode.lower() != 'all':
+            filter_mode = location_mode
+            if not _validate_location_mode(filter_mode):
+                logger.warning(f"Invalid location_mode: {location_mode}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid location_mode. Must be one of: address, buildings, all"
+                )
 
         items_orm: list = []
         total: int = 0
+        query_type = "none"
 
         # Build query with filters
         if search:
+            logger.info(f"Executing SEARCH query with search='{search}', mode_filter={filter_mode}")
             items_orm = await location_crud.search(
                 db, query=search, limit=limit, skip=skip,
-                location_mode=location_mode
+                location_mode=filter_mode
             )
             total = len(items_orm)
+            query_type = "search"
+            logger.info(f"Search returned {len(items_orm)} items")
 
         elif parent_id:
+            logger.info(f"Executing GET_CHILDREN query with parent_id={parent_id}, mode_filter={filter_mode}")
             items_orm = await location_crud.get_children(
                 db, parent_id=parent_id, skip=skip, limit=limit,
-                include_inactive=include_inactive, location_mode=location_mode
+                include_inactive=include_inactive, location_mode=filter_mode
             )
-            total = await location_crud.count_children(db, parent_id, include_inactive, location_mode)
+            total = await location_crud.count_children(db, parent_id, include_inactive, filter_mode)
+            query_type = "children"
+            logger.info(f"Children query returned {len(items_orm)} items, total={total}")
 
         elif level:
+            logger.info(f"Executing GET_BY_LEVEL query with level={level}, mode_filter={filter_mode}")
             items_orm = await location_crud.get_by_level(
                 db, level=level, skip=skip, limit=limit,
-                include_inactive=include_inactive, location_mode=location_mode
+                include_inactive=include_inactive, location_mode=filter_mode
             )
             total = len(items_orm)
+            query_type = "level"
+            logger.info(f"Level query returned {len(items_orm)} items")
 
         elif location_type:
+            logger.info(f"Executing GET_BY_LOCATION_TYPE query with location_type={location_type}, mode_filter={filter_mode}")
             items_orm = await location_crud.get_by_location_type(
                 db, location_type=location_type, skip=skip, limit=limit,
-                location_mode=location_mode
+                location_mode=filter_mode
             )
             total = len(items_orm)
+            query_type = "location_type"
+            logger.info(f"Location type query returned {len(items_orm)} items")
 
         else:
-            items_orm = await location_crud.get_multi(
-                db, skip=skip, limit=limit,
-                location_mode=location_mode
+            # NO FILTERS SPECIFIED - Load first level items based on location_mode
+            logger.info(f"No filters specified. Loading first level items for mode: {filter_mode}")
+            
+            # Determine the first level based on location_mode
+            if filter_mode == "buildings":
+                first_level = 11  # First building level
+                logger.info(f"Buildings mode: fetching level {first_level} items")
+            elif filter_mode == "address":
+                first_level = 1  # First address level
+                logger.info(f"Address mode: fetching level {first_level} items")
+            else:
+                # For 'all' mode, we need to handle both - but since filter_mode is mandatory,
+                # we shouldn't hit this case. Still, let's handle gracefully.
+                logger.warning(f"Unexpected filter_mode '{filter_mode}' in else block, defaulting to address level 1")
+                first_level = 1
+            
+            items_orm = await location_crud.get_by_level(
+                db, level=first_level, skip=skip, limit=limit,
+                include_inactive=include_inactive, location_mode=filter_mode if filter_mode != 'all' else None
             )
-            total = await location_crud.count(db, location_mode=location_mode)
+            total = len(items_orm)
+            query_type = f"first_level_{filter_mode}"
 
-        logger.info(f"list_locations → {len(items_orm)} rows, total={total}, mode_filter={location_mode}")
+        logger.info(f"list_locations → {len(items_orm)} rows, total={total}, mode_filter={filter_mode}, query_type={query_type}")
 
         items = [_orm_to_dict(loc) for loc in items_orm]
         pages = (total + limit - 1) // limit if total > 0 else 0
 
-        return LocationListResponse(
+        response = LocationListResponse(
             items=items,
             total=total,
             page=skip // limit + 1 if limit > 0 else 1,
             size=limit,
             pages=pages,
         )
+        
+        logger.info(f"Response prepared: {len(response.items)} items, total={response.total}")
+        logger.info("=" * 60)
+        
+        return response
 
     except HTTPException:
         raise
@@ -180,8 +231,8 @@ async def list_locations(
         logger.exception("list_locations failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail=str(exc))
-
-
+    
+    
 @router.get("/statistics", response_model=dict)
 async def get_location_statistics(
     db: AsyncSession = Depends(deps.get_db),
@@ -417,6 +468,17 @@ async def create_location(
     current_user: User = Depends(deps.get_current_admin),
 ) -> LocationResponse:
     """Create a new location (admin only)."""
+    # DEBUG: Print what was actually received BEFORE any processing
+    print("=" * 60)
+    print("CREATE LOCATION - RAW RECEIVED DATA:")
+    print(f"location_mode: {getattr(location_in, 'location_mode', 'NOT FOUND')}")
+    print(f"location_type: {getattr(location_in, 'location_type', 'NOT FOUND')}")
+    print(f"level: {location_in.level}")
+    print(f"parent_id: {location_in.parent_id}")
+    print(f"code: {location_in.code}")
+    print(f"name: {location_in.name}")
+    print("=" * 60)
+    
     try:
         # Validate location_mode
         if location_in.location_mode and location_in.location_mode not in VALID_LOCATION_MODES:
@@ -432,9 +494,8 @@ async def create_location(
                 detail=f"Code '{location_in.code}' already exists"
             )
 
-        # Validate parent relationship - KEEP THE OBJECT ATTACHED
+        # Validate parent relationship
         if location_in.parent_id:
-            # Use a fresh query that stays within this session context
             parent_result = await db.execute(
                 select(Location).where(Location.id == location_in.parent_id)
             )
@@ -446,33 +507,104 @@ async def create_location(
                     detail=f"Parent {location_in.parent_id} not found"
                 )
             
-            # Force load the level attribute while still in session
-            parent_level = parent.level  # Access it while session is active
+            parent_level = parent.level
+            parent_mode = parent.location_mode
+            child_level = location_in.level
+            child_mode = location_in.location_mode
             
-            expected = parent_level + 1
-            if location_in.level != expected:
+            # Validate parent-child relationship based on modes
+            is_valid = False
+            error_detail = None
+            
+            # Case 1: Address -> Address (levels 1-7, child must be parent + 1)
+            if parent_mode == 'address' and child_mode == 'address':
+                if child_level == parent_level + 1:
+                    is_valid = True
+                else:
+                    error_detail = f"Address child level must be {parent_level + 1}, got {child_level}"
+            
+            # Case 2: Address -> Building (any address level can be parent of Office level 11)
+            elif parent_mode == 'address' and child_mode == 'buildings':
+                # Only Office (level 11) can be directly under an address
+                if child_level == 11:
+                    is_valid = True
+                else:
+                    error_detail = f"Only Office (level 11) can be directly under an address. Got level {child_level}"
+            
+            # Case 3: Building -> Building (levels 11-14, child must be parent + 1)
+            elif parent_mode == 'buildings' and child_mode == 'buildings':
+                if child_level == parent_level + 1:
+                    is_valid = True
+                else:
+                    error_detail = f"Building child level must be {parent_level + 1}, got {child_level}"
+            
+            # Case 4: Building -> Address (NOT allowed)
+            elif parent_mode == 'buildings' and child_mode == 'address':
+                error_detail = f"Buildings cannot be parents of address locations"
+            
+            # Case 5: Unknown combination
+            else:
+                error_detail = f"Invalid parent-child relationship: {parent_mode} level {parent_level} cannot be parent of {child_mode} level {child_level}"
+            
+            if not is_valid:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Level must be {expected} (parent is {parent_level})"
+                    detail=error_detail
                 )
             
-            # Inherit location_mode from parent if not specified
-            if not location_in.location_mode:
+            # Inherit location_mode from parent if not specified (only for same mode)
+            if not location_in.location_mode and parent_mode == child_mode:
                 location_in.location_mode = parent.location_mode
 
         # Set default location_mode if not provided
         if not location_in.location_mode:
             location_in.location_mode = "address"
 
+        # Auto-set location_type if not provided
+        if not location_in.location_type:
+            if location_in.location_mode == 'buildings':
+                type_map = {11: 'office', 12: 'building', 13: 'room', 14: 'conference'}
+                location_in.location_type = type_map.get(location_in.level)
+            else:
+                type_map = {1: 'country', 2: 'region', 3: 'district', 4: 'county', 
+                           5: 'subcounty', 6: 'parish', 7: 'village'}
+                location_in.location_type = type_map.get(location_in.level)
+            
+            if not location_in.location_type:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Could not auto-determine location_type for level {location_in.level} in mode {location_in.location_mode}"
+                )
+
+        print(f"After auto-set - location_mode: {location_in.location_mode}, location_type: {location_in.location_type}")
+
+        # Additional validation for top-level locations
+        first_level = 11 if location_in.location_mode == 'buildings' else 1
+        
+        if location_in.level == first_level and location_in.parent_id is not None:
+            # For buildings: level 11 can have parent (address)
+            # For address: level 1 cannot have parent
+            if location_in.location_mode == 'address':
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Level {first_level} address locations cannot have a parent"
+                )
+        
+        if location_in.level > first_level and location_in.parent_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Level {location_in.level} locations must have a parent"
+            )
+
         loc = await location_crud.create(db, obj_in=location_in, user=current_user)
         
-        # Convert to dict while session is still active
         return loc.to_dict() if hasattr(loc, 'to_dict') else _orm_to_dict(loc)
 
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("create_location failed")
+        print(f"ERROR: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc)
@@ -490,7 +622,7 @@ async def update_location(
         loc = await location_crud.get(db, location_id)
         if not loc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                detail=f"Location {location_id} not found")
+                                detail=f"Location {location_id} not found !")
 
         # Validate location_mode if being updated
         if location_in.location_mode is not None:
@@ -508,7 +640,7 @@ async def update_location(
             parent = await location_crud.get(db, location_in.parent_id)
             if not parent:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                    detail=f"Parent {location_in.parent_id} not found")
+                                    detail=f"Parent {location_in.parent_id} not found !!")
             new_level = location_in.level or loc.level
             if new_level != parent.level + 1:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
@@ -615,3 +747,77 @@ async def get_location_modes(
             "buildings": "Building and facility locations"
         }
     }
+
+@router.get("/tree")
+async def get_location_tree(
+    location_mode: str = Query("address", description="address or buildings"),
+    max_depth: int = Query(7, ge=1, le=10),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get hierarchical tree of locations"""
+    
+    # Determine which locations to fetch based on mode
+    if location_mode == "address":
+        # Get address hierarchy (Country, Region, District, County, Subcounty, Parish, Village)
+        root_locations = await db.execute(
+            select(Location).where(
+                Location.location_mode == "address",
+                Location.level == 1,  # Country level
+                Location.is_active == True
+            ).order_by(Location.name)
+        )
+    elif location_mode == "buildings":
+        # Get building hierarchy (Office, Building, Room, Conference)
+        root_locations = await db.execute(
+            select(Location).where(
+                Location.location_mode == "buildings",
+                Location.level == 11,  # Office level
+                Location.is_active == True
+            ).order_by(Location.name)
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid location_mode")
+    
+    roots = root_locations.scalars().all()
+    
+    # Build tree recursively
+    tree = []
+    for root in roots:
+        node = await build_location_node(db, root, max_depth)
+        if node:
+            tree.append(node)
+    
+    return tree
+
+
+async def build_location_node(db: AsyncSession, location: Location, max_depth: int, current_depth: int = 1) -> Dict[str, Any]:
+    """Recursively build location tree node"""
+    
+    node = {
+        "id": location.id,
+        "name": location.name,
+        "code": location.code,
+        "level": location.level,
+        "location_mode": location.location_mode,
+        "location_type": location.location_type,
+        "children": []
+    }
+    
+    # Add children if within depth limit
+    if current_depth < max_depth:
+        # Find child locations
+        children_result = await db.execute(
+            select(Location).where(
+                Location.parent_id == location.id,
+                Location.is_active == True
+            ).order_by(Location.name)
+        )
+        children = children_result.scalars().all()
+        
+        for child in children:
+            child_node = await build_location_node(db, child, max_depth, current_depth + 1)
+            if child_node:
+                node["children"].append(child_node)
+    
+    return node

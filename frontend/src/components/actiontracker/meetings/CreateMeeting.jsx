@@ -1,5 +1,5 @@
-// CreateMeeting.jsx - Redirect to Dashboard after successful creation
-import React, { useState, useEffect } from 'react';
+// CreateMeeting.jsx - with Location Search and Hierarchy
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -23,6 +23,7 @@ import {
   FormControl,
   InputLabel,
   Select,
+  ListItemButton,
   MenuItem,
   List,
   ListItem,
@@ -30,32 +31,30 @@ import {
   ListItemAvatar,
   Avatar,
   Divider,
-  Checkbox,
-  FormControlLabel,
   useMediaQuery,
   useTheme,
   Card,
   CardContent,
   Stack,
-  MobileStepper,
   Container,
   AppBar,
   Toolbar,
-  Zoom,
   InputAdornment,
   Tooltip,
+  ListItemIcon,
+  Grid,
   Switch,
-  FormGroup,
-  Fab,
   Collapse,
-  CardActionArea
+  CardActionArea,
+  ToggleButton,
+  ToggleButtonGroup,
+  Breadcrumbs,
+  Link as MuiLink
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
   PersonAdd as PersonAddIcon,
-  GroupAdd as GroupAddIcon,
   Close as CloseIcon,
-  Person as PersonIcon,
   Cancel as CancelIcon,
   ArrowBack as ArrowBackIcon,
   ArrowForward as ArrowForwardIcon,
@@ -65,25 +64,36 @@ import {
   People as PeopleIcon,
   Description as DescriptionIcon,
   Save as SaveIcon,
-  Info as InfoIcon,
   MyLocation as MyLocationIcon,
-  ContentCopy as ContentCopyIcon,
-  ContentPaste as PasteIcon,
   GpsFixed as GpsFixedIcon,
   GpsNotFixed as GpsNotFixedIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  Dashboard as DashboardIcon,
-  EditNote as SecretaryIcon // Added for Secretary
+  EditNote as SecretaryIcon,
+  Search as SearchIcon,
+  Apartment as ApartmentIcon,
+  Business as BusinessIcon,
+  Public as PublicIcon,
+  Flag as FlagIcon,
+  Terrain as TerrainIcon,
+  
+  Home as HomeIcon,
+  MeetingRoom as MeetingRoomIcon,
+  EventSeat as EventSeatIcon,
+  Clear as ClearIcon,
+  ChevronRight as ChevronRightIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon,
+  Work as WorkIcon,
+  Title as TitleIcon
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { MobileDatePicker } from '@mui/x-date-pickers/MobileDatePicker';
-import { MobileTimePicker } from '@mui/x-date-pickers/MobileTimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+import api from '../../../services/api';
 
 // Redux imports
 import {
@@ -100,6 +110,36 @@ import {
   selectParticipantsLoading,
 } from '../../../store/slices/actionTracker/participantSlice';
 import { createMeeting, clearMeetingState } from '../../../store/slices/actionTracker/meetingSlice';
+
+// Location Levels
+const ADDRESS_LEVELS = [
+  { level: 1, name: 'Country', icon: <PublicIcon />, color: '#4CAF50' },
+  { level: 2, name: 'Region', icon: <FlagIcon />, color: '#2196F3' },
+  { level: 3, name: 'District', icon: <TerrainIcon />, color: '#9C27B0' },
+  { level: 4, name: 'County', icon: <BusinessIcon />, color: '#FF9800' },
+  { level: 5, name: 'Subcounty', icon: <HomeIcon />, color: '#795548' },
+  { level: 6, name: 'Parish', icon: <LocationIcon />, color: '#607D8B' },
+  { level: 7, name: 'Village', icon: <HomeIcon />, color: '#8BC34A' }
+];
+
+const BUILDING_LEVELS = [
+  { level: 11, name: 'Office', icon: <ApartmentIcon />, color: '#E91E63' },
+  { level: 12, name: 'Building', icon: <BusinessIcon />, color: '#3F51B5' },
+  { level: 13, name: 'Room', icon: <MeetingRoomIcon />, color: '#009688' },
+  { level: 14, name: 'Conference', icon: <EventSeatIcon />, color: '#673AB7' }
+];
+
+// Helper function for alpha transparency
+const alpha = (color, opacity) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
+  if (result) {
+    const r = parseInt(result[1], 16);
+    const g = parseInt(result[2], 16);
+    const b = parseInt(result[3], 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+  return color;
+};
 
 // Quill modules
 const mobileModules = {
@@ -126,6 +166,314 @@ const steps = [
   { label: 'Participants', icon: PeopleIcon },
   { label: 'Review', icon: CheckCircleIcon },
 ];
+
+// Location Search Component
+const LocationSearch = ({ value, onChange, onClear, error }) => {
+  const theme = useTheme();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [locationMode, setLocationMode] = useState('address');
+  const [selectedLocation, setSelectedLocation] = useState(value);
+  const [locationHierarchy, setLocationHierarchy] = useState([]);
+  const [addressTree, setAddressTree] = useState([]);
+  const [buildingTree, setBuildingTree] = useState([]);
+  const [expandedNodes, setExpandedNodes] = useState({});
+  
+  // Load location hierarchy when selected
+  useEffect(() => {
+    if (selectedLocation?.id) {
+      loadLocationHierarchy(selectedLocation.id);
+    } else {
+      setLocationHierarchy([]);
+    }
+  }, [selectedLocation]);
+  
+  // Load address tree on mount
+  useEffect(() => {
+    loadAddressTree();
+    loadBuildingTree();
+  }, []);
+  
+  const loadLocationHierarchy = async (locationId) => {
+    try {
+      const response = await api.get(`/locations/${locationId}/ancestors`);
+      const ancestors = response.data || [];
+      const fullHierarchy = [...ancestors];
+      
+      const locationResponse = await api.get(`/locations/${locationId}`);
+      if (locationResponse.data) {
+        fullHierarchy.push(locationResponse.data);
+      }
+      setLocationHierarchy(fullHierarchy);
+    } catch (err) {
+      console.error('Error loading hierarchy:', err);
+      setLocationHierarchy([selectedLocation]);
+    }
+  };
+  
+  const loadAddressTree = async () => {
+    try {
+      const response = await api.get('/locations/tree', { params: { location_mode: 'address', max_depth: 7 } });
+      setAddressTree(response.data || []);
+    } catch (err) {
+      console.error('Error loading address tree:', err);
+    }
+  };
+  
+  const loadBuildingTree = async () => {
+    try {
+      const response = await api.get('/locations/tree', { params: { location_mode: 'buildings', max_depth: 4 } });
+      setBuildingTree(response.data || []);
+    } catch (err) {
+      console.error('Error loading building tree:', err);
+    }
+  };
+  
+  const searchLocations = async (query) => {
+    if (!query || query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const response = await api.get('/locations/', {
+        params: {
+          search: query,
+          location_mode: locationMode === 'all' ? undefined : locationMode,
+          limit: 50,
+          include_inactive: false
+        }
+      });
+      setSearchResults(response.data?.items || []);
+    } catch (err) {
+      console.error('Error searching locations:', err);
+      setSearchResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm) {
+        searchLocations(searchTerm);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  
+  const handleSelectLocation = (location) => {
+    setSelectedLocation(location);
+    setSearchTerm('');
+    setSearchResults([]);
+    onChange(location);
+  };
+  
+  const handleClearLocation = () => {
+    setSelectedLocation(null);
+    setLocationHierarchy([]);
+    onChange(null);
+    if (onClear) onClear();
+  };
+  
+  const getLevelInfo = (location) => {
+    if (location.location_mode === 'buildings') {
+      return BUILDING_LEVELS.find(l => l.level === location.level);
+    }
+    return ADDRESS_LEVELS.find(l => l.level === location.level);
+  };
+  
+  const toggleNode = (nodeId) => {
+    setExpandedNodes(prev => ({ ...prev, [nodeId]: !prev[nodeId] }));
+  };
+  
+  const renderTreeNodes = (nodes, depth = 0) => {
+    if (!nodes || nodes.length === 0) return null;
+    
+    return nodes.map(node => {
+      const levelInfo = getLevelInfo(node);
+      const isExpanded = expandedNodes[node.id];
+      const hasChildren = node.children && node.children.length > 0;
+      
+      return (
+        <Box key={node.id} sx={{ ml: depth * 3 }}>
+          <ListItemButton
+            onClick={() => toggleNode(node.id)}
+            sx={{ borderRadius: 1, mb: 0.5 }}
+          >
+            <ListItemIcon sx={{ minWidth: 36 }}>
+              {hasChildren ? (
+                isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />
+              ) : (
+                <LocationIcon fontSize="small" />
+              )}
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Box sx={{ color: levelInfo?.color }}>
+                    {levelInfo?.icon}
+                  </Box>
+                  <Typography variant="body2">{node.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">({node.code})</Typography>
+                </Stack>
+              }
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSelectLocation(node);
+              }}
+            >
+              Select
+            </Button>
+          </ListItemButton>
+          {hasChildren && isExpanded && (
+            <Box sx={{ ml: 2 }}>
+              {renderTreeNodes(node.children, depth + 1)}
+            </Box>
+          )}
+        </Box>
+      );
+    });
+  };
+  
+  return (
+    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <CardContent>
+        <Stack spacing={2}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <LocationIcon sx={{ color: 'primary.main' }} />
+            <Typography variant="subtitle1" fontWeight={600}>
+              Meeting Location
+            </Typography>
+            {selectedLocation && (
+              <Chip
+                label="Location Selected"
+                size="small"
+                color="success"
+                onDelete={handleClearLocation}
+              />
+            )}
+          </Stack>
+          
+          {/* Location Mode Toggle */}
+          <ToggleButtonGroup
+            value={locationMode}
+            exclusive
+            onChange={(e, val) => val && setLocationMode(val)}
+            size="small"
+            fullWidth
+          >
+            <ToggleButton value="address">
+              <PublicIcon sx={{ mr: 1 }} /> Addresses
+            </ToggleButton>
+            <ToggleButton value="buildings">
+              <ApartmentIcon sx={{ mr: 1 }} /> Buildings
+            </ToggleButton>
+          </ToggleButtonGroup>
+          
+          {/* Search Input */}
+          <TextField
+            fullWidth
+            placeholder={`Search for ${locationMode === 'address' ? 'address (Country, District, Village)' : 'building (Office, Building, Room)'}...`}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            size="small"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+              endAdornment: loading && <CircularProgress size={20} />
+            }}
+          />
+          
+          {/* Search Results */}
+          {searchResults.length > 0 && (
+            <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+              <List dense>
+                {searchResults.map(result => {
+                  const levelInfo = getLevelInfo(result);
+                  return (
+                    <ListItemButton
+                      key={result.id}
+                      onClick={() => handleSelectLocation(result)}
+                      selected={selectedLocation?.id === result.id}
+                    >
+                      <ListItemIcon>
+                        {levelInfo?.icon || <LocationIcon />}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={result.name}
+                        secondary={`${result.code} • ${levelInfo?.name || `Level ${result.level}`} • ${result.location_mode}`}
+                      />
+                    </ListItemButton>
+                  );
+                })}
+              </List>
+            </Paper>
+          )}
+          
+          {/* Location Tree */}
+          {!searchTerm && (
+            <>
+              <Typography variant="caption" color="text.secondary">
+                Or browse from hierarchy:
+              </Typography>
+              <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto' }}>
+                <List dense>
+                  {locationMode === 'address' 
+                    ? renderTreeNodes(addressTree)
+                    : renderTreeNodes(buildingTree)
+                  }
+                </List>
+              </Paper>
+            </>
+          )}
+          
+          {/* Selected Location Display */}
+          {selectedLocation && locationHierarchy.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Selected Location Path:
+              </Typography>
+              <Breadcrumbs separator={<ArrowForwardIcon sx={{ fontSize: 14 }} />}>
+                {locationHierarchy.map((item, idx) => {
+                  const levelInfo = getLevelInfo(item);
+                  return (
+                    <Chip
+                      key={item.id}
+                      label={item.name}
+                      size="small"
+                      sx={{
+                        bgcolor: alpha(levelInfo?.color || theme.palette.primary.main, 0.1),
+                        borderColor: levelInfo?.color || theme.palette.primary.main,
+                        color: levelInfo?.color || theme.palette.primary.main,
+                      }}
+                      icon={levelInfo?.icon}
+                    />
+                  );
+                })}
+              </Breadcrumbs>
+            </Paper>
+          )}
+          
+          {!selectedLocation && (
+            <Alert severity="info" variant="outlined">
+              Search for or browse to select a location. You can select either an address or a building.
+            </Alert>
+          )}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+};
 
 const CreateMeeting = () => {
   const navigate = useNavigate();
@@ -157,8 +505,10 @@ const CreateMeeting = () => {
     start_time: null,
     end_time: null,
     location_text: '',
+    location_id: null,
+    location_details: null,
     agenda: '',
-    secretary_name: '', // Changed from facilitator
+    secretary_name: '',
     gps_latitude: '',
     gps_longitude: '',
   });
@@ -168,7 +518,7 @@ const CreateMeeting = () => {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsSupported, setGpsSupported] = useState(true);
 
-  // New participant form
+  // New participant form with all fields
   const [newParticipant, setNewParticipant] = useState({
     name: '',
     email: '',
@@ -179,6 +529,32 @@ const CreateMeeting = () => {
   });
 
   const apiLoading = meetingLoading || participantsLoading || submitting;
+
+  // Handle location selection
+  const handleLocationSelect = (location) => {
+    if (location) {
+      setFormData(prev => ({
+        ...prev,
+        location_id: location.id,
+        location_text: location.name,
+        location_details: {
+          id: location.id,
+          name: location.name,
+          code: location.code,
+          level: location.level,
+          location_mode: location.location_mode,
+          location_type: location.location_type
+        }
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        location_id: null,
+        location_text: '',
+        location_details: null
+      }));
+    }
+  };
 
   // Fetch data on mount
   useEffect(() => {
@@ -200,7 +576,7 @@ const CreateMeeting = () => {
     };
   }, [dispatch]);
 
-  // Handle meeting creation success - Redirect to Dashboard
+  // Handle meeting creation success
   useEffect(() => {
     if (success) {
       setSnackbar({
@@ -257,30 +633,6 @@ const CreateMeeting = () => {
     );
   };
 
-  const handleCopyCoordinates = () => {
-    const coordinates = `${formData.gps_latitude},${formData.gps_longitude}`;
-    navigator.clipboard.writeText(coordinates).then(() => {
-      setSnackbar({ open: true, message: 'Coordinates copied!', severity: 'success' });
-    });
-  };
-
-  const handlePasteCoordinates = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      const match = text.match(/([-+]?\d*\.?\d+)\s*[,]\s*([-+]?\d*\.?\d+)/);
-      if (match) {
-        setFormData((prev) => ({
-          ...prev,
-          gps_latitude: match[1],
-          gps_longitude: match[2],
-        }));
-        setGpsEnabled(true);
-      }
-    } catch (err) {
-      setSnackbar({ open: true, message: 'Unable to paste', severity: 'error' });
-    }
-  };
-
   const handleGpsToggle = (event) => {
     const enabled = event.target.checked;
     setGpsEnabled(enabled);
@@ -299,6 +651,11 @@ const CreateMeeting = () => {
   const handleStartTimeChange = (time) => setFormData({ ...formData, start_time: time });
   const handleEndTimeChange = (time) => setFormData({ ...formData, end_time: time });
   const handleAgendaChange = (value) => setFormData({ ...formData, agenda: value });
+
+  // Participant handlers
+  const handleNewParticipantChange = (field) => (event) => {
+    setNewParticipant({ ...newParticipant, [field]: event.target.value });
+  };
 
   const handleUseParticipantList = () => {
     if (selectedParticipantList) {
@@ -327,6 +684,11 @@ const CreateMeeting = () => {
       name: '', email: '', telephone: '', title: '', organization: '', is_chairperson: false,
     });
     setShowAddParticipantDialog(false);
+    setSnackbar({
+      open: true,
+      message: 'Participant added successfully',
+      severity: 'success',
+    });
   };
 
   const handleRemoveParticipant = (participantId) => {
@@ -370,9 +732,10 @@ const CreateMeeting = () => {
         start_time: startDateTime.toISOString(),
         end_time: endDateTime ? endDateTime.toISOString() : null,
         location_text: formData.location_text || null,
+        location_id: formData.location_id || null,
         gps_coordinates: gpsEnabled ? `${formData.gps_latitude},${formData.gps_longitude}` : null,
         agenda: formData.agenda || null,
-        secretary: formData.secretary_name || null, // Changed from facilitator
+        secretary: formData.secretary_name || null,
         chairperson_name: chairperson?.name || null,
         custom_participants: meetingParticipants.map((p) => ({
           name: p.name,
@@ -381,7 +744,7 @@ const CreateMeeting = () => {
           title: p.title || null,
           organization: p.organization || null,
           is_chairperson: p.is_chairperson || false,
-          is_secretary: p.name === formData.secretary_name // Tagging the secretary
+          is_secretary: p.name === formData.secretary_name
         })),
       };
 
@@ -442,14 +805,21 @@ const CreateMeeting = () => {
                 <DatePicker label="Meeting Date *" value={formData.meeting_date} onChange={handleDateChange} slotProps={{ textField: { fullWidth: true, required: true } }} />
                 <TimePicker label="Start Time *" value={formData.start_time} onChange={handleStartTimeChange} slotProps={{ textField: { fullWidth: true, required: true } }} />
                 <TimePicker label="End Time" value={formData.end_time} onChange={handleEndTimeChange} slotProps={{ textField: { fullWidth: true } }} />
-                <TextField fullWidth label="Location" name="location_text" value={formData.location_text} onChange={handleChange} InputProps={{ startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} /> }} />
-
+                
+                {/* Location Search Component */}
+                <LocationSearch 
+                  value={formData.location_details}
+                  onChange={handleLocationSelect}
+                  onClear={() => handleLocationSelect(null)}
+                />
+                
+                {/* GPS Section */}
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
                   <CardActionArea onClick={() => setShowGpsDetails(!showGpsDetails)}>
                     <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box display="flex" alignItems="center" gap={1}>
                         {gpsEnabled ? <GpsFixedIcon color="success" /> : <GpsNotFixedIcon color="disabled" />}
-                        <Typography variant="subtitle1" fontWeight="bold">GPS Coordinates</Typography>
+                        <Typography variant="subtitle1" fontWeight="bold">GPS Coordinates (Optional)</Typography>
                       </Box>
                       <Switch checked={gpsEnabled} onChange={handleGpsToggle} onClick={(e) => e.stopPropagation()} />
                     </Box>
@@ -457,7 +827,7 @@ const CreateMeeting = () => {
                   <Collapse in={showGpsDetails && gpsEnabled}>
                     <Box sx={{ p: 2, pt: 0, borderTop: 1, borderColor: 'divider' }}>
                       <Stack spacing={2}>
-                        <Button size="small" variant="contained" startIcon={<MyLocationIcon />} onClick={getCurrentLocation}>Get Location</Button>
+                        <Button size="small" variant="contained" startIcon={<MyLocationIcon />} onClick={getCurrentLocation}>Get Current Location</Button>
                         <TextField fullWidth label="Latitude" value={formData.gps_latitude} size="small" />
                         <TextField fullWidth label="Longitude" value={formData.gps_longitude} size="small" />
                       </Stack>
@@ -467,7 +837,7 @@ const CreateMeeting = () => {
 
                 <Box>
                   <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Agenda</Typography>
-                  <ReactQuill theme="snow" value={formData.agenda} onChange={handleAgendaChange} style={{ height: '150px', marginBottom: '50px' }} />
+                  <ReactQuill theme="snow" value={formData.agenda} onChange={handleAgendaChange} modules={isMobile ? mobileModules : desktopModules} formats={formats} style={{ height: '150px', marginBottom: '50px' }} />
                 </Box>
               </Stack>
             )}
@@ -494,20 +864,65 @@ const CreateMeeting = () => {
                   <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                       <Typography variant="subtitle1" fontWeight="bold">👤 Individual Participants</Typography>
-                      <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)}>Add</Button>
+                      <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)}>Add Participant</Button>
                     </Box>
 
                     {meetingParticipants.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>No participants added</Typography>
+                      <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>No participants added yet</Typography>
                     ) : (
                       <List sx={{ maxHeight: 300, overflow: 'auto' }}>
                         {meetingParticipants.map((participant) => (
                           <React.Fragment key={participant.id}>
-                            <ListItem secondaryAction={<IconButton onClick={() => handleRemoveParticipant(participant.id)}><DeleteIcon /></IconButton>}>
-                              <ListItemAvatar><Avatar sx={{ bgcolor: participant.is_chairperson ? 'primary.main' : 'success.main' }}>{participant.name[0]}</Avatar></ListItemAvatar>
-                              <ListItemText primary={participant.name} secondary={participant.is_chairperson ? "Chairperson" : "Member"} />
+                            <ListItem
+                              secondaryAction={
+                                <IconButton edge="end" onClick={() => handleRemoveParticipant(participant.id)}>
+                                  <DeleteIcon />
+                                </IconButton>
+                              }
+                            >
+                              <ListItemAvatar>
+                                <Avatar sx={{ bgcolor: participant.is_chairperson ? 'primary.main' : 'success.main' }}>
+                                  {participant.name?.charAt(0) || 'P'}
+                                </Avatar>
+                              </ListItemAvatar>
+                              <ListItemText
+                                primary={
+                                  <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Typography variant="body2" fontWeight={500}>{participant.name}</Typography>
+                                    {participant.is_chairperson && <Chip label="Chairperson" size="small" color="primary" />}
+                                  </Stack>
+                                }
+                                secondary={
+                                  <Stack direction="row" spacing={2} flexWrap="wrap">
+                                    {participant.email && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <EmailIcon sx={{ fontSize: 12 }} /> {participant.email}
+                                      </Typography>
+                                    )}
+                                    {participant.telephone && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <PhoneIcon sx={{ fontSize: 12 }} /> {participant.telephone}
+                                      </Typography>
+                                    )}
+                                    {participant.title && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <TitleIcon sx={{ fontSize: 12 }} /> {participant.title}
+                                      </Typography>
+                                    )}
+                                    {participant.organization && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <WorkIcon sx={{ fontSize: 12 }} /> {participant.organization}
+                                      </Typography>
+                                    )}
+                                  </Stack>
+                                }
+                              />
                             </ListItem>
-                            {!participant.is_chairperson && <Button size="small" sx={{ ml: 7 }} onClick={() => handleSetChairperson(participant.id)}>Make Chairperson</Button>}
+                            {!participant.is_chairperson && (
+                              <Button size="small" sx={{ ml: 7, mb: 1 }} onClick={() => handleSetChairperson(participant.id)}>
+                                Make Chairperson
+                              </Button>
+                            )}
                             <Divider component="li" />
                           </React.Fragment>
                         ))}
@@ -516,7 +931,7 @@ const CreateMeeting = () => {
                   </CardContent>
                 </Card>
 
-                {/* Updated Secretary Selection */}
+                {/* Secretary Selection */}
                 <Card variant="outlined" sx={{ borderLeft: 6, borderColor: 'secondary.main' }}>
                   <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
                     <Stack direction="row" spacing={1} alignItems="center" mb={2}>
@@ -545,47 +960,128 @@ const CreateMeeting = () => {
             {/* Step 3: Review */}
             {activeStep === 2 && (
               <Stack spacing={2}>
-                <Alert severity="info">Review meeting details</Alert>
-                <Card variant="outlined" sx={{ bgcolor: '#fafafa' }}>
+                <Alert severity="info">Review meeting details before creating</Alert>
+                <Card variant="outlined">
                   <CardContent>
-                    <Typography variant="subtitle2" color="primary">Information</Typography>
-                    <Typography variant="body2"><strong>Title:</strong> {formData.title}</Typography>
-                    <Typography variant="body2"><strong>Chairperson:</strong> {chairpersonName}</Typography>
-                    <Typography variant="body2" color="secondary.main"><strong>Secretary:</strong> {formData.secretary_name || 'Not selected'}</Typography>
+                    <Typography variant="subtitle2" color="primary" gutterBottom>Meeting Information</Typography>
+                    <Grid container spacing={1}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2"><strong>Title:</strong> {formData.title}</Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2"><strong>Chairperson:</strong> {chairpersonName}</Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2" color="secondary.main"><strong>Secretary:</strong> {formData.secretary_name || 'Not selected'}</Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2"><strong>Location:</strong> {formData.location_text || 'Not specified'}</Typography>
+                      </Grid>
+                      {formData.location_details && (
+                        <Grid size={{ xs: 12 }}>
+                          <Typography variant="body2"><strong>Location Type:</strong> {formData.location_details.location_mode} - Level {formData.location_details.level}</Typography>
+                        </Grid>
+                      )}
+                    </Grid>
                     <Divider sx={{ my: 2 }} />
-                    <Typography variant="subtitle2" color="primary">Participants ({meetingParticipants.length})</Typography>
-                    <Box component="ul" sx={{ pl: 2, mt: 1 }}>
-                      {meetingParticipants.slice(0, 5).map(p => <li key={p.id}><Typography variant="body2">{p.name}</Typography></li>)}
-                      {meetingParticipants.length > 5 && <li><Typography variant="body2">...and {meetingParticipants.length - 5} more</Typography></li>}
+                    <Typography variant="subtitle2" color="primary" gutterBottom>Participants ({meetingParticipants.length})</Typography>
+                    <Box component="ul" sx={{ pl: 2, mt: 1, maxHeight: 150, overflow: 'auto' }}>
+                      {meetingParticipants.slice(0, 10).map(p => (
+                        <li key={p.id}>
+                          <Typography variant="body2">
+                            {p.name} {p.is_chairperson && '(Chairperson)'}
+                            {p.name === formData.secretary_name && ' (Secretary)'}
+                          </Typography>
+                        </li>
+                      ))}
+                      {meetingParticipants.length > 10 && (
+                        <li><Typography variant="body2">...and {meetingParticipants.length - 10} more</Typography></li>
+                      )}
                     </Box>
                   </CardContent>
                 </Card>
-                <Button variant="contained" size="large" onClick={handleSubmit} startIcon={<SaveIcon />}>Create Meeting</Button>
+                <Button variant="contained" size="large" onClick={handleSubmit} startIcon={<SaveIcon />} disabled={apiLoading}>
+                  {apiLoading ? <CircularProgress size={24} /> : 'Create Meeting'}
+                </Button>
               </Stack>
             )}
 
             {/* Navigation Buttons */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
-              <Button onClick={handleBack} startIcon={<ArrowBackIcon />}>{activeStep === 0 ? 'Cancel' : 'Back'}</Button>
-              {activeStep < 2 && <Button variant="contained" onClick={handleNext} endIcon={<ArrowForwardIcon />}>Next</Button>}
+              <Button onClick={handleBack} startIcon={<ArrowBackIcon />} disabled={apiLoading}>
+                {activeStep === 0 ? 'Cancel' : 'Back'}
+              </Button>
+              {activeStep < 2 && (
+                <Button variant="contained" onClick={handleNext} endIcon={<ArrowForwardIcon />} disabled={apiLoading}>
+                  Next
+                </Button>
+              )}
             </Box>
           </Paper>
         </Container>
 
-        {/* Add Participant Dialog */}
-        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)}>
+        {/* Add Participant Dialog with all fields */}
+        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="sm" fullWidth>
           <DialogTitle>Add New Participant</DialogTitle>
           <DialogContent>
-            <TextField fullWidth label="Name" margin="dense" value={newParticipant.name} onChange={(e) => setNewParticipant({...newParticipant, name: e.target.value})} />
-            <TextField fullWidth label="Email" margin="dense" value={newParticipant.email} onChange={(e) => setNewParticipant({...newParticipant, email: e.target.value})} />
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                fullWidth
+                label="Full Name *"
+                value={newParticipant.name}
+                onChange={handleNewParticipantChange('name')}
+                required
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Email"
+                type="email"
+                value={newParticipant.email}
+                onChange={handleNewParticipantChange('email')}
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Telephone"
+                value={newParticipant.telephone}
+                onChange={handleNewParticipantChange('telephone')}
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Title"
+                value={newParticipant.title}
+                onChange={handleNewParticipantChange('title')}
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Organization"
+                value={newParticipant.organization}
+                onChange={handleNewParticipantChange('organization')}
+                size="small"
+              />
+            </Stack>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setShowAddParticipantDialog(false)}>Cancel</Button>
-            <Button variant="contained" onClick={handleAddCustomParticipant}>Add</Button>
+            <Button variant="contained" onClick={handleAddCustomParticipant} disabled={!newParticipant.name.trim()}>
+              Add Participant
+            </Button>
           </DialogActions>
         </Dialog>
 
-        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({...snackbar, open: false})} message={snackbar.message} />
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
+        >
+          <Alert severity={snackbar.severity} variant="filled">
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Box>
     </LocalizationProvider>
   );

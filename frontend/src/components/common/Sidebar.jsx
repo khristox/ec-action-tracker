@@ -24,7 +24,7 @@ import { fetchUserMenus, selectMenus } from '../../store/slices/menuSlice';
 import { selectUser } from '../../store/slices/authSlice';
 
 const DRAWER_WIDTHS = { expanded: 280, collapsed: 72 };
-const LOGO_PATH = '/logo.png'; // Root-absolute path to prevent failing on sub-routes
+const LOGO_PATH = '/logo.png';
 
 // ==================== Icon Helper Functions ====================
 
@@ -105,7 +105,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     dispatch(fetchUserMenus());
   }, [dispatch]);
 
-  // Search Logic: Returns items if they match OR if any of their children match
+  // Search Logic
   const filteredMenus = useMemo(() => {
     if (!searchQuery.trim()) return menus || [];
 
@@ -165,7 +165,9 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
             justifyContent: isCollapsed ? 'center' : 'flex-start',
             px: isCollapsed ? 2.5 : 2,
             pl: isCollapsed ? 2.5 : 2 + depth * 2, 
-            borderRadius: 2, mx: 1, mb: 0.5,
+            borderRadius: 2, 
+            mx: 1, 
+            mb: 0.5,
             '&.Mui-selected': {
               bgcolor: alpha(theme.palette.primary.main, 0.1),
               color: theme.palette.primary.main,
@@ -173,13 +175,24 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
             },
           }}
         >
-          <ListItemIcon sx={{ minWidth: 0, mr: isCollapsed ? 0 : 2, color: 'inherit' }}>
+          <ListItemIcon sx={{ 
+            minWidth: 0, 
+            mr: isCollapsed ? 0 : 2, 
+            color: 'inherit',
+            justifyContent: 'center'
+          }}>
             {renderIcon(item)}
           </ListItemIcon>
           
           {!isCollapsed && (
             <>
-              <ListItemText primary={item.title} primaryTypographyProps={{ fontSize: '0.85rem', fontWeight: isSelected ? 600 : 400 }} />
+              <ListItemText 
+                primary={item.title} 
+                primaryTypographyProps={{ 
+                  fontSize: '0.85rem', 
+                  fontWeight: isSelected ? 600 : 400 
+                }} 
+              />
               {hasChildren && (isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />)}
             </>
           )}
@@ -188,7 +201,13 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
 
       return (
         <React.Fragment key={item.id}>
-          {isCollapsed ? <Tooltip title={item.title} placement="right">{menuItem}</Tooltip> : menuItem}
+          {isCollapsed ? (
+            <Tooltip title={item.title} placement="right">
+              {menuItem}
+            </Tooltip>
+          ) : (
+            menuItem
+          )}
           {hasChildren && !isCollapsed && (
             <Collapse in={isOpen} timeout="auto" unmountOnExit>
               <List component="div" disablePadding>
@@ -202,12 +221,26 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   };
 
   const sidebarContent = (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'space-between', minHeight: 64 }}>
+    <Box sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '100%', 
+      overflow: 'hidden' 
+    }}>
+      {/* Header */}
+      <Box sx={{ 
+        p: 2, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: isCollapsed ? 'center' : 'space-between', 
+        minHeight: 64 
+      }}>
         {!isCollapsed && (
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Avatar src={LOGO_PATH} sx={{ width: 32, height: 32 }} />
-            <Typography variant="subtitle1" fontWeight={700} noWrap>EC Uganda</Typography>
+            <Typography variant="subtitle1" fontWeight={700} noWrap>
+              EC Uganda
+            </Typography>
           </Stack>
         )}
         {!isMobile && (
@@ -217,55 +250,113 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
         )}
       </Box>
 
+      {/* Search Bar - Only show when expanded */}
       {!isCollapsed && (
         <Box sx={{ px: 2, pb: 2 }}>
           <TextField
-            fullWidth size="small" placeholder="Search menu..."
+            fullWidth
+            size="small"
+            placeholder="Search menu..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
-              endAdornment: searchQuery && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSearchQuery('')}><ClearIcon fontSize="inherit" /></IconButton>
-                </InputAdornment>
-              ),
-              sx: { borderRadius: 2, fontSize: '0.8rem', bgcolor: alpha(theme.palette.action.hover, 0.5) }
+            slotProps={{  // Using slotProps instead of InputProps (MUI v6+)
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+                endAdornment: searchQuery && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setSearchQuery('')}>
+                      <ClearIcon fontSize="inherit" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+                sx: { 
+                  borderRadius: 2, 
+                  fontSize: '0.8rem', 
+                  bgcolor: alpha(theme.palette.action.hover, 0.5) 
+                }
+              }
             }}
           />
         </Box>
       )}
 
       <Divider />
+      
+      {/* Menu List */}
       <Box sx={{ flex: 1, overflowY: 'auto', py: 2 }}>
-        <List disablePadding>{renderMenuItems(filteredMenus)}</List>
+        <List disablePadding>
+          {renderMenuItems(filteredMenus)}
+        </List>
       </Box>
+      
       <Divider />
 
-      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start' }}>
-        <Avatar sx={{ bgcolor: theme.palette.primary.main, width: 32, height: 32, fontSize: '0.9rem' }}>
-          {user?.username?.[0].toUpperCase()}
+      {/* User Info Footer */}
+      <Box sx={{ 
+        p: 2, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: isCollapsed ? 'center' : 'flex-start' 
+      }}>
+        <Avatar sx={{ 
+          bgcolor: theme.palette.primary.main, 
+          width: 32, 
+          height: 32, 
+          fontSize: '0.9rem' 
+        }}>
+          {user?.username?.[0]?.toUpperCase() || 'U'}
         </Avatar>
         {!isCollapsed && (
           <Box sx={{ ml: 1.5, overflow: 'hidden' }}>
-            <Typography variant="body2" fontWeight={600} noWrap>{user?.username}</Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>{user?.email}</Typography>
+            <Typography variant="body2" fontWeight={600} noWrap>
+              {user?.username || 'User'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {user?.email || 'user@example.com'}
+            </Typography>
           </Box>
         )}
       </Box>
     </Box>
   );
 
-  return isMobile ? (
-    <Drawer variant="temporary" open={mobileOpen} onClose={onClose} sx={{ '& .MuiDrawer-paper': { width: DRAWER_WIDTHS.expanded } }}>
-      {sidebarContent}
-    </Drawer>
-  ) : (
-    <Box component="aside" sx={{
+  // Mobile drawer
+  if (isMobile) {
+    return (
+      <Drawer 
+        variant="temporary" 
+        open={mobileOpen} 
+        onClose={onClose} 
+        sx={{ 
+          '& .MuiDrawer-paper': { 
+            width: DRAWER_WIDTHS.expanded 
+          } 
+        }}
+      >
+        {sidebarContent}
+      </Drawer>
+    );
+  }
+
+  // Desktop sidebar
+  return (
+    <Box
+      component="aside"
+      sx={{
         width: isCollapsed ? DRAWER_WIDTHS.collapsed : DRAWER_WIDTHS.expanded,
-        height: '100%', flexShrink: 0, bgcolor: 'background.paper', borderRight: `1px solid ${theme.palette.divider}`,
-        transition: theme.transitions.create('width', { duration: theme.transitions.duration.enteringScreen }),
-      }}>
+        height: '100%',
+        flexShrink: 0,
+        bgcolor: 'background.paper',
+        borderRight: `1px solid ${theme.palette.divider}`,
+        transition: theme.transitions.create('width', {
+          duration: theme.transitions.duration.enteringScreen,
+        }),
+      }}
+    >
       {sidebarContent}
     </Box>
   );

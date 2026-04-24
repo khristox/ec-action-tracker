@@ -23,7 +23,8 @@ import {
   useMediaQuery,
   useTheme,
   Snackbar,
-  Fade
+  Fade,
+  alpha
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -44,6 +45,7 @@ const CreateParticipant = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { loading, error } = useSelector((state) => state.participants);
   
@@ -128,14 +130,34 @@ const CreateParticipant = () => {
   };
 
   return (
-    <Box sx={{ p: isMobile ? 2 : 3 }}>
+    <Box sx={{ 
+      p: isMobile ? 2 : 3, 
+      bgcolor: 'background.default', 
+      minHeight: '100vh' 
+    }}>
       {/* Breadcrumbs Navigation */}
-      <Breadcrumbs sx={{ mb: 3 }}>
+      <Breadcrumbs 
+        sx={{ 
+          mb: 3,
+          '& .MuiBreadcrumbs-separator': {
+            color: 'text.disabled'
+          }
+        }}
+      >
         <Link 
           color="inherit" 
           href="/participants" 
           onClick={(e) => { e.preventDefault(); navigate('/participants'); }}
-          sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+          sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 0.5,
+            color: 'text.secondary',
+            textDecoration: 'none',
+            '&:hover': {
+              color: 'primary.main'
+            }
+          }}
         >
           <HomeIcon fontSize="small" />
           Participants
@@ -149,10 +171,20 @@ const CreateParticipant = () => {
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
         <Box>
-          <Typography variant={isMobile ? "h5" : "h4"} fontWeight={700}>
+          <Typography 
+            variant={isMobile ? "h5" : "h4"} 
+            fontWeight={800} 
+            sx={{ 
+              color: 'text.primary',
+              background: isDark ? `linear-gradient(135deg, ${theme.palette.primary.light}, ${theme.palette.primary.main})` : 'none',
+              backgroundClip: isDark ? 'text' : 'none',
+              WebkitBackgroundClip: isDark ? 'text' : 'none',
+              WebkitTextFillColor: isDark ? 'transparent' : 'inherit'
+            }}
+          >
             Create New Participant
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Add a new person to the participant directory
           </Typography>
         </Box>
@@ -161,14 +193,32 @@ const CreateParticipant = () => {
             variant="outlined"
             startIcon={<CancelIcon />}
             onClick={handleCancel}
+            sx={{ 
+              borderColor: 'divider',
+              color: 'text.secondary',
+              '&:hover': {
+                borderColor: 'error.main',
+                bgcolor: alpha(theme.palette.error.main, 0.1),
+                color: 'error.main'
+              }
+            }}
           >
             Cancel
           </Button>
           <Button
             variant="contained"
-            startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
+            startIcon={saving ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : <SaveIcon />}
             onClick={handleSubmit}
             disabled={saving || !isFormValid()}
+            sx={{ 
+              background: isDark ? `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})` : undefined,
+              boxShadow: isDark ? `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}` : undefined,
+              '&:hover': {
+                transform: 'translateY(-1px)',
+                boxShadow: isDark ? `0 6px 16px ${alpha(theme.palette.primary.main, 0.4)}` : undefined,
+              },
+              transition: 'all 0.2s'
+            }}
           >
             {saving ? 'Saving...' : 'Save Participant'}
           </Button>
@@ -177,20 +227,53 @@ const CreateParticipant = () => {
 
       {/* Error Alert */}
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => dispatch(clearError())}>
+        <Alert 
+          severity="error" 
+          sx={{ 
+            mb: 3, 
+            borderRadius: 2,
+            bgcolor: alpha(theme.palette.error.main, 0.1),
+            backdropFilter: 'blur(8px)',
+            '& .MuiAlert-icon': {
+              color: theme.palette.error.main
+            }
+          }} 
+          onClose={() => dispatch(clearError())}
+        >
           {error}
         </Alert>
       )}
 
       {/* Main Form */}
-      <Card elevation={0} sx={{ border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+      <Card 
+        elevation={0} 
+        sx={{ 
+          border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+          borderRadius: 3,
+          bgcolor: isDark ? alpha(theme.palette.background.paper, 0.8) : 'background.paper',
+          backdropFilter: isDark ? 'blur(10px)' : 'none',
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            boxShadow: isDark ? `0 8px 24px ${alpha(theme.palette.common.black, 0.2)}` : theme.shadows[2],
+          }
+        }}
+      >
         <CardContent sx={{ p: isMobile ? 2 : 3 }}>
-          <Typography variant="h6" fontWeight={600} gutterBottom>
+          <Typography 
+            variant="h6" 
+            fontWeight={700} 
+            gutterBottom
+            sx={{ 
+              color: 'text.primary',
+              borderLeft: `3px solid ${theme.palette.primary.main}`,
+              pl: 2,
+              mb: 2
+            }}
+          >
             Participant Information
           </Typography>
-          <Divider sx={{ mb: 3 }} />
+          <Divider sx={{ mb: 3, borderColor: alpha(theme.palette.divider, 0.1) }} />
           
-          {/* FIXED: Using new Grid v2 syntax - removed 'item' prop, using 'size' instead of 'xs', 'sm' */}
           <Grid container spacing={3}>
             {/* Full Name - Required */}
             <Grid size={12}>
@@ -205,6 +288,23 @@ const CreateParticipant = () => {
                 helperText={getFieldError('name') || "Enter the participant's full name"}
                 placeholder="e.g., John Doe"
                 size={isMobile ? "medium" : "small"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: alpha(theme.palette.background.paper, 0.6),
+                    backdropFilter: 'blur(8px)',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.8),
+                    },
+                    '&.Mui-focused': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.9),
+                      boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`,
+                    },
+                    '& fieldset': {
+                      borderColor: alpha(theme.palette.divider, 0.5),
+                    }
+                  }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -228,6 +328,23 @@ const CreateParticipant = () => {
                 helperText={getFieldError('email') || "Optional - for notifications"}
                 placeholder="john.doe@example.com"
                 size={isMobile ? "medium" : "small"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: alpha(theme.palette.background.paper, 0.6),
+                    backdropFilter: 'blur(8px)',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.8),
+                    },
+                    '&.Mui-focused': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.9),
+                      boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`,
+                    },
+                    '& fieldset': {
+                      borderColor: alpha(theme.palette.divider, 0.5),
+                    }
+                  }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -250,6 +367,23 @@ const CreateParticipant = () => {
                 helperText={getFieldError('telephone') || "Optional - for SMS updates"}
                 placeholder="+256712345678"
                 size={isMobile ? "medium" : "small"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: alpha(theme.palette.background.paper, 0.6),
+                    backdropFilter: 'blur(8px)',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.8),
+                    },
+                    '&.Mui-focused': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.9),
+                      boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`,
+                    },
+                    '& fieldset': {
+                      borderColor: alpha(theme.palette.divider, 0.5),
+                    }
+                  }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -269,6 +403,19 @@ const CreateParticipant = () => {
                 onChange={handleChange('title')}
                 placeholder="e.g., Project Manager, Director"
                 size={isMobile ? "medium" : "small"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: alpha(theme.palette.background.paper, 0.6),
+                    backdropFilter: 'blur(8px)',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.8),
+                    },
+                    '& fieldset': {
+                      borderColor: alpha(theme.palette.divider, 0.5),
+                    }
+                  }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -288,6 +435,19 @@ const CreateParticipant = () => {
                 onChange={handleChange('organization')}
                 placeholder="e.g., Electoral Commission, Ministry"
                 size={isMobile ? "medium" : "small"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: alpha(theme.palette.background.paper, 0.6),
+                    backdropFilter: 'blur(8px)',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.8),
+                    },
+                    '& fieldset': {
+                      borderColor: alpha(theme.palette.divider, 0.5),
+                    }
+                  }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -310,6 +470,23 @@ const CreateParticipant = () => {
                 onChange={handleChange('notes')}
                 placeholder="Any additional information about this participant..."
                 size={isMobile ? "medium" : "small"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: alpha(theme.palette.background.paper, 0.6),
+                    backdropFilter: 'blur(8px)',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.8),
+                    },
+                    '&.Mui-focused': {
+                      bgcolor: alpha(theme.palette.background.paper, 0.9),
+                      boxShadow: `0 0 0 2px ${alpha(theme.palette.primary.main, 0.2)}`,
+                    },
+                    '& fieldset': {
+                      borderColor: alpha(theme.palette.divider, 0.5),
+                    }
+                  }
+                }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1.5 }}>
@@ -338,16 +515,34 @@ const CreateParticipant = () => {
           onClick={handleCancel}
           fullWidth={isMobile}
           size="large"
+          sx={{ 
+            borderColor: 'divider',
+            color: 'text.secondary',
+            '&:hover': {
+              borderColor: 'error.main',
+              bgcolor: alpha(theme.palette.error.main, 0.1),
+              color: 'error.main'
+            }
+          }}
         >
           Cancel
         </Button>
         <Button
           variant="contained"
-          startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
+          startIcon={saving ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : <SaveIcon />}
           onClick={handleSubmit}
           disabled={saving || !isFormValid()}
           fullWidth={isMobile}
           size="large"
+          sx={{ 
+            background: isDark ? `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})` : undefined,
+            boxShadow: isDark ? `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}` : undefined,
+            '&:hover': {
+              transform: 'translateY(-1px)',
+              boxShadow: isDark ? `0 6px 16px ${alpha(theme.palette.primary.main, 0.4)}` : undefined,
+            },
+            transition: 'all 0.2s'
+          }}
         >
           {saving ? 'Saving...' : 'Save Participant'}
         </Button>
@@ -365,7 +560,14 @@ const CreateParticipant = () => {
             severity="success" 
             onClose={() => setSuccessMessage(null)}
             icon={<GroupAddIcon />}
-            sx={{ boxShadow: 3 }}
+            sx={{ 
+              boxShadow: 3,
+              bgcolor: isDark ? alpha(theme.palette.success.main, 0.9) : theme.palette.success.main,
+              color: '#fff',
+              '& .MuiAlert-icon': {
+                color: '#fff'
+              }
+            }}
           >
             {successMessage}
           </Alert>

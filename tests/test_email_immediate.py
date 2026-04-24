@@ -54,7 +54,7 @@ async def test_email_immediate():
             to_email=to_email,
             username="TestUser",
             user_id="test-user-123",
-            background_tasks=None  # Send immediately, not in background
+            token="test-token-abc"
         )
         
         if result:

@@ -47,9 +47,8 @@ import {
 import api from '../../services/api';
 import { logout } from '../../store/slices/authSlice';
 
-// Font Awesome icon mapping (same as Sidebar)
+// Font Awesome icon mapping
 const fontAwesomeIcons = {
-  // Solid icons
   'fa-home': faHome,
   'fa-tachometer-alt': faHome,
   'fa-calendar-alt': faCalendarAlt,
@@ -67,15 +66,13 @@ const fontAwesomeIcons = {
   'fa-file-alt': faFileAlt,
   'fa-check-circle': faCheckCircle,
   'fa-exclamation-triangle': faExclamationTriangle,
-  
-  // Brand icons
   'fab fa-facebook': faFacebook,
   'fab fa-twitter': faTwitter,
   'fab fa-google': faGoogle,
   'fab fa-github': faGithub,
 };
 
-// MUI icon mapping (same as Sidebar)
+// MUI icon mapping
 const muiIcons = {
   Dashboard: DashboardIcon,
   Event: EventIcon,
@@ -104,7 +101,6 @@ const muiIcons = {
   Notifications: SettingsIcon,
   Calendar: EventIcon,
   Home: DashboardIcon,
-  Dashboard: DashboardIcon,
   Meeting: EventIcon,
   Action: AssignmentIcon,
   Participant: PeopleIcon,
@@ -112,9 +108,7 @@ const muiIcons = {
 };
 
 const getIconComponent = (icon, iconType = 'mui', iconLibrary = 'fas') => {
-  // Handle Font Awesome icons
   if (iconType === 'fontawesome') {
-    // Check if it's a brand icon
     let iconName = icon;
     if (iconLibrary === 'fab' && icon.startsWith('fa-')) {
       iconName = `fab fa-${icon.replace('fa-', '')}`;
@@ -123,23 +117,19 @@ const getIconComponent = (icon, iconType = 'mui', iconLibrary = 'fas') => {
     if (faIcon) {
       return <FontAwesomeIcon icon={faIcon} />;
     }
-    // Try with fa- prefix
     const withPrefix = `fa-${icon}`;
     const fallbackIcon = fontAwesomeIcons[withPrefix];
     if (fallbackIcon) {
       return <FontAwesomeIcon icon={fallbackIcon} />;
     }
-    // Default fallback
     return <FontAwesomeIcon icon={faHome} />;
   }
   
-  // Handle MUI icons
   if (iconType === 'mui' || iconType === 'material_symbols') {
     const Icon = muiIcons[icon];
     if (Icon) {
       return <Icon />;
     }
-    // Try to find by different case
     const capitalizedIcon = icon?.charAt(0).toUpperCase() + icon?.slice(1);
     const FallbackIcon = muiIcons[capitalizedIcon];
     if (FallbackIcon) {
@@ -147,12 +137,10 @@ const getIconComponent = (icon, iconType = 'mui', iconLibrary = 'fas') => {
     }
   }
   
-  // Handle custom/image icons
   if (iconType === 'custom' && icon) {
     return <img src={icon} alt="icon" style={{ width: 24, height: 24 }} />;
   }
   
-  // Default fallback
   return <DashboardIcon />;
 };
 
@@ -162,6 +150,7 @@ const MobileBottomNav = () => {
   const theme = useTheme();
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
+  const isDarkMode = theme.palette.mode === 'dark';
   
   const [menus, setMenus] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -175,149 +164,210 @@ const MobileBottomNav = () => {
   const open = Boolean(anchorEl);
 
   // Fetch dynamic menus from backend
-// Update fetchMenus function
-const fetchMenus = useCallback(async () => {
-  try {
-    const response = await api.get('/menus/mobile');
-    const menuData = response.data.data || response.data || [];
-    
-    const mobileMenus = menuData
-      .filter(menu => menu.can_show_mb_bottom === true && menu.is_active === true)
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .slice(0, 5);
-    
-    if (mobileMenus.length > 0) {
-      setMenus(mobileMenus);
-    } else {
-      // Fallback to default menus
+  const fetchMenus = useCallback(async () => {
+    try {
+      const response = await api.get('/menus/mobile');
+      const menuData = response.data.data || response.data || [];
+      
+      const mobileMenus = menuData
+        .filter(menu => menu.can_show_mb_bottom === true && menu.is_active === true)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .slice(0, 5);
+      
+      if (mobileMenus.length > 0) {
+        setMenus(mobileMenus);
+      } else {
+        setMenus(getDefaultMenus());
+      }
+    } catch (error) {
+      console.error('Error fetching mobile menus:', error);
       setMenus(getDefaultMenus());
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    console.error('Error fetching mobile menus:', error);
-    // Use default menus on error
-    setMenus(getDefaultMenus());
-  } finally {
-    setLoading(false);
-  }
-}, []);
+  }, []);
 
-// Default menus function
-const getDefaultMenus = () => {
-  return [
-    { 
-      id: 'dashboard', 
-      code: 'dashboard', 
-      title: 'Home', 
-      icon: 'Dashboard', 
-      icon_type: 'mui',
-      icon_library: 'mui',
-      path: '/dashboard', 
-      sort_order: 1,
-      is_active: true,
-      can_show_mb_bottom: true
-    },
-    { 
-      id: 'meetings', 
-      code: 'meetings', 
-      title: 'Meetings', 
-      icon: 'Event', 
-      icon_type: 'mui',
-      icon_library: 'mui',
-      path: '/meetings', 
-      sort_order: 2,
-      is_active: true,
-      can_show_mb_bottom: true
-    },
-    { 
-      id: 'actions', 
-      code: 'actions', 
-      title: 'Actions', 
-      icon: 'Assignment', 
-      icon_type: 'mui',
-      icon_library: 'mui',
-      path: '/actions', 
-      sort_order: 3,
-      is_active: true,
-      can_show_mb_bottom: true
-    },
-    { 
-      id: 'participants', 
-      code: 'participants', 
-      title: 'People', 
-      icon: 'People', 
-      icon_type: 'mui',
-      icon_library: 'mui',
-      path: '/participants', 
-      sort_order: 4,
-      is_active: true,
-      can_show_mb_bottom: true
-    },
-    { 
-      id: 'profile', 
-      code: 'profile', 
-      title: 'Profile', 
-      icon: 'Person', 
-      icon_type: 'mui',
-      icon_library: 'mui',
-      path: '/profile', 
-      sort_order: 5,
-      is_active: true,
-      can_show_mb_bottom: true
-    },
-  ];
-};
+  const getDefaultMenus = () => {
+    return [
+      { 
+        id: 'dashboard', 
+        code: 'dashboard', 
+        title: 'Home', 
+        icon: 'Dashboard', 
+        icon_type: 'mui',
+        icon_library: 'mui',
+        path: '/dashboard', 
+        sort_order: 1,
+        is_active: true,
+        can_show_mb_bottom: true
+      },
+      { 
+        id: 'meetings', 
+        code: 'meetings', 
+        title: 'Meetings', 
+        icon: 'Event', 
+        icon_type: 'mui',
+        icon_library: 'mui',
+        path: '/meetings', 
+        sort_order: 2,
+        is_active: true,
+        can_show_mb_bottom: true
+      },
+      { 
+        id: 'actions', 
+        code: 'actions', 
+        title: 'Actions', 
+        icon: 'Assignment', 
+        icon_type: 'mui',
+        icon_library: 'mui',
+        path: '/actions', 
+        sort_order: 3,
+        is_active: true,
+        can_show_mb_bottom: true
+      },
+      { 
+        id: 'participants', 
+        code: 'participants', 
+        title: 'People', 
+        icon: 'People', 
+        icon_type: 'mui',
+        icon_library: 'mui',
+        path: '/participants', 
+        sort_order: 4,
+        is_active: true,
+        can_show_mb_bottom: true
+      },
+      { 
+        id: 'profile', 
+        code: 'profile', 
+        title: 'Profile', 
+        icon: 'Person', 
+        icon_type: 'mui',
+        icon_library: 'mui',
+        path: '/profile', 
+        sort_order: 5,
+        is_active: true,
+        can_show_mb_bottom: true
+      },
+    ];
+  };
 
-  // Fetch badge counts
- // Update the fetchBadgeCounts function to handle API responses correctly
-const fetchBadgeCounts = useCallback(async () => {
-  try {
-    const counts = {};
-    
-    const hasMeetings = menus.some(m => m.code === 'meetings');
-    if (hasMeetings) {
-      const meetingsRes = await api.get('/action-tracker/meetings/', {
-        params: { limit: 100, upcoming: true }
+  // Fetch meeting count for the logged-in user
+  const fetchMeetingCount = useCallback(async () => {
+    try {
+      const response = await api.get('/action-tracker/meetings/', {
+        params: { 
+          limit: 100, 
+          upcoming: true,
+          user_id: user?.id 
+        }
       });
-      // Handle different response structures
-      let meetings = meetingsRes.data.data || meetingsRes.data || [];
+      
+      let meetings = response.data.data || response.data || [];
       if (!Array.isArray(meetings)) {
         meetings = meetings.items || [];
       }
-      counts.meetings = meetings.filter(m => m && new Date(m.meeting_date) > new Date()).length;
-    }
-    
-    const hasActions = menus.some(m => m.code === 'actions');
-    if (hasActions) {
-      const tasksRes = await api.get('/action-tracker/actions/my-tasks', {
-        params: { limit: 100, include_completed: false }
+      
+      const upcomingMeetings = meetings.filter(meeting => {
+        if (!meeting || !meeting.meeting_date) return false;
+        const meetingDate = new Date(meeting.meeting_date);
+        const now = new Date();
+        return meetingDate > now;
       });
-      let tasks = tasksRes.data.data || tasksRes.data || [];
+      
+      return upcomingMeetings.length;
+    } catch (error) {
+      console.error('Error fetching meeting count:', error);
+      return 0;
+    }
+  }, [user?.id]);
+
+  // Fetch action/task count for the logged-in user
+  const fetchActionCount = useCallback(async () => {
+    try {
+      const response = await api.get('/action-tracker/actions/my-tasks', {
+        params: { 
+          limit: 100, 
+          include_completed: false 
+        }
+      });
+      
+      let tasks = response.data.data || response.data || [];
       if (!Array.isArray(tasks)) {
         tasks = tasks.items || [];
       }
-      counts.actions = tasks.filter(t => t && !t.completed_at && !t.is_overdue).length;
-      counts.overdue = tasks.filter(t => t && t.is_overdue && !t.completed_at).length;
+      
+      const pendingTasks = tasks.filter(task => 
+        task && !task.completed_at && !task.is_overdue
+      );
+      
+      const overdueTasks = tasks.filter(task => 
+        task && task.is_overdue && !task.completed_at
+      );
+      
+      return {
+        pending: pendingTasks.length,
+        overdue: overdueTasks.length,
+        total: tasks.filter(task => task && !task.completed_at).length
+      };
+    } catch (error) {
+      console.error('Error fetching action count:', error);
+      return { pending: 0, overdue: 0, total: 0 };
     }
-    
-    setBadgeCounts(counts);
-  } catch (error) {
-    console.error('Error fetching badge counts:', error);
-    // Set default counts on error
-    setBadgeCounts({ meetings: 0, actions: 0, overdue: 0 });
-  }
-}, [menus]);
+  }, []);
+
+  // Fetch all badge counts based on dynamic menus
+  const fetchBadgeCounts = useCallback(async () => {
+    try {
+      const counts = {
+        meetings: 0,
+        actions: 0,
+        overdue: 0,
+      };
+      
+      // Check if meetings menu exists and fetch meeting count
+      const hasMeetings = menus.some(m => m.code === 'meetings');
+      if (hasMeetings && user?.id) {
+        counts.meetings = await fetchMeetingCount();
+      }
+      
+      // Check if actions menu exists and fetch action count
+      const hasActions = menus.some(m => m.code === 'actions');
+      if (hasActions && user?.id) {
+        const actionCounts = await fetchActionCount();
+        counts.actions = actionCounts.pending;
+        counts.overdue = actionCounts.overdue;
+      }
+      
+      setBadgeCounts(counts);
+    } catch (error) {
+      console.error('Error fetching badge counts:', error);
+      setBadgeCounts({ meetings: 0, actions: 0, overdue: 0 });
+    }
+  }, [menus, user?.id, fetchMeetingCount, fetchActionCount]);
 
   useEffect(() => {
     fetchMenus();
   }, [fetchMenus]);
 
   useEffect(() => {
-    if (menus.length > 0) {
+    if (menus.length > 0 && user?.id) {
       fetchBadgeCounts();
       const interval = setInterval(fetchBadgeCounts, 60000);
       return () => clearInterval(interval);
     }
-  }, [menus, fetchBadgeCounts]);
+  }, [menus, user?.id, fetchBadgeCounts]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && menus.length > 0 && user?.id) {
+        fetchBadgeCounts();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [menus, user?.id, fetchBadgeCounts]);
 
   const getValueFromPath = useCallback(() => {
     const path = location.pathname;
@@ -391,8 +441,11 @@ const fetchBadgeCounts = useCallback(async () => {
           py: 1,
           display: 'flex',
           justifyContent: 'center',
+          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+          boxShadow: isDarkMode 
+            ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+            : '0 -2px 8px rgba(0, 0, 0, 0.08)',
         }}
-        elevation={3}
       >
         <CircularProgress size={30} />
       </Paper>
@@ -413,8 +466,11 @@ const fetchBadgeCounts = useCallback(async () => {
           borderRadius: 0,
           background: alpha(theme.palette.background.paper, 0.95),
           backdropFilter: 'blur(10px)',
+          // Dynamic shadow based on theme mode - removed static elevation
+          boxShadow: isDarkMode 
+            ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+            : '0 -2px 8px rgba(0, 0, 0, 0.08)',
         }}
-        elevation={3}
       >
         <BottomNavigation
           showLabels
@@ -475,6 +531,10 @@ const fetchBadgeCounts = useCallback(async () => {
             borderRadius: 2,
             minWidth: 220,
             overflow: 'visible',
+            bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+            boxShadow: isDarkMode 
+              ? '0 4px 20px rgba(0, 0, 0, 0.5)' 
+              : '0 4px 20px rgba(0, 0, 0, 0.1)',
           },
         }}
       >

@@ -3,10 +3,11 @@
 import csv
 from io import StringIO
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import logging
+from math import radians, sin, cos, sqrt, atan2
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import and_, distinct, func, select, or_, desc
@@ -37,8 +38,8 @@ from app.schemas.meeting_minutes.meeting_minutes import (
 )
 
 from .status_utils import get_status_id_by_short_name, get_status_by_short_name, get_valid_status_short_names
-from .utils import build_meeting_response
-from app.services.email_service import EmailService, email_service
+from .utils import build_meeting_response as utils_build_meeting_response
+from app.services.email_service import email_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,38 +55,92 @@ async def get_meeting_or_404(db: AsyncSession, meeting_id: UUID) -> Meeting:
     return meeting
 
 
-def apply_meeting_filters(query, filters: Dict[str, Any]):
-    """Apply common filters to meeting query"""
-    if filters.get("upcoming"):
-        query = query.where(Meeting.meeting_date >= datetime.now().date())
+def apply_meeting_filters(query, filters):
+    """Apply filters to meeting query including location-based filters"""
     
+    # Upcoming meetings filter
+    if filters.get("upcoming"):
+        query = query.where(Meeting.meeting_date >= date.today())
+    
+    # Status filter
+    if filters.get("status"):
+            status_value = filters["status"]
+            # Try to match by short_name first, then by code
+            query = query.where(
+                or_(
+                    Meeting.status.has(short_name=status_value),
+                    Meeting.status.has(code=f"MEETING_STATUS_{status_value.upper()}")
+                )
+            )
+    
+    # Search filter (title, description, purpose)
     if filters.get("search"):
         search_term = f"%{filters['search']}%"
         query = query.where(
             or_(
                 Meeting.title.ilike(search_term),
+                Meeting.description.ilike(search_term),
+                Meeting.purpose.ilike(search_term),
                 Meeting.location_text.ilike(search_term),
-                Meeting.facilitator.ilike(search_term)
+                Meeting.venue.ilike(search_term),
+                Meeting.district_office.ilike(search_term)
             )
         )
     
-    if filters.get("status"):
-        query = query.where(Meeting.status.has(Attribute.short_name == filters["status"]))
+    # Location filter (venue, district, or office)
+    if filters.get("location"):
+        location_term = f"%{filters['location']}%"
+        query = query.where(
+            or_(
+                Meeting.location_text.ilike(location_term),
+                Meeting.venue.ilike(location_term),
+                Meeting.district_office.ilike(location_term),
+                Meeting.district.ilike(location_term)
+            )
+        )
     
-    return query.where(Meeting.is_active == True)
+    # District-specific filter
+    if filters.get("district"):
+        district_term = f"%{filters['district']}%"
+        query = query.where(
+            or_(
+                Meeting.district_office.ilike(district_term),
+                Meeting.district.ilike(district_term)
+            )
+        )
+    
+    # Region filter
+    if filters.get("region"):
+        region_term = f"%{filters['region']}%"
+        query = query.where(Meeting.region.ilike(region_term))
+    
+    return query
 
 
-def build_meeting_list_response(meeting_obj: Meeting) -> MeetingListResponse:
-    """Build list response for a meeting"""
+def build_meeting_list_response(meeting_obj: Meeting) -> Optional[MeetingListResponse]:
+    """Build list response for a meeting - end_time is optional"""
+    if not meeting_obj:
+        return None
+    
+    # Keep original values - don't modify
+    start_time = meeting_obj.start_time
+    end_time = meeting_obj.end_time  # Can be None
+    
     status_data = None
     if meeting_obj.status:
         status_data = {
-            "id": str(meeting_obj.status.id),
+            "id": meeting_obj.status.id,
             "code": meeting_obj.status.code,
             "name": meeting_obj.status.name,
             "short_name": meeting_obj.status.short_name,
             "description": meeting_obj.status.description,
             "extra_metadata": meeting_obj.status.extra_metadata,
+            "color": getattr(meeting_obj.status, 'color', None),
+            "sort_order": getattr(meeting_obj.status, 'sort_order', None),
+            "group_id": getattr(meeting_obj.status, 'group_id', None),
+            "created_at": getattr(meeting_obj.status, 'created_at', None),
+            "updated_at": getattr(meeting_obj.status, 'updated_at', None),
+            "is_active": getattr(meeting_obj.status, 'is_active', True)
         }
     
     return MeetingListResponse(
@@ -96,8 +151,8 @@ def build_meeting_list_response(meeting_obj: Meeting) -> MeetingListResponse:
         location_text=meeting_obj.location_text,
         gps_coordinates=meeting_obj.gps_coordinates,
         meeting_date=meeting_obj.meeting_date,
-        start_time=meeting_obj.start_time,
-        end_time=meeting_obj.end_time,
+        start_time=start_time,
+        end_time=end_time,  # Keep original, can be None
         agenda=meeting_obj.agenda,
         facilitator=meeting_obj.facilitator,
         chairperson_name=meeting_obj.chairperson_name,
@@ -117,6 +172,103 @@ def build_meeting_list_response(meeting_obj: Meeting) -> MeetingListResponse:
         documents_count=0
     )
 
+# app/api/v1/endpoints/action_tracker/meetings.py
+
+def build_meeting_response(meeting_obj: Meeting) -> Optional[MeetingResponse]:
+    """Build detailed meeting response - end_time is optional"""
+    if not meeting_obj:
+        return None
+    
+    # Don't modify end_time - keep it as is (can be None)
+    start_time = meeting_obj.start_time
+    end_time = meeting_obj.end_time  # Keep original value, even if None or same as start_time
+    
+    status_data = None
+    if meeting_obj.status:
+        status_data = {
+            "id": meeting_obj.status.id,
+            "code": meeting_obj.status.code,
+            "name": meeting_obj.status.name,
+            "short_name": meeting_obj.status.short_name,
+            "description": meeting_obj.status.description,
+            "extra_metadata": meeting_obj.status.extra_metadata,
+            "color": getattr(meeting_obj.status, 'color', None),
+            "sort_order": getattr(meeting_obj.status, 'sort_order', None),
+            "group_id": getattr(meeting_obj.status, 'group_id', None),
+            "created_at": getattr(meeting_obj.status, 'created_at', None),
+            "updated_at": getattr(meeting_obj.status, 'updated_at', None),
+            "is_active": getattr(meeting_obj.status, 'is_active', True)
+        }
+    
+    # Build participants list
+    participants = []
+    for p in meeting_obj.participants:
+        participants.append(MeetingParticipantResponse(
+            id=p.id,
+            meeting_id=p.meeting_id,
+            name=p.name,
+            email=p.email,
+            telephone=p.telephone,
+            title=p.title,
+            organization=p.organization,
+            is_chairperson=p.is_chairperson,
+            is_secretary=getattr(p, 'is_secretary', False),
+            attendance_status=p.attendance_status,
+            apology_comment=p.apology_comment,
+            created_by_id=p.created_by_id,
+            created_by_name=p.created_by.username if p.created_by else None,
+            created_at=p.created_at,
+            updated_by_id=p.updated_by_id,
+            updated_by_name=p.updated_by.username if p.updated_by else None,
+            updated_at=p.updated_at,
+            is_active=p.is_active
+        ))
+    
+    # Build response - keep end_time as is (don't modify)
+    return MeetingResponse(
+        id=meeting_obj.id,
+        title=meeting_obj.title,
+        description=meeting_obj.description,
+        location_id=meeting_obj.location_id,
+        location_text=meeting_obj.location_text,
+        gps_coordinates=meeting_obj.gps_coordinates,
+        meeting_date=meeting_obj.meeting_date,
+        start_time=start_time,
+        end_time=end_time,  # Keep original, can be None
+        agenda=meeting_obj.agenda,
+        facilitator=meeting_obj.facilitator,
+        chairperson_name=meeting_obj.chairperson_name,
+        status_id=meeting_obj.status_id,
+        created_by_id=meeting_obj.created_by_id,
+        created_by_name=meeting_obj.created_by.username if meeting_obj.created_by else None,
+        created_at=meeting_obj.created_at,
+        platform=getattr(meeting_obj, 'platform', None),
+        meeting_link=getattr(meeting_obj, 'meeting_link', None),
+        meeting_id_online=getattr(meeting_obj, 'meeting_id_online', None),
+        passcode=getattr(meeting_obj, 'passcode', None),
+        has_online_meeting=getattr(meeting_obj, 'has_online_meeting', False),
+        has_physical_meeting=getattr(meeting_obj, 'has_physical_meeting', True),
+        venue=getattr(meeting_obj, 'venue', None),
+        address=getattr(meeting_obj, 'address', None),
+        location_instructions=getattr(meeting_obj, 'location_instructions', None),
+        chairperson_id=getattr(meeting_obj, 'chairperson_id', None),
+        secretary_id=getattr(meeting_obj, 'secretary_id', None),
+        dial_in_numbers=getattr(meeting_obj, 'dial_in_numbers', None),
+        send_reminders=getattr(meeting_obj, 'send_reminders', True),
+        reminder_minutes_before=getattr(meeting_obj, 'reminder_minutes_before', 30),
+        updated_by_id=meeting_obj.updated_by_id,
+        updated_by_name=meeting_obj.updated_by.username if meeting_obj.updated_by else None,
+        updated_at=meeting_obj.updated_at,
+        is_active=meeting_obj.is_active,
+        status_comment=getattr(meeting_obj, 'status_comment', None),
+        status_date=getattr(meeting_obj, 'status_date', None),
+        status_name=None,
+        location_name=getattr(meeting_obj, 'location_name', None),
+        status=status_data,
+        participants=participants,
+        minutes=[],
+        documents=[]
+    )
 
 async def update_meeting_common(
     db: AsyncSession,
@@ -124,16 +276,31 @@ async def update_meeting_common(
     update_data: Dict[str, Any],
     current_user: User,
     source: str = "PUT"
-) -> Meeting:
+) -> Optional[Meeting]:
     """Common function for updating meeting (used by PUT and PATCH)"""
     db_obj = await get_meeting_or_404(db, meeting_id)
     
-
-    print(update_data)
-
-    old_status_id = db_obj.status_id
+    # FIX: Validate and fix start_time and end_time if both are being updated
+    new_start_time = update_data.get("start_time")
+    new_end_time = update_data.get("end_time")
+    
+    # Get effective start_time (new or existing)
+    effective_start_time = new_start_time if new_start_time else db_obj.start_time
+    
+    # If end_time is being updated or needs fixing
+    if new_end_time is not None:
+        if new_end_time <= effective_start_time:
+            # Fix end_time to be 1 hour after start_time
+            new_end_time = effective_start_time + timedelta(hours=1)
+            update_data["end_time"] = new_end_time
+            logger.warning(f"Fixed invalid end_time in update: was {new_end_time}, set to {new_end_time}")
+    
+    # Handle status_comment and status_date separately
     status_comment = update_data.pop("status_comment", None)
     status_date_raw = update_data.pop("status_date", None)
+    
+    # Check if status_id is being updated
+    old_status_id = db_obj.status_id
     new_status_id = update_data.get("status_id")
     
     # Update regular fields
@@ -172,6 +339,7 @@ async def update_meeting_common(
     
     # Reload with all relationships
     return await meeting_crud.get_meeting_with_details(db, meeting_id)
+
 
 
 def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
@@ -272,49 +440,105 @@ async def get_meetings(
     upcoming: bool = Query(False),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    location: Optional[str] = Query(None, description="Filter by location name"),
+    district: Optional[str] = Query(None, description="Filter by district office"),
+    region: Optional[str] = Query(None, description="Filter by region"),
+    lat: Optional[float] = Query(None, description="Latitude for proximity search"),
+    lng: Optional[float] = Query(None, description="Longitude for proximity search"),
+    radius_km: Optional[float] = Query(10, ge=1, le=100, description="Search radius in kilometers"),
 ):
-    """Get paginated list of meetings with audit info"""
+    """Get paginated list of meetings with location filtering and geo-search"""
+    
     skip = (page - 1) * limit
     
-    # Build query
+    # Build base query with relationships
     query = select(Meeting).options(
         selectinload(Meeting.status),
         selectinload(Meeting.participants),
         selectinload(Meeting.created_by),
-        selectinload(Meeting.updated_by)
+        selectinload(Meeting.updated_by),
     ).order_by(desc(Meeting.meeting_date), desc(Meeting.start_time))
     
-    # Apply filters
-    query = apply_meeting_filters(query, {
+    # Create filters dictionary
+    filters = {
         "upcoming": upcoming,
         "search": search,
-        "status": status
-    })
+        "status": status,
+        "location": location,
+        "district": district,
+        "region": region
+    }
+    
+    # Apply location-based filters
+    query = apply_meeting_filters(query, filters)
+    
+    # Geo-location proximity search
+    if lat is not None and lng is not None:
+        query = query.where(
+            Meeting.latitude.isnot(None),
+            Meeting.longitude.isnot(None)
+        )
     
     # Execute paginated query
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     meetings_list = result.scalars().all()
     
-    # Count total
+    # Count total with all filters
     count_query = select(func.count(Meeting.id))
-    count_query = apply_meeting_filters(count_query, {
-        "upcoming": upcoming,
-        "search": search,
-        "status": status
-    })
+    count_query = apply_meeting_filters(count_query, filters)
+    
+    if lat is not None and lng is not None:
+        count_query = count_query.where(
+            Meeting.latitude.isnot(None),
+            Meeting.longitude.isnot(None)
+        )
+    
     count_res = await db.execute(count_query)
     total_count = count_res.scalar() or 0
     
-    items = [build_meeting_list_response(meeting) for meeting in meetings_list]
+    # Build response items with location info
+    items = []
+    for meeting in meetings_list:
+        meeting_response = build_meeting_list_response(meeting)
+        if meeting_response:
+            # Convert to dict to add location details
+            meeting_dict = meeting_response.model_dump()
+            
+            # Add location details
+            meeting_dict["location_details"] = {
+                "venue": getattr(meeting, 'venue', None),
+                "district_office": getattr(meeting, 'district_office', None),
+                "district": getattr(meeting, 'district', None),
+                "region": getattr(meeting, 'region', None),
+                "address": meeting.location_text,
+                "latitude": getattr(meeting, 'latitude', None),
+                "longitude": getattr(meeting, 'longitude', None),
+                "is_virtual": getattr(meeting, 'is_virtual', False),
+                "virtual_link": getattr(meeting, 'virtual_link', None)
+            }
+            
+            # Calculate distance if geo-search was used
+            if lat is not None and lng is not None and meeting.latitude and meeting.longitude:
+                R = 6371
+                lat1, lon1 = radians(lat), radians(lng)
+                lat2, lon2 = radians(meeting.latitude), radians(meeting.longitude)
+                dlat = lat2 - lat1
+                dlon = lon2 - lon1
+                a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                distance = R * c
+                meeting_dict["location_details"]["distance_km"] = round(distance, 2)
+            
+            items.append(meeting_dict)
     
-    return {
-        "items": items,
-        "total": total_count,
-        "page": page,
-        "size": limit,
-        "pages": (total_count + limit - 1) // limit
-    }
+    return MeetingPaginationResponse(
+        items=items,
+        total=total_count,
+        page=page,
+        size=limit,
+        pages=(total_count + limit - 1) // limit
+    )
 
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
@@ -324,18 +548,17 @@ async def get_meeting(
     current_user: User = Depends(deps.get_current_user),
 ):
     """Get meeting by ID with minutes and actions loaded"""
-    query = MeetingQuery.get_with_audit_info().where(
-        Meeting.id == meeting_id, 
-        Meeting.is_active == True
-    )
+    # Use the CRUD method that loads all relationships
+    meeting = await meeting_crud.get_meeting_with_details(db, meeting_id)
     
-    result = await db.execute(query)
-    meeting_obj = result.scalar_one_or_none()
-    
-    if not meeting_obj:
+    if not meeting:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     
-    return meeting_obj
+    response = build_meeting_response(meeting)
+    if not response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build meeting response")
+    
+    return response
 
 
 @router.put("/{meeting_id}", response_model=MeetingResponse)
@@ -431,8 +654,8 @@ async def get_meeting_minutes(
     meeting_id: UUID,
     skip: int = 0,
     limit: int = 100,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user)
 ):
     """Get all minutes for a meeting"""
     await get_meeting_or_404(db, meeting_id)
@@ -505,15 +728,24 @@ async def get_latest_meeting_status_history(
 
 # ==================== MEETING PARTICIPANTS ====================
 
-@router.get("/{meeting_id}/participants", response_model=List[MeetingParticipantResponse])
+@router.get("/{meeting_id}/participants/", response_model=List[MeetingParticipantResponse])
 async def get_meeting_participants(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
     """Get all participants for a meeting"""
-    await get_meeting_or_404(db, meeting_id)
-    return await meeting_participant.get_by_meeting(db, meeting_id)
+    # Verify meeting exists
+    meeting = await meeting_crud.get(db, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    
+    # Get participants - note: remove trailing slash in URL pattern
+    participants = await meeting_participant.get_by_meeting(db, meeting_id)
+    
+    # Ensure we always return a list, even if empty
+    return participants or []
+
 
 
 @router.patch("/{meeting_id}/participants/{participant_id}", response_model=MeetingParticipantResponse)
@@ -543,7 +775,7 @@ async def update_participant_attendance(
 async def notify_meeting_participants(
     meeting_id: str,
     notification_data: NotificationRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
     """Send notifications to meeting participants"""
@@ -556,7 +788,7 @@ async def notify_meeting_participants(
     meeting = await get_meeting_or_404(db, UUID(meeting_id))
     
     # Get participants from meeting_participants table
-    participants = await db.execute(
+    result = await db.execute(
         select(MeetingParticipant)
         .where(
             MeetingParticipant.id.in_(notification_data.participant_ids),
@@ -564,7 +796,7 @@ async def notify_meeting_participants(
             MeetingParticipant.is_active == True
         )
     )
-    participants = participants.scalars().all()
+    participants = result.scalars().all()
     
     if not participants:
         raise HTTPException(status_code=404, detail="No participants found")
@@ -625,197 +857,6 @@ def _build_notification_result(participant, notif_type: str, success: bool, erro
     return result
 
 
-# ==================== AUDIT LOGS ====================
-
-async def _get_audit_conditions(meeting_id: str, db: AsyncSession) -> List:
-    """Build conditions for audit log queries"""
-    conditions = [AuditLog.record_id == meeting_id, AuditLog.table_name == "meetings"]
-    
-    related_queries = {
-        "meeting_minutes": select(MeetingMinutes.id).where(MeetingMinutes.meeting_id == meeting_id),
-        "meeting_actions": select(MeetingAction.id)
-            .join(MeetingMinutes, MeetingAction.minute_id == MeetingMinutes.id)
-            .where(MeetingMinutes.meeting_id == meeting_id),
-        "meeting_documents": select(MeetingDocument.id).where(MeetingDocument.meeting_id == meeting_id),
-        "meeting_participants": select(MeetingParticipant.id).where(MeetingParticipant.meeting_id == meeting_id)
-    }
-    
-    for table_name, query in related_queries.items():
-        result = await db.execute(query)
-        record_ids = [str(r) for r in result.scalars().all()]
-        if record_ids:
-            conditions.append(
-                and_(AuditLog.record_id.in_(record_ids), AuditLog.table_name == table_name)
-            )
-    
-    return conditions
-
-
-@router.get("/{meeting_id}/audit-logs")
-async def get_meeting_audit_logs(
-    meeting_id: str,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-    action: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Get audit logs for a specific meeting"""
-    await get_meeting_or_404(db, UUID(meeting_id))
-    
-    conditions = await _get_audit_conditions(meeting_id, db)
-    query = select(AuditLog).where(or_(*conditions))
-    
-    # Apply filters
-    if action and action != "all":
-        query = query.where(AuditLog.action == action)
-    if user_id and user_id != "all":
-        query = query.where(AuditLog.user_id == user_id)
-    if start_date:
-        query = query.where(AuditLog.timestamp >= start_date)
-    if end_date:
-        query = query.where(AuditLog.timestamp <= end_date)
-    
-    # Get total count
-    count_query = select(func.count()).select_from(AuditLog).where(or_(*conditions))
-    total = (await db.execute(count_query)).scalar() or 0
-    
-    # Get paginated results
-    query = query.order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit)
-    result = await db.execute(query)
-    logs = result.scalars().all()
-    
-    # Build response
-    enhanced_logs = []
-    for log in logs:
-        log_dict = {
-            "id": str(log.id),
-            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-            "action": log.action,
-            "table_name": log.table_name,
-            "record_id": log.record_id,
-            "user_id": str(log.user_id) if log.user_id else None,
-            "username": log.username,
-            "user_email": log.user_email,
-            "old_values": log.old_values,
-            "new_values": log.new_values,
-            "changes_summary": log.changes_summary,
-            "ip_address": log.ip_address,
-            "endpoint": log.endpoint,
-            "status": log.status,
-            "error_message": log.error_message,
-            "extra_data": log.extra_data,
-        }
-        enhanced_logs.append(log_dict)
-    
-    return {"items": enhanced_logs, "total": total, "skip": skip, "limit": limit}
-
-
-@router.get("/{meeting_id}/audit-logs/filters")
-async def get_audit_log_filters(
-    meeting_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Get available filter options for audit logs"""
-    conditions = await _get_audit_conditions(meeting_id, db)
-    query = select(AuditLog).where(or_(*conditions))
-    result = await db.execute(query)
-    logs = result.scalars().all()
-    
-    actions = set()
-    users = {}
-    table_types = set()
-    timestamps = []
-    
-    for log in logs:
-        if log.action:
-            actions.add(log.action)
-        if log.user_id and str(log.user_id) not in users:
-            users[str(log.user_id)] = {
-                "id": str(log.user_id),
-                "name": log.username or "",
-                "email": log.user_email or ""
-            }
-        if log.table_name:
-            table_types.add(log.table_name)
-        if log.timestamp:
-            timestamps.append(log.timestamp)
-    
-    return {
-        "actions": sorted(list(actions)),
-        "users": list(users.values()),
-        "table_types": sorted(list(table_types)),
-        "date_range": {
-            "min": min(timestamps).isoformat() if timestamps else None,
-            "max": max(timestamps).isoformat() if timestamps else None
-        }
-    }
-
-
-@router.get("/{meeting_id}/audit-logs/export")
-async def export_audit_logs(
-    meeting_id: str,
-    format: str = Query("csv", regex="^(csv|json)$"),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Export audit logs to CSV or JSON format"""
-    conditions = await _get_audit_conditions(meeting_id, db)
-    query = select(AuditLog).where(or_(*conditions)).order_by(AuditLog.timestamp.desc())
-    result = await db.execute(query)
-    logs = result.scalars().all()
-    
-    if format == "csv":
-        output = StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Timestamp', 'Action', 'Table Name', 'Record ID', 'User Name', 'User Email', 'Changes Summary', 'IP Address', 'Endpoint', 'Status'])
-        
-        for log in logs:
-            writer.writerow([
-                log.timestamp.isoformat() if log.timestamp else '',
-                log.action or '',
-                log.table_name or '',
-                log.record_id or '',
-                log.username or '',
-                log.user_email or '',
-                log.changes_summary or '',
-                log.ip_address or '',
-                log.endpoint or '',
-                log.status or ''
-            ])
-        
-        return Response(
-            content=output.getvalue(),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=meeting_{meeting_id}_audit.csv"}
-        )
-    else:
-        return {
-            "meeting_id": meeting_id,
-            "export_date": datetime.now().isoformat(),
-            "total_records": len(logs),
-            "data": [
-                {
-                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                    "action": log.action,
-                    "table_name": log.table_name,
-                    "record_id": log.record_id,
-                    "user_name": log.username,
-                    "user_email": log.user_email,
-                    "changes_summary": log.changes_summary,
-                    "ip_address": log.ip_address,
-                    "endpoint": log.endpoint,
-                    "status": log.status
-                }
-                for log in logs
-            ]
-        }
-
-
 # ==================== EMAIL NOTIFICATION HELPER ====================
 
 async def send_email_notification(to_email: str, meeting, custom_message: str = "", participant_name: str = "") -> bool:
@@ -824,7 +865,7 @@ async def send_email_notification(to_email: str, meeting, custom_message: str = 
         meeting_time = f"{meeting.start_time} - {meeting.end_time}" if meeting.start_time else "Time TBD"
         meeting_date = meeting.meeting_date.strftime("%A, %B %d, %Y") if meeting.meeting_date else "Date TBD"
         
-        is_online = hasattr(meeting, 'platform') and meeting.platform and meeting.platform != 'physical'
+        is_online = getattr(meeting, 'platform', None) and meeting.platform != 'physical'
         location_text = meeting.location_text or "Location TBD"
         meeting_link = getattr(meeting, 'meeting_link', '')
         
@@ -852,8 +893,9 @@ async def send_email_notification(to_email: str, meeting, custom_message: str = 
         </html>
         """
         
-        if email_service._is_configured():
-            return email_service.send_email(
+        # Check if email service is configured
+        if hasattr(email_service, 'is_configured') and email_service.is_configured():
+            return await email_service.send_email(
                 to_email=to_email,
                 subject=f"📅 Meeting Invitation: {meeting.title}",
                 html_content=html_content
@@ -891,7 +933,7 @@ async def get_default_meeting_status(db: AsyncSession) -> Optional[MeetingStatus
 @router.post("/create-zoom-meeting")
 async def create_zoom_meeting(
     meeting_data: ZoomMeetingCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(deps.get_db)
 ):
     """Create a Zoom meeting using Zoom API"""
     # Implement Zoom API integration

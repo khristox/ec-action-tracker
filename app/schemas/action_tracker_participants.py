@@ -59,6 +59,7 @@ def validate_name(v: str) -> str:
     return v.strip()
 
 
+
 # ==================== Participant Schemas ====================
 
 class ParticipantBase(ORMBase):
@@ -165,6 +166,24 @@ class ParticipantUpdate(ORMBase):
     def validate_telephone(cls, v: Optional[str]) -> Optional[str]:
         """Validate telephone field if provided"""
         return validate_phone(v)
+class ParticipantSearchResponse(BaseModel):
+    id: int
+    email: str
+    name: str
+    telephone: Optional[str] = None
+    title: Optional[str] = None
+    organization: Optional[str] = None
+    department: Optional[str] = None
+    is_active: bool = True
+    
+    class Config:
+        from_attributes = True
+
+class ParticipantSearchResult(BaseModel):
+    items: List[ParticipantSearchResponse]
+    total: int
+    pages: int
+    query: Optional[str] = None
 
 
 class ParticipantResponse(ParticipantBase):
@@ -332,20 +351,23 @@ class ParticipantListUpdate(ORMBase):
         return v.strip() if v else v
 
 
-class ParticipantListResponse(ParticipantListBase):
+class ParticipantListResponse(BaseModel):
     """Schema for participant list response"""
     id: UUID = Field(..., description="Unique list identifier")
+    name: str
+    description: Optional[str] = None
+    is_global: bool
     created_by_id: Optional[UUID] = Field(None, description="ID of user who created")
     created_by_name: Optional[str] = Field(None, description="Name of user who created")
+    created_by_username: Optional[str] = Field(None, description="Username of user who created")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_by_id: Optional[UUID] = Field(None, description="ID of user who last updated")
     updated_by_name: Optional[str] = Field(None, description="Name of user who last updated")
+    updated_by_username: Optional[str] = Field(None, description="Username of user who last updated")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
     is_active: bool = Field(True, description="Whether list is active")
-    participants: List[ParticipantResponse] = Field(
-        default_factory=list, 
-        description="Participants in the list"
-    )
+    member_count: int = 0
+    participants: List[dict] = Field(default_factory=list, description="Participants in the list")
     participant_count: int = Field(0, ge=0, description="Number of participants in the list")
     
     @model_validator(mode='after')
@@ -354,27 +376,22 @@ class ParticipantListResponse(ParticipantListBase):
         if self.participants:
             self.participant_count = len(self.participants)
         return self
-    
-    @property
-    def is_editable(self) -> bool:
-        """Check if list can be edited by current user"""
-        # This will be overridden by permission logic in API
-        return True
-    
-    @property
-    def display_name(self) -> str:
-        """Get display name with global indicator"""
-        if self.is_global:
-            return f"{self.name} (Global)"
-        return self.name
+
+
+# ADD THIS NEW CLASS - Paginated response
+class PaginatedParticipantListResponse(BaseModel):
+    """Paginated response for participant lists"""
+    items: List[ParticipantListResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
 
 
 class ParticipantListDetailResponse(ParticipantListResponse):
     """Detailed participant list response with additional info"""
     created_by_email: Optional[str] = Field(None, description="Email of creator")
     updated_by_email: Optional[str] = Field(None, description="Email of last updater")
-    created_by_name: Optional[str] = None
-    updated_by_name: Optional[str] = None
     can_edit: bool = Field(True, description="Whether current user can edit this list")
     can_delete: bool = Field(True, description="Whether current user can delete this list")
     
@@ -387,8 +404,6 @@ class ParticipantListDetailResponse(ParticipantListResponse):
             "can_view": True,
             "can_share": self.is_global or self.can_edit
         }
-
-
 # ==================== List Members Management Schemas ====================
 
 class AddParticipantsToListRequest(BaseModel):

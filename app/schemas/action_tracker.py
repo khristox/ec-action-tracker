@@ -12,7 +12,7 @@ from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesResponse
 # ==================== Shared Config ====================
 
 class ORMBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # ==================== Assigned To JSON Schema ====================
@@ -36,7 +36,7 @@ class MeetingParticipantBase(ORMBase):
     title: Optional[str] = None
     organization: Optional[str] = None
     is_chairperson: bool = False
-    is_secretary: bool = False  # New field
+    is_secretary: bool = False
     attendance_status: Optional[str] = Field("pending", description="attended, missed, pending, excused")
     apology_comment: Optional[str] = None
 
@@ -52,21 +52,24 @@ class MeetingParticipantUpdate(ORMBase):
     title: Optional[str] = None
     organization: Optional[str] = None
     is_chairperson: Optional[bool] = None
-    is_secretary: Optional[bool] = None  # New field
+    is_secretary: Optional[bool] = None
     attendance_status: Optional[str] = None
     apology_comment: Optional[str] = None
 
 
 class MeetingParticipantResponse(MeetingParticipantBase):
     id: UUID
-    meeting_id: UUID
-    created_by_id: Optional[UUID] = None
-    created_by_name: Optional[str] = None
-    created_at: datetime
-    updated_by_id: Optional[UUID] = None
-    updated_by_name: Optional[str] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    short_name: Optional[str] = None
+    description: Optional[str] = None
+    extra_metadata: Optional[dict] = None
+    color: Optional[str] = None
+    sort_order: Optional[int] = None
+    group_id: Optional[UUID] = None  # Add this field
+    created_at: Optional[datetime] = None  # Add this field
     updated_at: Optional[datetime] = None
-    is_active: bool = True
+    is_active: Optional[bool] = True
 
 
 # ==================== Attribute Response Schema ====================
@@ -79,16 +82,20 @@ class AttributeResponse(ORMBase):
     short_name: Optional[str] = None
     description: Optional[str] = None
     extra_metadata: Optional[dict] = None
-    
     color: Optional[str] = None
     sort_order: Optional[int] = None
+    group_id: Optional[UUID] = None  # ADD THIS FIELD
+    created_at: Optional[datetime] = None  # ADD THIS FIELD
+    updated_at: Optional[datetime] = None  # ADD THIS FIELD
+    is_active: Optional[bool] = True  # ADD THIS FIELD
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Meeting Schemas ====================
 
 class MeetingBase(ORMBase):
-    """Input-only base. Does NOT include `status` as a field because responses
-    receive an ORM Attribute object there, not a string."""
+    """Input-only base"""
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
     location_id: Optional[UUID] = None
@@ -96,31 +103,13 @@ class MeetingBase(ORMBase):
     gps_coordinates: Optional[str] = Field(None, max_length=100)
     meeting_date: datetime
     start_time: datetime
-    end_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None  # Keep as Optional
     agenda: Optional[str] = None
-    facilitator: Optional[str] = Field(None, max_length=255)  # Secretary name (backward compat)
+    facilitator: Optional[str] = Field(None, max_length=255)
     chairperson_name: Optional[str] = Field(None, max_length=255)
     status_id: Optional[UUID] = None
 
-    @field_validator('end_time', mode='before')
-    @classmethod
-    def validate_end_time(cls, v: Any, info: Any) -> Any:
-        if isinstance(v, str):
-            try:
-                v = datetime.fromisoformat(v.replace('Z', '+00:00'))
-            except ValueError:
-                raise ValueError('Invalid datetime format for end_time')
-        
-        start_time = info.data.get('start_time')
-        if start_time and v:
-            if isinstance(start_time, str):
-                try:
-                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                except ValueError:
-                    raise ValueError('Invalid datetime format for start_time')
-            if v <= start_time:
-                raise ValueError('End time must be after start time')
-        return v
+    
 
 
 class MeetingCreate(MeetingBase):
@@ -141,9 +130,6 @@ class MeetingCreate(MeetingBase):
     location_instructions: Optional[str] = Field(None, description="Special instructions for location")
     send_reminders: bool = Field(True, description="Whether to send email reminders")
     reminder_minutes_before: int = Field(30, description="Minutes before meeting to send reminders")
-    
-    class Config:
-        populate_by_name = True
 
 
 class MeetingUpdate(ORMBase):
@@ -169,7 +155,7 @@ class MeetingUpdate(ORMBase):
     # Role fields
     chairperson_id: Optional[UUID] = None
     secretary_id: Optional[UUID] = None
-    facilitator: Optional[str] = None  # Secretary name
+    facilitator: Optional[str] = None
     chairperson_name: Optional[str] = None
     
     # Notification settings
@@ -183,17 +169,14 @@ class MeetingUpdate(ORMBase):
     end_time: Optional[datetime] = None
     agenda: Optional[str] = None
     status_id: Optional[UUID] = None
-    status: Optional[str] = Field(
-        None, description="Meeting status slug e.g. pending/started/ended/closed/cancelled"
-    )
+    status: Optional[str] = Field(None, description="Meeting status slug")
     is_active: Optional[bool] = None
     status_comment: Optional[str] = Field(None, description="Comment explaining the status change")
     status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
-    
+
     @field_validator('platform', 'meeting_link', 'meeting_id_online', 'passcode', mode='before')
     @classmethod
     def convert_tuple_to_string(cls, v: Any) -> Any:
-        """Convert tuple to string if needed (fix for SQLAlchemy tuple issue)"""
         if v is None:
             return None
         if isinstance(v, tuple):
@@ -205,15 +188,11 @@ class MeetingUpdate(ORMBase):
     @field_validator('dial_in_numbers', mode='before')
     @classmethod
     def convert_tuple_to_list(cls, v: Any) -> Any:
-        """Convert tuple to list if needed"""
         if v is None:
             return None
         if isinstance(v, tuple):
             return list(v) if v else None
         return v
-    
-    class Config:
-        populate_by_name = True
 
 
 # ==================== Meeting Responses ====================
@@ -341,9 +320,6 @@ class MeetingResponse(MeetingBase):
         if self.status and not self.status_name:
             self.status_name = self.status.name
         return self
-    
-    class Config:
-        populate_by_name = True
 
 
 class MeetingPaginationResponse(ORMBase):
@@ -432,6 +408,8 @@ class MeetingDocumentCreate(BaseModel):
     document_type: Optional[str] = "attachment" 
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MeetingDocumentUpdate(ORMBase):
@@ -542,9 +520,11 @@ class NotificationType(str, Enum):
 class NotificationRequest(BaseModel):
     """Request schema for sending meeting notifications"""
     participant_ids: List[UUID] = Field(..., description="List of participant user IDs")
-    notification_type: List[str] = Field(default=["email"], description="Types of notifications to send: email, whatsapp, sms")
+    notification_type: List[str] = Field(default=["email"], description="Types of notifications to send")
     custom_message: Optional[str] = Field(None, description="Optional custom message to include")
     meeting_details: Optional[Dict[str, Any]] = Field(None, description="Meeting details to include in notification")
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 class NotificationResponse(BaseModel):
@@ -554,6 +534,8 @@ class NotificationResponse(BaseModel):
     sent: int
     results: List[Dict[str, Any]] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Zoom Meeting Schemas ====================
@@ -564,6 +546,8 @@ class ZoomMeetingCreate(BaseModel):
     start_time: datetime = Field(..., description="Meeting start time")
     duration: int = Field(60, description="Meeting duration in minutes")
     timezone: str = Field("UTC", description="Meeting timezone")
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ZoomMeetingResponse(BaseModel):
@@ -572,6 +556,8 @@ class ZoomMeetingResponse(BaseModel):
     id: str
     password: Optional[str] = None
     start_url: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Meeting Platform Schemas ====================
@@ -591,10 +577,13 @@ class MeetingPlatformInfo(BaseModel):
     meeting_id: Optional[str] = None
     passcode: Optional[str] = None
     dial_in_numbers: Optional[List[Dict[str, str]]] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Resolve Forward References ====================
 
 MeetingMinutesResponse.model_rebuild()
 MeetingResponse.model_rebuild()
+MeetingDocumentResponse.model_rebuild()
 MeetingStatusHistoryResponse.model_rebuild()

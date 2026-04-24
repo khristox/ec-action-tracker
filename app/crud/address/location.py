@@ -4,7 +4,7 @@ import logging
 from typing import Optional, List, Dict, Any, Tuple, Set
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, and_, update, delete
+from sqlalchemy import select, func, or_, and_, update, delete, text
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from app.crud.base import CRUDBase
@@ -14,9 +14,61 @@ from app.schemas.address.location import LocationCreate, LocationUpdate
 
 logger = logging.getLogger(__name__)
 
-# Constants
+# ============================================================================
+# Constants - Address Mode (Levels 1-7)
+# ============================================================================
+
+ADDRESS_LEVELS = {
+    1: {"name": "Country", "type": "country", "icon": "🌍", "description": "Sovereign nation"},
+    2: {"name": "Region", "type": "region", "icon": "🏛️", "description": "Administrative region"},
+    3: {"name": "District", "type": "district", "icon": "🏢", "description": "District or municipality"},
+    4: {"name": "County", "type": "county", "icon": "🏘️", "description": "County division"},
+    5: {"name": "Subcounty", "type": "subcounty", "icon": "🏠", "description": "Subcounty area"},
+    6: {"name": "Parish", "type": "parish", "icon": "⛪", "description": "Parish community"},
+    7: {"name": "Village", "type": "village", "icon": "🏡", "description": "Village locality"},
+}
+
+# ============================================================================
+# Constants - Buildings Mode (Levels 11-14)
+# ============================================================================
+
+BUILDINGS_LEVELS = {
+    11: {"name": "Office", "type": "office", "icon": "💼", "description": "Office complex or headquarters"},
+    12: {"name": "Building", "type": "building", "icon": "🏢", "description": "Individual building structure"},
+    13: {"name": "Room", "type": "room", "icon": "🚪", "description": "Room or office space"},
+    14: {"name": "Conference", "type": "conference", "icon": "📊", "description": "Conference/meeting facility"},
+}
+
+# Building facility types (for location_type in buildings mode)
+BUILDING_FACILITY_TYPES = {
+    "office": {"name": "Office", "icon": "💼", "level": 11},
+    "headquarters": {"name": "Headquarters", "icon": "🏢", "level": 11},
+    "branch": {"name": "Branch Office", "icon": "🏛️", "level": 11},
+    "building": {"name": "Building", "icon": "🏢", "level": 12},
+    "annex": {"name": "Annex Building", "icon": "🏘️", "level": 12},
+    "room": {"name": "Room", "icon": "🚪", "level": 13},
+    "office_space": {"name": "Office Space", "icon": "💺", "level": 13},
+    "conference_room": {"name": "Conference Room", "icon": "📊", "level": 14},
+    "meeting_room": {"name": "Meeting Room", "icon": "🤝", "level": 14},
+    "training_room": {"name": "Training Room", "icon": "📚", "level": 14},
+    "boardroom": {"name": "Boardroom", "icon": "👔", "level": 14},
+}
+
+# ============================================================================
+# Constants - Common
+# ============================================================================
+
 VALID_LOCATION_MODES = ["address", "buildings", "mixed"]
-VALID_LOCATION_TYPES = ["country", "region", "district", "county", "subcounty", "parish", "village", "building"]
+VALID_ADDRESS_TYPES = ["country", "region", "district", "county", "subcounty", "parish", "village"]
+
+VALID_BUILDING_TYPES = list(BUILDING_FACILITY_TYPES.keys())
+
+VALID_LOCATION_TYPES = VALID_ADDRESS_TYPES + VALID_BUILDING_TYPES
+
+
+MAX_ADDRESS_DEPTH = 7
+MAX_BUILDINGS_DEPTH = 14
+
 LEVEL_NAMES = {
     1: "Country",
     2: "Region", 
@@ -24,10 +76,16 @@ LEVEL_NAMES = {
     4: "County",
     5: "SubCounty",
     6: "Parish",
-    7: "Village"
+    7: "Village",
+    11: "Office",
+    12: "Building",
+    13: "Room",
+    14: "Conference"
 }
-MAX_DEPTH = 7
 
+# ============================================================================
+# CRUD Class
+# ============================================================================
 
 class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
     
@@ -36,8 +94,9 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
         # Cache for frequently accessed locations
         self._code_cache: Dict[str, Location] = {}
         self._id_cache: Dict[UUID, Location] = {}
+        self._hierarchy_cache: Dict[str, Any] = {}
 
-    # List of all read-only properties that should never be passed to the constructor
+    # List of all read-only properties
     READONLY_PROPERTIES: Set[str] = {
         'gps_coordinates',
         'gps_geojson',
@@ -72,11 +131,74 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             del self._id_cache[location_id]
         if code and code in self._code_cache:
             del self._code_cache[code]
+        self._hierarchy_cache.clear()
     
     def _clear_cache(self) -> None:
         """Clear all caches"""
         self._code_cache.clear()
         self._id_cache.clear()
+        self._hierarchy_cache.clear()
+
+    # ==================== LOCATION MODE HELPERS ====================
+    
+    def get_levels_for_mode(self, mode: str = "address") -> Dict[int, Dict]:
+        """Get level configuration for a specific mode"""
+        if mode == "buildings":
+            return BUILDINGS_LEVELS
+        return ADDRESS_LEVELS
+    
+    def get_valid_levels(self, mode: str = "address") -> List[int]:
+        """Get valid level numbers for a mode"""
+        levels = self.get_levels_for_mode(mode)
+        return sorted(levels.keys())
+    
+    def get_next_level(self, current_level: int, mode: str = "address") -> Optional[int]:
+        """Get the next level in hierarchy"""
+        valid_levels = self.get_valid_levels(mode)
+        try:
+            current_index = valid_levels.index(current_level)
+            if current_index + 1 < len(valid_levels):
+                return valid_levels[current_index + 1]
+        except ValueError:
+            pass
+        return None
+    
+    def get_previous_level(self, current_level: int, mode: str = "address") -> Optional[int]:
+        """Get the previous level in hierarchy"""
+        valid_levels = self.get_valid_levels(mode)
+        try:
+            current_index = valid_levels.index(current_level)
+            if current_index > 0:
+                return valid_levels[current_index - 1]
+        except ValueError:
+            pass
+        return None
+    
+    def get_level_info(self, level: int, mode: str = "address") -> Optional[Dict]:
+        """Get level information"""
+        levels = self.get_levels_for_mode(mode)
+        return levels.get(level)
+    
+    def get_default_level(self, mode: str = "address") -> int:
+        """Get default starting level for a mode"""
+        if mode == "buildings":
+            return 11  # Office level
+        return 1  # Country level
+    
+    def validate_building_type(self, location_type: str) -> bool:
+        """Validate building facility type"""
+        return location_type in BUILDING_FACILITY_TYPES
+    
+    def get_building_type_info(self, location_type: str) -> Optional[Dict]:
+        """Get building type information"""
+        return BUILDING_FACILITY_TYPES.get(location_type)
+    
+    def get_auto_location_type(self, level: int, mode: str = "address") -> Optional[str]:
+        """Get auto-generated location type based on level"""
+        level_info = self.get_level_info(level, mode)
+        if level_info:
+            return level_info["type"]
+        return None
 
     # ==================== BASIC CRUD METHODS ====================
     
@@ -127,50 +249,6 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             logger.error(f"Error fetching location by code '{code}': {e}")
             return None
     
-    async def get_by_ids(
-        self,
-        db: AsyncSession,
-        ids: List[UUID],
-        use_cache: bool = True
-    ) -> List[Location]:
-        """Get multiple locations by IDs"""
-        if not ids:
-            return []
-        
-        # Check cache first
-        if use_cache:
-            cached_locations = [self._id_cache.get(id) for id in ids if id in self._id_cache]
-            missing_ids = [id for id in ids if id not in self._id_cache]
-            
-            if not missing_ids:
-                return [loc for loc in cached_locations if loc is not None]
-            
-            # Fetch missing ones
-            try:
-                query = select(Location).where(Location.id.in_(missing_ids))
-                result = await db.execute(query)
-                fetched = result.scalars().all()
-                
-                # Update cache
-                for loc in fetched:
-                    self._id_cache[loc.id] = loc
-                
-                # Combine cached and fetched
-                all_locations = [self._id_cache.get(id) for id in ids]
-                return [loc for loc in all_locations if loc is not None]
-            except SQLAlchemyError as e:
-                logger.error(f"Error fetching locations by IDs: {e}")
-                return [loc for loc in cached_locations if loc is not None]
-        
-        # No cache, fetch all
-        try:
-            query = select(Location).where(Location.id.in_(ids))
-            result = await db.execute(query)
-            return list(result.scalars().all())
-        except SQLAlchemyError as e:
-            logger.error(f"Error fetching locations by IDs: {e}")
-            return []
-    
     async def get_by_level(
         self,
         db: AsyncSession,
@@ -182,8 +260,10 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
         order_by: str = "name"
     ) -> List[Location]:
         """Get locations by level with filtering and ordering"""
-        if not 1 <= level <= MAX_DEPTH:
-            logger.error(f"Invalid level: {level}")
+        # Validate level based on mode
+        valid_levels = self.get_valid_levels(location_mode or "address")
+        if level not in valid_levels:
+            logger.error(f"Invalid level: {level} for mode {location_mode}")
             return []
         
         try:
@@ -223,7 +303,7 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
         """Get child locations with optional recursive fetching"""
         if recursive:
             return await self._get_descendants_recursive(
-                db, parent_id, max_depth or MAX_DEPTH, include_inactive, location_mode
+                db, parent_id, max_depth or MAX_ADDRESS_DEPTH, include_inactive, location_mode
             )
         
         try:
@@ -266,34 +346,6 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             descendants.extend(sub_descendants)
         
         return descendants
-    
-    async def get_by_location_type(
-        self,
-        db: AsyncSession,
-        location_type: str,
-        skip: int = 0,
-        limit: int = 100,
-        location_mode: Optional[str] = None,
-        include_inactive: bool = False
-    ) -> List[Location]:
-        """Get locations by type with mode filtering"""
-        if location_type not in VALID_LOCATION_TYPES:
-            logger.warning(f"Invalid location_type: {location_type}")
-        
-        try:
-            query = select(Location).where(Location.location_type == location_type)
-            
-            if not include_inactive:
-                query = query.where(Location.status == "active")
-            if location_mode:
-                query = query.where(Location.location_mode == location_mode)
-            
-            query = query.offset(skip).limit(limit).order_by(Location.name)
-            result = await db.execute(query)
-            return list(result.scalars().all())
-        except SQLAlchemyError as e:
-            logger.error(f"Error fetching locations by type '{location_type}': {e}")
-            return []
     
     async def search(
         self,
@@ -380,8 +432,9 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
     ) -> int:
         """Count child locations"""
         if recursive:
+            max_depth = MAX_ADDRESS_DEPTH if location_mode != "buildings" else MAX_BUILDINGS_DEPTH
             descendants = await self._get_descendants_recursive(
-                db, location_id, MAX_DEPTH, include_inactive, location_mode
+                db, location_id, max_depth, include_inactive, location_mode
             )
             return len(descendants)
         
@@ -401,11 +454,9 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
 
     def _clean_location_data(self, data: dict) -> dict:
         """Remove read-only properties and handle None values"""
-        # Remove read-only properties
         for prop in self.READONLY_PROPERTIES:
             data.pop(prop, None)
         
-        # Remove None values for optional fields
         optional_fields = ['alt_code', 'short_name', 'native_name', 'full_name', 
                           'location_type', 'postal_code', 'extra_metadata', 'gps_data',
                           'latitude', 'longitude', 'population', 'area', 'density']
@@ -415,8 +466,7 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
         
         return data
 
-
-# app/crud/address/location.py
+    # ==================== CREATE/UPDATE/DELETE ====================
 
     async def create(
         self,
@@ -431,22 +481,42 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
                 logger.error(f"Invalid location_mode: {obj_in.location_mode}")
                 return None
             
-            # Set default location_mode if not provided
+            # Set default location_mode
             if not obj_in.location_mode:
                 obj_in.location_mode = "address"
             
+            # Auto-set level if not provided
+            if not obj_in.level:
+                obj_in.level = self.get_default_level(obj_in.location_mode)
+            
+            # Validate level is appropriate for mode
+            valid_levels = self.get_valid_levels(obj_in.location_mode)
+            if obj_in.level not in valid_levels:
+                logger.error(f"Invalid level {obj_in.level} for mode {obj_in.location_mode}")
+                return None
+            
+            # Auto-set location_type based on level if not provided
+            if not obj_in.location_type:
+                obj_in.location_type = self.get_auto_location_type(obj_in.level, obj_in.location_mode)
+            
+            # Validate building type if in buildings mode
+            if obj_in.location_mode == "buildings" and obj_in.location_type:
+                if not self.validate_building_type(obj_in.location_type):
+                    logger.warning(f"Unknown building type: {obj_in.location_type}")
+            
             # Auto-calculate level from parent
             if obj_in.parent_id:
-                # Get parent within the same session
                 parent_result = await db.execute(
                     select(Location).where(Location.id == obj_in.parent_id)
                 )
                 parent = parent_result.scalar_one_or_none()
                 
                 if parent:
-                    obj_in.level = parent.level + 1
-                    if not obj_in.location_mode:
+                    next_level = self.get_next_level(parent.level, parent.location_mode)
+                    if next_level:
+                        obj_in.level = next_level
                         obj_in.location_mode = parent.location_mode
+                        obj_in.location_type = self.get_auto_location_type(next_level, parent.location_mode)
                 else:
                     logger.error(f"Parent location {obj_in.parent_id} not found")
                     return None
@@ -465,10 +535,13 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             await db.commit()
             await db.refresh(location)
             
-            # Expunge from session to avoid detachment issues later
+            # Expunge from session
             db.expunge(location)
             
-            logger.info(f"✅ Created location: {location.code} - {location.name}")
+            # Invalidate cache
+            self._invalidate_cache()
+            
+            logger.info(f"✅ Created location: {location.code} - {location.name} (Level {location.level})")
             return location
             
         except IntegrityError as e:
@@ -479,8 +552,6 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             await db.rollback()
             logger.error(f"Error creating location: {e}")
             return None
-
-
 
     async def update(
         self,
@@ -500,10 +571,11 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
                     logger.error(f"Invalid location_mode: {update_data['location_mode']}")
                     return None
             
-            # Validate level change doesn't break hierarchy
-            if "level" in update_data and update_data["level"] != db_obj.level:
-                if db_obj.children:
-                    logger.error(f"Cannot change level of location with children")
+            # Validate level change
+            if "level" in update_data:
+                valid_levels = self.get_valid_levels(update_data.get("location_mode", db_obj.location_mode))
+                if update_data["level"] not in valid_levels:
+                    logger.error(f"Invalid level {update_data['level']}")
                     return None
             
             # Apply updates
@@ -548,19 +620,16 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
                 return None
             
             if soft_delete:
-                # Soft delete
                 location.status = "archived"
                 db.add(location)
                 await db.commit()
                 await db.refresh(location)
                 logger.info(f"✅ Soft deleted location: {location.code}")
             else:
-                # Hard delete
                 await db.delete(location)
                 await db.commit()
                 logger.info(f"✅ Hard deleted location: {location.code}")
             
-            # Invalidate cache
             self._invalidate_cache(id, location.code)
             return location
             
@@ -605,13 +674,15 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
     ) -> List[Location]:
         """Get all descendants of a location"""
         try:
-            max_depth = max_depth or MAX_DEPTH
+            location = await self.get(db, location_id)
+            if not location:
+                return []
+            
+            max_depth = max_depth or (MAX_ADDRESS_DEPTH if location.location_mode != "buildings" else MAX_BUILDINGS_DEPTH)
             
             descendants = []
             if include_self:
-                location = await self.get(db, location_id)
-                if location:
-                    descendants.append(location)
+                descendants.append(location)
             
             children = await self.get_children(db, location_id, limit=1000)
             for child in children:
@@ -662,6 +733,112 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             logger.error(f"Error getting breadcrumb for {location_id}: {e}")
             return []
     
+
+    async def get_tree(
+        self,
+        db: AsyncSession,
+        root_id: Optional[UUID] = None,
+        max_depth: int = 7,
+        location_mode: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get location hierarchy tree"""
+        
+        if root_id:
+            # Start from specific root
+            root_result = await db.execute(
+                select(Location).where(
+                    Location.id == root_id,
+                    Location.is_active == True
+                )
+            )
+            root = root_result.scalar_one_or_none()
+            if not root:
+                return []
+            
+            # Build tree from this root
+            node = await self._build_tree_node(db, root, max_depth, 1, location_mode)
+            return [node] if node else []
+        else:
+            # Get all top-level locations
+            # Determine first level based on mode
+            if location_mode == "buildings":
+                first_level = 11
+            else:
+                first_level = 1
+            
+            filter_conditions = [
+                Location.is_active == True,
+                Location.level == first_level
+            ]
+            
+            if location_mode:
+                filter_conditions.append(Location.location_mode == location_mode)
+            
+            root_result = await db.execute(
+                select(Location)
+                .where(and_(*filter_conditions))
+                .order_by(Location.name)
+            )
+            roots = root_result.scalars().all()
+            
+            # Build tree for each root
+            tree = []
+            for root in roots:
+                node = await self._build_tree_node(db, root, max_depth, 1, location_mode)
+                if node:
+                    tree.append(node)
+            
+            return tree
+
+    async def _build_tree_node(
+        self,
+        db: AsyncSession,
+        location: Location,
+        max_depth: int,
+        current_depth: int,
+        location_mode: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Recursively build a tree node"""
+        
+        node = {
+            "id": str(location.id),
+            "name": location.name,
+            "code": location.code,
+            "level": location.level,
+            "location_mode": location.location_mode,
+            "location_type": location.location_type,
+            "children": []
+        }
+        
+        # Add children if within depth limit
+        if current_depth < max_depth:
+            # Build filter conditions for children
+            filter_conditions = [
+                Location.parent_id == location.id,
+                Location.is_active == True
+            ]
+            
+            if location_mode:
+                filter_conditions.append(Location.location_mode == location_mode)
+            
+            children_result = await db.execute(
+                select(Location)
+                .where(and_(*filter_conditions))
+                .order_by(Location.name)
+            )
+            children = children_result.scalars().all()
+            
+            for child in children:
+                child_node = await self._build_tree_node(
+                    db, child, max_depth, current_depth + 1, location_mode
+                )
+                if child_node:
+                    node["children"].append(child_node)
+        
+        return node
+
+    # app/crud/address/location.py
+
     async def get_statistics(self, db: AsyncSession) -> Dict[str, Any]:
         """Get comprehensive location statistics"""
         try:
@@ -676,11 +853,18 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
                 "total_area": 0
             }
             
-            # Count by level
-            for level in range(1, MAX_DEPTH + 1):
+            # Count by level (Address levels 1-7)
+            for level in range(1, 8):
                 count = await self.count(db, level=level)
                 if count > 0:
                     stats["by_level"][LEVEL_NAMES.get(level, f"Level {level}")] = count
+            
+            # Count by level (Buildings levels 11-14)
+            for level in [11, 12, 13, 14]:
+                count = await self.count(db, level=level)
+                if count > 0:
+                    level_name = {11: "Office", 12: "Building", 13: "Room", 14: "Conference"}.get(level, f"Level {level}")
+                    stats["by_level"][level_name] = count
             
             # Count by mode
             for mode in VALID_LOCATION_MODES:
@@ -700,10 +884,11 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
                 result = await db.execute(query)
                 stats["by_status"][status] = result.scalar() or 0
             
-            # Count locations with GPS
+            # Count locations with GPS - FIX: Use the column name, not the property
+            # The column names are '_latitude' and '_longitude' in the model
             query = select(func.count()).select_from(Location).where(
-                Location.latitude.isnot(None),
-                Location.longitude.isnot(None)
+                Location._latitude.isnot(None),  # Use _latitude, not latitude
+                Location._longitude.isnot(None)   # Use _longitude, not longitude
             )
             result = await db.execute(query)
             stats["with_gps"] = result.scalar() or 0
@@ -719,11 +904,11 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
         except SQLAlchemyError as e:
             logger.error(f"Error getting statistics: {e}")
             return {}
-    
+
     async def count_by_mode(self, db: AsyncSession, mode: str) -> int:
         """Count locations by mode"""
         return await self.count(db, location_mode=mode)
-
+    
     async def get_by_code_as_dict(
         self, 
         db: AsyncSession, 
@@ -731,9 +916,6 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
     ) -> Optional[dict]:
         """Get location by code and return as dictionary (session-safe)."""
         try:
-            # Eagerly load any relationships you might need
-            from sqlalchemy.orm import selectinload
-            
             query = select(Location).where(Location.code == code).options(
                 selectinload(Location.parent),
                 selectinload(Location.children)
@@ -745,12 +927,111 @@ class CRUDLocation(CRUDBase[Location, LocationCreate, LocationUpdate]):
             if not location:
                 return None
             
-            # Convert to dict while session is still active
             return location.to_dict()
             
         except SQLAlchemyError as e:
             logger.error(f"Error fetching location by code '{code}': {e}")
             return None
-        
+    
+    # ==================== CTE HIERARCHY QUERIES ====================
+    
+    async def get_location_hierarchy_cte(
+        self,
+        db: AsyncSession,
+        root_id: Optional[UUID] = None,
+        location_mode: Optional[str] = None,
+        max_depth: int = 7
+    ) -> List[Dict[str, Any]]:
+        """
+        Get location hierarchy using recursive CTE
+        Returns parent-to-child tree structure
+        """
+        try:
+            mode_filter = f"AND location_mode = '{location_mode}'" if location_mode else ""
+            root_filter = f"AND id = '{root_id}'" if root_id else ""
+            
+            cte_query = f"""
+            WITH RECURSIVE location_hierarchy AS (
+                -- Anchor: Root nodes
+                SELECT 
+                    id,
+                    code,
+                    name,
+                    level,
+                    location_type,
+                    location_mode,
+                    parent_id,
+                    status,
+                    ARRAY[id] as path,
+                    1 as depth,
+                    name as tree_label
+                FROM locations
+                WHERE (parent_id IS NULL OR level = 1 OR level = 11)
+                {mode_filter}
+                {root_filter}
+                
+                UNION ALL
+                
+                -- Recursive: Children
+                SELECT 
+                    l.id,
+                    l.code,
+                    l.name,
+                    l.level,
+                    l.location_type,
+                    l.location_mode,
+                    l.parent_id,
+                    l.status,
+                    h.path || l.id,
+                    h.depth + 1,
+                    REPEAT('  ', h.depth) || l.name as tree_label
+                FROM locations l
+                INNER JOIN location_hierarchy h ON l.parent_id = h.id
+                WHERE h.depth < {max_depth}
+            )
+            SELECT 
+                id,
+                code,
+                name,
+                level,
+                location_type,
+                location_mode,
+                status,
+                depth,
+                tree_label,
+                array_to_string(ARRAY(
+                    SELECT name FROM locations 
+                    WHERE id = ANY(path) 
+                    ORDER BY level
+                ), ' > ') as breadcrumb
+            FROM location_hierarchy
+            ORDER BY path;
+            """
+            
+            result = await db.execute(text(cte_query))
+            rows = result.fetchall()
+            
+            hierarchy = []
+            for row in rows:
+                hierarchy.append({
+                    "id": str(row.id),
+                    "code": row.code,
+                    "name": row.name,
+                    "level": row.level,
+                    "location_type": row.location_type,
+                    "location_mode": row.location_mode,
+                    "status": row.status,
+                    "depth": row.depth,
+                    "tree_label": row.tree_label,
+                    "breadcrumb": row.breadcrumb
+                })
+            
+            return hierarchy
+            
+        except Exception as e:
+            logger.error(f"Error getting location hierarchy: {e}")
+            return []
+
+
 # Create singleton instance
 location = CRUDLocation(Location)

@@ -1,48 +1,31 @@
+// components/common/Navbar.jsx
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useColorMode } from '../../context/ThemeProvider';
 import {
-  AppBar,
-  Toolbar,
-  IconButton,
-  Typography,
-  Box,
-  Avatar,
-  Menu,
-  MenuItem,
-  Tooltip,
-  Badge,
-  useTheme,
-  Divider,
-  ListItemIcon,
-  CircularProgress,
-  Popover,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  Chip,
-  Button
+  AppBar, Toolbar, IconButton, Typography, Box, Avatar, Menu, MenuItem,
+  Tooltip, Badge, useTheme, Divider, ListItemIcon, CircularProgress,
+  Popover, List, ListItem, ListItemText, ListItemAvatar, Chip, Button
 } from '@mui/material';
 import {
-  Menu as MenuIcon,
-  Notifications,
-  Person,
-  Logout,
-  ArrowBack as ArrowBackIcon,
-  Assignment as AssignmentIcon,
-  Warning as WarningIcon,
-  Schedule as ScheduleIcon,
-  CheckCircle as CheckCircleIcon
+  Menu as MenuIcon, Notifications, Person, Logout,
+  ArrowBack as ArrowBackIcon, Assignment as AssignmentIcon,
+  Warning as WarningIcon, CheckCircle as CheckCircleIcon,
+  Brightness4, Brightness7 
 } from '@mui/icons-material';
 import { logout, selectIsLoading } from '../../store/slices/authSlice';
 import api from '../../services/api';
 
-const Navbar = ({ handleDrawerToggle, isMobile }) => {
+const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
   const theme = useTheme();
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
+  
+  // Get theme context
+  const { mode, toggleColorMode } = useColorMode();
+  const isDarkMode = mode === 'dark';
 
   const [anchorElUser, setAnchorElUser] = useState(null);
   const [notificationsAnchor, setNotificationsAnchor] = useState(null);
@@ -56,50 +39,23 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const showBackButton = pathSegments.length > 1 && location.pathname !== '/dashboard';
 
-  // Fetch tasks from the correct endpoint with proper parameters
   const fetchAllTasks = async () => {
     setLoadingNotifications(true);
     try {
-      // Use the correct endpoint with parameters
       const response = await api.get('/action-tracker/actions/my-tasks', {
-        params: {
-          skip: 0,
-          limit: 100,
-          include_completed: false  // This excludes completed tasks
-        }
+        params: { skip: 0, limit: 100, include_completed: false }
       });
-      
-      // Handle different response structures
       const tasks = response.data.data || response.data || [];
-      
-      // Create notifications array
       const notificationItems = tasks.map(task => ({
         id: task.id,
         title: task.title || task.description || 'Untitled Task',
-        description: task.description,
         type: task.is_overdue ? 'overdue' : 'pending',
         due_date: task.due_date,
         progress: task.overall_progress_percentage || 0,
-        meeting_title: task.meeting_title,
-        created_at: task.created_at,
-        status: task.status,
-        priority: task.priority,
         is_overdue: task.is_overdue
       }));
-      
-      // Sort: Overdue first, then by due date (closest first)
-      notificationItems.sort((a, b) => {
-        if (a.is_overdue && !b.is_overdue) return -1;
-        if (!a.is_overdue && b.is_overdue) return 1;
-        if (a.due_date && b.due_date) {
-          return new Date(a.due_date) - new Date(b.due_date);
-        }
-        return 0;
-      });
-      
       setNotifications(notificationItems);
       setNotificationCount(notificationItems.length);
-      
     } catch (error) {
       console.error('Error fetching tasks:', error);
     } finally {
@@ -107,13 +63,9 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
     }
   };
 
-  // Fetch notifications on component mount and periodically
   useEffect(() => {
     fetchAllTasks();
-    
-    // Refresh every 30 seconds
     const interval = setInterval(fetchAllTasks, 30000);
-    
     return () => clearInterval(interval);
   }, []);
 
@@ -122,52 +74,9 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
     try {
       await dispatch(logout()).unwrap();
       navigate('/login', { replace: true });
-    } catch (error) {
-      console.error("Logout failed", error);
+    } catch (error) { 
+      console.error("Logout failed", error); 
     }
-  };
-
-  const handleNotificationsOpen = (event) => {
-    setNotificationsAnchor(event.currentTarget);
-    // Refresh when opening
-    fetchAllTasks();
-  };
-
-  const handleNotificationsClose = () => {
-    setNotificationsAnchor(null);
-  };
-
-  const handleNotificationClick = (taskId) => {
-    setNotificationsAnchor(null);
-    navigate(`/actions/${taskId}`);
-  };
-
-  const handleViewAllTasks = () => {
-    setNotificationsAnchor(null);
-    navigate('/actions/my-tasks');
-  };
-
-  const getNotificationIcon = (type) => {
-    if (type === 'overdue') {
-      return <WarningIcon sx={{ color: '#f44336', fontSize: 20 }} />;
-    }
-    return <AssignmentIcon sx={{ color: '#ff9800', fontSize: 20 }} />;
-  };
-
-  const getNotificationColor = (type) => {
-    return type === 'overdue' ? 'error' : 'warning';
-  };
-
-  const formatDueDate = (dueDate) => {
-    if (!dueDate) return 'No due date';
-    const date = new Date(dueDate);
-    const now = new Date();
-    const diffDays = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
-    
-    if (diffDays < 0) return `Overdue by ${Math.abs(diffDays)} days`;
-    if (diffDays === 0) return 'Due today';
-    if (diffDays === 1) return 'Due tomorrow';
-    return `Due in ${diffDays} days`;
   };
 
   const notificationsOpen = Boolean(notificationsAnchor);
@@ -179,17 +88,18 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
       sx={{
         height: 48,
         zIndex: theme.zIndex.drawer + 1,
-        bgcolor: 'primary.main',
-        borderBottom: '1px solid rgba(255,255,255,0.12)',
+        // Original blue color in light mode, dark background in dark mode
+        bgcolor: isDarkMode ? theme.palette.background.paper : '#1976d2',
+        color: isDarkMode ? theme.palette.text.primary : '#ffffff',
+        borderBottom: isDarkMode ? `1px solid ${theme.palette.divider}` : 'none',
+        transition: theme.transitions.create(['background-color', 'color'], {
+          duration: theme.transitions.duration.short,
+        }),
       }}
     >
       <Toolbar 
         variant="dense" 
-        sx={{ 
-          minHeight: 48, 
-          justifyContent: 'space-between',
-          px: { xs: 1, sm: 2 }
-        }}
+        sx={{ minHeight: 48, justifyContent: 'space-between', px: { xs: 1, sm: 2 } }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
           <IconButton
@@ -199,11 +109,7 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
             sx={{ mr: 1 }}
             size="small"
           >
-            {showBackButton ? (
-              <ArrowBackIcon fontSize="small" />
-            ) : (
-              <MenuIcon fontSize="small" />
-            )}
+            {showBackButton ? <ArrowBackIcon fontSize="small" /> : <MenuIcon fontSize="small" />}
           </IconButton>
 
           <Typography
@@ -212,47 +118,56 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
             onClick={() => navigate('/dashboard')}
             sx={{ 
               fontWeight: 800, 
-              cursor: 'pointer', 
-              letterSpacing: '-0.5px',
+              cursor: 'pointer',
+              color: isDarkMode ? theme.palette.primary.light : '#ffffff',
               fontSize: { xs: '0.9rem', sm: '1.05rem' },
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
             }}
           >
             {isMobile ? 'Tracker' : 'Action Tracker'}
           </Typography>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0, sm: 0.5 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 } }}>
+          
+          {/* THEME TOGGLE BUTTON */}
+          <Tooltip title={isDarkMode ? "Light Mode" : "Dark Mode"}>
+            <IconButton 
+              onClick={toggleColorMode} 
+              sx={{ 
+                color: isDarkMode ? 'inherit' : '#ffffff',
+                '&:hover': {
+                  backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.2)',
+                }
+              }}
+              size="small"
+            >
+              {isDarkMode ? <Brightness7 fontSize="small" /> : <Brightness4 fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+
           {/* Notifications Bell */}
           <Tooltip title="My Tasks">
             <IconButton 
               color="inherit" 
-              size="small"
-              onClick={handleNotificationsOpen}
+              size="small" 
+              onClick={(e) => setNotificationsAnchor(e.currentTarget)}
+              sx={{
+                color: isDarkMode ? 'inherit' : '#ffffff',
+                '&:hover': {
+                  backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.2)',
+                }
+              }}
             >
-              <Badge 
-                badgeContent={notificationCount} 
-                color="error"
-                max={99}
-                sx={{
-                  '& .MuiBadge-badge': {
-                    fontSize: '0.65rem',
-                    height: 16,
-                    minWidth: 16,
-                  }
-                }}
-              >
+              <Badge badgeContent={notificationCount} color="error" max={99}>
                 <Notifications fontSize="small" />
               </Badge>
             </IconButton>
           </Tooltip>
 
-          {/* Notifications Popover */}
           <Popover
             open={notificationsOpen}
             anchorEl={notificationsAnchor}
-            onClose={handleNotificationsClose}
+            onClose={() => setNotificationsAnchor(null)}
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
             PaperProps={{
@@ -261,156 +176,89 @@ const Navbar = ({ handleDrawerToggle, isMobile }) => {
                 maxHeight: 400,
                 borderRadius: 2,
                 mt: 1,
-                overflow: 'hidden'
+                bgcolor: 'background.paper',
+                backgroundImage: 'none'
               }
             }}
           >
-            <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#f5f5f5' }}>
-              <Typography variant="subtitle2" fontWeight={700}>
-                My Pending Tasks
-              </Typography>
+            <Box sx={{ p: 2, borderBottom: `1px solid ${theme.palette.divider}`, bgcolor: 'action.hover' }}>
+              <Typography variant="subtitle2" fontWeight={700}>My Pending Tasks</Typography>
               <Typography variant="caption" color="text.secondary">
-                {notificationCount} task{notificationCount !== 1 ? 's' : ''} pending your attention
+                {notificationCount} tasks pending
               </Typography>
             </Box>
             
-            {loadingNotifications ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-                <CircularProgress size={24} />
-              </Box>
-            ) : notifications.length === 0 ? (
-              <Box sx={{ p: 4, textAlign: 'center' }}>
-                <CheckCircleIcon sx={{ fontSize: 48, color: '#4caf50', mb: 1 }} />
-                <Typography variant="body2" color="text.secondary">
-                  All caught up! No pending tasks.
-                </Typography>
-              </Box>
-            ) : (
-              <>
-                <List sx={{ p: 0, maxHeight: 300, overflow: 'auto' }}>
-                  {notifications.slice(0, 5).map((notification) => (
-                    <ListItem 
-                      key={notification.id}
-                      button
-                      onClick={() => handleNotificationClick(notification.id)}
-                      sx={{ 
-                        borderBottom: '1px solid #f0f0f0',
-                        '&:hover': { bgcolor: '#f5f5f5' }
-                      }}
-                    >
-                      <ListItemAvatar>
-                        <Avatar sx={{ bgcolor: 'transparent' }}>
-                          {getNotificationIcon(notification.type)}
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={
-                          <Typography variant="body2" fontWeight={600} noWrap>
-                            {notification.title}
-                          </Typography>
-                        }
-                        secondary={
-                          <Box sx={{ mt: 0.5 }}>
-                            <Chip 
-                              size="small" 
-                              label={notification.type === 'overdue' ? 'Overdue' : 'Pending'}
-                              color={getNotificationColor(notification.type)}
-                              sx={{ height: 18, fontSize: '0.6rem', mr: 1 }}
-                            />
-                            {notification.due_date && (
-                              <Typography variant="caption" color="text.secondary" component="span">
-                                {formatDueDate(notification.due_date)}
-                              </Typography>
-                            )}
-                            {notification.progress > 0 && notification.progress < 100 && (
-                              <Typography variant="caption" color="primary" component="span" sx={{ ml: 1 }}>
-                                {notification.progress}% complete
-                              </Typography>
-                            )}
-                          </Box>
-                        }
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-                
-                {notifications.length > 5 && (
-                  <Box sx={{ p: 1.5, borderTop: '1px solid #e0e0e0', textAlign: 'center' }}>
-                    <Button size="small" onClick={handleViewAllTasks} fullWidth>
-                      View all {notificationCount} tasks
-                    </Button>
-                  </Box>
-                )}
-              </>
-            )}
+            <List sx={{ p: 0, maxHeight: 300, overflow: 'auto' }}>
+              {notifications.length === 0 ? (
+                <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <CheckCircleIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
+                  <Typography variant="body2">All caught up!</Typography>
+                </Box>
+              ) : (
+                notifications.slice(0, 5).map((n) => (
+                  <ListItem 
+                    key={n.id} 
+                    button 
+                    onClick={() => { setNotificationsAnchor(null); navigate(`/actions/${n.id}`); }}
+                    sx={{ borderBottom: `1px solid ${theme.palette.divider}` }}
+                  >
+                    <ListItemAvatar>
+                      <Avatar sx={{ bgcolor: 'transparent' }}>
+                        {n.type === 'overdue' ? <WarningIcon color="error" /> : <AssignmentIcon color="warning" />}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={<Typography variant="body2" fontWeight={600}>{n.title}</Typography>}
+                      secondary={<Chip size="small" label={n.is_overdue ? 'Overdue' : 'Pending'} color={n.is_overdue ? 'error' : 'warning'} sx={{ height: 16, fontSize: '0.6rem' }} />}
+                    />
+                  </ListItem>
+                ))
+              )}
+            </List>
+            <Box sx={{ p: 1 }}>
+              <Button fullWidth size="small" onClick={() => { setNotificationsAnchor(null); navigate('/actions/my-tasks'); }}>
+                View All
+              </Button>
+            </Box>
           </Popover>
 
           {/* User Menu */}
-          <Tooltip title="Account">
-            <IconButton 
-              onClick={(e) => setAnchorElUser(e.currentTarget)} 
-              sx={{ ml: 0, p: 0.5 }}
-              size="small"
+          <IconButton 
+            onClick={(e) => setAnchorElUser(e.currentTarget)} 
+            sx={{ 
+              p: 0.5,
+              '&:hover': {
+                backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.2)',
+              }
+            }}
+          >
+            <Avatar 
+              sx={{ 
+                width: 28, height: 28, 
+                bgcolor: isDarkMode ? 'primary.light' : '#ffffff', 
+                color: isDarkMode ? '#fff' : '#1976d2', 
+                fontSize: '0.75rem', 
+                fontWeight: 700 
+              }}
             >
-              {isLoading ? (
-                <CircularProgress size={20} color="inherit" />
-              ) : (
-                <Avatar 
-                  sx={{ 
-                    width: { xs: 26, sm: 28 }, 
-                    height: { xs: 26, sm: 28 }, 
-                    bgcolor: 'white', 
-                    color: 'primary.main', 
-                    fontSize: '0.7rem', 
-                    fontWeight: 700 
-                  }}
-                >
-                  {user?.full_name?.[0] || user?.username?.[0] || 'A'}
-                </Avatar>
-              )}
-            </IconButton>
-          </Tooltip>
+              {user?.full_name?.[0] || user?.username?.[0] || 'U'}
+            </Avatar>
+          </IconButton>
         </Box>
       </Toolbar>
 
-      {/* User Menu */}
       <Menu
         anchorEl={anchorElUser}
         open={Boolean(anchorElUser)}
         onClose={() => setAnchorElUser(null)}
-        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-        PaperProps={{ 
-          elevation: 4, 
-          sx: { width: 200, mt: 1, borderRadius: 2 } 
-        }}
+        PaperProps={{ sx: { width: 200, borderRadius: 2, mt: 1 } }}
       >
-        <MenuItem onClick={() => { 
-          setAnchorElUser(null); 
-          navigate('/settings/profile'); 
-        }}>
-          <ListItemIcon><Person fontSize="small" /></ListItemIcon> 
-          Profile
+        <MenuItem onClick={() => { setAnchorElUser(null); navigate('/settings/profile'); }}>
+          <ListItemIcon><Person fontSize="small" /></ListItemIcon> Profile
         </MenuItem>
-        
-        <MenuItem onClick={() => {
-          setAnchorElUser(null);
-          navigate('/actions/my-tasks');
-        }}>
-          <ListItemIcon><AssignmentIcon fontSize="small" /></ListItemIcon>
-          My Tasks
-        </MenuItem>
-        
         <Divider />
-        
-        <MenuItem 
-          onClick={handleLogout} 
-          sx={{ color: 'error.main' }}
-        >
-          <ListItemIcon>
-            <Logout fontSize="small" color="error" />
-          </ListItemIcon> 
-          Logout
+        <MenuItem onClick={handleLogout} sx={{ color: 'error.main' }}>
+          <ListItemIcon><Logout fontSize="small" color="error" /></ListItemIcon> Logout
         </MenuItem>
       </Menu>
     </AppBar>

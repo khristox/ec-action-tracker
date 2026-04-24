@@ -42,6 +42,7 @@ def get_frontend_path() -> Optional[Path]:
         if path.exists() and path.is_dir():
             return path
     fallback = Path("/home/chris/Chr/Apps/ECATMIS/static")
+    print(f"Checking fallback frontend path: {fallback}" )
     if fallback.exists() and fallback.is_dir():
         return fallback
     return None

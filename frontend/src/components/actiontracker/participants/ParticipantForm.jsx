@@ -16,7 +16,9 @@ import {
   MenuItem,
   Grid,
   Chip,
-  InputAdornment
+  InputAdornment,
+  useTheme,
+  alpha
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -30,6 +32,9 @@ import {
 import api from '../../../services/api';
 
 const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId, loading: externalLoading }) => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -158,28 +163,40 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
       onClose={onClose} 
       maxWidth="sm" 
       fullWidth
-      PaperProps={{ sx: { borderRadius: 3 } }}
+      PaperProps={{ 
+        sx: { 
+          borderRadius: 3,
+          bgcolor: 'background.paper',
+          backgroundImage: 'none'
+        } 
+      }}
     >
       <DialogTitle sx={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
-        pb: 1
+        pb: 1,
+        borderBottom: `1px solid ${theme.palette.divider}`,
+        bgcolor: 'background.paper'
       }}>
         <Stack direction="row" spacing={1} alignItems="center">
-          <PersonAddIcon color="primary" />
-          <Typography variant="h6" fontWeight={700}>
+          <PersonAddIcon sx={{ color: theme.palette.primary.main }} />
+          <Typography variant="h6" fontWeight={700} sx={{ color: 'text.primary' }}>
             {editingParticipant ? 'Edit Participant' : 'Add Participant'}
           </Typography>
         </Stack>
-        <IconButton onClick={onClose} size="small">
+        <IconButton onClick={onClose} size="small" sx={{ color: 'text.secondary' }}>
           <CloseIcon />
         </IconButton>
       </DialogTitle>
       
-      <DialogContent dividers>
+      <DialogContent dividers sx={{ bgcolor: 'background.default' }}>
         {errors.submit && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert 
+            severity="error" 
+            sx={{ mb: 2, borderRadius: 2 }}
+            onClose={() => setErrors(prev => ({ ...prev, submit: '' }))}
+          >
             {errors.submit}
           </Alert>
         )}
@@ -187,7 +204,7 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
         {/* Suggestions */}
         {suggestions.length > 0 && (
           <Box sx={{ mb: 2 }}>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               Existing participants found:
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
@@ -199,6 +216,12 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
                   color="primary"
                   size="small"
                   variant="outlined"
+                  sx={{ 
+                    cursor: 'pointer',
+                    '&:hover': {
+                      bgcolor: alpha(theme.palette.primary.main, 0.1)
+                    }
+                  }}
                 />
               ))}
             </Stack>
@@ -218,9 +241,17 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <PersonAddIcon fontSize="small" color="action" />
+                    <PersonAddIcon fontSize="small" sx={{ color: 'action.active' }} />
                   </InputAdornment>
                 ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
               }}
             />
           </Grid>
@@ -237,9 +268,17 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <EmailIcon fontSize="small" color="action" />
+                    <EmailIcon fontSize="small" sx={{ color: 'action.active' }} />
                   </InputAdornment>
                 ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
               }}
             />
           </Grid>
@@ -253,9 +292,17 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <PhoneIcon fontSize="small" color="action" />
+                    <PhoneIcon fontSize="small" sx={{ color: 'action.active' }} />
                   </InputAdornment>
                 ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
               }}
             />
           </Grid>
@@ -269,9 +316,17 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <BusinessIcon fontSize="small" color="action" />
+                    <BusinessIcon fontSize="small" sx={{ color: 'action.active' }} />
                   </InputAdornment>
                 ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
               }}
             />
           </Grid>
@@ -282,6 +337,14 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               label="Title / Position"
               value={formData.title}
               onChange={handleChange('title')}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
+              }}
             />
           </Grid>
           
@@ -291,6 +354,14 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               label="Department"
               value={formData.department}
               onChange={handleChange('department')}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
+              }}
             />
           </Grid>
           
@@ -303,9 +374,17 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <LocationIcon fontSize="small" color="action" />
+                    <LocationIcon fontSize="small" sx={{ color: 'action.active' }} />
                   </InputAdornment>
                 ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
               }}
             />
           </Grid>
@@ -319,20 +398,50 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               value={formData.notes}
               onChange={handleChange('notes')}
               placeholder="Additional notes about the participant..."
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: 'background.paper',
+                  '& fieldset': {
+                    borderColor: theme.palette.divider,
+                  }
+                }
+              }}
             />
           </Grid>
         </Grid>
       </DialogContent>
       
-      <DialogActions sx={{ p: 2.5, gap: 1 }}>
-        <Button onClick={onClose} disabled={loading || externalLoading}>
+      <DialogActions sx={{ 
+        p: 2.5, 
+        gap: 1,
+        borderTop: `1px solid ${theme.palette.divider}`,
+        bgcolor: 'background.paper'
+      }}>
+        <Button 
+          onClick={onClose} 
+          disabled={loading || externalLoading}
+          sx={{ 
+            color: 'text.secondary',
+            '&:hover': {
+              bgcolor: alpha(theme.palette.action.hover, 0.5)
+            }
+          }}
+        >
           Cancel
         </Button>
         <Button 
           variant="contained" 
           onClick={handleSubmit}
           disabled={loading || externalLoading}
-          startIcon={loading ? <CircularProgress size={16} /> : <SaveIcon />}
+          startIcon={loading ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <SaveIcon />}
+          sx={{ 
+            fontWeight: 600,
+            '&:hover': {
+              transform: 'translateY(-1px)',
+              boxShadow: theme.shadows[4]
+            },
+            transition: 'all 0.2s'
+          }}
         >
           {loading ? 'Saving...' : editingParticipant ? 'Update' : 'Add Participant'}
         </Button>

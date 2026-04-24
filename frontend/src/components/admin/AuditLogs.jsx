@@ -166,7 +166,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
     <Box sx={{ mb: 2, border: `1px solid ${theme.palette.divider}`, borderRadius: 1, overflow: 'hidden' }}>
       <Box sx={{ 
         p: 1.5, 
-        bgcolor: alpha(theme.palette.primary.main, 0.08),
+        bgcolor: alpha(theme.palette.primary.main, 0.12),
         borderBottom: `1px solid ${theme.palette.divider}`,
         display: 'flex',
         alignItems: 'center',
@@ -180,7 +180,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
       
       <Grid container>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Box sx={{ p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.04), height: '100%' }}>
+          <Box sx={{ p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.08), height: '100%' }}>
             <Typography variant="caption" color="error" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <RemoveCircleOutline fontSize="small" />
               Old Value
@@ -198,6 +198,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
                 borderRadius: 1,
                 maxHeight: 200,
                 overflow: 'auto',
+                color: 'text.primary',
               }}
             >
               {formattedOld}
@@ -205,7 +206,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
           </Box>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Box sx={{ p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.04), height: '100%' }}>
+          <Box sx={{ p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.08), height: '100%' }}>
             <Typography variant="caption" color="success.main" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <AddCircleOutline fontSize="small" />
               New Value
@@ -223,6 +224,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
                 borderRadius: 1,
                 maxHeight: 200,
                 overflow: 'auto',
+                color: 'text.primary',
               }}
             >
               {formattedNew}
@@ -294,6 +296,7 @@ const ObjectDiff = ({ oldObject, newObject }) => {
 
 // JSON Diff Viewer component
 const JsonDiffViewer = ({ log }) => {
+  const theme = useTheme();
   const [viewMode, setViewMode] = useState('diff');
   
   const oldData = getOldValues(log);
@@ -324,7 +327,7 @@ const JsonDiffViewer = ({ log }) => {
       )}
 
       {viewMode === 'old' && oldData && (
-        <Paper variant="outlined" sx={{ p: 2, bgcolor: alpha(theme.palette.error.main, 0.04) }}>
+        <Paper variant="outlined" sx={{ p: 2, bgcolor: alpha(theme.palette.error.main, 0.08) }}>
           <Typography variant="subtitle2" color="error" gutterBottom>
             Old Values
           </Typography>
@@ -341,6 +344,7 @@ const JsonDiffViewer = ({ log }) => {
               borderRadius: 1,
               maxHeight: 400,
               overflow: 'auto',
+              color: 'text.primary',
             }}
           >
             {JSON.stringify(oldData, null, 2)}
@@ -349,7 +353,7 @@ const JsonDiffViewer = ({ log }) => {
       )}
 
       {viewMode === 'new' && newData && (
-        <Paper variant="outlined" sx={{ p: 2, bgcolor: alpha(theme.palette.success.main, 0.04) }}>
+        <Paper variant="outlined" sx={{ p: 2, bgcolor: alpha(theme.palette.success.main, 0.08) }}>
           <Typography variant="subtitle2" color="success.main" gutterBottom>
             New Values
           </Typography>
@@ -366,6 +370,7 @@ const JsonDiffViewer = ({ log }) => {
               borderRadius: 1,
               maxHeight: 400,
               overflow: 'auto',
+              color: 'text.primary',
             }}
           >
             {JSON.stringify(newData, null, 2)}
@@ -374,7 +379,7 @@ const JsonDiffViewer = ({ log }) => {
       )}
 
       {viewMode === 'extra' && extraData && (
-        <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper' }}>
           <Typography variant="subtitle2" gutterBottom>
             Extra Data (Meeting ID, etc.)
           </Typography>
@@ -387,10 +392,11 @@ const JsonDiffViewer = ({ log }) => {
               fontSize: '0.75rem',
               m: 0,
               p: 1,
-              bgcolor: 'background.paper',
+              bgcolor: 'background.default',
               borderRadius: 1,
               maxHeight: 400,
               overflow: 'auto',
+              color: 'text.primary',
             }}
           >
             {JSON.stringify(extraData, null, 2)}
@@ -431,8 +437,20 @@ const getStatusColor = (status) => {
 
 // Column Management Drawer
 const ColumnManager = ({ open, onClose, columns, onToggleColumn }) => {
+  const theme = useTheme();
+  
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}>
+    <Drawer 
+      anchor="right" 
+      open={open} 
+      onClose={onClose}
+      PaperProps={{
+        sx: {
+          bgcolor: 'background.paper',
+          backgroundImage: 'none',
+        }
+      }}
+    >
       <Box sx={{ width: 320, p: 3 }}>
         <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <ViewColumnOutlined />
@@ -454,6 +472,8 @@ const ColumnManager = ({ open, onClose, columns, onToggleColumn }) => {
                 <ListItemText 
                   primary={col.header}
                   secondary={`Width: ${col.width}px`}
+                  primaryTypographyProps={{ color: 'text.primary' }}
+                  secondaryTypographyProps={{ color: 'text.secondary' }}
                 />
                 <DragHandleOutlined color="action" />
               </ListItemButton>
@@ -484,7 +504,18 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
   const extraData = getExtraData(log);
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="lg" 
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: 'background.paper',
+          backgroundImage: 'none',
+        }
+      }}
+    >
       <DialogTitle>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -513,16 +544,16 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, md: 6 }}>
               <Typography variant="subtitle2" color="text.secondary">Timestamp</Typography>
-              <Typography variant="body1" sx={{ mb: 2 }}>
+              <Typography variant="body1" sx={{ mb: 2, color: 'text.primary' }}>
                 {log.timestamp ? format(parseISO(log.timestamp), 'PPpp') : '—'}
               </Typography>
               
               <Typography variant="subtitle2" color="text.secondary">User</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Avatar sx={{ width: 28, height: 28 }}>
+                <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.main' }}>
                   {log.username?.[0]?.toUpperCase() || 'U'}
                 </Avatar>
-                <Typography variant="body1">
+                <Typography variant="body1" color="text.primary">
                   {log.username || 'System'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
@@ -531,20 +562,20 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
               </Box>
               
               <Typography variant="subtitle2" color="text.secondary">IP Address</Typography>
-              <Typography variant="body1" fontFamily="monospace" sx={{ mb: 2 }}>
+              <Typography variant="body1" fontFamily="monospace" sx={{ mb: 2, color: 'text.primary' }}>
                 {log.ip_address || '—'}
               </Typography>
             </Grid>
             
             <Grid size={{ xs: 12, md: 6 }}>
               <Typography variant="subtitle2" color="text.secondary">Resource</Typography>
-              <Typography variant="body1" sx={{ textTransform: 'capitalize', mb: 2 }}>
+              <Typography variant="body1" sx={{ textTransform: 'capitalize', mb: 2, color: 'text.primary' }}>
                 {log.table_name?.replace(/_/g, ' ') || '—'}
               </Typography>
               
               <Typography variant="subtitle2" color="text.secondary">Record ID</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Typography variant="body1" fontFamily="monospace">
+                <Typography variant="body1" fontFamily="monospace" color="text.primary">
                   {log.record_id || '—'}
                 </Typography>
                 {log.record_id && (
@@ -577,7 +608,7 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
             {log.endpoint && (
               <Grid size={12}>
                 <Typography variant="subtitle2" color="text.secondary">Endpoint</Typography>
-                <Typography variant="body2" fontFamily="monospace" sx={{ mb: 1, wordBreak: 'break-all' }}>
+                <Typography variant="body2" fontFamily="monospace" sx={{ mb: 1, wordBreak: 'break-all', color: 'text.primary' }}>
                   {log.endpoint}
                 </Typography>
               </Grid>
@@ -621,6 +652,7 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
                 borderRadius: 1,
                 maxHeight: 500,
                 overflow: 'auto',
+                color: 'text.primary',
               }}
             >
               {JSON.stringify({ 
@@ -711,8 +743,10 @@ const exportToPDF = (logs, columns, filename = 'audit_logs') => {
   const doc = new jsPDF('landscape');
   
   doc.setFontSize(16);
+  doc.setTextColor(40, 40, 40);
   doc.text('Audit Logs Report', 14, 15);
   doc.setFontSize(10);
+  doc.setTextColor(100, 100, 100);
   doc.text(`Generated: ${format(new Date(), 'PPpp')}`, 14, 25);
   doc.text(`Total Records: ${logs.length}`, 14, 32);
   
@@ -757,9 +791,9 @@ const exportToPDF = (logs, columns, filename = 'audit_logs') => {
     head: [headers],
     body: tableData,
     startY: 40,
-    styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+    styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak', textColor: [40, 40, 40] },
     headStyles: { fillColor: [41, 128, 185], textColor: 255, fontSize: 8, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [240, 240, 240] },
+    alternateRowStyles: { fillColor: [245, 245, 245] },
     columnStyles: {
       0: { cellWidth: 35 }, // timestamp
       1: { cellWidth: 30 }, // user
@@ -928,7 +962,7 @@ const AuditLogs = () => {
     const columnMap = {
       timestamp: (params) => (
         <Tooltip title={params.row.timestamp ? format(parseISO(params.row.timestamp), 'PPpp') : '—'}>
-          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+          <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'text.primary' }}>
             {params.row.timestamp ? format(parseISO(params.row.timestamp), 'MMM dd, HH:mm:ss') : '—'}
           </Typography>
         </Tooltip>
@@ -939,7 +973,7 @@ const AuditLogs = () => {
             {params.row.username?.[0]?.toUpperCase() || 'U'}
           </Avatar>
           <Box>
-            <Typography variant="body2" fontWeight={500}>
+            <Typography variant="body2" fontWeight={500} color="text.primary">
               {params.row.username || 'System'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
@@ -967,14 +1001,14 @@ const AuditLogs = () => {
         </Box>
       ),
       record_id: (params) => (
-        <Typography variant="caption" fontFamily="monospace" sx={{ opacity: 0.7 }}>
+        <Typography variant="caption" fontFamily="monospace" sx={{ opacity: 0.7, color: 'text.secondary' }}>
           {params.row.record_id?.slice(0, 12) || '—'}
           {params.row.record_id?.length > 12 && '...'}
         </Typography>
       ),
       changes_summary: (params) => (
         <Tooltip title={params.row.changes_summary || 'No changes'}>
-          <Typography variant="body2" noWrap sx={{ maxWidth: 280 }}>
+          <Typography variant="body2" noWrap sx={{ maxWidth: 280, color: 'text.primary' }}>
             {params.row.changes_summary || '—'}
           </Typography>
         </Tooltip>
@@ -991,21 +1025,21 @@ const AuditLogs = () => {
       ip_address: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <ComputerOutlined fontSize="small" color="action" />
-          <Typography variant="body2" fontFamily="monospace">
+          <Typography variant="body2" fontFamily="monospace" color="text.primary">
             {params.row.ip_address || '—'}
           </Typography>
         </Box>
       ),
       endpoint: (params) => (
         <Tooltip title={params.row.endpoint}>
-          <Typography variant="caption" noWrap sx={{ maxWidth: 180 }}>
+          <Typography variant="caption" noWrap sx={{ maxWidth: 180, color: 'text.secondary' }}>
             {params.row.endpoint || '—'}
           </Typography>
         </Tooltip>
       ),
       user_agent: (params) => (
         <Tooltip title={params.row.user_agent}>
-          <Typography variant="caption" noWrap sx={{ maxWidth: 230 }}>
+          <Typography variant="caption" noWrap sx={{ maxWidth: 230, color: 'text.secondary' }}>
             {params.row.user_agent || '—'}
           </Typography>
         </Tooltip>
@@ -1016,7 +1050,11 @@ const AuditLogs = () => {
       field: col.id,
       headerName: col.header,
       width: col.width,
-      renderCell: columnMap[col.id] || ((params) => params.row[col.id] || '—'),
+      renderCell: columnMap[col.id] || ((params) => (
+        <Typography variant="body2" color="text.primary">
+          {params.row[col.id] || '—'}
+        </Typography>
+      )),
     }));
     
     // Add actions column
@@ -1085,7 +1123,7 @@ const AuditLogs = () => {
           {/* Header */}
           <motion.div variants={fadeInUp}>
             <Box sx={{ mb: 4 }}>
-              <Typography variant="h4" fontWeight={700} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography variant="h4" fontWeight={700} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.primary' }}>
                 <SecurityOutlined sx={{ fontSize: 40, color: 'primary.main' }} />
                 Audit Logs
               </Typography>
@@ -1101,14 +1139,19 @@ const AuditLogs = () => {
               {statCards.map((stat, index) => (
                 <Grid size={{ xs: 12, sm: 6, md: 3 }} key={index}>
                   <Zoom in={true} style={{ transitionDelay: `${index * 100}ms` }}>
-                    <Card sx={{ height: '100%', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
+                    <Card sx={{ 
+                      height: '100%', 
+                      transition: 'transform 0.2s', 
+                      '&:hover': { transform: 'translateY(-4px)' },
+                      bgcolor: 'background.paper',
+                    }}>
                       <CardContent>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Box>
                             <Typography color="text.secondary" gutterBottom variant="body2">
                               {stat.title}
                             </Typography>
-                            <Typography variant="h3" fontWeight={700}>
+                            <Typography variant="h3" fontWeight={700} color="text.primary">
                               {stat.value.toLocaleString()}
                             </Typography>
                           </Box>
@@ -1126,10 +1169,10 @@ const AuditLogs = () => {
 
           {/* Filters */}
           <motion.div variants={fadeInUp}>
-            <Paper sx={{ p: 3, mb: 3 }}>
+            <Paper sx={{ p: 3, mb: 3, bgcolor: 'background.paper' }}>
               <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
                 <FilterListOutlined color="action" />
-                <Typography variant="h6">Filters</Typography>
+                <Typography variant="h6" color="text.primary">Filters</Typography>
                 <Box sx={{ flex: 1 }} />
                 <Button 
                   size="small" 
@@ -1250,7 +1293,7 @@ const AuditLogs = () => {
 
           {/* Data Grid */}
           <motion.div variants={fadeInUp}>
-            <Paper sx={{ width: '100%', overflow: 'hidden', position: 'relative' }}>
+            <Paper sx={{ width: '100%', overflow: 'hidden', position: 'relative', bgcolor: 'background.paper' }}>
               {error && (
                 <Alert severity="error" sx={{ m: 2 }}>
                   {typeof error === 'string' ? error : error?.message || 'Failed to load audit logs'}
@@ -1269,8 +1312,23 @@ const AuditLogs = () => {
                   disableRowSelectionOnClick
                   getRowId={(row) => row.id || `${row.timestamp}-${row.action}`}
                   sx={{
-                    '& .MuiDataGrid-cell': { borderBottom: '1px solid', borderColor: 'divider' },
-                    '& .MuiDataGrid-row:hover': { backgroundColor: 'action.hover', cursor: 'pointer' },
+                    '& .MuiDataGrid-cell': { 
+                      borderBottom: '1px solid', 
+                      borderColor: 'divider',
+                      color: 'text.primary',
+                    },
+                    '& .MuiDataGrid-row:hover': { 
+                      backgroundColor: 'action.hover', 
+                      cursor: 'pointer' 
+                    },
+                    '& .MuiDataGrid-columnHeaders': {
+                      backgroundColor: 'background.default',
+                      color: 'text.secondary',
+                    },
+                    '& .MuiDataGrid-footerContainer': {
+                      borderTop: '1px solid',
+                      borderColor: 'divider',
+                    },
                   }}
                   onRowClick={(params) => handleViewDetails(params.row)}
                 />

@@ -193,7 +193,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         """
         try:
             query = select(self.model).where(self._get_id_column() == id)
-            query = self._apply_exclude_deleted(query, include_deleted)
+            """ print(query )
+            query = self._apply_exclude_deleted(query, include_deleted) """
             
             result = await db.execute(query)
             return result.scalar_one_or_none()

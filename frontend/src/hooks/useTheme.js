@@ -1,10 +1,4 @@
-import { useContext } from 'react';
-import { ThemeContext } from '../context/ThemeContext';
+import { useColorMode } from '../context/ThemeProvider';
 
-export const useTheme = () => {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within ThemeProvider');
-  }
-  return context;
-};
+// Drop-in replacement — same API as before (mode, toggleTheme, toggleColorMode)
+export const useTheme = () => useColorMode();

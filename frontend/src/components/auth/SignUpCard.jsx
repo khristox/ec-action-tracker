@@ -25,6 +25,14 @@ import {
   LinearProgress,
   Tooltip,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControlLabel,
+  Switch,
+  Grid,
+  Collapse,
 } from '@mui/material';
 import {
   Visibility,
@@ -39,8 +47,12 @@ import {
   InfoOutlined,
   HourglassEmpty,
   Refresh,
+  Edit,
+  Smartphone,
+  SendOutlined,
+  MarkEmailReadOutlined,
 } from '@mui/icons-material';
-import { register, clearError, resetRegistrationSuccess } from '../../store/slices/authSlice';
+import { register, clearError, resetRegistrationSuccess, resendVerification } from '../../store/slices/authSlice';
 
 function SlideTransition(props) {
   return <Slide {...props} direction="up" />;
@@ -49,7 +61,7 @@ function SlideTransition(props) {
 const SignUpCard = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { isRegistering, error, fieldErrors: reduxFieldErrors, registrationSuccess } = useSelector((state) => state.auth);
+  const { isRegistering, error, fieldErrors: reduxFieldErrors, registrationSuccess, verificationEmailSent } = useSelector((state) => state.auth);
 
   // Form state
   const [activeStep, setActiveStep] = useState(0);
@@ -59,6 +71,9 @@ const SignUpCard = () => {
     password: '',
     confirmPassword: '',
     full_name: '',
+    first_name: '',
+    last_name: '',
+    phone: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -67,7 +82,17 @@ const SignUpCard = () => {
   const [successSnackbarOpen, setSuccessSnackbarOpen] = useState(false);
   const [waitTimeRemaining, setWaitTimeRemaining] = useState(0);
   const [waitMessage, setWaitMessage] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false); // Add this to prevent double submission
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
+  const [resendDisabled, setResendDisabled] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  
+  // Name splitting preferences
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
+  const [nameSplitOrder, setNameSplitOrder] = useState('first-last');
+  const [tempFirstName, setTempFirstName] = useState('');
+  const [tempLastName, setTempLastName] = useState('');
 
   // Generate username from email
   const generateUsernameFromEmail = useCallback((email) => {
@@ -92,6 +117,41 @@ const SignUpCard = () => {
     return suggestions.slice(0, 5);
   }, []);
 
+  // Split full name into first and last name based on order
+  const splitFullName = useCallback((fullName, order = nameSplitOrder) => {
+    if (!fullName || !fullName.trim()) {
+      return { first_name: '', last_name: '' };
+    }
+    
+    const nameParts = fullName.trim().split(/\s+/);
+    
+    if (nameParts.length === 1) {
+      if (order === 'first-last') {
+        return { first_name: nameParts[0], last_name: '' };
+      } else {
+        return { first_name: '', last_name: nameParts[0] };
+      }
+    }
+    
+    if (order === 'first-last') {
+      const firstName = nameParts[0];
+      const lastName = nameParts.slice(1).join(' ');
+      return { first_name: firstName, last_name: lastName };
+    } else {
+      const lastName = nameParts[nameParts.length - 1];
+      const firstName = nameParts.slice(0, -1).join(' ');
+      return { first_name: firstName, last_name: lastName };
+    }
+  }, [nameSplitOrder]);
+
+  // Update first and last name when full name changes
+  useEffect(() => {
+    if (formData.full_name && !formData.first_name && !formData.last_name) {
+      const { first_name, last_name } = splitFullName(formData.full_name);
+      setFormData(prev => ({ ...prev, first_name, last_name }));
+    }
+  }, [formData.full_name, formData.first_name, formData.last_name, splitFullName]);
+
   // Auto-generate username when email changes
   useEffect(() => {
     if (formData.email && !formData.username) {
@@ -100,7 +160,19 @@ const SignUpCard = () => {
     }
   }, [formData.email, formData.username, generateUsernameFromEmail]);
 
-  // Helper function to extract error message from various response formats
+  // Handle resend countdown timer
+  useEffect(() => {
+    let timer;
+    if (resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown(prev => prev - 1);
+      }, 1000);
+    } else {
+      setResendDisabled(false);
+    }
+    return () => clearInterval(timer);
+  }, [resendCountdown]);
+
   const getErrorMessage = (error) => {
     if (!error) return '';
     
@@ -119,7 +191,6 @@ const SignUpCard = () => {
     return 'Registration failed. Please try again.';
   };
 
-  // Helper function to extract field-specific errors
   const getFieldErrorFromResponse = (error) => {
     const fieldErrors = {};
     
@@ -127,7 +198,6 @@ const SignUpCard = () => {
       fieldErrors[error.detail.field] = error.detail.message;
     }
     
-    // Extract wait time if present
     if (error?.detail?.wait_minutes) {
       setWaitTimeRemaining(error.detail.wait_minutes * 60);
       setWaitMessage(error.detail.message);
@@ -146,11 +216,8 @@ const SignUpCard = () => {
 
   const errorMessage = getErrorMessage(error);
   const responseFieldErrors = getFieldErrorFromResponse(error);
-  
-  // Merge local, Redux, and response field errors
   const fieldErrors = { ...localFieldErrors, ...reduxFieldErrors, ...responseFieldErrors };
 
-  // Countdown timer for wait period
   useEffect(() => {
     let timer;
     if (waitTimeRemaining > 0) {
@@ -168,39 +235,46 @@ const SignUpCard = () => {
     return () => clearInterval(timer);
   }, [waitTimeRemaining]);
 
-  // Show error snackbar when error occurs
   useEffect(() => {
     if (errorMessage) {
       setSnackbarOpen(true);
     }
   }, [errorMessage]);
 
-  // Reset submitting state when registration completes or fails
   useEffect(() => {
     if (!isRegistering) {
       setIsSubmitting(false);
     }
   }, [isRegistering]);
 
-  // Handle registration success
   useEffect(() => {
     if (registrationSuccess) {
       setSuccessSnackbarOpen(true);
       dispatch(clearError());
       setIsSubmitting(false);
       
+      // Open verification dialog after successful registration
+      setTimeout(() => {
+        setVerificationDialogOpen(true);
+      }, 1500);
+      
+      // Reset registration success after showing dialog
       const timer = setTimeout(() => {
-        navigate('/login', { replace: true });
         dispatch(resetRegistrationSuccess());
-      }, 3000);
+      }, 5000);
       
       return () => clearTimeout(timer);
     }
-  }, [registrationSuccess, navigate, dispatch]);
+  }, [registrationSuccess, dispatch]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    
+    if (name === 'full_name') {
+      const { first_name, last_name } = splitFullName(value);
+      setFormData(prev => ({ ...prev, first_name, last_name }));
+    }
     
     if (fieldErrors[name]) {
       setLocalFieldErrors(prev => ({ ...prev, [name]: '' }));
@@ -221,18 +295,61 @@ const SignUpCard = () => {
     }
   };
 
+  const handleOpenNameDialog = () => {
+    setTempFirstName(formData.first_name);
+    setTempLastName(formData.last_name);
+    setNameDialogOpen(true);
+  };
+
+  const handleSaveNameChanges = () => {
+    setFormData(prev => ({
+      ...prev,
+      first_name: tempFirstName,
+      last_name: tempLastName,
+      full_name: `${tempFirstName} ${tempLastName}`.trim()
+    }));
+    setNameDialogOpen(false);
+  };
+
+  const handleToggleNameOrder = () => {
+    const newOrder = nameSplitOrder === 'first-last' ? 'last-first' : 'first-last';
+    setNameSplitOrder(newOrder);
+    
+    if (formData.full_name) {
+      const { first_name, last_name } = splitFullName(formData.full_name, newOrder);
+      setFormData(prev => ({ ...prev, first_name, last_name }));
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (resendDisabled) return;
+    
+    try {
+      setResendDisabled(true);
+      setResendCountdown(60); // 60 second cooldown
+      
+      await dispatch(resendVerification(registeredEmail || formData.email)).unwrap();
+      
+      // Show success message
+      setSnackbarOpen(true);
+      // You could also show a success notification here
+    } catch (err) {
+      console.error('Failed to resend verification:', err);
+      setResendDisabled(false);
+      setResendCountdown(0);
+    }
+  };
+
   const validateStep = () => {
     const errors = {};
     
     if (activeStep === 0) {
-      // Email validation first
       if (!formData.email.trim()) {
         errors.email = 'Email is required';
       } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
         errors.email = 'Please enter a valid email address';
       }
       
-      // Username validation
       if (!formData.username.trim()) {
         errors.username = 'Username is required';
       } else if (formData.username.length < 3) {
@@ -241,11 +358,21 @@ const SignUpCard = () => {
         errors.username = 'Username can only contain letters, numbers, and underscores';
       }
       
-      // Full name validation
       if (!formData.full_name.trim()) {
         errors.full_name = 'Full name is required';
       } else if (formData.full_name.trim().length < 2) {
         errors.full_name = 'Full name must be at least 2 characters';
+      }
+      
+      if (!formData.first_name.trim()) {
+        errors.first_name = 'First name is required';
+      }
+      if (!formData.last_name.trim()) {
+        errors.last_name = 'Last name is required';
+      }
+      
+      if (formData.phone && !/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/.test(formData.phone)) {
+        errors.phone = 'Please enter a valid phone number';
       }
     } else if (activeStep === 1) {
       if (!formData.password) {
@@ -290,7 +417,6 @@ const SignUpCard = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Prevent double submission
     if (isSubmitting || isRegistering || registrationSuccess || waitTimeRemaining > 0) {
       return;
     }
@@ -298,7 +424,8 @@ const SignUpCard = () => {
     if (!validateStep()) {
       if (localFieldErrors.password || localFieldErrors.confirmPassword) {
         setActiveStep(1);
-      } else if (localFieldErrors.full_name || localFieldErrors.username || localFieldErrors.email) {
+      } else if (localFieldErrors.full_name || localFieldErrors.username || localFieldErrors.email || 
+                 localFieldErrors.first_name || localFieldErrors.last_name || localFieldErrors.phone) {
         setActiveStep(0);
       }
       return;
@@ -306,23 +433,30 @@ const SignUpCard = () => {
     
     dispatch(clearError());
     setLocalFieldErrors({});
-    
-    // Set submitting flag to prevent double submission
     setIsSubmitting(true);
     
+    // Store email for resend functionality
+    setRegisteredEmail(formData.email.trim().toLowerCase());
+    
+    const registrationData = {
+      email: formData.email.trim().toLowerCase(),
+      first_name: formData.first_name.trim(),
+      last_name: formData.last_name.trim(),
+      password: formData.password,
+      username: formData.username.trim(),
+      // Do NOT send full_name - backend expects first_name and last_name only
+    };
+    
+    if (formData.phone) {
+      registrationData.phone = formData.phone.trim();
+    }
+    
     try {
-      const result = await dispatch(register({
-        username: formData.username.trim(),
-        email: formData.email.trim().toLowerCase(),
-        password: formData.password,
-        full_name: formData.full_name.trim(),
-      })).unwrap();
-      
+      const result = await dispatch(register(registrationData)).unwrap();
       console.log('Registration successful:', result);
-      
     } catch (err) {
       console.error('Registration failed:', err);
-      setIsSubmitting(false); // Reset on error so user can try again
+      setIsSubmitting(false);
       
       if (err?.detail?.field) {
         setActiveStep(0);
@@ -339,6 +473,11 @@ const SignUpCard = () => {
 
   const handleCloseSuccessSnackbar = () => {
     setSuccessSnackbarOpen(false);
+  };
+
+  const handleCloseVerificationDialog = () => {
+    setVerificationDialogOpen(false);
+    navigate('/login');
   };
 
   const steps = ['Personal Information', 'Create Password', 'Review'];
@@ -376,11 +515,61 @@ const SignUpCard = () => {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  // Determine if any action is in progress that should disable the form
   const isFormDisabled = isRegistering || registrationSuccess || waitTimeRemaining > 0 || isSubmitting;
 
   return (
     <>
+      {/* Verification Dialog */}
+      <Dialog 
+        open={verificationDialogOpen} 
+        onClose={handleCloseVerificationDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <MarkEmailReadOutlined color="primary" />
+            <Typography variant="h6">Verify Your Email Address</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            We've sent a verification link to:
+          </Typography>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover', textAlign: 'center', mb: 2 }}>
+            <Typography variant="subtitle1" fontWeight="bold" color="primary">
+              {registeredEmail || formData.email}
+            </Typography>
+          </Paper>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Please check your email and click the verification link to activate your account.
+            The link will expire in 24 hours.
+          </Typography>
+          {verificationEmailSent && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              Verification link sent! Please check your inbox and spam folder.
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 3, flexDirection: 'column', gap: 2 }}>
+          <Button 
+            variant="contained" 
+            fullWidth
+            onClick={handleCloseVerificationDialog}
+          >
+            Go to Login
+          </Button>
+          <Button 
+            variant="text" 
+            fullWidth
+            onClick={handleResendVerification}
+            disabled={resendDisabled}
+          >
+            {resendDisabled ? `Resend available in ${resendCountdown}s` : 'Resend Verification Email'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Fullscreen Backdrop during registration */}
       <Backdrop
         sx={{ 
@@ -410,6 +599,72 @@ const SignUpCard = () => {
         />
       </Backdrop>
 
+      {/* Name Modification Dialog */}
+      <Dialog open={nameDialogOpen} onClose={() => setNameDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <BadgeOutlined />
+            <Typography variant="h6">Edit Name Details</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={nameSplitOrder === 'last-first'}
+                  onChange={handleToggleNameOrder}
+                  color="primary"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  {nameSplitOrder === 'first-last' 
+                    ? 'Order: First Name then Last Name' 
+                    : 'Order: Last Name then First Name'}
+                </Typography>
+              }
+            />
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1, mb: 2 }}>
+              {nameSplitOrder === 'first-last' 
+                ? 'First word(s) as First Name, remaining as Last Name' 
+                : 'Last word as Last Name, remaining as First Name'}
+            </Typography>
+            
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="First Name"
+                  value={tempFirstName}
+                  onChange={(e) => setTempFirstName(e.target.value)}
+                  margin="normal"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Last Name"
+                  value={tempLastName}
+                  onChange={(e) => setTempLastName(e.target.value)}
+                  margin="normal"
+                />
+              </Grid>
+            </Grid>
+            
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              Full Name Preview: {`${tempFirstName} ${tempLastName}`.trim() || 'Enter names above'}
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNameDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveNameChanges} variant="contained" color="primary">
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Card
         sx={{
           width: { xs: '100%', sm: 500, md: 550 },
@@ -432,7 +687,7 @@ const SignUpCard = () => {
               Create Account
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Join us to manage your rental properties
+              Join us to manage your action items and meetings
             </Typography>
           </Box>
 
@@ -470,7 +725,7 @@ const SignUpCard = () => {
             ))}
           </Stepper>
 
-          {/* Error Alert - Inline for immediate feedback */}
+          {/* Error Alert */}
           {errorMessage && !snackbarOpen && !waitMessage && (
             <Fade in>
               <Alert 
@@ -499,8 +754,8 @@ const SignUpCard = () => {
               icon={<CheckCircleOutline />} 
               sx={{ mb: 3 }}
               action={
-                <Button color="inherit" size="small" onClick={() => navigate('/login')}>
-                  Login Now
+                <Button color="inherit" size="small" onClick={() => setVerificationDialogOpen(true)}>
+                  Verify Now
                 </Button>
               }
             >
@@ -508,7 +763,7 @@ const SignUpCard = () => {
                 Registration successful!
               </Typography>
               <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                Redirecting to login in 3 seconds...
+                Please verify your email to activate your account.
               </Typography>
             </Alert>
           )}
@@ -517,7 +772,7 @@ const SignUpCard = () => {
           <form onSubmit={handleSubmit}>
             {activeStep === 0 && (
               <Box>
-                {/* Email Field - First */}
+                {/* Email Field */}
                 <TextField
                   fullWidth
                   label="Email Address"
@@ -539,7 +794,7 @@ const SignUpCard = () => {
                   }}
                 />
                 
-                {/* Username Field with Regenerate Icon */}
+                {/* Username Field */}
                 <TextField
                   fullWidth
                   label="Username"
@@ -559,7 +814,6 @@ const SignUpCard = () => {
                     ),
                     endAdornment: (
                       <InputAdornment position="end">
-                        {/* Wrap disabled button in a span for Tooltip */}
                         <Tooltip title="Generate new username">
                           <span>
                             <IconButton 
@@ -601,22 +855,96 @@ const SignUpCard = () => {
                   </Box>
                 )}
                 
-                {/* Full Name Field */}
+                {/* Full Name Field with EDIT BUTTON */}
+                <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
+                  <TextField
+                    fullWidth
+                    label="Full Name"
+                    name="full_name"
+                    value={formData.full_name}
+                    onChange={handleChange}
+                    required
+                    error={hasFieldError('full_name')}
+                    helperText={getFieldError('full_name')}
+                    disabled={isFormDisabled}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <BadgeOutlined color="action" />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  <Tooltip title="Edit First and Last Name Separately">
+                    <IconButton
+                      onClick={handleOpenNameDialog}
+                      disabled={isFormDisabled}
+                      sx={{
+                        position: 'absolute',
+                        right: 8,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        backgroundColor: 'primary.main',
+                        color: 'white',
+                        '&:hover': {
+                          backgroundColor: 'primary.dark',
+                          transform: 'translateY(-50%) scale(1.05)',
+                        },
+                        zIndex: 1,
+                        '&.Mui-disabled': {
+                          backgroundColor: 'grey.400',
+                          color: 'grey.600',
+                        },
+                      }}
+                      size="small"
+                    >
+                      <Edit fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+                
+                {/* Display split names */}
+                {(formData.first_name || formData.last_name) && (
+                  <Box sx={{ mt: 2, mb: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                      Will be saved as:
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 3, mt: 1 }}>
+                      <Typography variant="body2">
+                        <strong>First Name:</strong> {formData.first_name || '—'}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Last Name:</strong> {formData.last_name || '—'}
+                      </Typography>
+                    </Box>
+                    <Button
+                      size="small"
+                      startIcon={<Edit />}
+                      onClick={handleOpenNameDialog}
+                      sx={{ mt: 1 }}
+                      disabled={isFormDisabled}
+                    >
+                      Edit Names
+                    </Button>
+                  </Box>
+                )}
+                
+                {/* Phone Field */}
                 <TextField
                   fullWidth
-                  label="Full Name"
-                  name="full_name"
-                  value={formData.full_name}
+                  label="Phone Number (Optional)"
+                  name="phone"
+                  type="tel"
+                  value={formData.phone}
                   onChange={handleChange}
                   margin="normal"
-                  required
-                  error={hasFieldError('full_name')}
-                  helperText={getFieldError('full_name')}
+                  error={hasFieldError('phone')}
+                  helperText={getFieldError('phone') || 'e.g., +256712345678'}
                   disabled={isFormDisabled}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <BadgeOutlined color="action" />
+                        <Smartphone color="action" />
                       </InputAdornment>
                     ),
                   }}
@@ -658,7 +986,6 @@ const SignUpCard = () => {
                   }}
                 />
                 
-                {/* Password strength indicator */}
                 {formData.password && !hasFieldError('password') && (
                   <Box sx={{ mt: 1, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -730,8 +1057,16 @@ const SignUpCard = () => {
                     <strong>Username:</strong> {formData.username}
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1 }}>
-                    <strong>Full Name:</strong> {formData.full_name}
+                    <strong>First Name:</strong> {formData.first_name}
                   </Typography>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    <strong>Last Name:</strong> {formData.last_name}
+                  </Typography>
+                  {formData.phone && (
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      <strong>Phone:</strong> {formData.phone}
+                    </Typography>
+                  )}
                 </Box>
               </Paper>
             )}
@@ -793,7 +1128,7 @@ const SignUpCard = () => {
         </CardContent>
       </Card>
 
-      {/* Error Snackbar Popup */}
+      {/* Error Snackbar */}
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={6000}
@@ -811,21 +1146,6 @@ const SignUpCard = () => {
           <Typography variant="body2" fontWeight={500}>
             {errorMessage || 'Registration failed. Please try again.'}
           </Typography>
-          {error?.status === 409 && (
-            <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-              Try a different email address or{' '}
-              <Link 
-                component="button" 
-                onClick={() => {
-                  handleCloseSnackbar();
-                  navigate('/login');
-                }}
-                sx={{ color: 'white', textDecoration: 'underline' }}
-              >
-                sign in
-              </Link>
-            </Typography>
-          )}
         </Alert>
       </Snackbar>
 
@@ -848,7 +1168,7 @@ const SignUpCard = () => {
             Registration successful!
           </Typography>
           <Typography variant="caption" display="block">
-            Redirecting to login...
+            Please check your email to verify your account.
           </Typography>
         </Alert>
       </Snackbar>
@@ -856,4 +1176,4 @@ const SignUpCard = () => {
   );
 };
 
-export default SignUpCard;
+export default SignUpCard;x

@@ -2,24 +2,21 @@ import React from 'react';
 import CssBaseline from '@mui/material/CssBaseline';
 import Stack from '@mui/material/Stack';
 import Box from '@mui/material/Box';
-import { useMediaQuery, useTheme as useMuiTheme } from '@mui/material';
-import { useTheme } from '../hooks/useTheme';
+import { useMediaQuery, useTheme } from '@mui/material';
 import ColorModeSelect from '../components/shared-theme/ColorModeSelect';
 import SignInCard from '../components/auth/SignInCard';
 import Content from '../components/auth/Content';
 
 const SignInSide = () => {
-  const { mode } = useTheme();
-  const theme = useMuiTheme();
+  const theme = useTheme();
+  const mode = theme.palette.mode;
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   return (
     <>
       <CssBaseline enableColorScheme />
-      <ColorModeSelect 
-        sx={{ position: 'fixed', top: '1rem', right: '1rem', zIndex: 1000 }}
-      />
-      
+      <ColorModeSelect sx={{ position: 'fixed', top: '1rem', right: '1rem', zIndex: 1000 }} />
+
       <Box
         sx={{
           minHeight: '100vh',
@@ -33,16 +30,12 @@ const SignInSide = () => {
             content: '""',
             display: 'block',
             position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
+            top: 0, left: 0, right: 0, bottom: 0,
             zIndex: -1,
-            backgroundImage: 'radial-gradient(ellipse at 50% 50%, hsl(210, 100%, 97%), hsl(0, 0%, 100%))',
+            backgroundImage: mode === 'dark'
+              ? 'radial-gradient(at 50% 50%, hsla(210, 100%, 16%, 0.5), hsl(220, 30%, 5%))'
+              : 'radial-gradient(ellipse at 50% 50%, hsl(210, 100%, 97%), hsl(0, 0%, 100%))',
             backgroundRepeat: 'no-repeat',
-            ...(mode === 'dark' && {
-              backgroundImage: 'radial-gradient(at 50% 50%, hsla(210, 100%, 16%, 0.5), hsl(220, 30%, 5%))',
-            }),
           },
         }}
       >

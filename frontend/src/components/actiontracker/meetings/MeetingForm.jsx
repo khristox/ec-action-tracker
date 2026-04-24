@@ -1,429 +1,1293 @@
-// src/components/actiontracker/meetings/MeetingForm.jsx
-import React, { useState } from 'react';
+// src/components/meetings/MeetingForm.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Button, Stack, Box, Typography, IconButton,
-  FormControl, InputLabel, Select, MenuItem, Chip,
-  Alert, Divider, Switch, FormControlLabel, Grid,
-  Card, CardContent, Tooltip, Collapse, InputAdornment
+  Box,
+  Typography,
+  Button,
+  Paper,
+  TextField,
+  Stepper,
+  Step,
+  StepLabel,
+  Alert,
+  CircularProgress,
+  Snackbar,
+  Chip,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  ListItemButton,
+  MenuItem,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  Divider,
+  useMediaQuery,
+  useTheme,
+  Card,
+  CardContent,
+  Stack,
+  Container,
+  AppBar,
+  Toolbar,
+  InputAdornment,
+  Tooltip,
+  ListItemIcon,
+  Grid,
+  Switch,
+  Collapse,
+  CardActionArea,
+  ToggleButton,
+  ToggleButtonGroup,
+  Breadcrumbs,
+  Link as MuiLink,
+  LinearProgress
 } from '@mui/material';
 import {
+  Delete as DeleteIcon,
+  PersonAdd as PersonAddIcon,
   Close as CloseIcon,
-  ZoomIn as ZoomIcon,
-  VideoCall as GoogleMeetIcon,
-  MeetingRoom as TeamsIcon,
-  PersonPin as PhysicalIcon,
-  NotificationsActive as NotificationIcon,
-  AccessTime as TimeIcon,
-  Add as AddIcon,
-  ContentCopy as CopyIcon,
-  Check as CheckIcon,
-  Link as LinkIcon,
+  Cancel as CancelIcon,
+  ArrowBack as ArrowBackIcon,
+  ArrowForward as ArrowForwardIcon,
+  CheckCircle as CheckCircleIcon,
+  Event as EventIcon,
+  LocationOn as LocationIcon,
+  People as PeopleIcon,
+  Description as DescriptionIcon,
+  Save as SaveIcon,
+  MyLocation as MyLocationIcon,
+  GpsFixed as GpsFixedIcon,
+  GpsNotFixed as GpsNotFixedIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  EditNote as SecretaryIcon,
+  Search as SearchIcon,
+  Apartment as ApartmentIcon,
+  Business as BusinessIcon,
+  Public as PublicIcon,
+  Flag as FlagIcon,
+  Terrain as TerrainIcon,
+  Home as HomeIcon,
+  MeetingRoom as MeetingRoomIcon,
+  EventSeat as EventSeatIcon,
+  Clear as ClearIcon,
+  ChevronRight as ChevronRightIcon,
   Phone as PhoneIcon,
-  Security as SecurityIcon
+  Email as EmailIcon,
+  Work as WorkIcon,
+  Title as TitleIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
-import { DateTimePicker } from '@mui/x-date-pickers';
-import { format } from 'date-fns';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { TimePicker } from '@mui/x-date-pickers/TimePicker';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 import api from '../../../services/api';
-import ParticipantSelector from './ParticipantSelector';
 
-const meetingPlatforms = [
-  { value: 'zoom', label: 'Zoom', icon: <ZoomIcon />, color: '#0B5CFF' },
-  { value: 'google_meet', label: 'Google Meet', icon: <GoogleMeetIcon />, color: '#34A853' },
-  { value: 'microsoft_teams', label: 'Microsoft Teams', icon: <TeamsIcon />, color: '#6264A7' },
-  { value: 'physical', label: 'Physical Meeting', icon: <PhysicalIcon />, color: '#6B7280' },
-  { value: 'other', label: 'Other', icon: <LinkIcon />, color: '#F59E0B' }
+// Redux imports
+import {
+  fetchParticipantLists,
+  fetchParticipants,
+  addCustomParticipant,
+  removeLocalMeetingParticipant,
+  setMeetingChairperson,
+  addParticipantsFromListToMeeting,
+  clearMeetingParticipants,
+  selectParticipantLists,
+  selectMeetingParticipantsAll,
+  selectMeetingChairperson,
+  selectParticipantsLoading,
+} from '../../../store/slices/actionTracker/participantSlice';
+import { 
+  createMeeting, 
+  updateMeeting, 
+  fetchMeetingById,
+  clearMeetingState,
+  clearCurrentMeeting,
+  selectCurrentMeeting,
+  selectMeetingLoading 
+} from '../../../store/slices/actionTracker/meetingSlice';
+
+// Location Levels
+const ADDRESS_LEVELS = [
+  { level: 1, name: 'Country', icon: <PublicIcon />, color: '#4CAF50' },
+  { level: 2, name: 'Region', icon: <FlagIcon />, color: '#2196F3' },
+  { level: 3, name: 'District', icon: <TerrainIcon />, color: '#9C27B0' },
+  { level: 4, name: 'County', icon: <BusinessIcon />, color: '#FF9800' },
+  { level: 5, name: 'Subcounty', icon: <HomeIcon />, color: '#795548' },
+  { level: 6, name: 'Parish', icon: <LocationIcon />, color: '#607D8B' },
+  { level: 7, name: 'Village', icon: <HomeIcon />, color: '#8BC34A' }
 ];
 
-const MeetingForm = ({ open, onClose, onSave, editingMeeting, initialData }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    meeting_date: new Date(),
-    location: '',
-    platform: 'physical',
-    meeting_link: '',
-    meeting_id: '',
-    passcode: '',
-    dial_in_numbers: [],
-    send_reminders: true,
-    reminder_minutes_before: 30,
-    participants: []
-  });
-  
+const BUILDING_LEVELS = [
+  { level: 11, name: 'Office', icon: <ApartmentIcon />, color: '#E91E63' },
+  { level: 12, name: 'Building', icon: <BusinessIcon />, color: '#3F51B5' },
+  { level: 13, name: 'Room', icon: <MeetingRoomIcon />, color: '#009688' },
+  { level: 14, name: 'Conference', icon: <EventSeatIcon />, color: '#673AB7' }
+];
+
+// Helper function for alpha transparency
+const alpha = (color, opacity) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
+  if (result) {
+    const r = parseInt(result[1], 16);
+    const g = parseInt(result[2], 16);
+    const b = parseInt(result[3], 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+  return color;
+};
+
+// Quill modules
+const mobileModules = {
+  toolbar: [
+    ['bold', 'italic', 'underline'],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+    ['clean'],
+  ],
+};
+
+const desktopModules = {
+  toolbar: [
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+    ['link', 'clean'],
+  ],
+};
+
+const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'list', 'link'];
+
+const steps = [
+  { label: 'Details', icon: EventIcon },
+  { label: 'Participants', icon: PeopleIcon },
+  { label: 'Review', icon: CheckCircleIcon },
+];
+
+// Location Search Component
+const LocationSearch = ({ value, onChange, onClear, error }) => {
+  const theme = useTheme();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [newDialIn, setNewDialIn] = useState({ number: '', instructions: '' });
-
-  const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handlePlatformChange = (platform) => {
-    setFormData(prev => ({ ...prev, platform }));
-    
-    // Auto-generate meeting link based on platform
-    if (platform === 'zoom') {
-      generateZoomLink();
-    } else if (platform === 'google_meet') {
-      generateGoogleMeetLink();
+  const [locationMode, setLocationMode] = useState('address');
+  const [selectedLocation, setSelectedLocation] = useState(value);
+  const [locationHierarchy, setLocationHierarchy] = useState([]);
+  const [addressTree, setAddressTree] = useState([]);
+  const [buildingTree, setBuildingTree] = useState([]);
+  const [expandedNodes, setExpandedNodes] = useState({});
+  
+  // Load location hierarchy when selected
+  useEffect(() => {
+    if (selectedLocation?.id) {
+      loadLocationHierarchy(selectedLocation.id);
+    } else {
+      setLocationHierarchy([]);
     }
-  };
-
-  const generateZoomLink = async () => {
+  }, [selectedLocation]);
+  
+  // Load address tree on mount
+  useEffect(() => {
+    loadAddressTree();
+    loadBuildingTree();
+  }, []);
+  
+  // Update when value prop changes
+  useEffect(() => {
+    if (value !== selectedLocation) {
+      setSelectedLocation(value);
+    }
+  }, [value]);
+  
+  const loadLocationHierarchy = async (locationId) => {
     try {
-      // Call your backend to create a Zoom meeting
-      const response = await api.post('/meetings/create-zoom-meeting', {
-        topic: formData.title,
-        start_time: formData.meeting_date,
-        duration: 60
-      });
+      const response = await api.get(`/locations/${locationId}/ancestors`);
+      const ancestors = response.data || [];
+      const fullHierarchy = [...ancestors];
       
-      setFormData(prev => ({
-        ...prev,
-        meeting_link: response.data.join_url,
-        meeting_id: response.data.id,
-        passcode: response.data.password
-      }));
+      const locationResponse = await api.get(`/locations/${locationId}`);
+      if (locationResponse.data) {
+        fullHierarchy.push(locationResponse.data);
+      }
+      setLocationHierarchy(fullHierarchy);
     } catch (err) {
-      console.error('Failed to create Zoom meeting:', err);
+      console.error('Error loading hierarchy:', err);
+      setLocationHierarchy([selectedLocation]);
     }
   };
-
-  const generateGoogleMeetLink = () => {
-    // Generate a Google Meet link (you might need to use Google Calendar API)
-    const meetLink = `https://meet.google.com/new`;
-    setFormData(prev => ({ ...prev, meeting_link: meetLink }));
-  };
-
-  const handleCopyLink = () => {
-    if (formData.meeting_link) {
-      navigator.clipboard.writeText(formData.meeting_link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleAddDialInNumber = () => {
-    if (newDialIn.number) {
-      setFormData(prev => ({
-        ...prev,
-        dial_in_numbers: [...prev.dial_in_numbers, newDialIn]
-      }));
-      setNewDialIn({ number: '', instructions: '' });
-    }
-  };
-
-  const handleRemoveDialInNumber = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      dial_in_numbers: prev.dial_in_numbers.filter((_, i) => i !== index)
-    }));
-  };
-
-  const handleSendNotification = async () => {
-    setLoading(true);
+  
+  const loadAddressTree = async () => {
     try {
-      await api.post(`/meetings/${editingMeeting?.id}/notify-participants`, {
-        participants: formData.participants,
-        meeting_details: {
-          title: formData.title,
-          date: formData.meeting_date,
-          platform: formData.platform,
-          meeting_link: formData.meeting_link,
-          meeting_id: formData.meeting_id,
-          passcode: formData.passcode,
-          location: formData.location
-        }
-      });
-      alert('Notifications sent successfully!');
+      const response = await api.get('/locations/tree', { params: { location_mode: 'address', max_depth: 7 } });
+      setAddressTree(response.data || []);
     } catch (err) {
-      setError('Failed to send notifications');
-    } finally {
-      setLoading(false);
+      console.error('Error loading address tree:', err);
     }
   };
-
-  const handleSubmit = async () => {
-    if (!formData.title.trim()) {
-      setError('Meeting title is required');
+  
+  const loadBuildingTree = async () => {
+    try {
+      const response = await api.get('/locations/tree', { params: { location_mode: 'buildings', max_depth: 4 } });
+      setBuildingTree(response.data || []);
+    } catch (err) {
+      console.error('Error loading building tree:', err);
+    }
+  };
+  
+  const searchLocations = async (query) => {
+    if (!query || query.length < 2) {
+      setSearchResults([]);
       return;
     }
     
     setLoading(true);
     try {
-      await onSave(formData);
-      onClose();
+      const response = await api.get('/locations/', {
+        params: {
+          search: query,
+          location_mode: locationMode === 'all' ? undefined : locationMode,
+          limit: 50,
+          include_inactive: false
+        }
+      });
+      setSearchResults(response.data?.items || []);
     } catch (err) {
-      setError(err.message || 'Failed to save meeting');
+      console.error('Error searching locations:', err);
+      setSearchResults([]);
     } finally {
       setLoading(false);
     }
   };
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm) {
+        searchLocations(searchTerm);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  
+  const handleSelectLocation = (location) => {
+    setSelectedLocation(location);
+    setSearchTerm('');
+    setSearchResults([]);
+    onChange(location);
+  };
+  
+  const handleClearLocation = () => {
+    setSelectedLocation(null);
+    setLocationHierarchy([]);
+    onChange(null);
+    if (onClear) onClear();
+  };
+  
+  const getLevelInfo = (location) => {
+    if (location.location_mode === 'buildings') {
+      return BUILDING_LEVELS.find(l => l.level === location.level);
+    }
+    return ADDRESS_LEVELS.find(l => l.level === location.level);
+  };
+  
+  const toggleNode = (nodeId) => {
+    setExpandedNodes(prev => ({ ...prev, [nodeId]: !prev[nodeId] }));
+  };
+  
+  const renderTreeNodes = (nodes, depth = 0) => {
+    if (!nodes || nodes.length === 0) return null;
+    
+    return nodes.map(node => {
+      const levelInfo = getLevelInfo(node);
+      const isExpanded = expandedNodes[node.id];
+      const hasChildren = node.children && node.children.length > 0;
+      
+      return (
+        <Box key={node.id} sx={{ ml: depth * 3 }}>
+          <ListItemButton
+            onClick={() => toggleNode(node.id)}
+            sx={{ borderRadius: 1, mb: 0.5 }}
+          >
+            <ListItemIcon sx={{ minWidth: 36 }}>
+              {hasChildren ? (
+                isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />
+              ) : (
+                <LocationIcon fontSize="small" />
+              )}
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Box sx={{ color: levelInfo?.color }}>
+                    {levelInfo?.icon}
+                  </Box>
+                  <Typography variant="body2">{node.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">({node.code})</Typography>
+                </Stack>
+              }
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSelectLocation(node);
+              }}
+            >
+              Select
+            </Button>
+          </ListItemButton>
+          {hasChildren && isExpanded && (
+            <Box sx={{ ml: 2 }}>
+              {renderTreeNodes(node.children, depth + 1)}
+            </Box>
+          )}
+        </Box>
+      );
+    });
+  };
+  
+  return (
+    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <CardContent>
+        <Stack spacing={2}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <LocationIcon sx={{ color: 'primary.main' }} />
+            <Typography variant="subtitle1" fontWeight={600}>
+              Meeting Location
+            </Typography>
+            {selectedLocation && (
+              <Chip
+                label="Location Selected"
+                size="small"
+                color="success"
+                onDelete={handleClearLocation}
+              />
+            )}
+          </Stack>
+          
+          {/* Location Mode Toggle */}
+          <ToggleButtonGroup
+            value={locationMode}
+            exclusive
+            onChange={(e, val) => val && setLocationMode(val)}
+            size="small"
+            fullWidth
+          >
+            <ToggleButton value="address">
+              <PublicIcon sx={{ mr: 1 }} /> Addresses
+            </ToggleButton>
+            <ToggleButton value="buildings">
+              <ApartmentIcon sx={{ mr: 1 }} /> Buildings
+            </ToggleButton>
+          </ToggleButtonGroup>
+          
+          {/* Search Input */}
+          <TextField
+            fullWidth
+            placeholder={`Search for ${locationMode === 'address' ? 'address (Country, District, Village)' : 'building (Office, Building, Room)'}...`}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            size="small"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+              endAdornment: loading && <CircularProgress size={20} />
+            }}
+          />
+          
+          {/* Search Results */}
+          {searchResults.length > 0 && (
+            <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+              <List dense>
+                {searchResults.map(result => {
+                  const levelInfo = getLevelInfo(result);
+                  return (
+                    <ListItemButton
+                      key={result.id}
+                      onClick={() => handleSelectLocation(result)}
+                      selected={selectedLocation?.id === result.id}
+                    >
+                      <ListItemIcon>
+                        {levelInfo?.icon || <LocationIcon />}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={result.name}
+                        secondary={`${result.code} • ${levelInfo?.name || `Level ${result.level}`} • ${result.location_mode}`}
+                      />
+                    </ListItemButton>
+                  );
+                })}
+              </List>
+            </Paper>
+          )}
+          
+          {/* Location Tree */}
+          {!searchTerm && (
+            <>
+              <Typography variant="caption" color="text.secondary">
+                Or browse from hierarchy:
+              </Typography>
+              <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto' }}>
+                <List dense>
+                  {locationMode === 'address' 
+                    ? renderTreeNodes(addressTree)
+                    : renderTreeNodes(buildingTree)
+                  }
+                </List>
+              </Paper>
+            </>
+          )}
+          
+          {/* Selected Location Display */}
+          {selectedLocation && locationHierarchy.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Selected Location Path:
+              </Typography>
+              <Breadcrumbs separator={<ArrowForwardIcon sx={{ fontSize: 14 }} />}>
+                {locationHierarchy.map((item, idx) => {
+                  const levelInfo = getLevelInfo(item);
+                  return (
+                    <Chip
+                      key={item.id}
+                      label={item.name}
+                      size="small"
+                      sx={{
+                        bgcolor: alpha(levelInfo?.color || theme.palette.primary.main, 0.1),
+                        borderColor: levelInfo?.color || theme.palette.primary.main,
+                        color: levelInfo?.color || theme.palette.primary.main,
+                      }}
+                      icon={levelInfo?.icon}
+                    />
+                  );
+                })}
+              </Breadcrumbs>
+            </Paper>
+          )}
+          
+          {!selectedLocation && (
+            <Alert severity="info" variant="outlined">
+              Search for or browse to select a location. You can select either an address or a building.
+            </Alert>
+          )}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+};
 
-  const selectedPlatform = meetingPlatforms.find(p => p.value === formData.platform);
+const MeetingForm = () => {
+  const navigate = useNavigate();
+  const { id } = useParams(); // Get meeting ID from URL for edit mode
+  const dispatch = useDispatch();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  
+  const isEditMode = Boolean(id);
+
+  // Redux state
+  const participantLists = useSelector(selectParticipantLists);
+  const meetingParticipants = useSelector(selectMeetingParticipantsAll);
+  const chairperson = useSelector(selectMeetingChairperson);
+  const participantsLoading = useSelector(selectParticipantsLoading);
+  const currentMeeting = useSelector(selectCurrentMeeting);
+  const meetingLoading = useSelector(selectMeetingLoading);
+  const { isLoading: submitting, success, error: meetingError } = useSelector(
+    (state) => state.meetings
+  );
+
+  const [activeStep, setActiveStep] = useState(0);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
+  const [selectedParticipantList, setSelectedParticipantList] = useState(null);
+  const [showGpsDetails, setShowGpsDetails] = useState(false);
+  const [formLoading, setFormLoading] = useState(isEditMode);
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    meeting_date: null,
+    start_time: null,
+    end_time: null,
+    location_text: '',
+    location_id: null,
+    location_details: null,
+    agenda: '',
+    secretary_name: '',
+    gps_latitude: '',
+    gps_longitude: '',
+  });
+
+  // GPS State
+  const [gpsEnabled, setGpsEnabled] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsSupported, setGpsSupported] = useState(true);
+
+  // New participant form
+  const [newParticipant, setNewParticipant] = useState({
+    name: '',
+    email: '',
+    telephone: '',
+    title: '',
+    organization: '',
+    is_chairperson: false,
+  });
+
+  const apiLoading = submitting || participantsLoading || formLoading;
+
+  // Fetch meeting data for edit mode
+  useEffect(() => {
+    if (isEditMode && id) {
+      dispatch(fetchMeetingById(id)).unwrap()
+        .then((meeting) => {
+          if (meeting) {
+            // Populate form with meeting data
+            const meetingDate = new Date(meeting.meeting_date);
+            const startTime = meeting.start_time ? new Date(meeting.start_time) : null;
+            const endTime = meeting.end_time ? new Date(meeting.end_time) : null;
+            
+            setFormData({
+              title: meeting.title || '',
+              description: meeting.description || '',
+              meeting_date: meetingDate,
+              start_time: startTime,
+              end_time: endTime,
+              location_text: meeting.location_text || '',
+              location_id: meeting.location_id || null,
+              location_details: meeting.location_id ? {
+                id: meeting.location_id,
+                name: meeting.location_text,
+                code: meeting.location_code,
+                level: meeting.location_level,
+                location_mode: meeting.location_mode
+              } : null,
+              agenda: meeting.agenda || '',
+              secretary_name: meeting.secretary_name || '',
+              gps_latitude: meeting.gps_coordinates?.split(',')[0] || '',
+              gps_longitude: meeting.gps_coordinates?.split(',')[1] || '',
+            });
+            
+            // Set GPS enabled if coordinates exist
+            if (meeting.gps_coordinates) {
+              setGpsEnabled(true);
+            }
+            
+            // Populate participants
+            if (meeting.participants && meeting.participants.length > 0) {
+              meeting.participants.forEach(participant => {
+                dispatch(addCustomParticipant(participant));
+              });
+            }
+            
+            // Set chairperson
+            const chair = meeting.participants?.find(p => p.is_chairperson);
+            if (chair) {
+              dispatch(setMeetingChairperson(chair.id));
+            }
+          }
+          setFormLoading(false);
+        })
+        .catch((error) => {
+          console.error('Error fetching meeting:', error);
+          setSnackbar({
+            open: true,
+            message: 'Failed to load meeting data',
+            severity: 'error',
+          });
+          setFormLoading(false);
+        });
+    }
+  }, [isEditMode, id, dispatch]);
+
+  // Handle location selection
+  const handleLocationSelect = (location) => {
+    if (location) {
+      setFormData(prev => ({
+        ...prev,
+        location_id: location.id,
+        location_text: location.name,
+        location_details: {
+          id: location.id,
+          name: location.name,
+          code: location.code,
+          level: location.level,
+          location_mode: location.location_mode,
+          location_type: location.location_type
+        }
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        location_id: null,
+        location_text: '',
+        location_details: null
+      }));
+    }
+  };
+
+  // Fetch data on mount
+  useEffect(() => {
+    dispatch(fetchParticipantLists());
+    dispatch(fetchParticipants({ limit: 100 }));
+
+    if (!navigator.geolocation) {
+      setGpsSupported(false);
+      setSnackbar({
+        open: true,
+        message: 'Geolocation is not supported by your browser',
+        severity: 'warning',
+      });
+    }
+
+    return () => {
+      dispatch(clearMeetingState());
+      dispatch(clearMeetingParticipants());
+      dispatch(clearCurrentMeeting());
+    };
+  }, [dispatch]);
+
+  // Handle meeting creation/update success
+  useEffect(() => {
+    if (success) {
+      setSnackbar({
+        open: true,
+        message: isEditMode ? 'Meeting updated successfully! Redirecting...' : 'Meeting created successfully! Redirecting...',
+        severity: 'success',
+      });
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 2000);
+    }
+  }, [success, navigate, isEditMode]);
+
+  // Handle errors
+  useEffect(() => {
+    if (meetingError) {
+      setSnackbar({
+        open: true,
+        message: typeof meetingError === 'string' ? meetingError : `Failed to ${isEditMode ? 'update' : 'create'} meeting`,
+        severity: 'error',
+      });
+    }
+  }, [meetingError, isEditMode]);
+
+  // GPS Functions
+  const getCurrentLocation = () => {
+    if (!gpsSupported) {
+      setSnackbar({
+        open: true,
+        message: 'Geolocation is not supported by your browser',
+        severity: 'error',
+      });
+      return;
+    }
+
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setFormData((prev) => ({
+          ...prev,
+          gps_latitude: latitude.toFixed(6),
+          gps_longitude: longitude.toFixed(6),
+        }));
+        setGpsEnabled(true);
+        setGpsLoading(false);
+      },
+      (error) => {
+        let errorMessage = 'Unable to get location.';
+        setSnackbar({ open: true, message: errorMessage, severity: 'error' });
+        setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleGpsToggle = (event) => {
+    const enabled = event.target.checked;
+    setGpsEnabled(enabled);
+    if (!enabled) {
+      setFormData((prev) => ({ ...prev, gps_latitude: '', gps_longitude: '' }));
+    } else if (gpsSupported && !formData.gps_latitude) {
+      getCurrentLocation();
+    }
+  };
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleDateChange = (date) => setFormData({ ...formData, meeting_date: date });
+  const handleStartTimeChange = (time) => setFormData({ ...formData, start_time: time });
+  const handleEndTimeChange = (time) => setFormData({ ...formData, end_time: time });
+  const handleAgendaChange = (value) => setFormData({ ...formData, agenda: value });
+
+  // Participant handlers
+  const handleNewParticipantChange = (field) => (event) => {
+    setNewParticipant({ ...newParticipant, [field]: event.target.value });
+  };
+
+  const handleUseParticipantList = () => {
+    if (selectedParticipantList) {
+      const list = participantLists.find((l) => l.id === selectedParticipantList);
+      if (list && list.participants) {
+        dispatch(
+          addParticipantsFromListToMeeting({
+            listId: selectedParticipantList,
+            participants: list.participants,
+          })
+        );
+        setSnackbar({
+          open: true,
+          message: `Added ${list.participants.length} participants`,
+          severity: 'success',
+        });
+      }
+      setSelectedParticipantList(null);
+    }
+  };
+
+  const handleAddCustomParticipant = () => {
+    if (!newParticipant.name.trim()) return;
+    dispatch(addCustomParticipant(newParticipant));
+    setNewParticipant({
+      name: '', email: '', telephone: '', title: '', organization: '', is_chairperson: false,
+    });
+    setShowAddParticipantDialog(false);
+    setSnackbar({
+      open: true,
+      message: 'Participant added successfully',
+      severity: 'success',
+    });
+  };
+
+  const handleRemoveParticipant = (participantId) => {
+    dispatch(removeLocalMeetingParticipant(participantId));
+  };
+
+  const handleSetChairperson = (participantId) => {
+    dispatch(setMeetingChairperson(participantId));
+  };
+
+  const handleNext = () => {
+    if (activeStep === 0 && !formData.title.trim()) return;
+    setActiveStep(activeStep + 1);
+    window.scrollTo(0, 0);
+  };
+
+  const handleBack = () => {
+    if (activeStep === 0) navigate('/meetings');
+    else setActiveStep(activeStep - 1);
+  };
+
+  const handleCancel = () => navigate('/meetings');
+
+  const handleSubmit = async () => {
+    try {
+      const meetingDate = formData.meeting_date;
+      const startDateTime = new Date(meetingDate);
+      startDateTime.setHours(formData.start_time.getHours(), formData.start_time.getMinutes());
+
+      let endDateTime = null;
+      if (formData.end_time) {
+        endDateTime = new Date(meetingDate);
+        endDateTime.setHours(formData.end_time.getHours(), formData.end_time.getMinutes());
+      }
+
+      const meetingPayload = {
+        title: formData.title,
+        description: formData.description || null,
+        meeting_date: startDateTime.toISOString(),
+        start_time: startDateTime.toISOString(),
+        end_time: endDateTime ? endDateTime.toISOString() : null,
+        location_text: formData.location_text || null,
+        location_id: formData.location_id || null,
+        gps_coordinates: gpsEnabled && formData.gps_latitude && formData.gps_longitude 
+          ? `${formData.gps_latitude},${formData.gps_longitude}` 
+          : null,
+        agenda: formData.agenda || null,
+        secretary_name: formData.secretary_name || null,
+        chairperson_name: chairperson?.name || null,
+        custom_participants: meetingParticipants.map((p) => ({
+          name: p.name,
+          email: p.email || null,
+          telephone: p.telephone || null,
+          title: p.title || null,
+          organization: p.organization || null,
+          is_chairperson: p.is_chairperson || false,
+          is_secretary: p.name === formData.secretary_name
+        })),
+      };
+
+      if (isEditMode) {
+        await dispatch(updateMeeting({ id, data: meetingPayload })).unwrap();
+      } else {
+        await dispatch(createMeeting(meetingPayload)).unwrap();
+      }
+      
+      navigate('/dashboard');
+    } catch (error) {
+      setSnackbar({ 
+        open: true, 
+        message: error.message || `Failed to ${isEditMode ? 'update' : 'create'} meeting`, 
+        severity: 'error' 
+      });
+    }
+  };
+
+  const chairpersonName = chairperson?.name || 'Not selected';
+  const pageTitle = isEditMode ? 'Edit Meeting' : 'Create New Meeting';
+  const pageSubtitle = isEditMode ? 'Update meeting details' : 'Fill in the details to schedule a new meeting';
+
+  if (formLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6" fontWeight={600}>
-            {editingMeeting ? 'Edit Meeting' : 'Create New Meeting'}
-          </Typography>
-          <IconButton onClick={onClose}><CloseIcon /></IconButton>
-        </Stack>
-      </DialogTitle>
-      
-      <DialogContent dividers>
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
-        
-        <Stack spacing={3}>
-          {/* Basic Information */}
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                Basic Information
-              </Typography>
-              <Stack spacing={2}>
-                <TextField
-                  fullWidth
-                  label="Meeting Title *"
-                  value={formData.title}
-                  onChange={(e) => handleChange('title', e.target.value)}
-                  placeholder="e.g., Weekly Sprint Planning"
+    <LocalizationProvider dateAdapter={AdapterDateFns}>
+      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 10, sm: 4 } }}>
+        {/* Mobile App Bar */}
+        {isMobile && (
+          <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Toolbar sx={{ px: 1.5 }}>
+              <IconButton edge="start" onClick={() => navigate('/meetings')}><ArrowBackIcon /></IconButton>
+              <Typography variant="h6" sx={{ flex: 1, textAlign: 'center', fontWeight: 600 }}>{pageTitle}</Typography>
+              <IconButton edge="end" onClick={handleCancel}><CloseIcon /></IconButton>
+            </Toolbar>
+          </AppBar>
+        )}
+
+        <Container maxWidth="md" sx={{ px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
+          {!isMobile && (
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+              <Box>
+                <Typography variant="h4" fontWeight={800} color="primary">{pageTitle}</Typography>
+                <Typography variant="body2" color="text.secondary">{pageSubtitle}</Typography>
+              </Box>
+              <Button variant="outlined" startIcon={<CancelIcon />} onClick={handleCancel} disabled={apiLoading}>Cancel</Button>
+            </Box>
+          )}
+
+          <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, borderRadius: { xs: 2, md: 3 }, position: 'relative', overflow: 'hidden' }}>
+            {apiLoading && (
+              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(255,255,255,0.85)', zIndex: 10, backdropFilter: 'blur(4px)' }}>
+                <LinearProgress />
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                  <CircularProgress />
+                </Box>
+              </Box>
+            )}
+
+            <Stepper activeStep={activeStep} sx={{ mb: 4, display: isMobile ? 'none' : 'flex' }}>
+              {steps.map((step, index) => (
+                <Step key={index}><StepLabel StepIconComponent={step.icon}>{step.label}</StepLabel></Step>
+              ))}
+            </Stepper>
+
+            {/* Step 1: Meeting Details */}
+            {activeStep === 0 && (
+              <Stack spacing={2.5}>
+                <TextField 
+                  fullWidth 
+                  label="Meeting Title *" 
+                  name="title" 
+                  required 
+                  value={formData.title} 
+                  onChange={handleChange} 
+                  disabled={apiLoading} 
+                />
+                <TextField 
+                  fullWidth 
+                  label="Description" 
+                  name="description" 
+                  multiline 
+                  rows={isMobile ? 2 : 3} 
+                  value={formData.description} 
+                  onChange={handleChange} 
+                  disabled={apiLoading} 
+                />
+                <DatePicker 
+                  label="Meeting Date *" 
+                  value={formData.meeting_date} 
+                  onChange={handleDateChange} 
+                  slotProps={{ textField: { fullWidth: true, required: true } }} 
+                />
+                <TimePicker 
+                  label="Start Time *" 
+                  value={formData.start_time} 
+                  onChange={handleStartTimeChange} 
+                  slotProps={{ textField: { fullWidth: true, required: true } }} 
+                />
+                <TimePicker 
+                  label="End Time (Optional)" 
+                  value={formData.end_time} 
+                  onChange={handleEndTimeChange} 
+                  slotProps={{ textField: { fullWidth: true } }} 
                 />
                 
-                <TextField
-                  fullWidth
-                  label="Description"
-                  multiline
-                  rows={2}
-                  value={formData.description}
-                  onChange={(e) => handleChange('description', e.target.value)}
-                  placeholder="Meeting agenda and objectives..."
+                {/* Location Search Component */}
+                <LocationSearch 
+                  value={formData.location_details}
+                  onChange={handleLocationSelect}
+                  onClear={() => handleLocationSelect(null)}
                 />
                 
-                <DateTimePicker
-                  label="Meeting Date & Time"
-                  value={formData.meeting_date}
-                  onChange={(date) => handleChange('meeting_date', date)}
-                  slotProps={{ textField: { fullWidth: true } }}
-                />
-              </Stack>
-            </CardContent>
-          </Card>
-          
-          {/* Meeting Platform */}
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                Meeting Platform
-              </Typography>
-              
-              <Grid container spacing={1} sx={{ mb: 2 }}>
-                {meetingPlatforms.map((platform) => (
-                  <Grid size={{ xs: 6, sm: 2.4 }} key={platform.value}>
-                    <Card
-                      variant={formData.platform === platform.value ? 'elevation' : 'outlined'}
-                      elevation={formData.platform === platform.value ? 2 : 0}
-                      sx={{
-                        cursor: 'pointer',
-                        textAlign: 'center',
-                        p: 1.5,
-                        bgcolor: formData.platform === platform.value ? alpha(platform.color, 0.1) : 'transparent',
-                        borderColor: formData.platform === platform.value ? platform.color : '#e0e0e0',
-                        '&:hover': { bgcolor: alpha(platform.color, 0.05) }
-                      }}
-                      onClick={() => handlePlatformChange(platform.value)}
-                    >
-                      <Box sx={{ color: platform.color, mb: 0.5 }}>
-                        {platform.icon}
+                {/* GPS Section */}
+                <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                  <CardActionArea onClick={() => setShowGpsDetails(!showGpsDetails)}>
+                    <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        {gpsEnabled ? <GpsFixedIcon color="success" /> : <GpsNotFixedIcon color="disabled" />}
+                        <Typography variant="subtitle1" fontWeight="bold">GPS Coordinates (Optional)</Typography>
                       </Box>
-                      <Typography variant="caption" fontWeight={500}>
-                        {platform.label}
-                      </Typography>
-                    </Card>
-                  </Grid>
-                ))}
-              </Grid>
-              
-              {/* Platform-specific fields */}
-              <Collapse in={formData.platform !== 'physical'}>
-                <Stack spacing={2} sx={{ mt: 2 }}>
-                  <TextField
-                    fullWidth
-                    label="Meeting Link"
-                    value={formData.meeting_link}
-                    onChange={(e) => handleChange('meeting_link', e.target.value)}
-                    placeholder="https://..."
-                    InputProps={{
-                      endAdornment: formData.meeting_link && (
-                        <InputAdornment position="end">
-                          <Tooltip title={copied ? "Copied!" : "Copy Link"}>
-                            <IconButton onClick={handleCopyLink}>
-                              {copied ? <CheckIcon color="success" /> : <CopyIcon />}
-                            </IconButton>
-                          </Tooltip>
-                        </InputAdornment>
-                      )
-                    }}
-                  />
-                  
-                  <Stack direction="row" spacing={2}>
-                    <TextField
-                      fullWidth
-                      label="Meeting ID"
-                      value={formData.meeting_id}
-                      onChange={(e) => handleChange('meeting_id', e.target.value)}
-                    />
-                    <TextField
-                      fullWidth
-                      label="Passcode"
-                      value={formData.passcode}
-                      onChange={(e) => handleChange('passcode', e.target.value)}
-                      type="password"
-                    />
-                  </Stack>
-                  
-                  <Box>
-                    <Typography variant="subtitle2" gutterBottom>
-                      Dial-in Numbers
-                    </Typography>
-                    <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                      <TextField
-                        size="small"
-                        placeholder="Phone number"
-                        value={newDialIn.number}
-                        onChange={(e) => setNewDialIn({ ...newDialIn, number: e.target.value })}
-                      />
-                      <TextField
-                        size="small"
-                        placeholder="Instructions (optional)"
-                        value={newDialIn.instructions}
-                        onChange={(e) => setNewDialIn({ ...newDialIn, instructions: e.target.value })}
-                      />
-                      <Button onClick={handleAddDialInNumber} startIcon={<AddIcon />}>
-                        Add
-                      </Button>
-                    </Stack>
-                    
-                    <Stack spacing={1}>
-                      {formData.dial_in_numbers.map((dial, idx) => (
-                        <Chip
-                          key={idx}
-                          icon={<PhoneIcon />}
-                          label={`${dial.number} ${dial.instructions ? `- ${dial.instructions}` : ''}`}
-                          onDelete={() => handleRemoveDialInNumber(idx)}
-                          variant="outlined"
+                      <Switch checked={gpsEnabled} onChange={handleGpsToggle} onClick={(e) => e.stopPropagation()} />
+                    </Box>
+                  </CardActionArea>
+                  <Collapse in={showGpsDetails && gpsEnabled}>
+                    <Box sx={{ p: 2, pt: 0, borderTop: 1, borderColor: 'divider' }}>
+                      <Stack spacing={2}>
+                        <Button 
+                          size="small" 
+                          variant="contained" 
+                          startIcon={<MyLocationIcon />} 
+                          onClick={getCurrentLocation}
+                          disabled={gpsLoading}
+                        >
+                          {gpsLoading ? <CircularProgress size={20} /> : 'Get Current Location'}
+                        </Button>
+                        <TextField 
+                          fullWidth 
+                          label="Latitude" 
+                          value={formData.gps_latitude} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, gps_latitude: e.target.value }))}
+                          size="small" 
                         />
-                      ))}
+                        <TextField 
+                          fullWidth 
+                          label="Longitude" 
+                          value={formData.gps_longitude} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, gps_longitude: e.target.value }))}
+                          size="small" 
+                        />
+                      </Stack>
+                    </Box>
+                  </Collapse>
+                </Card>
+
+                <Box>
+                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Agenda</Typography>
+                  <ReactQuill 
+                    theme="snow" 
+                    value={formData.agenda} 
+                    onChange={handleAgendaChange} 
+                    modules={isMobile ? mobileModules : desktopModules} 
+                    formats={formats} 
+                    style={{ height: '150px', marginBottom: '50px' }} 
+                  />
+                </Box>
+              </Stack>
+            )}
+
+            {/* Step 2: Participants */}
+            {activeStep === 1 && (
+              <Stack spacing={3}>
+                <Card variant="outlined">
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>📋 Add from Participant List</Typography>
+                    <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                      <InputLabel>Select Participant List</InputLabel>
+                      <Select 
+                        value={selectedParticipantList || ''} 
+                        onChange={(e) => setSelectedParticipantList(e.target.value)} 
+                        label="Select Participant List"
+                      >
+                        {participantLists.map((list) => (
+                          <MenuItem key={list.id} value={list.id}>{list.name} ({list.participants?.length || 0})</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Button 
+                      fullWidth 
+                      variant="contained" 
+                      onClick={handleUseParticipantList} 
+                      disabled={!selectedParticipantList}
+                    >
+                      Add Selected List
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card variant="outlined">
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                      <Typography variant="subtitle1" fontWeight="bold">👤 Individual Participants</Typography>
+                      <Button 
+                        variant="outlined" 
+                        startIcon={<PersonAddIcon />} 
+                        onClick={() => setShowAddParticipantDialog(true)}
+                        disabled={apiLoading}
+                      >
+                        Add Participant
+                      </Button>
+                    </Box>
+
+                    {meetingParticipants.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                        No participants added yet
+                      </Typography>
+                    ) : (
+                      <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                        {meetingParticipants.map((participant) => (
+                          <React.Fragment key={participant.id}>
+                            <ListItem
+                              secondaryAction={
+                                <IconButton edge="end" onClick={() => handleRemoveParticipant(participant.id)}>
+                                  <DeleteIcon />
+                                </IconButton>
+                              }
+                            >
+                              <ListItemAvatar>
+                                <Avatar sx={{ bgcolor: participant.is_chairperson ? 'primary.main' : 'success.main' }}>
+                                  {participant.name?.charAt(0) || 'P'}
+                                </Avatar>
+                              </ListItemAvatar>
+                              <ListItemText
+                                primary={
+                                  <Stack direction="row" alignItems="center" spacing={1}>
+                                    <Typography variant="body2" fontWeight={500}>{participant.name}</Typography>
+                                    {participant.is_chairperson && <Chip label="Chairperson" size="small" color="primary" />}
+                                  </Stack>
+                                }
+                                secondary={
+                                  <Stack direction="row" spacing={2} flexWrap="wrap">
+                                    {participant.email && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <EmailIcon sx={{ fontSize: 12 }} /> {participant.email}
+                                      </Typography>
+                                    )}
+                                    {participant.telephone && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <PhoneIcon sx={{ fontSize: 12 }} /> {participant.telephone}
+                                      </Typography>
+                                    )}
+                                    {participant.title && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <TitleIcon sx={{ fontSize: 12 }} /> {participant.title}
+                                      </Typography>
+                                    )}
+                                    {participant.organization && (
+                                      <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                                        <WorkIcon sx={{ fontSize: 12 }} /> {participant.organization}
+                                      </Typography>
+                                    )}
+                                  </Stack>
+                                }
+                              />
+                            </ListItem>
+                            {!participant.is_chairperson && (
+                              <Button 
+                                size="small" 
+                                sx={{ ml: 7, mb: 1 }} 
+                                onClick={() => handleSetChairperson(participant.id)}
+                              >
+                                Make Chairperson
+                              </Button>
+                            )}
+                            <Divider component="li" />
+                          </React.Fragment>
+                        ))}
+                      </List>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Secretary Selection */}
+                <Card variant="outlined" sx={{ borderLeft: 6, borderColor: 'secondary.main' }}>
+                  <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                    <Stack direction="row" spacing={1} alignItems="center" mb={2}>
+                      <SecretaryIcon color="secondary" />
+                      <Typography variant="subtitle1" fontWeight="bold">Designate Secretary</Typography>
                     </Stack>
-                  </Box>
-                </Stack>
-              </Collapse>
-              
-              <Collapse in={formData.platform === 'physical'}>
-                <TextField
-                  fullWidth
-                  label="Location"
-                  value={formData.location}
-                  onChange={(e) => handleChange('location', e.target.value)}
-                  placeholder="Building, Room Number, Address..."
-                  sx={{ mt: 2 }}
-                />
-              </Collapse>
-            </CardContent>
-          </Card>
-          
-          {/* Participants */}
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                Participants
-              </Typography>
-              <ParticipantSelector
-                value={formData.participants}
-                onChange={(participants) => handleChange('participants', participants)}
-                meetingId={editingMeeting?.id}
-              />
-            </CardContent>
-          </Card>
-          
-          {/* Advanced Settings */}
-          <Card variant="outlined">
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="subtitle1" fontWeight={600}>
-                  Notification Settings
-                </Typography>
-                <Button
-                  size="small"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  endIcon={showAdvanced ? <CloseIcon /> : <AddIcon />}
+                    <FormControl fullWidth>
+                      <InputLabel>Select Secretary from Participants</InputLabel>
+                      <Select
+                        name="secretary_name"
+                        value={formData.secretary_name}
+                        onChange={handleChange}
+                        label="Select Secretary from Participants"
+                      >
+                        <MenuItem value=""><em>None Selected</em></MenuItem>
+                        {meetingParticipants.map((p) => (
+                          <MenuItem key={p.id} value={p.name}>{p.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </CardContent>
+                </Card>
+              </Stack>
+            )}
+
+            {/* Step 3: Review */}
+            {activeStep === 2 && (
+              <Stack spacing={2}>
+                <Alert severity="info">
+                  {isEditMode ? 'Review meeting details before updating' : 'Review meeting details before creating'}
+                </Alert>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="subtitle2" color="primary" gutterBottom>Meeting Information</Typography>
+                    <Grid container spacing={1}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2"><strong>Title:</strong> {formData.title}</Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2"><strong>Chairperson:</strong> {chairpersonName}</Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2" color="secondary.main"><strong>Secretary:</strong> {formData.secretary_name || 'Not selected'}</Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}>
+                        <Typography variant="body2"><strong>Location:</strong> {formData.location_text || 'Not specified'}</Typography>
+                      </Grid>
+                      {formData.location_details && (
+                        <Grid size={{ xs: 12 }}>
+                          <Typography variant="body2"><strong>Location Type:</strong> {formData.location_details.location_mode} - Level {formData.location_details.level}</Typography>
+                        </Grid>
+                      )}
+                      {formData.meeting_date && formData.start_time && (
+                        <Grid size={{ xs: 12 }}>
+                          <Typography variant="body2">
+                            <strong>Date & Time:</strong> {formData.meeting_date?.toLocaleDateString()} at {formData.start_time?.toLocaleTimeString()}
+                            {formData.end_time && ` - ${formData.end_time?.toLocaleTimeString()}`}
+                          </Typography>
+                        </Grid>
+                      )}
+                    </Grid>
+                    <Divider sx={{ my: 2 }} />
+                    <Typography variant="subtitle2" color="primary" gutterBottom>Participants ({meetingParticipants.length})</Typography>
+                    <Box component="ul" sx={{ pl: 2, mt: 1, maxHeight: 150, overflow: 'auto' }}>
+                      {meetingParticipants.slice(0, 10).map(p => (
+                        <li key={p.id}>
+                          <Typography variant="body2">
+                            {p.name} {p.is_chairperson && '(Chairperson)'}
+                            {p.name === formData.secretary_name && ' (Secretary)'}
+                          </Typography>
+                        </li>
+                      ))}
+                      {meetingParticipants.length > 10 && (
+                        <li><Typography variant="body2">...and {meetingParticipants.length - 10} more</Typography></li>
+                      )}
+                    </Box>
+                  </CardContent>
+                </Card>
+                <Button 
+                  variant="contained" 
+                  size="large" 
+                  onClick={handleSubmit} 
+                  startIcon={<SaveIcon />} 
+                  disabled={apiLoading}
                 >
-                  {showAdvanced ? 'Less' : 'More'}
+                  {apiLoading ? <CircularProgress size={24} /> : (isEditMode ? 'Update Meeting' : 'Create Meeting')}
                 </Button>
               </Stack>
-              
-              <Collapse in={showAdvanced}>
-                <Stack spacing={2} sx={{ mt: 2 }}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={formData.send_reminders}
-                        onChange={(e) => handleChange('send_reminders', e.target.checked)}
-                      />
-                    }
-                    label="Send email reminders to participants"
-                  />
-                  
-                  <FormControl fullWidth>
-                    <InputLabel>Send Reminder</InputLabel>
-                    <Select
-                      value={formData.reminder_minutes_before}
-                      onChange={(e) => handleChange('reminder_minutes_before', e.target.value)}
-                      label="Send Reminder"
-                      disabled={!formData.send_reminders}
-                    >
-                      <MenuItem value={15}>15 minutes before</MenuItem>
-                      <MenuItem value={30}>30 minutes before</MenuItem>
-                      <MenuItem value={60}>1 hour before</MenuItem>
-                      <MenuItem value={120}>2 hours before</MenuItem>
-                      <MenuItem value={1440}>1 day before</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Stack>
-              </Collapse>
-            </CardContent>
-          </Card>
-        </Stack>
-      </DialogContent>
-      
-      <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
-        <Button
-          variant="outlined"
-          color="primary"
-          startIcon={<NotificationIcon />}
-          onClick={handleSendNotification}
-          disabled={!editingMeeting || formData.participants.length === 0}
+            )}
+
+            {/* Navigation Buttons */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
+              <Button onClick={handleBack} startIcon={<ArrowBackIcon />} disabled={apiLoading}>
+                {activeStep === 0 ? 'Cancel' : 'Back'}
+              </Button>
+              {activeStep < 2 && (
+                <Button variant="contained" onClick={handleNext} endIcon={<ArrowForwardIcon />} disabled={apiLoading}>
+                  Next
+                </Button>
+              )}
+            </Box>
+          </Paper>
+        </Container>
+
+        {/* Add Participant Dialog */}
+        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Add New Participant</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                fullWidth
+                label="Full Name *"
+                value={newParticipant.name}
+                onChange={handleNewParticipantChange('name')}
+                required
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Email"
+                type="email"
+                value={newParticipant.email}
+                onChange={handleNewParticipantChange('email')}
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Telephone"
+                value={newParticipant.telephone}
+                onChange={handleNewParticipantChange('telephone')}
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Title"
+                value={newParticipant.title}
+                onChange={handleNewParticipantChange('title')}
+                size="small"
+              />
+              <TextField
+                fullWidth
+                label="Organization"
+                value={newParticipant.organization}
+                onChange={handleNewParticipantChange('organization')}
+                size="small"
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowAddParticipantDialog(false)}>Cancel</Button>
+            <Button variant="contained" onClick={handleAddCustomParticipant} disabled={!newParticipant.name.trim()}>
+              Add Participant
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
         >
-          Send Notifications ({formData.participants.length})
-        </Button>
-        
-        <Stack direction="row" spacing={1}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleSubmit}
-            disabled={loading || !formData.title.trim()}
-          >
-            {loading ? 'Saving...' : (editingMeeting ? 'Update Meeting' : 'Create Meeting')}
-          </Button>
-        </Stack>
-      </DialogActions>
-    </Dialog>
+          <Alert severity={snackbar.severity} variant="filled">
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
+      </Box>
+    </LocalizationProvider>
   );
 };
 

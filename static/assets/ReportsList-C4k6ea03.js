@@ -1,0 +1,2 @@
+import"./rolldown-runtime-COnpUsM8.js";import{Aa as e,Ia as t,Qi as n,_a as r,wa as i}from"./mui-vendor-CxEsjj-i.js";t();var a=e(),o=()=>(0,a.jsx)(n,{maxWidth:`xl`,sx:{py:4},children:(0,a.jsxs)(i,{sx:{p:4,textAlign:`center`},children:[(0,a.jsx)(r,{variant:`h4`,gutterBottom:!0,children:`Reports`}),(0,a.jsx)(r,{variant:`body2`,color:`text.secondary`,children:`Reports and analytics coming soon.`})]})});export{o as default};
+//# sourceMappingURL=ReportsList-C4k6ea03.js.map

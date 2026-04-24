@@ -71,6 +71,8 @@ const ApologyDialog = memo(({
   initialMessage = '',
   loading 
 }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   const [message, setMessage] = useState(initialMessage);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -112,12 +114,25 @@ const ApologyDialog = memo(({
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+    <Dialog 
+      open={open} 
+      onClose={handleClose} 
+      maxWidth="sm" 
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+          borderRadius: 2
+        }
+      }}
+    >
       <DialogTitle>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={1} alignItems="center">
             <MessageIcon color="warning" />
-            <Typography variant="h6">Mark Absent with Apology</Typography>
+            <Typography variant="h6" sx={{ color: isDarkMode ? '#ffffff' : 'inherit' }}>
+              Mark Absent with Apology
+            </Typography>
           </Stack>
           {!isSubmitting && !submitted && (
             <IconButton onClick={handleClose} disabled={isSubmitting}>
@@ -213,6 +228,7 @@ const ParticipantsTab = ({
   currentSecretaryId
 }) => {
   const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   const [loading, setLoading] = useState(false);
   const [participants, setParticipants] = useState(initialParticipants || []);
   const [attendanceStatus, setAttendanceStatus] = useState({});
@@ -504,10 +520,19 @@ const ParticipantsTab = ({
 
   const StatCard = useCallback(({ title, value, icon, color, tooltip }) => (
     <Zoom in={true} style={{ transitionDelay: '100ms' }}>
-      <Card variant="outlined" sx={{ height: '100%', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
+      <Card 
+        variant="outlined" 
+        sx={{ 
+          height: '100%', 
+          transition: 'transform 0.2s', 
+          '&:hover': { transform: 'translateY(-4px)' },
+          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+          borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
+        }}
+      >
         <CardContent>
           <Stack direction="row" alignItems="center" spacing={2}>
-            <Avatar sx={{ bgcolor: alpha(color, 0.1), color: color, width: 48, height: 48 }}>
+            <Avatar sx={{ bgcolor: alpha(color, isDarkMode ? 0.2 : 0.1), color: color, width: 48, height: 48 }}>
               {icon}
             </Avatar>
             <Box>
@@ -524,14 +549,22 @@ const ParticipantsTab = ({
         </CardContent>
       </Card>
     </Zoom>
-  ), []);
+  ), [isDarkMode, theme]);
 
   // Read-only mode
   if (isReadOnly) {
     return (
       <Fade in={true}>
         <Stack spacing={3}>
-          <Alert severity="info" icon={<InfoIcon />} sx={{ borderRadius: 2 }}>
+          <Alert 
+            severity="info" 
+            icon={<InfoIcon />} 
+            sx={{ 
+              borderRadius: 2,
+              bgcolor: isDarkMode ? alpha(theme.palette.info.main, 0.1) : undefined,
+              color: isDarkMode ? theme.palette.info.light : undefined
+            }}
+          >
             <Typography variant="subtitle2" fontWeight={600}>
               Meeting Not Started - View Only Mode
             </Typography>
@@ -556,16 +589,23 @@ const ParticipantsTab = ({
             </Grid>
           </Grid>
 
-          <TableContainer component={Paper} variant="outlined">
+          <TableContainer 
+            component={Paper} 
+            variant="outlined"
+            sx={{
+              bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+              borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
+            }}
+          >
             <Table>
               <TableHead>
-                <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Participant</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Contact</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Role</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Apology Comment</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+                <TableRow sx={{ bgcolor: isDarkMode ? alpha(theme.palette.common.white, 0.05) : '#f8fafc' }}>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Participant</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Contact</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Role</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Apology Comment</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }} align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -576,7 +616,7 @@ const ParticipantsTab = ({
                         <Avatar sx={{ width: 36, height: 36, bgcolor: '#6366f1' }}>
                           {participant.name?.[0] || participant.full_name?.[0] || '?'}
                         </Avatar>
-                        <Typography variant="body2" fontWeight={600}>
+                        <Typography variant="body2" fontWeight={600} sx={{ color: isDarkMode ? '#e0e0e0' : 'inherit' }}>
                           {participant.name || participant.full_name || participant.username}
                         </Typography>
                       </Stack>
@@ -584,13 +624,13 @@ const ParticipantsTab = ({
                     <TableCell>
                       <Stack spacing={0.5}>
                         {participant.email && (
-                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: isDarkMode ? '#94a3b8' : 'inherit' }}>
                             <EmailIcon fontSize="small" sx={{ fontSize: 12 }} />
                             {participant.email}
                           </Typography>
                         )}
                         {participant.telephone && (
-                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: isDarkMode ? '#94a3b8' : 'inherit' }}>
                             <PhoneIcon fontSize="small" sx={{ fontSize: 12 }} />
                             {participant.telephone}
                           </Typography>
@@ -620,7 +660,7 @@ const ParticipantsTab = ({
                       {(attendanceStatus[participant.id] === 'absent_with_apology' ||
                         participant.attendance_status === 'absent_with_apology') && (
                         <Tooltip title={apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}>
-                          <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', color: isDarkMode ? '#94a3b8' : 'inherit' }}>
                             {apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}
                           </Typography>
                         </Tooltip>
@@ -647,7 +687,15 @@ const ParticipantsTab = ({
   return (
     <Fade in={true}>
       <Stack spacing={3}>
-        <Alert severity="success" icon={<PlayCircleIcon />} sx={{ borderRadius: 2 }}>
+        <Alert 
+          severity="success" 
+          icon={<PlayCircleIcon />} 
+          sx={{ 
+            borderRadius: 2,
+            bgcolor: isDarkMode ? alpha(theme.palette.success.main, 0.1) : undefined,
+            color: isDarkMode ? theme.palette.success.light : undefined
+          }}
+        >
           <Typography variant="subtitle2" fontWeight={600}>Meeting in Progress</Typography>
           <Typography variant="body2">You can now mark attendance and assign roles for participants.</Typography>
         </Alert>
@@ -667,27 +715,48 @@ const ParticipantsTab = ({
           </Grid>
         </Grid>
 
-        <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
+        <Paper sx={{ 
+          p: 2, 
+          bgcolor: isDarkMode ? alpha(theme.palette.success.main, 0.1) : alpha(theme.palette.success.main, 0.05),
+          borderRadius: 2
+        }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-            <Typography variant="body2" fontWeight={600}>Attendance Rate</Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ color: isDarkMode ? '#e0e0e0' : 'inherit' }}>
+              Attendance Rate
+            </Typography>
             <Typography variant="h6" fontWeight={700} color="success.main">{stats.attendanceRate}%</Typography>
           </Stack>
-          <LinearProgress variant="determinate" value={parseFloat(stats.attendanceRate)} sx={{ height: 8, borderRadius: 4 }} />
+          <LinearProgress 
+            variant="determinate" 
+            value={parseFloat(stats.attendanceRate)} 
+            sx={{ 
+              height: 8, 
+              borderRadius: 4,
+              bgcolor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
+            }} 
+          />
           <Typography variant="caption" color="text.secondary" mt={1}>
             {stats.attended} out of {stats.total} participants attended
           </Typography>
         </Paper>
 
-        <TableContainer component={Paper} variant="outlined">
+        <TableContainer 
+          component={Paper} 
+          variant="outlined"
+          sx={{
+            bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+            borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
+          }}
+        >
           <Table>
             <TableHead>
-              <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                <TableCell sx={{ fontWeight: 700 }}>Participant</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Contact</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Role</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Apology Comment</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
+              <TableRow sx={{ bgcolor: isDarkMode ? alpha(theme.palette.common.white, 0.05) : '#f8fafc' }}>
+                <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Participant</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Contact</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Role</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>Apology Comment</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#e0e0e0' : 'inherit' }} align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -695,11 +764,17 @@ const ParticipantsTab = ({
                 <TableRow key={participant.id} hover>
                   <TableCell>
                     <Stack direction="row" alignItems="center" spacing={1.5}>
-                      <Avatar sx={{ width: 36, height: 36, bgcolor: participant.is_chairperson ? theme.palette.primary.main : (participant.is_secretary ? theme.palette.secondary.main : '#6366f1') }}>
+                      <Avatar sx={{ 
+                        width: 36, 
+                        height: 36, 
+                        bgcolor: participant.is_chairperson 
+                          ? theme.palette.primary.main 
+                          : (participant.is_secretary ? theme.palette.secondary.main : '#6366f1')
+                      }}>
                         {participant.name?.[0] || participant.full_name?.[0] || '?'}
                       </Avatar>
                       <Box>
-                        <Typography variant="body2" fontWeight={600}>
+                        <Typography variant="body2" fontWeight={600} sx={{ color: isDarkMode ? '#e0e0e0' : 'inherit' }}>
                           {participant.name || participant.full_name || participant.username}
                         </Typography>
                         {participant.title && (
@@ -714,13 +789,13 @@ const ParticipantsTab = ({
                   <TableCell>
                     <Stack spacing={0.5}>
                       {participant.email && (
-                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: isDarkMode ? '#94a3b8' : 'inherit' }}>
                           <EmailIcon fontSize="small" sx={{ fontSize: 12 }} />
                           {participant.email}
                         </Typography>
                       )}
                       {participant.telephone && (
-                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: isDarkMode ? '#94a3b8' : 'inherit' }}>
                           <PhoneIcon fontSize="small" sx={{ fontSize: 12 }} />
                           {participant.telephone}
                         </Typography>
@@ -745,7 +820,11 @@ const ParticipantsTab = ({
                           startIcon={<StarIcon />}
                           onClick={() => handleSetChairperson(participant.id)}
                           disabled={loading || participant.is_chairperson}
-                          sx={{ textTransform: 'none' }}
+                          sx={{ 
+                            textTransform: 'none',
+                            borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.2) : undefined,
+                            color: isDarkMode ? '#e0e0e0' : 'inherit'
+                          }}
                         >
                           Set as Chairperson
                         </Button>
@@ -766,7 +845,11 @@ const ParticipantsTab = ({
                           startIcon={<SecretaryIcon />}
                           onClick={() => handleSetSecretary(participant.id)}
                           disabled={loading || participant.is_secretary}
-                          sx={{ textTransform: 'none' }}
+                          sx={{ 
+                            textTransform: 'none',
+                            borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.2) : undefined,
+                            color: isDarkMode ? '#e0e0e0' : 'inherit'
+                          }}
                         >
                           Set as Secretary
                         </Button>
@@ -785,7 +868,7 @@ const ParticipantsTab = ({
                     {(attendanceStatus[participant.id] === 'absent_with_apology' ||
                       participant.attendance_status === 'absent_with_apology') && (
                       <Tooltip title={apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}>
-                        <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', color: isDarkMode ? '#94a3b8' : 'inherit' }}>
                           {apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}
                         </Typography>
                       </Tooltip>
@@ -855,7 +938,14 @@ const ParticipantsTab = ({
           onClose={() => setSnackbar({ ...snackbar, open: false })}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
-          <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          <Alert 
+            severity={snackbar.severity} 
+            onClose={() => setSnackbar({ ...snackbar, open: false })}
+            sx={{
+              bgcolor: isDarkMode ? 'background.paper' : undefined,
+              color: isDarkMode ? '#e0e0e0' : undefined
+            }}
+          >
             {snackbar.message}
           </Alert>
         </Snackbar>

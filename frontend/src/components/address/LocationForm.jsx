@@ -1,5 +1,5 @@
 // src/components/address/LocationForm.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -22,272 +22,55 @@ import {
   FormHelperText,
   Divider,
   Paper,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent,
   Breadcrumbs,
-  Link,
-  Tooltip,
   Autocomplete,
-  InputAdornment
+  InputAdornment,
+  useTheme,
+  alpha
 } from '@mui/material';
 import {
   Close as CloseIcon,
   Save as SaveIcon,
   LocationOn as LocationIcon,
-  Add as AddIcon,
-  Delete as DeleteIcon,
-  Edit as EditIcon,
-  Search as SearchIcon,
-  Map as MapIcon,
-  Home as HomeIcon,
-  Business as BusinessIcon,
   Public as PublicIcon,
+  Apartment as ApartmentIcon,
   Flag as FlagIcon,
   Terrain as TerrainIcon,
-  ArrowBack as ArrowBackIcon,
-  ArrowForward as ArrowForwardIcon,
-  CheckCircle as CheckCircleIcon
+  Business as BusinessIcon,
+  Home as HomeIcon,
+  Map as MapIcon
 } from '@mui/icons-material';
 import api from '../../services/api';
 
-// ==================== Constants ====================
-
-const LEVELS = [
-  { level: 1, type: 'country', name: 'Country', icon: <PublicIcon />, placeholder: 'e.g., Uganda' },
-  { level: 2, type: 'region', name: 'Region', icon: <FlagIcon />, placeholder: 'e.g., Central Region' },
-  { level: 3, type: 'district', name: 'District', icon: <TerrainIcon />, placeholder: 'e.g., Kampala' },
-  { level: 4, type: 'county', name: 'County', icon: <BusinessIcon />, placeholder: 'e.g., Kampala Central' },
-  { level: 5, type: 'subcounty', name: 'Subcounty', icon: <HomeIcon />, placeholder: 'e.g., Central Division' },
-  { level: 6, type: 'parish', name: 'Parish', icon: <LocationIcon />, placeholder: 'e.g., Nakasero' },
-  { level: 7, type: 'village', name: 'Village', icon: <HomeIcon />, placeholder: 'e.g., Nakasero I' },
+// Level configurations with dark mode compatible colors
+const ADDRESS_LEVELS = [
+  { level: 1, name: 'Country', type: 'country', icon: <PublicIcon />, color: '#4CAF50', darkColor: '#81C784' },
+  { level: 2, name: 'Region', type: 'region', icon: <FlagIcon />, color: '#2196F3', darkColor: '#64B5F6' },
+  { level: 3, name: 'District', type: 'district', icon: <TerrainIcon />, color: '#9C27B0', darkColor: '#CE93D8' },
+  { level: 4, name: 'County', type: 'county', icon: <BusinessIcon />, color: '#FF9800', darkColor: '#FFB74D' },
+  { level: 5, name: 'Subcounty', type: 'subcounty', icon: <HomeIcon />, color: '#795548', darkColor: '#A1887F' },
+  { level: 6, name: 'Parish', type: 'parish', icon: <LocationIcon />, color: '#607D8B', darkColor: '#90A4AE' },
+  { level: 7, name: 'Village', type: 'village', icon: <HomeIcon />, color: '#8BC34A', darkColor: '#AED581' }
 ];
 
-const LEVEL_MAP = {
-  1: 'country',
-  2: 'region',
-  3: 'district',
-  4: 'county',
-  5: 'subcounty',
-  6: 'parish',
-  7: 'village'
-};
+const BUILDINGS_LEVELS = [
+  { level: 11, name: 'Office', type: 'office', icon: <ApartmentIcon />, color: '#E91E63', darkColor: '#F06292' },
+  { level: 12, name: 'Building', type: 'building', icon: <BusinessIcon />, color: '#3F51B5', darkColor: '#7986CB' },
+  { level: 13, name: 'Room', type: 'room', icon: <LocationIcon />, color: '#009688', darkColor: '#4DB6AC' },
+  { level: 14, name: 'Conference', type: 'conference', icon: <MapIcon />, color: '#673AB7', darkColor: '#9575CD' }
+];
 
-// ==================== Helper Functions ====================
-
-const getLevelIcon = (level) => {
-  const levelData = LEVELS.find(l => l.level === level);
-  return levelData?.icon || <LocationIcon />;
-};
-
-const getLevelName = (level) => {
-  const levelData = LEVELS.find(l => l.level === level);
-  return levelData?.name || `Level ${level}`;
-};
-
-// ==================== Location Hierarchy Component ====================
-
-const LocationHierarchy = ({ ancestors = [], onSelect, onClear }) => {
-  if (!ancestors || ancestors.length === 0) {
-    return (
-      <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc', textAlign: 'center' }}>
-        <Typography variant="body2" color="text.secondary">
-          No parent location selected. This will be a top-level location.
-        </Typography>
-      </Paper>
-    );
-  }
-
-  return (
-    <Box>
-      <Typography variant="subtitle2" gutterBottom>
-        Location Hierarchy
-      </Typography>
-      <Breadcrumbs separator="›" aria-label="location hierarchy">
-        {ancestors.map((ancestor, index) => (
-          <Link
-            key={ancestor.id}
-            component="button"
-            variant="body2"
-            onClick={() => onSelect?.(ancestor)}
-            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer' }}
-          >
-            {getLevelIcon(ancestor.level)}
-            {ancestor.name}
-          </Link>
-        ))}
-      </Breadcrumbs>
-      {onClear && ancestors.length > 0 && (
-        <Button size="small" onClick={onClear} sx={{ mt: 1 }}>
-          Clear parent
-        </Button>
-      )}
-    </Box>
-  );
-};
-
-// ==================== Parent Selector Component ====================
-
-const ParentSelector = ({ level, value, onChange, disabled }) => {
-  const [open, setOpen] = useState(false);
-  const [options, setOptions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const parentLevel = level - 1;
-  const parentLevelInfo = LEVELS.find(l => l.level === parentLevel);
-
-  const fetchParents = useCallback(async () => {
-    if (!parentLevelInfo) return;
-    
-    setLoading(true);
-    try {
-      const response = await api.get('/locations/', {
-        params: {
-          level: parentLevel,
-          limit: 50,
-          ...(searchTerm && { search: searchTerm })
-        }
-      });
-      setOptions(response.data?.items || response.data || []);
-    } catch (error) {
-      console.error('Failed to fetch parent locations:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [parentLevel, parentLevelInfo, searchTerm]);
-
-  useEffect(() => {
-    if (open) {
-      fetchParents();
-    }
-  }, [open, fetchParents]);
-
-  if (!parentLevelInfo) {
-    return (
-      <Alert severity="info">
-        This is a top-level location (Country). No parent selection needed.
-      </Alert>
-    );
-  }
-
-  return (
-    <Autocomplete
-      open={open}
-      onOpen={() => setOpen(true)}
-      onClose={() => setOpen(false)}
-      value={value}
-      onChange={(event, newValue) => onChange(newValue)}
-      options={options}
-      loading={loading}
-      getOptionLabel={(option) => `${option.name} (${option.code})`}
-      isOptionEqualToValue={(option, val) => option.id === val?.id}
-      renderOption={(props, option) => (
-        <li {...props}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            {getLevelIcon(parentLevel)}
-            <Typography variant="body2">{option.name}</Typography>
-            <Chip label={option.code} size="small" variant="outlined" />
-          </Stack>
-        </li>
-      )}
-      renderInput={(params) => (
-        <TextField
-          {...params}
-          label={`Parent ${parentLevelInfo.name}`}
-          placeholder={`Search for ${parentLevelInfo.name}...`}
-          InputProps={{
-            ...params.InputProps,
-            startAdornment: (
-              <>
-                <InputAdornment position="start">
-                  {getLevelIcon(parentLevel)}
-                </InputAdornment>
-                {params.InputProps.startAdornment}
-              </>
-            ),
-            endAdornment: (
-              <>
-                {loading ? <CircularProgress size={20} /> : null}
-                {params.InputProps.endAdornment}
-              </>
-            ),
-          }}
-          helperText={`Select the parent ${parentLevelInfo.name} for this location`}
-          disabled={disabled}
-        />
-      )}
-    />
-  );
-};
-
-// ==================== Location Preview Component ====================
-
-const LocationPreview = ({ formData, ancestors }) => {
-  const levelInfo = LEVELS.find(l => l.level === formData.level);
+const LocationForm = ({ open, onClose, onSuccess, initialData, mode = 'create', locationMode = 'address' }) => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   
-  if (!formData.name && !formData.code) {
-    return null;
-  }
-
-  return (
-    <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f0fdf4', borderRadius: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        {levelInfo?.icon}
-        <Typography variant="subtitle2" fontWeight={600}>
-          Location Preview
-        </Typography>
-      </Stack>
-      
-      <Stack spacing={1}>
-        <Box>
-          <Typography variant="caption" color="text.secondary">Full Hierarchy</Typography>
-          <Typography variant="body2">
-            {ancestors.length > 0 ? (
-              <Breadcrumbs separator=" › " maxItems={3}>
-                {ancestors.map(a => (
-                  <span key={a.id}>{a.name}</span>
-                ))}
-                <strong>{formData.name || 'New Location'}</strong>
-              </Breadcrumbs>
-            ) : (
-              <strong>{formData.name || 'New Location'}</strong>
-            )}
-          </Typography>
-        </Box>
-        
-        <Box>
-          <Typography variant="caption" color="text.secondary">Location Code</Typography>
-          <Typography variant="body2" fontFamily="monospace">
-            {formData.code || 'Will be auto-generated'}
-          </Typography>
-        </Box>
-        
-        <Box>
-          <Typography variant="caption" color="text.secondary">Type</Typography>
-          <Chip 
-            label={levelInfo?.name || `Level ${formData.level}`} 
-            size="small" 
-            color="primary" 
-            variant="outlined"
-          />
-        </Box>
-      </Stack>
-    </Paper>
-  );
-};
-
-// ==================== Main Location Form Component ====================
-
-const LocationForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }) => {
   const [formData, setFormData] = useState({
     code: '',
     name: '',
     short_name: '',
     native_name: '',
     full_name: '',
-    level: 1,
+    level: locationMode === 'address' ? 1 : 11,
     location_type: '',
     parent_id: null,
     status: 'active',
@@ -295,8 +78,7 @@ const LocationForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
     longitude: '',
     population: '',
     area: '',
-    postal_code: '',
-    extra_metadata: {}
+    postal_code: ''
   });
   
   const [ancestors, setAncestors] = useState([]);
@@ -305,535 +87,465 @@ const LocationForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
   const [success, setSuccess] = useState(false);
   const [codeValidating, setCodeValidating] = useState(false);
   const [codeAvailable, setCodeAvailable] = useState(null);
-  const [activeStep, setActiveStep] = useState(0);
-  const [availableLevels, setAvailableLevels] = useState([]);
-
+  const [parentOptions, setParentOptions] = useState([]);
+  const [loadingParents, setLoadingParents] = useState(false);
+  
   const isEdit = mode === 'edit';
-  const levelInfo = LEVELS.find(l => l.level === formData.level);
+  const levels = locationMode === 'buildings' ? BUILDINGS_LEVELS : ADDRESS_LEVELS;
+  const currentLevel = levels.find(l => l.level === formData.level);
+  
+  useEffect(() => {
+    if (formData.level && formData.level > (locationMode === 'buildings' ? 11 : 1)) {
+      fetchParentOptions(locationMode === 'buildings' ? formData.level - 1 : formData.level - 1);
+    }
+  }, [formData.level, locationMode]);
 
-  // Fetch available levels based on parent
-  const fetchAvailableLevels = useCallback(async () => {
-    if (!formData.parent_id) {
-      setAvailableLevels(LEVELS);
-      return;
-    }
-    
-    try {
-      const response = await api.get(`/locations/${formData.parent_id}`);
-      const parent = response.data;
-      const nextLevel = parent.level + 1;
-      const available = LEVELS.filter(l => l.level === nextLevel);
-      setAvailableLevels(available);
-      
-      if (formData.level !== nextLevel) {
-        setFormData(prev => ({ ...prev, level: nextLevel }));
-      }
-    } catch (error) {
-      console.error('Failed to fetch parent info:', error);
-      setAvailableLevels(LEVELS);
-    }
+  useEffect(() => {
+    if (formData.parent_id) fetchAncestors();
+    else setAncestors([]);
   }, [formData.parent_id]);
 
-  // Fetch ancestors when parent changes
-  const fetchAncestors = useCallback(async () => {
-    if (!formData.parent_id) {
-      setAncestors([]);
-      return;
-    }
-    
-    try {
-      const response = await api.get(`/locations/${formData.parent_id}/ancestors`);
-      const ancestorsList = response.data || [];
-      setAncestors(ancestorsList);
-    } catch (error) {
-      console.error('Failed to fetch ancestors:', error);
-      setAncestors([]);
-    }
-  }, [formData.parent_id]);
-
-  // Validate code uniqueness
-  const validateCode = useCallback(async (code) => {
-    if (!code || code.length < 3) {
-      setCodeAvailable(null);
-      return;
-    }
-    
-    setCodeValidating(true);
-    try {
-      const response = await api.get(`/locations/by-code/${code}`);
-      const exists = response.data;
-      setCodeAvailable(!exists);
-    } catch (error) {
-      if (error.response?.status === 404) {
-        setCodeAvailable(true);
-      } else {
-        setCodeAvailable(false);
-      }
-    } finally {
-      setCodeValidating(false);
-    }
-  }, []);
-
-  // Load initial data for edit mode
   useEffect(() => {
     if (open && initialData && isEdit) {
       setFormData({
-        code: initialData.code || '',
-        name: initialData.name || '',
-        short_name: initialData.short_name || '',
-        native_name: initialData.native_name || '',
-        full_name: initialData.full_name || '',
-        level: initialData.level || 1,
-        location_type: initialData.location_type || '',
-        parent_id: initialData.parent_id || null,
-        status: initialData.status || 'active',
+        ...initialData,
         latitude: initialData.latitude || '',
         longitude: initialData.longitude || '',
         population: initialData.population || '',
         area: initialData.area || '',
-        postal_code: initialData.postal_code || '',
-        extra_metadata: initialData.extra_metadata || {}
       });
-      setAvailableLevels(LEVELS.filter(l => l.level === (initialData.level || 1)));
     }
   }, [open, initialData, isEdit]);
 
-  // Fetch ancestors when parent changes
-  useEffect(() => {
-    if (open) {
-      fetchAncestors();
-      fetchAvailableLevels();
-    }
-  }, [open, formData.parent_id, fetchAncestors, fetchAvailableLevels]);
+  const fetchParentOptions = async (level) => {
+    setLoadingParents(true);
+    try {
+      const response = await api.get('/locations/', { params: { level, limit: 100, location_mode: locationMode } });
+      setParentOptions(response.data?.items || []);
+    } catch (err) { console.error(err); } finally { setLoadingParents(false); }
+  };
 
-  // Validate code on change
-  useEffect(() => {
-    if (!isEdit && formData.code) {
-      const timer = setTimeout(() => validateCode(formData.code), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [formData.code, isEdit, validateCode]);
+  const fetchAncestors = async () => {
+    try {
+      const response = await api.get(`/locations/${formData.parent_id}/ancestors`);
+      setAncestors(response.data || []);
+    } catch (err) { console.error(err); }
+  };
+
+  const validateCode = async (code) => {
+    if (!code || code.length < 3 || isEdit) return;
+    setCodeValidating(true);
+    try {
+      const response = await api.get(`/locations/by-code/${code}`);
+      setCodeAvailable(!response.data);
+    } catch (err) { setCodeAvailable(err.response?.status === 404); } finally { setCodeValidating(false); }
+  };
 
   const handleChange = (field) => (event) => {
-    setFormData(prev => ({ ...prev, [field]: event.target.value }));
-  };
-
-  const handleParentChange = (parent) => {
-    setFormData(prev => ({ 
-      ...prev, 
-      parent_id: parent?.id || null,
-      level: parent ? parent.level + 1 : 1
-    }));
-  };
-
-  const handleLevelChange = (event) => {
-    const newLevel = parseInt(event.target.value);
-    setFormData(prev => ({ ...prev, level: newLevel }));
-    
-    // Clear parent if level is 1 (country)
-    if (newLevel === 1) {
-      setFormData(prev => ({ ...prev, parent_id: null }));
+    const value = event.target.value;
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (field === 'code') validateCode(value);
+    if (field === 'level') {
+      const info = levels.find(l => l.level === value);
+      setFormData(prev => ({ ...prev, level: value, location_type: info?.type || '', parent_id: null }));
     }
-  };
-
-  const handleClearParent = () => {
-    setFormData(prev => ({ ...prev, parent_id: null, level: 1 }));
   };
 
   const handleSubmit = async () => {
-    // Validation
-    if (!formData.name) {
-      setError('Location name is required');
-      return;
-    }
-    
-    if (!formData.code) {
-      setError('Location code is required');
-      return;
-    }
-    
-    if (codeAvailable === false && !isEdit) {
-      setError('Location code already exists. Please use a different code.');
-      return;
-    }
-    
+    if (!formData.name || !formData.code) { setError('Name and Code are required'); return; }
     setLoading(true);
-    setError(null);
-    
     try {
-      const payload = {
-        code: formData.code,
-        name: formData.name,
-        short_name: formData.short_name || null,
-        native_name: formData.native_name || null,
-        full_name: formData.full_name || null,
-        level: formData.level,
-        location_type: LEVEL_MAP[formData.level],
-        parent_id: formData.parent_id || null,
-        status: formData.status,
-        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
-        population: formData.population ? parseInt(formData.population) : null,
-        area: formData.area ? parseFloat(formData.area) : null,
-        postal_code: formData.postal_code || null,
-      };
-      
-      let response;
-      if (isEdit && initialData?.id) {
-        response = await api.put(`/locations/${initialData.id}`, payload);
-      } else {
-        response = await api.post('/locations/', payload);
-      }
-      
+      const payload = { ...formData, location_mode: locationMode };
+      const response = isEdit ? await api.put(`/locations/${initialData.id}`, payload) : await api.post('/locations/', payload);
       setSuccess(true);
-      setTimeout(() => {
-        onSuccess?.(response.data);
-        onClose();
-      }, 1500);
-    } catch (err) {
-      console.error('Failed to save location:', err);
-      setError(err.response?.data?.detail || 'Failed to save location');
-    } finally {
-      setLoading(false);
-    }
+      setTimeout(() => { onSuccess?.(response.data); onClose(); }, 1500);
+    } catch (err) { setError(err.response?.data?.detail || 'Failed to save'); } finally { setLoading(false); }
   };
 
-  const steps = [
-    {
-      label: 'Basic Information',
-      description: 'Name and code for the location',
-      fields: ['name', 'code', 'short_name', 'native_name', 'full_name']
-    },
-    {
-      label: 'Hierarchy',
-      description: 'Parent location and level',
-      fields: ['level', 'parent_id']
-    },
-    {
-      label: 'Geographic Data',
-      description: 'GPS coordinates and demographics',
-      fields: ['latitude', 'longitude', 'population', 'area']
-    },
-    {
-      label: 'Additional Info',
-      description: 'Postal code and metadata',
-      fields: ['postal_code', 'status']
-    }
-  ];
+  const getLevelColor = (level) => {
+    const levelInfo = levels.find(l => l.level === level);
+    if (!levelInfo) return theme.palette.primary.main;
+    return isDark ? levelInfo.darkColor : levelInfo.color;
+  };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ pb: 1 }}>
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="md" 
+      fullWidth
+      PaperProps={{
+        sx: { 
+          bgcolor: 'background.paper',
+          backgroundImage: 'none',
+          borderRadius: 2,
+          border: `1px solid ${theme.palette.divider}`
+        }
+      }}
+    >
+      <DialogTitle sx={{ 
+        pb: 1, 
+        borderBottom: `1px solid ${theme.palette.divider}`,
+        bgcolor: 'background.default'
+      }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={1.5} alignItems="center">
-            <LocationIcon color="primary" />
-            <Typography variant="h6" fontWeight={700}>
-              {isEdit ? 'Edit Location' : 'Create New Location'}
+            <Box sx={{ color: 'primary.main', display: 'flex' }}>
+              {locationMode === 'address' ? <PublicIcon /> : <ApartmentIcon />}
+            </Box>
+            <Typography variant="h6" fontWeight={700} color="text.primary">
+              {isEdit ? 'Edit Location' : `New ${locationMode === 'address' ? 'Address' : 'Building'}`}
             </Typography>
-            {levelInfo && (
+            {currentLevel && (
               <Chip 
-                label={levelInfo.name} 
+                label={currentLevel.name} 
                 size="small" 
-                color="primary" 
-                icon={levelInfo.icon}
+                sx={{ 
+                  bgcolor: alpha(getLevelColor(currentLevel.level), isDark ? 0.15 : 0.1),
+                  color: getLevelColor(currentLevel.level),
+                  fontWeight: 600,
+                  border: `1px solid ${alpha(getLevelColor(currentLevel.level), 0.3)}`,
+                  '& .MuiChip-icon': { color: 'inherit' }
+                }}
+                icon={React.cloneElement(currentLevel.icon, { style: { color: 'inherit', fontSize: '1.2rem' } })}
               />
             )}
           </Stack>
-          <IconButton onClick={onClose} size="small" disabled={loading}>
+          <IconButton 
+            onClick={onClose} 
+            size="small" 
+            disabled={loading}
+            sx={{ color: 'text.secondary', '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) } }}
+          >
             <CloseIcon />
           </IconButton>
         </Stack>
       </DialogTitle>
       
-      <DialogContent dividers>
-        {error && (
-          <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 3 }}>
-            {error}
-          </Alert>
-        )}
-        
-        {success && (
-          <Alert severity="success" sx={{ mb: 3 }}>
-            Location {isEdit ? 'updated' : 'created'} successfully!
-          </Alert>
-        )}
-        
-        {/* Location Hierarchy Preview */}
-        {ancestors.length > 0 && (
-          <LocationHierarchy 
-            ancestors={ancestors} 
-            onSelect={handleParentChange}
-            onClear={handleClearParent}
-          />
-        )}
-        
-        <Stepper activeStep={activeStep} orientation="vertical" sx={{ mt: 2 }}>
-          {steps.map((step, index) => (
-            <Step key={step.label}>
-              <StepLabel StepIconComponent={step.icon}>
-                <Typography variant="subtitle2">{step.label}</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {step.description}
+      <DialogContent sx={{ mt: 2, bgcolor: 'background.paper' }}>
+        <Stack spacing={3}>
+          {error && (
+            <Alert 
+              severity="error" 
+              variant={isDark ? "outlined" : "standard"}
+              onClose={() => setError(null)}
+              sx={{ borderColor: 'error.main' }}
+            >
+              {error}
+            </Alert>
+          )}
+          {success && (
+            <Alert 
+              severity="success" 
+              variant={isDark ? "outlined" : "standard"}
+              sx={{ borderColor: 'success.main' }}
+            >
+              Saved successfully!
+            </Alert>
+          )}
+          
+          {/* Hierarchy Preview */}
+          {ancestors.length > 0 && (
+            <Paper 
+              variant="outlined" 
+              sx={{ 
+                p: 2, 
+                bgcolor: isDark ? alpha(theme.palette.primary.main, 0.05) : 'grey.50',
+                borderColor: 'divider',
+                borderRadius: 1
+              }}
+            >
+              <Typography variant="caption" sx={{ 
+                color: 'text.secondary', 
+                mb: 1, 
+                display: 'block', 
+                textTransform: 'uppercase', 
+                letterSpacing: 1,
+                fontWeight: 600
+              }}>
+                Location Hierarchy
+              </Typography>
+              <Breadcrumbs separator={<Typography color="text.disabled" sx={{ fontSize: '1.2rem' }}>›</Typography>}>
+                {ancestors.map(ancestor => (
+                  <Typography key={ancestor.id} variant="body2" color="text.secondary">
+                    {ancestor.name}
+                  </Typography>
+                ))}
+                <Typography variant="body2" color="primary" fontWeight={600}>
+                  {formData.name || '...'}
                 </Typography>
-              </StepLabel>
-              <StepContent>
-                <Stack spacing={2} sx={{ mt: 1, mb: 2 }}>
-                  {/* Step 1: Basic Information */}
-                  {index === 0 && (
-                    <>
-                      <TextField
-                        fullWidth
-                        label="Location Name *"
-                        value={formData.name}
-                        onChange={handleChange('name')}
-                        placeholder={levelInfo?.placeholder}
-                        required
-                        disabled={loading}
-                        InputProps={{
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              {levelInfo?.icon}
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        label="Location Code *"
-                        value={formData.code}
-                        onChange={handleChange('code')}
-                        placeholder="e.g., UG-1-001"
-                        required
-                        disabled={loading || isEdit}
-                        error={codeAvailable === false && !isEdit}
-                        helperText={
-                          codeAvailable === false && !isEdit
-                            ? 'Code already exists'
-                            : codeValidating
-                            ? 'Checking availability...'
-                            : 'Unique identifier for this location'
-                        }
-                        InputProps={{
-                          endAdornment: codeValidating && (
-                            <InputAdornment position="end">
-                              <CircularProgress size={20} />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        label="Short Name"
-                        value={formData.short_name}
-                        onChange={handleChange('short_name')}
-                        placeholder="Abbreviated name"
-                        disabled={loading}
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        label="Native Name"
-                        value={formData.native_name}
-                        onChange={handleChange('native_name')}
-                        placeholder="Name in local language"
-                        disabled={loading}
-                      />
-                      
-                      <TextField
-                        fullWidth
-                        label="Full Name"
-                        value={formData.full_name}
-                        onChange={handleChange('full_name')}
-                        placeholder="Complete official name"
-                        disabled={loading}
-                      />
-                    </>
+              </Breadcrumbs>
+            </Paper>
+          )}
+          
+          <Grid container spacing={2.5}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Location Name *"
+                value={formData.name}
+                onChange={handleChange('name')}
+                disabled={loading}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: theme.palette.divider },
+                    '&:hover fieldset': { borderColor: 'primary.main' },
+                    '&.Mui-focused fieldset': { borderColor: 'primary.main', borderWidth: 2 },
+                  },
+                  '& .MuiInputLabel-root': { color: 'text.secondary' },
+                  '& .MuiInputLabel-root.Mui-focused': { color: 'primary.main' },
+                }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Box sx={{ color: alpha(theme.palette.text.primary, 0.5), display: 'flex' }}>
+                        {currentLevel?.icon}
+                      </Box>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Location Code *"
+                value={formData.code}
+                onChange={handleChange('code')}
+                disabled={loading || isEdit}
+                error={codeAvailable === false && !isEdit}
+                helperText={codeAvailable === false && !isEdit ? 'Code already exists' : 'Unique identifier'}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: theme.palette.divider },
+                    '&:hover fieldset': { borderColor: 'primary.main' },
+                    '&.Mui-focused fieldset': { borderColor: 'primary.main', borderWidth: 2 },
+                  },
+                  '& .MuiInputLabel-root': { color: 'text.secondary' },
+                  '& .MuiInputLabel-root.Mui-focused': { color: 'primary.main' },
+                }}
+                InputProps={{
+                  endAdornment: codeValidating && (
+                    <InputAdornment position="end">
+                      <CircularProgress size={20} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel sx={{ color: 'text.secondary' }}>Level</InputLabel>
+                <Select
+                  value={formData.level}
+                  label="Level"
+                  onChange={handleChange('level')}
+                  disabled={loading || isEdit}
+                  sx={{
+                    bgcolor: 'background.default',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: theme.palette.divider },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                    '& .MuiSelect-select': { color: 'text.primary' }
+                  }}
+                >
+                  {levels.map(level => (
+                    <MenuItem key={level.level} value={level.level} sx={{ color: 'text.primary' }}>
+                      <Stack direction="row" alignItems="center" spacing={1.5}>
+                        <Box sx={{ color: getLevelColor(level.level), display: 'flex' }}>{level.icon}</Box>
+                        <Box>
+                          <Typography variant="body2">{level.name}</Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>Level {level.level}</Typography>
+                        </Box>
+                      </Stack>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} sm={6}>
+              {formData.level > (locationMode === 'buildings' ? 11 : 1) ? (
+                <Autocomplete
+                  options={parentOptions}
+                  loading={loadingParents}
+                  getOptionLabel={(option) => `${option.name} (${option.code})`}
+                  value={parentOptions.find(p => p.id === formData.parent_id) || null}
+                  onChange={(e, newValue) => setFormData(prev => ({ ...prev, parent_id: newValue?.id || null }))}
+                  renderInput={(params) => (
+                    <TextField 
+                      {...params} 
+                      label={`Parent ${levels.find(l => l.level === formData.level - 1)?.name}`}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          '& fieldset': { borderColor: theme.palette.divider },
+                          '&:hover fieldset': { borderColor: 'primary.main' },
+                          '&.Mui-focused fieldset': { borderColor: 'primary.main', borderWidth: 2 },
+                        },
+                        '& .MuiInputLabel-root': { color: 'text.secondary' },
+                        '& .MuiInputLabel-root.Mui-focused': { color: 'primary.main' },
+                      }}
+                    />
                   )}
-                  
-                  {/* Step 2: Hierarchy */}
-                  {index === 1 && (
-                    <>
-                      <FormControl fullWidth disabled={loading}>
-                        <InputLabel>Location Level</InputLabel>
-                        <Select
-                          value={formData.level}
-                          label="Location Level"
-                          onChange={handleLevelChange}
-                        >
-                          {availableLevels.map((level) => (
-                            <MenuItem key={level.level} value={level.level}>
-                              <Stack direction="row" alignItems="center" spacing={1}>
-                                {level.icon}
-                                <Typography>{level.name}</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  (Level {level.level})
-                                </Typography>
-                              </Stack>
-                            </MenuItem>
-                          ))}
-                        </Select>
-                        <FormHelperText>
-                          {formData.level === 1 
-                            ? 'Country level - top of hierarchy' 
-                            : `Level ${formData.level} - ${levelInfo?.name}`}
-                        </FormHelperText>
-                      </FormControl>
-                      
-                      {formData.level > 1 && (
-                        <ParentSelector
-                          level={formData.level}
-                          value={formData.parent_id ? { id: formData.parent_id } : null}
-                          onChange={handleParentChange}
-                          disabled={loading}
-                        />
-                      )}
-                    </>
-                  )}
-                  
-                  {/* Step 3: Geographic Data */}
-                  {index === 2 && (
-                    <>
-                      <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, sm: 6 }}>
-                          <TextField
-                            fullWidth
-                            label="Latitude"
-                            type="number"
-                            value={formData.latitude}
-                            onChange={handleChange('latitude')}
-                            placeholder="-90 to 90"
-                            disabled={loading}
-                            InputProps={{
-                              startAdornment: (
-                                <InputAdornment position="start">
-                                  <MapIcon fontSize="small" />
-                                </InputAdornment>
-                              ),
-                            }}
-                          />
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6 }}>
-                          <TextField
-                            fullWidth
-                            label="Longitude"
-                            type="number"
-                            value={formData.longitude}
-                            onChange={handleChange('longitude')}
-                            placeholder="-180 to 180"
-                            disabled={loading}
-                          />
-                        </Grid>
-                      </Grid>
-                      
-                      <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, sm: 6 }}>
-                          <TextField
-                            fullWidth
-                            label="Population"
-                            type="number"
-                            value={formData.population}
-                            onChange={handleChange('population')}
-                            placeholder="Estimated population"
-                            disabled={loading}
-                          />
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6 }}>
-                          <TextField
-                            fullWidth
-                            label="Area (sq km)"
-                            type="number"
-                            value={formData.area}
-                            onChange={handleChange('area')}
-                            placeholder="Area in square kilometers"
-                            disabled={loading}
-                          />
-                        </Grid>
-                      </Grid>
-                    </>
-                  )}
-                  
-                  {/* Step 4: Additional Info */}
-                  {index === 3 && (
-                    <>
-                      <TextField
-                        fullWidth
-                        label="Postal Code"
-                        value={formData.postal_code}
-                        onChange={handleChange('postal_code')}
-                        placeholder="ZIP/Postal code"
-                        disabled={loading}
-                      />
-                      
-                      <FormControl fullWidth>
-                        <InputLabel>Status</InputLabel>
-                        <Select
-                          value={formData.status}
-                          label="Status"
-                          onChange={handleChange('status')}
-                          disabled={loading}
-                        >
-                          <MenuItem value="active">Active</MenuItem>
-                          <MenuItem value="inactive">Inactive</MenuItem>
-                          <MenuItem value="archived">Archived</MenuItem>
-                        </Select>
-                        <FormHelperText>
-                          Active locations are visible in the system
-                        </FormHelperText>
-                      </FormControl>
-                    </>
-                  )}
-                </Stack>
-                
-                <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                  <Button
-                    variant="outlined"
-                    onClick={() => setActiveStep(prev => prev - 1)}
-                    disabled={activeStep === 0}
-                    startIcon={<ArrowBackIcon />}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    variant="contained"
-                    onClick={() => {
-                      if (activeStep === steps.length - 1) {
-                        handleSubmit();
-                      } else {
-                        setActiveStep(prev => prev + 1);
-                      }
-                    }}
-                    disabled={loading}
-                    endIcon={activeStep === steps.length - 1 ? <SaveIcon /> : <ArrowForwardIcon />}
-                  >
-                    {activeStep === steps.length - 1 
-                      ? (loading ? 'Saving...' : (isEdit ? 'Update' : 'Create')) 
-                      : 'Next'}
-                  </Button>
-                </Stack>
-              </StepContent>
-            </Step>
-          ))}
-        </Stepper>
-        
-        {/* Location Preview */}
-        {(formData.name || formData.code) && (
-          <LocationPreview formData={formData} ancestors={ancestors} />
-        )}
+                  sx={{
+                    '& .MuiAutocomplete-inputRoot': {
+                      bgcolor: 'background.default',
+                    }
+                  }}
+                />
+              ) : (
+                <Box sx={{ 
+                  p: 2, 
+                  borderRadius: 1, 
+                  bgcolor: 'action.hover', 
+                  border: '1px dashed', 
+                  borderColor: 'divider',
+                  textAlign: 'center'
+                }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Top-level location. No parent required.
+                  </Typography>
+                </Box>
+              )}
+            </Grid>
+          </Grid>
+          
+          <Divider sx={{ my: 1 }}>
+            <Chip 
+              label="Geographic & Additional Data" 
+              size="small" 
+              variant="outlined" 
+              sx={{ 
+                opacity: 0.7,
+                borderColor: 'divider',
+                color: 'text.secondary'
+              }} 
+            />
+          </Divider>
+          
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <TextField 
+                fullWidth 
+                label="Latitude" 
+                type="number" 
+                value={formData.latitude} 
+                onChange={handleChange('latitude')} 
+                disabled={loading}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: theme.palette.divider },
+                    '&:hover fieldset': { borderColor: 'primary.main' },
+                  },
+                  '& .MuiInputLabel-root': { color: 'text.secondary' },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField 
+                fullWidth 
+                label="Longitude" 
+                type="number" 
+                value={formData.longitude} 
+                onChange={handleChange('longitude')} 
+                disabled={loading}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: theme.palette.divider },
+                    '&:hover fieldset': { borderColor: 'primary.main' },
+                  },
+                  '& .MuiInputLabel-root': { color: 'text.secondary' },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField 
+                fullWidth 
+                label="Population" 
+                type="number" 
+                value={formData.population} 
+                onChange={handleChange('population')} 
+                disabled={loading}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: theme.palette.divider },
+                    '&:hover fieldset': { borderColor: 'primary.main' },
+                  },
+                  '& .MuiInputLabel-root': { color: 'text.secondary' },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField 
+                fullWidth 
+                label="Area (km²)" 
+                type="number" 
+                value={formData.area} 
+                onChange={handleChange('area')} 
+                disabled={loading}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: theme.palette.divider },
+                    '&:hover fieldset': { borderColor: 'primary.main' },
+                  },
+                  '& .MuiInputLabel-root': { color: 'text.secondary' },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl fullWidth>
+                <InputLabel sx={{ color: 'text.secondary' }}>Status</InputLabel>
+                <Select 
+                  value={formData.status} 
+                  label="Status" 
+                  onChange={handleChange('status')} 
+                  disabled={loading}
+                  sx={{
+                    bgcolor: 'background.default',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: theme.palette.divider },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                    '& .MuiSelect-select': { color: 'text.primary' }
+                  }}
+                >
+                  <MenuItem value="active" sx={{ color: 'text.primary' }}>Active</MenuItem>
+                  <MenuItem value="inactive" sx={{ color: 'text.primary' }}>Inactive</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
+        </Stack>
       </DialogContent>
       
-      <DialogActions sx={{ p: 2.5, justifyContent: 'space-between' }}>
-        <Button onClick={onClose} disabled={loading}>
+      <DialogActions sx={{ 
+        p: 3, 
+        borderTop: `1px solid ${theme.palette.divider}`,
+        bgcolor: 'background.default'
+      }}>
+        <Button 
+          onClick={onClose} 
+          disabled={loading} 
+          sx={{ 
+            color: 'text.secondary',
+            '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) }
+          }}
+        >
           Cancel
         </Button>
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={loading || !formData.name || !formData.code || codeAvailable === false}
-          startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
+          disabled={loading || !formData.name || !formData.code || (codeAvailable === false && !isEdit)}
+          startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+          sx={{ 
+            px: 4,
+            bgcolor: 'primary.main',
+            '&:hover': { bgcolor: 'primary.dark' },
+            '&.Mui-disabled': { bgcolor: 'action.disabledBackground', color: 'text.disabled' }
+          }}
         >
-          {loading ? 'Saving...' : (isEdit ? 'Update Location' : 'Create Location')}
+          {isEdit ? 'Update Location' : 'Create Location'}
         </Button>
       </DialogActions>
     </Dialog>

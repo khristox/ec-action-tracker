@@ -2,6 +2,7 @@
 import { createSlice, createAsyncThunk, createSelector, createAction } from '@reduxjs/toolkit';
 import api from '../../../services/api';
 
+
 // ==================== Types & Constants ====================
 
 const DEFAULT_PAGINATION = {
@@ -28,15 +29,12 @@ const CACHE_CONFIG = {
 };
 
 const STATUS_COLOR_MAP = {
-  // Meeting Statuses
   PENDING: '#F59E0B',
   STARTED: '#3B82F6',
   ENDED: '#10B981',
   AWAITING: '#8B5CF6',
   CLOSED: '#6B7280',
   CANCELLED: '#EF4444',
-  
-  // Action Statuses
   scheduled: '#3B82F6',
   ongoing: '#F59E0B',
   in_progress: '#3B82F6',
@@ -97,7 +95,6 @@ const handleApiError = (error) => {
 const updateMeetingInList = (items, updatedMeeting) => {
   const index = items.findIndex(m => m.id === updatedMeeting.id);
   if (index === -1) return items;
-  
   const newItems = [...items];
   newItems[index] = updatedMeeting;
   return newItems;
@@ -135,7 +132,6 @@ const processStatusOptions = (attributes) => {
     })).sort((a, b) => a.sortOrder - b.sortOrder);
   }
   
-  // Fallback: filter attributes that start with MEETING_STATUS_
   return attributes
     .filter(attr => attr.code?.startsWith('MEETING_STATUS_'))
     .map(attr => ({
@@ -165,7 +161,6 @@ const processPriorityOptions = (attributes) => {
 
 // ==================== Async Thunks ====================
 
-// Fetch all attributes for Action Tracker
 export const fetchActionTrackerAttributes = createAsyncThunk(
   'meetings/fetchActionTrackerAttributes',
   async (_, { rejectWithValue, getState }) => {
@@ -173,7 +168,6 @@ export const fetchActionTrackerAttributes = createAsyncThunk(
       const { meetings } = getState();
       const now = Date.now();
       
-      // Check cache
       if (CACHE_CONFIG.ENABLED && meetings.cache.timestamp && 
           (now - meetings.cache.timestamp) < CACHE_CONFIG.TTL) {
         return { fromCache: true };
@@ -194,7 +188,6 @@ export const fetchActionTrackerAttributes = createAsyncThunk(
   }
 );
 
-// Fetch meeting status options (legacy support)
 export const fetchMeetingStatusOptions = createAsyncThunk(
   'meetings/fetchMeetingStatusOptions',
   async (_, { dispatch, rejectWithValue }) => {
@@ -207,7 +200,6 @@ export const fetchMeetingStatusOptions = createAsyncThunk(
   }
 );
 
-// Create a new meeting
 export const createMeeting = createAsyncThunk(
   'meetings/createMeeting',
   async (meetingData, { rejectWithValue }) => {
@@ -223,7 +215,6 @@ export const createMeeting = createAsyncThunk(
   }
 );
 
-// Fetch all meetings with pagination and filtering
 export const fetchMeetings = createAsyncThunk(
   'meetings/fetchMeetings',
   async (params = {}, { rejectWithValue, getState }) => {
@@ -236,7 +227,6 @@ export const fetchMeetings = createAsyncThunk(
         ...params,
       };
       
-      // Clean parameters
       Object.keys(mergedParams).forEach(key => {
         if (mergedParams[key] == null || mergedParams[key] === '') {
           delete mergedParams[key];
@@ -258,7 +248,6 @@ export const fetchMeetings = createAsyncThunk(
   }
 );
 
-// Fetch a single meeting by ID
 export const fetchMeetingById = createAsyncThunk(
   'meetings/fetchMeetingById',
   async (id, { rejectWithValue }) => {
@@ -272,8 +261,6 @@ export const fetchMeetingById = createAsyncThunk(
   }
 );
 
-// Update a meeting
-// In meetingSlice.js
 export const updateMeeting = createAsyncThunk(
   'meetings/updateMeeting',
   async ({ id, data }, { rejectWithValue }) => {
@@ -286,7 +273,6 @@ export const updateMeeting = createAsyncThunk(
   }
 );
 
-// Delete a meeting
 export const deleteMeeting = createAsyncThunk(
   'meetings/deleteMeeting',
   async (id, { rejectWithValue }) => {
@@ -299,7 +285,6 @@ export const deleteMeeting = createAsyncThunk(
   }
 );
 
-// Update meeting status
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateMeetingStatus',
   async ({ id, status, comment }, { rejectWithValue }) => {
@@ -316,7 +301,6 @@ export const updateMeetingStatus = createAsyncThunk(
   }
 );
 
-// Add minutes to meeting
 export const addMeetingMinutes = createAsyncThunk(
   'meetings/addMeetingMinutes',
   async ({ id, minutesData }, { rejectWithValue }) => {
@@ -329,7 +313,6 @@ export const addMeetingMinutes = createAsyncThunk(
   }
 );
 
-// Fetch meeting minutes
 export const fetchMeetingMinutes = createAsyncThunk(
   'meetings/fetchMeetingMinutes',
   async (meetingId, { rejectWithValue }) => {
@@ -361,7 +344,6 @@ export const fetchMeetingMinutes = createAsyncThunk(
   }
 );
 
-// Create meeting minutes
 export const createMeetingMinutes = createAsyncThunk(
   'meetings/createMeetingMinutes',
   async ({ meetingId, data }, { rejectWithValue }) => {
@@ -374,7 +356,6 @@ export const createMeetingMinutes = createAsyncThunk(
   }
 );
 
-// Delete meeting minutes
 export const deleteMeetingMinutes = createAsyncThunk(
   'meetings/deleteMeetingMinutes',
   async ({ meetingId, minutesId }, { rejectWithValue }) => {
@@ -387,7 +368,6 @@ export const deleteMeetingMinutes = createAsyncThunk(
   }
 );
 
-// Update meeting minutes
 export const updateMeetingMinutes = createAsyncThunk(
   'meetings/updateMeetingMinutes',
   async ({ meetingId, minutesId, data }, { rejectWithValue }) => {
@@ -400,7 +380,6 @@ export const updateMeetingMinutes = createAsyncThunk(
   }
 );
 
-// Fetch meeting participants
 export const fetchMeetingParticipants = createAsyncThunk(
   'meetings/fetchMeetingParticipants',
   async (id, { rejectWithValue }) => {
@@ -419,7 +398,6 @@ export const fetchMeetingParticipants = createAsyncThunk(
   }
 );
 
-// Fetch meeting actions
 export const fetchMeetingActions = createAsyncThunk(
   'meetings/fetchMeetingActions',
   async (id, { rejectWithValue }) => {
@@ -438,7 +416,6 @@ export const fetchMeetingActions = createAsyncThunk(
   }
 );
 
-// Export meetings
 export const exportMeetings = createAsyncThunk(
   'meetings/exportMeetings',
   async (format = 'csv', { rejectWithValue, getState }) => {
@@ -476,7 +453,6 @@ const meetingSlice = createSlice({
   name: 'meetings',
   initialState: INITIAL_STATE,
   reducers: {
-    // UI Actions
     clearUpdateSuccess: (state) => {
       state.ui.updateSuccess = false;
     },
@@ -492,13 +468,9 @@ const meetingSlice = createSlice({
     resetUiState: (state) => {
       state.ui = INITIAL_STATE.ui;
     },
-    
-    // Clear minutes error
     clearMinutesError: (state) => {
       state.ui.minutesError = null;
     },
-    
-    // Meeting Management
     clearMeetingState: (state) => {
       state.currentMeeting = null;
       state.currentMinutes = { items: [], total: 0 };
@@ -509,12 +481,14 @@ const meetingSlice = createSlice({
       state.ui.success = false;
       state.ui.minutesError = null;
     },
+    clearCurrentMeeting: (state) => {
+      state.currentMeeting = null;
+      state.ui.error = null;
+    },
     clearMeetings: (state) => {
       state.meetings = { ...DEFAULT_PAGINATION };
       state.ui.error = null;
     },
-    
-    // Pagination
     setMeetingPage: (state, action) => {
       state.meetings.page = action.payload;
     },
@@ -522,8 +496,6 @@ const meetingSlice = createSlice({
       state.meetings.limit = action.payload;
       state.meetings.page = 1;
     },
-    
-    // Filter Management
     setFilters: (state, action) => {
       state.filters = { ...state.filters, ...action.payload };
       state.meetings.page = 1;
@@ -553,15 +525,11 @@ const meetingSlice = createSlice({
       state.filters.dateTo = action.payload.dateTo;
       state.meetings.page = 1;
     },
-    
-    // Cache Management
     clearCache: (state) => {
       state.cache.meetings.clear();
       state.cache.attributes = null;
       state.cache.timestamp = null;
     },
-    
-    // Optimistic Updates
     optimisticUpdateMeeting: (state, action) => {
       const { id, updates } = action.payload;
       const index = state.meetings.items.findIndex(m => m.id === id);
@@ -572,8 +540,6 @@ const meetingSlice = createSlice({
         state.currentMeeting = { ...state.currentMeeting, ...updates };
       }
     },
-    
-    // Local minutes management
     addMinutesLocally: (state, action) => {
       const newMinutes = action.payload;
       state.currentMinutes.items = [newMinutes, ...state.currentMinutes.items];
@@ -591,10 +557,12 @@ const meetingSlice = createSlice({
         state.currentMinutes.items[index] = { ...state.currentMinutes.items[index], ...data };
       }
     },
+    setCurrentMeeting: (state, action) => {
+      state.currentMeeting = action.payload;
+    },
   },
   extraReducers: (builder) => {
     builder
-      // ========== Fetch Action Tracker Attributes ==========
       .addCase(fetchActionTrackerAttributes.pending, (state) => {
         if (!state.statusOptions.length) {
           state.ui.isLoading = true;
@@ -612,15 +580,11 @@ const meetingSlice = createSlice({
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Fetch Meeting Status Options ==========
       .addCase(fetchMeetingStatusOptions.fulfilled, (state, action) => {
         if (action.payload?.length) {
           state.statusOptions = action.payload;
         }
       })
-
-      // ========== Create Meeting ==========
       .addCase(createMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
         state.ui.success = false;
@@ -631,12 +595,10 @@ const meetingSlice = createSlice({
         state.ui.success = true;
         state.currentMeeting = action.payload;
         state.ui.error = null;
-        
         if (action.payload) {
           state.meetings.items = [action.payload, ...state.meetings.items];
           state.meetings.total += 1;
         }
-        
         console.log('Meeting created successfully in state:', action.payload);
       })
       .addCase(createMeeting.rejected, (state, action) => {
@@ -645,8 +607,6 @@ const meetingSlice = createSlice({
         state.ui.error = action.payload;
         console.error('Meeting creation rejected:', action.payload);
       })
-
-      // ========== Fetch Meetings ==========
       .addCase(fetchMeetings.pending, (state) => {
         state.ui.isLoading = true;
         state.ui.error = null;
@@ -665,8 +625,6 @@ const meetingSlice = createSlice({
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Fetch Meeting By ID ==========
       .addCase(fetchMeetingById.pending, (state) => {
         state.ui.isLoading = true;
         state.ui.error = null;
@@ -679,8 +637,6 @@ const meetingSlice = createSlice({
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Update Meeting ==========
       .addCase(updateMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
         state.ui.error = null;
@@ -695,8 +651,6 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Delete Meeting ==========
       .addCase(deleteMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -713,8 +667,6 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Update Meeting Status ==========
       .addCase(updateMeetingStatus.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -728,8 +680,6 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Meeting Minutes ==========
       .addCase(addMeetingMinutes.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -743,7 +693,6 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-      
       .addCase(fetchMeetingMinutes.pending, (state) => {
         state.ui.isLoading = true;
         state.ui.minutesError = null;
@@ -757,8 +706,6 @@ const meetingSlice = createSlice({
         state.ui.minutesError = action.payload;
         state.ui.error = action.payload;
       })
-
-      // ========== Create Meeting Minutes ==========
       .addCase(createMeetingMinutes.pending, (state) => {
         state.ui.isSubmitting = true;
         state.ui.minutesError = null;
@@ -774,8 +721,6 @@ const meetingSlice = createSlice({
         state.ui.minutesError = action.payload;
         state.ui.error = action.payload;
       })
-
-      // ========== Delete Meeting Minutes ==========
       .addCase(deleteMeetingMinutes.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -789,8 +734,6 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Update Meeting Minutes ==========
       .addCase(updateMeetingMinutes.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -806,8 +749,6 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Meeting Participants ==========
       .addCase(fetchMeetingParticipants.pending, (state) => {
         state.ui.isLoading = true;
       })
@@ -819,8 +760,6 @@ const meetingSlice = createSlice({
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
-
-      // ========== Meeting Actions ==========
       .addCase(fetchMeetingActions.pending, (state) => {
         state.ui.isLoading = true;
       })
@@ -874,7 +813,7 @@ export const selectMeetingParticipantsTotal = (state) => state.meetings.currentP
 export const selectMeetingActions = (state) => state.meetings.currentActions.items;
 export const selectMeetingActionsTotal = (state) => state.meetings.currentActions.total;
 
-// Derived Selectors
+// ========== MOVED selectFilteredMeetings UP before it's referenced ==========
 export const selectFilteredMeetings = createSelector(
   [selectAllMeetings, selectMeetingsFilters],
   (items, filters) => {
@@ -930,11 +869,16 @@ export const selectFilteredMeetings = createSelector(
   }
 );
 
+// Now define the alias AFTER selectFilteredMeetings is defined
+export const selectFilteredMeetingsList = selectFilteredMeetings;
+
+export const selectMeetingLoading = selectMeetingsLoading;
+export const selectMeetingSubmitting = selectMeetingsSubmitting;
+
 export const selectUpcomingMeetings = createSelector(
   [selectAllMeetings],
   (items) => {
     if (!items?.length) return [];
-    
     const now = new Date();
     return items
       .filter((meeting) => new Date(meeting.meeting_date) >= now)
@@ -946,10 +890,8 @@ export const selectRecentMeetings = createSelector(
   [selectAllMeetings, (_, days = 7) => days],
   (items, days) => {
     if (!items?.length) return [];
-    
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
-    
     return items
       .filter((meeting) => new Date(meeting.meeting_date) >= cutoffDate)
       .sort((a, b) => new Date(b.meeting_date) - new Date(a.meeting_date));
@@ -968,11 +910,20 @@ export const selectMeetingsByStatus = createSelector(
   }
 );
 
+
+export const selectMeetingsPage = (state) => state.meetings.meetings.page;
+export const selectMeetingsPages = (state) => state.meetings.meetings.pages;
+export const selectMeetingsLimit = (state) => state.meetings.meetings.limit;
+export const selectCurrentPage = (state) => state.meetings.meetings.page;
+export const selectTotalPages = (state) => state.meetings.meetings.pages;
+export const selectTotalMeetings = (state) => state.meetings.meetings.total;
+
 export const selectMeetingById = createSelector(
   [selectAllMeetings, (_, id) => id],
   (items, id) => items.find(meeting => meeting.id === id)
 );
 
+// In meetingSlice.js - Update selectMeetingsStatistics
 export const selectMeetingsStatistics = createSelector(
   [selectAllMeetings],
   (items) => {
@@ -983,6 +934,7 @@ export const selectMeetingsStatistics = createSelector(
         ongoing: 0,
         completed: 0,
         cancelled: 0,
+        pending: 0,
         byStatus: {},
         byMonth: {},
         avgParticipants: 0,
@@ -991,13 +943,13 @@ export const selectMeetingsStatistics = createSelector(
       };
     }
     
-    const now = new Date();
     const stats = {
       total: items.length,
       scheduled: 0,
       ongoing: 0,
       completed: 0,
       cancelled: 0,
+      pending: 0,
       byStatus: {},
       byMonth: {},
       totalParticipants: 0,
@@ -1009,34 +961,35 @@ export const selectMeetingsStatistics = createSelector(
     
     items.forEach((meeting) => {
       const meetingDate = new Date(meeting.meeting_date);
-      const meetingEndTime = meeting.end_time ? new Date(meeting.end_time) : null;
+      let status = 'PENDING';
       
-      let status = 'unknown';
+      // Extract status from meeting data
       if (meeting.status) {
-        status = meeting.status.short_name || meeting.status.code || meeting.status.name || 'unknown';
-      } else if (meeting.status_name) {
-        status = meeting.status_name;
-      } else if (meeting.status_code) {
-        status = meeting.status_code;
+        if (typeof meeting.status === 'string') {
+          status = meeting.status;
+        } else if (meeting.status.short_name) {
+          status = meeting.status.short_name;
+        } else if (meeting.status.code) {
+          status = meeting.status.code.replace('MEETING_STATUS_', '');
+        }
       }
       
       stats.byStatus[status] = (stats.byStatus[status] || 0) + 1;
       
-      if (['completed', 'done', 'closed', 'ENDED'].includes(status)) {
-        stats.completed++;
-      } else if (['cancelled', 'canceled', 'CANCELLED'].includes(status)) {
-        stats.cancelled++;
-      } else if (meetingDate > now) {
-        stats.scheduled++;
-      } else if (meetingDate <= now && (!meetingEndTime || meetingEndTime >= now)) {
+      // Categorize for quick stats
+      if (status === 'STARTED' || status === 'started') {
         stats.ongoing++;
-      } else {
+      } else if (status === 'ENDED' || status === 'ended') {
         stats.completed++;
+      } else if (status === 'CANCELLED' || status === 'cancelled') {
+        stats.cancelled++;
+      } else if (status === 'SCHEDULED' || status === 'scheduled') {
+        stats.scheduled++;
+      } else {
+        stats.pending++;
       }
       
-      const participantCount = meeting.participants?.length || 
-                              meeting.participants_count || 
-                              meeting.custom_participants?.length || 0;
+      const participantCount = meeting.participants_count || 0;
       participantsSum += participantCount;
       
       const monthKey = `${meetingDate.getFullYear()}-${String(meetingDate.getMonth() + 1).padStart(2, '0')}`;
@@ -1104,7 +1057,8 @@ export const selectActionsForMeeting = createSelector(
 
 // ==================== Exports ====================
 export const { 
-  clearMeetingState, 
+  clearMeetingState,
+  clearCurrentMeeting,
   clearMeetings,
   clearError, 
   clearSuccess,
@@ -1126,6 +1080,7 @@ export const {
   removeMinutesLocally,
   updateMinutesLocally,
   clearMinutesError,
+  setCurrentMeeting,
 } = meetingSlice.actions;
 
 export default meetingSlice.reducer;

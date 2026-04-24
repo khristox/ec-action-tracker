@@ -22,6 +22,26 @@ export const sendMeetingNotifications = createAsyncThunk(
   }
 );
 
+
+// notificationSlice.js - Update the fetchParticipants thunk
+export const fetchParticipants = createAsyncThunk(
+  'notifications/fetchParticipants',
+  async (meetingId, { rejectWithValue }) => {
+    try {
+      const response = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
+      return response.data;
+    } catch (error) {
+      // If 404, return empty array instead of error
+      if (error.response?.status === 404) {
+        console.warn(`No participants endpoint found for meeting ${meetingId}`);
+        return [];
+      }
+      console.error('Fetch participants error:', error);
+      return rejectWithValue(error.response?.data?.detail || 'Failed to fetch participants');
+    }
+  }
+);
+
 // Async thunk for fetching meeting participants
 export const fetchMeetingParticipants = createAsyncThunk(
   'notifications/fetchMeetingParticipants',

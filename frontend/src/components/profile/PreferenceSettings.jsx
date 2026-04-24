@@ -16,21 +16,32 @@ import {
   Select,
   MenuItem,
   Paper,
+  useTheme,
+  useMediaQuery,
+  Fade,
+  Grow,
+  Stack
 } from '@mui/material';
 import {
   LanguageOutlined,
   AttachMoneyOutlined,
   AccessTimeOutlined,
   SaveOutlined,
+  CheckCircleOutline,
+  SettingsOutlined
 } from '@mui/icons-material';
 import { updateProfile } from '../../store/slices/profileSlice';
 
 const PreferenceSettings = ({ profile }) => {
   const dispatch = useDispatch();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [isUpdating, setIsUpdating] = useState(false);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
-  const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
 
   const [preferences, setPreferences] = useState({
     language: 'en',
@@ -64,22 +75,28 @@ const PreferenceSettings = ({ profile }) => {
         language: preferences.language,
         preferred_currency: preferences.preferred_currency,
         timezone: preferences.timezone,
+        date_format: preferences.date_format,
+        time_format: preferences.time_format,
       })).unwrap();
       
-      setSnackbarMessage('Preferences saved successfully!');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
+      setSnackbar({
+        open: true,
+        message: 'Preferences saved successfully!',
+        severity: 'success'
+      });
     } catch (error) {
-      setSnackbarMessage(error.message || 'Failed to save preferences');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
+      setSnackbar({
+        open: true,
+        message: error.message || 'Failed to save preferences',
+        severity: 'error'
+      });
     } finally {
       setIsUpdating(false);
     }
   };
 
   const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
+    setSnackbar(prev => ({ ...prev, open: false }));
   };
 
   const currencies = [
@@ -114,152 +131,277 @@ const PreferenceSettings = ({ profile }) => {
   ];
 
   return (
-    <Box>
-      <Typography variant="h6" gutterBottom>
-        User Preferences
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Customize your experience
-      </Typography>
+    <Box sx={{ 
+      p: isMobile ? 2 : 3,
+      bgcolor: 'background.default',
+      minHeight: '100vh',
+      width: '100%'
+    }}>
+      <Fade in timeout={500}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant={isMobile ? "h5" : "h4"} gutterBottom sx={{ 
+            fontWeight: 700,
+            color: 'text.primary',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 1
+          }}>
+            <SettingsOutlined sx={{ color: 'primary.main' }} />
+            User Preferences
+          </Typography>
+          <Typography variant="body2" sx={{ 
+            color: 'text.secondary',
+            pb: 2,
+            borderBottom: `2px solid ${theme.palette.divider}`
+          }}>
+            Customize your experience and application settings
+          </Typography>
+        </Box>
+      </Fade>
 
       <Grid container spacing={3}>
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              <LanguageOutlined sx={{ mr: 1, verticalAlign: 'middle' }} />
-              Language & Region
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Language</InputLabel>
-                  <Select
-                    name="language"
-                    value={preferences.language}
-                    onChange={handleChange}
-                    label="Language"
-                  >
-                    {languages.map(lang => (
-                      <MenuItem key={lang.code} value={lang.code}>
-                        {lang.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
+          <Grow in timeout={800}>
+            <Paper elevation={0} sx={{ 
+              p: isMobile ? 2 : 3, 
+              bgcolor: 'background.paper', 
+              borderRadius: 2, 
+              border: `1px solid ${theme.palette.divider}`,
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                borderColor: 'primary.main',
+                boxShadow: 1
+              }
+            }}>
+              <Typography variant="subtitle1" gutterBottom sx={{ 
+                color: 'text.primary',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}>
+                <LanguageOutlined sx={{ color: 'primary.main' }} />
+                Language & Region
+              </Typography>
+              <Divider sx={{ my: 2, borderColor: 'divider' }} />
               
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Preferred Currency</InputLabel>
-                  <Select
-                    name="preferred_currency"
-                    value={preferences.preferred_currency}
-                    onChange={handleChange}
-                    label="Preferred Currency"
-                    startAdornment={
-                      <InputAdornment position="start">
-                        <AttachMoneyOutlined />
-                      </InputAdornment>
-                    }
-                  >
-                    {currencies.map(currency => (
-                      <MenuItem key={currency.code} value={currency.code}>
-                        {currency.symbol} - {currency.name} ({currency.code})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+              <Grid container spacing={isMobile ? 2 : 3}>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel sx={{ color: 'text.secondary' }}>Language</InputLabel>
+                    <Select
+                      name="language"
+                      value={preferences.language}
+                      onChange={handleChange}
+                      label="Language"
+                      sx={{
+                        bgcolor: 'background.default',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                        '& .MuiSelect-select': { color: 'text.primary' }
+                      }}
+                    >
+                      {languages.map(lang => (
+                        <MenuItem key={lang.code} value={lang.code} sx={{ color: 'text.primary' }}>
+                          {lang.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel sx={{ color: 'text.secondary' }}>Preferred Currency</InputLabel>
+                    <Select
+                      name="preferred_currency"
+                      value={preferences.preferred_currency}
+                      onChange={handleChange}
+                      label="Preferred Currency"
+                      sx={{
+                        bgcolor: 'background.default',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                        '& .MuiSelect-select': { color: 'text.primary' }
+                      }}
+                      startAdornment={
+                        <InputAdornment position="start">
+                          <AttachMoneyOutlined sx={{ color: 'text.secondary' }} />
+                        </InputAdornment>
+                      }
+                    >
+                      {currencies.map(currency => (
+                        <MenuItem key={currency.code} value={currency.code} sx={{ color: 'text.primary' }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Typography component="span" sx={{ color: 'primary.main' }}>{currency.symbol}</Typography>
+                            <Typography component="span">{currency.name} ({currency.code})</Typography>
+                          </Stack>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
               </Grid>
-            </Grid>
-          </Paper>
+            </Paper>
+          </Grow>
         </Grid>
 
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              <AccessTimeOutlined sx={{ mr: 1, verticalAlign: 'middle' }} />
-              Time & Date
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Timezone</InputLabel>
-                  <Select
-                    name="timezone"
-                    value={preferences.timezone}
-                    onChange={handleChange}
-                    label="Timezone"
-                  >
-                    {timezones.map(tz => (
-                      <MenuItem key={tz} value={tz}>
-                        {tz.replace('_', ' ')}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
+          <Grow in timeout={1000}>
+            <Paper elevation={0} sx={{ 
+              p: isMobile ? 2 : 3, 
+              bgcolor: 'background.paper', 
+              borderRadius: 2, 
+              border: `1px solid ${theme.palette.divider}`,
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                borderColor: 'primary.main',
+                boxShadow: 1
+              }
+            }}>
+              <Typography variant="subtitle1" gutterBottom sx={{ 
+                color: 'text.primary',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}>
+                <AccessTimeOutlined sx={{ color: 'primary.main' }} />
+                Time & Date
+              </Typography>
+              <Divider sx={{ my: 2, borderColor: 'divider' }} />
               
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Date Format</InputLabel>
-                  <Select
-                    name="date_format"
-                    value={preferences.date_format}
-                    onChange={handleChange}
-                    label="Date Format"
-                  >
-                    <MenuItem value="YYYY-MM-DD">YYYY-MM-DD (2024-01-15)</MenuItem>
-                    <MenuItem value="DD/MM/YYYY">DD/MM/YYYY (15/01/2024)</MenuItem>
-                    <MenuItem value="MM/DD/YYYY">MM/DD/YYYY (01/15/2024)</MenuItem>
-                    <MenuItem value="DD MMM YYYY">DD MMM YYYY (15 Jan 2024)</MenuItem>
-                  </Select>
-                </FormControl>
+              <Grid container spacing={isMobile ? 2 : 3}>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel sx={{ color: 'text.secondary' }}>Timezone</InputLabel>
+                    <Select
+                      name="timezone"
+                      value={preferences.timezone}
+                      onChange={handleChange}
+                      label="Timezone"
+                      sx={{
+                        bgcolor: 'background.default',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                        '& .MuiSelect-select': { color: 'text.primary' }
+                      }}
+                    >
+                      {timezones.map(tz => (
+                        <MenuItem key={tz} value={tz} sx={{ color: 'text.primary' }}>
+                          {tz.replace(/_/g, ' ')}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel sx={{ color: 'text.secondary' }}>Date Format</InputLabel>
+                    <Select
+                      name="date_format"
+                      value={preferences.date_format}
+                      onChange={handleChange}
+                      label="Date Format"
+                      sx={{
+                        bgcolor: 'background.default',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                        '& .MuiSelect-select': { color: 'text.primary' }
+                      }}
+                    >
+                      <MenuItem value="YYYY-MM-DD" sx={{ color: 'text.primary' }}>YYYY-MM-DD (2024-01-15)</MenuItem>
+                      <MenuItem value="DD/MM/YYYY" sx={{ color: 'text.primary' }}>DD/MM/YYYY (15/01/2024)</MenuItem>
+                      <MenuItem value="MM/DD/YYYY" sx={{ color: 'text.primary' }}>MM/DD/YYYY (01/15/2024)</MenuItem>
+                      <MenuItem value="DD MMM YYYY" sx={{ color: 'text.primary' }}>DD MMM YYYY (15 Jan 2024)</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel sx={{ color: 'text.secondary' }}>Time Format</InputLabel>
+                    <Select
+                      name="time_format"
+                      value={preferences.time_format}
+                      onChange={handleChange}
+                      label="Time Format"
+                      sx={{
+                        bgcolor: 'background.default',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'primary.main', borderWidth: 2 },
+                        '& .MuiSelect-select': { color: 'text.primary' }
+                      }}
+                    >
+                      <MenuItem value="12h" sx={{ color: 'text.primary' }}>12-hour (02:30 PM)</MenuItem>
+                      <MenuItem value="24h" sx={{ color: 'text.primary' }}>24-hour (14:30)</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
               </Grid>
-              
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Time Format</InputLabel>
-                  <Select
-                    name="time_format"
-                    value={preferences.time_format}
-                    onChange={handleChange}
-                    label="Time Format"
-                  >
-                    <MenuItem value="12h">12-hour (02:30 PM)</MenuItem>
-                    <MenuItem value="24h">24-hour (14:30)</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-            </Grid>
-          </Paper>
+            </Paper>
+          </Grow>
         </Grid>
 
         <Grid item xs={12}>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button
-              variant="contained"
-              startIcon={isUpdating ? <CircularProgress size={20} /> : <SaveOutlined />}
-              onClick={handleSubmit}
-              disabled={isUpdating}
-            >
-              {isUpdating ? 'Saving...' : 'Save Preferences'}
-            </Button>
-          </Box>
+          <Fade in timeout={1200}>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                variant="contained"
+                startIcon={isUpdating ? <CircularProgress size={20} /> : <SaveOutlined />}
+                onClick={handleSubmit}
+                disabled={isUpdating}
+                sx={{ 
+                  minWidth: 200,
+                  py: isMobile ? 1.5 : 1,
+                  px: 4,
+                  bgcolor: 'primary.main',
+                  color: 'primary.contrastText',
+                  '&:hover': { 
+                    bgcolor: 'primary.dark',
+                    transform: 'translateY(-1px)',
+                    boxShadow: 2
+                  },
+                  '&.Mui-disabled': { 
+                    bgcolor: 'action.disabledBackground',
+                    color: 'text.disabled'
+                  },
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {isUpdating ? 'Saving...' : 'Save Preferences'}
+              </Button>
+            </Box>
+          </Fade>
         </Grid>
       </Grid>
 
       <Snackbar
-        open={snackbarOpen}
+        open={snackbar.open}
         autoHideDuration={6000}
         onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
+        TransitionComponent={Fade}
       >
-        <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} variant="filled">
-          {snackbarMessage}
+        <Alert 
+          onClose={handleCloseSnackbar} 
+          severity={snackbar.severity} 
+          variant="filled"
+          sx={{ 
+            width: '100%',
+            bgcolor: snackbar.severity === 'success' ? 'success.dark' : 'error.dark',
+            color: snackbar.severity === 'success' ? 'success.contrastText' : 'error.contrastText',
+            '& .MuiAlert-icon': { color: 'inherit' }
+          }}
+        >
+          {snackbar.message}
         </Alert>
       </Snackbar>
     </Box>

@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   IconButton, Tooltip, Alert, CircularProgress, Pagination,
   TextField, InputAdornment, MenuItem, Select, FormControl, InputLabel,
-  Card, CardContent, Grid
+  Card, CardContent, Grid, useTheme, alpha
 } from '@mui/material';
 import {
   Visibility, Search, Refresh, AccessTime, Assignment,
@@ -59,10 +59,48 @@ const formatDate = (dateString) => {
   }
 };
 
+// ==================== Styled Components ====================
+const StyledStatCard = ({ label, value, baseColor }) => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+
+  return (
+    <Card 
+      variant="outlined"
+      sx={{ 
+        height: '100%',
+        backgroundImage: 'none',
+        bgcolor: isDark ? alpha(baseColor, 0.1) : alpha(baseColor, 0.08),
+        borderColor: isDark ? alpha(baseColor, 0.3) : alpha(baseColor, 0.2),
+        transition: 'transform 0.2s ease-in-out',
+        '&:hover': { transform: 'translateY(-2px)' }
+      }}
+    >
+      <CardContent>
+        <Typography 
+          variant="h3" 
+          fontWeight={800} 
+          sx={{ 
+            fontSize: { xs: '1.75rem', sm: '2rem', md: '2.5rem' },
+            color: isDark ? alpha(baseColor, 0.9) : baseColor 
+          }}
+        >
+          {value}
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+          {label}
+        </Typography>
+      </CardContent>
+    </Card>
+  );
+};
+
 // ==================== Main Component ====================
 const MyTasks = () => {
-  const dispatch = useDispatch();
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   
   // Use selectors to get data from Redux
   const myTasksData = useSelector(selectMyTasks);
@@ -78,13 +116,6 @@ const MyTasks = () => {
 
   const limit = 10;
   const debouncedSearch = useDebounce(searchTerm, 500);
-
-  // Debug logging
-  useEffect(() => {
-    console.log('MyTasks - myTasksData:', myTasksData);
-    console.log('MyTasks - loading:', loading);
-    console.log('MyTasks - error:', error);
-  }, [myTasksData, loading, error]);
 
   // Fetch status options (run once)
   useEffect(() => {
@@ -143,7 +174,7 @@ const MyTasks = () => {
   // Fetch tasks
   const fetchTasks = useCallback(() => {
     const params = { 
-      skip: (page - 1) * limit,  // Backend uses skip for pagination
+      skip: (page - 1) * limit,
       limit: limit 
     };
 
@@ -157,7 +188,6 @@ const MyTasks = () => {
       params.priority = Number(priorityFilter);
     }
 
-    console.log('Fetching tasks with params:', params);
     dispatch(fetchMyTasks(params));
   }, [dispatch, page, limit, debouncedSearch, statusFilter, priorityFilter]);
 
@@ -202,207 +232,292 @@ const MyTasks = () => {
 
   if (loading && tasks.length === 0) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
-        <CircularProgress />
-        <Typography sx={{ mt: 2 }}>Loading your tasks...</Typography>
-      </Container>
+      <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress sx={{ color: theme.palette.primary.main }} />
+        <Typography sx={{ ml: 2, color: theme.palette.text.secondary }}>Loading your tasks...</Typography>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* Header & Stats Cards */}
-      <Box mb={3}>
-        <Typography variant="h4" fontWeight={700} gutterBottom>My Tasks</Typography>
-        <Typography variant="body2" color="text.secondary">Manage and track your assigned action items</Typography>
-      </Box>
-
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={3}>
-          <Card sx={{ bgcolor: '#EFF6FF', border: '1px solid #BFDBFE' }}>
-            <CardContent>
-              <Typography variant="h3" fontWeight={800} color="#2563EB">{stats.total}</Typography>
-              <Typography variant="body2" color="text.secondary">Total Tasks</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={3}>
-          <Card sx={{ bgcolor: '#FEF2F2', border: '1px solid #FEE2E2' }}>
-            <CardContent>
-              <Typography variant="h3" fontWeight={800} color="#DC2626">{stats.overdue}</Typography>
-              <Typography variant="body2" color="text.secondary">Overdue</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={3}>
-          <Card sx={{ bgcolor: '#FEFCE8', border: '1px solid #FEF08A' }}>
-            <CardContent>
-              <Typography variant="h3" fontWeight={800} color="#CA8A04">{stats.inProgress}</Typography>
-              <Typography variant="body2" color="text.secondary">In Progress</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} sm={3}>
-          <Card sx={{ bgcolor: '#ECFDF5', border: '1px solid #D1FAE5' }}>
-            <CardContent>
-              <Typography variant="h3" fontWeight={800} color="#059669">{stats.completed}</Typography>
-              <Typography variant="body2" color="text.secondary">Completed</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-          <TextField
-            fullWidth
-            size="small"
-            placeholder="Search tasks by description..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
-          />
-
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Status</InputLabel>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
-              {statusOptions.map((opt) => (
-                <MenuItem key={opt.value} value={opt.value}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: opt.color }} />
-                    {opt.label}
-                  </Box>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>Priority</InputLabel>
-            <Select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} label="Priority">
-              <MenuItem value="all">All Priorities</MenuItem>
-              <MenuItem value="1">High</MenuItem>
-              <MenuItem value="2">Medium</MenuItem>
-              <MenuItem value="3">Low</MenuItem>
-              <MenuItem value="4">Very Low</MenuItem>
-            </Select>
-          </FormControl>
-
-          <Button variant="outlined" startIcon={<Refresh />} onClick={fetchTasks}>
-            Refresh
-          </Button>
-        </Stack>
-      </Paper>
-
-      {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
-      {loadingStatus && <Alert severity="info" sx={{ mb: 3 }}>Loading status options...</Alert>}
-
-      {tasks.length === 0 && !loading ? (
-        <Paper sx={{ p: 6, textAlign: 'center' }}>
-          <Assignment sx={{ fontSize: 64, color: '#CBD5E1', mb: 2 }} />
-          <Typography variant="h6" fontWeight={600}>No Tasks Found</Typography>
-          <Typography variant="body2" color="text.secondary">
-            {searchTerm || statusFilter !== 'all' || priorityFilter !== 'all'
-              ? 'Try adjusting your filters'
-              : 'You have no assigned tasks at the moment'}
+    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', py: { xs: 2, sm: 3, md: 4 } }}>
+      <Container maxWidth="xl" sx={{ px: { xs: 2, sm: 3, md: 4 } }}>
+        {/* Header */}
+        <Box mb={4}>
+          <Typography variant="h4" fontWeight={800} sx={{ color: 'text.primary', fontSize: { xs: '1.75rem', sm: '2rem', md: '2.25rem' } }}>
+            My Tasks
           </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+            Manage and track your assigned action items
+          </Typography>
+        </Box>
+
+        {/* Dynamic Stats Section */}
+        <Grid container spacing={2} sx={{ mb: 4 }}>
+          <Grid item xs={6} sm={3}>
+            <StyledStatCard label="Total Tasks" value={stats.total} baseColor={theme.palette.primary.main} />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <StyledStatCard label="Overdue" value={stats.overdue} baseColor={theme.palette.error.main} />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <StyledStatCard label="In Progress" value={stats.inProgress} baseColor={theme.palette.warning.main} />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <StyledStatCard label="Completed" value={stats.completed} baseColor={theme.palette.success.main} />
+          </Grid>
+        </Grid>
+
+        {/* Filters Toolbar */}
+        <Paper 
+          variant="outlined" 
+          sx={{ 
+            p: { xs: 1.5, sm: 2 }, 
+            mb: 3, 
+            backgroundImage: 'none', 
+            bgcolor: 'background.paper',
+            borderColor: 'divider' 
+          }}
+        >
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search tasks by description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{ 
+                startAdornment: <InputAdornment position="start"><Search fontSize="small" sx={{ color: 'text.secondary' }} /></InputAdornment>,
+              }}
+              sx={{ flex: 2 }}
+            />
+            
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <InputLabel>Status</InputLabel>
+              <Select 
+                value={statusFilter} 
+                onChange={(e) => setStatusFilter(e.target.value)} 
+                label="Status"
+              >
+                {statusOptions.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: opt.color }} />
+                      {opt.label}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Priority</InputLabel>
+              <Select 
+                value={priorityFilter} 
+                onChange={(e) => setPriorityFilter(e.target.value)} 
+                label="Priority"
+              >
+                <MenuItem value="all">All Priorities</MenuItem>
+                <MenuItem value="1">High</MenuItem>
+                <MenuItem value="2">Medium</MenuItem>
+                <MenuItem value="3">Low</MenuItem>
+                <MenuItem value="4">Very Low</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Button 
+              variant="outlined" 
+              onClick={fetchTasks}
+              startIcon={<Refresh />}
+              sx={{ minWidth: 100 }}
+            >
+              Refresh
+            </Button>
+          </Stack>
         </Paper>
-      ) : (
-        <>
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow sx={{ bgcolor: '#F8FAFC' }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Task</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Meeting</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Priority</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {tasks.map((task) => {
-                  const priority = PRIORITY[task.priority] || PRIORITY[2];
-                  const isOverdue = task.is_overdue && !task.completed_at;
-                  const statusDisplay = getStatusDisplay(task);
 
-                  return (
-                    <TableRow
-                      key={task.id}
-                      hover
-                      sx={{
-                        bgcolor: isOverdue ? '#FEF2F2' : 'transparent',
-                        '&:hover': { bgcolor: isOverdue ? '#FEE2E2' : 'action.hover' }
-                      }}
-                    >
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={500}>
-                          {task.description || task.title || 'Untitled'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {task.meeting_title || '—'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={statusDisplay.label}
-                          icon={statusDisplay.icon}
-                          size="small"
-                          sx={{ bgcolor: statusDisplay.color, color: '#fff', fontWeight: 500 }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <AccessTime fontSize="small" color={isOverdue ? 'error' : 'action'} />
-                          <Typography color={isOverdue ? 'error' : 'inherit'}>{formatDate(task.due_date)}</Typography>
-                        </Stack>
-                        {isOverdue && <Typography variant="caption" color="error">Overdue</Typography>}
-                      </TableCell>
-                      <TableCell>
-                        <Chip label={priority.label} color={priority.color} size="small" />
-                      </TableCell>
-                      <TableCell>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <Box sx={{ flex: 1, bgcolor: '#E5E7EB', borderRadius: 2, height: 6 }}>
-                            <Box sx={{ width: `${task.overall_progress_percentage || 0}%`, bgcolor: isOverdue ? '#EF4444' : '#3B82F6', height: 6, borderRadius: 2 }} />
+        {error && (
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => {}}>
+            {error}
+          </Alert>
+        )}
+        
+        {loadingStatus && (
+          <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
+            Loading status options...
+          </Alert>
+        )}
+
+        {/* Tasks Table */}
+        {tasks.length === 0 && !loading ? (
+          <Paper 
+            sx={{ 
+              p: 6, 
+              textAlign: 'center',
+              bgcolor: 'background.paper',
+              border: `1px solid ${theme.palette.divider}`,
+              borderRadius: 2
+            }}
+          >
+            <Assignment sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+            <Typography variant="h6" fontWeight={600} sx={{ color: 'text.primary' }}>
+              No Tasks Found
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {searchTerm || statusFilter !== 'all' || priorityFilter !== 'all'
+                ? 'Try adjusting your filters'
+                : 'You have no assigned tasks at the moment'}
+            </Typography>
+          </Paper>
+        ) : (
+          <>
+            <TableContainer 
+              component={Paper} 
+              variant="outlined" 
+              sx={{ 
+                backgroundImage: 'none', 
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                overflowX: 'auto'
+              }}
+            >
+              <Table size="small" sx={{ minWidth: 600 }}>
+                <TableHead sx={{ bgcolor: isDark ? alpha(theme.palette.common.white, 0.05) : '#F8FAFC' }}>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Task</TableCell>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Meeting</TableCell>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Due Date</TableCell>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Priority</TableCell>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Progress</TableCell>
+                    <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }} align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {tasks.map((task) => {
+                    const priority = PRIORITY[task.priority] || PRIORITY[2];
+                    const isOverdue = task.is_overdue && !task.completed_at;
+                    const statusDisplay = getStatusDisplay(task);
+
+                    return (
+                      <TableRow 
+                        key={task.id} 
+                        hover 
+                        sx={{ 
+                          bgcolor: isOverdue ? alpha(theme.palette.error.main, isDark ? 0.08 : 0.03) : 'transparent',
+                          transition: 'background-color 0.2s'
+                        }}
+                      >
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={600} sx={{ color: 'text.primary' }}>
+                            {task.description || task.title || 'Untitled'}
+                          </Typography>
+                          {task.remarks && (
+                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+                              {task.remarks.length > 100 ? task.remarks.substring(0, 100) + '...' : task.remarks}
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                            {task.meeting_title || '—'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={statusDisplay.label}
+                            icon={statusDisplay.icon}
+                            size="small"
+                            sx={{ 
+                              bgcolor: statusDisplay.color, 
+                              color: '#fff', 
+                              fontWeight: 500,
+                              '& .MuiChip-icon': { color: '#fff' }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <AccessTime fontSize="small" sx={{ color: isOverdue ? 'error.main' : 'action.active' }} />
+                            <Typography variant="body2" sx={{ color: isOverdue ? 'error.main' : 'text.primary' }}>
+                              {formatDate(task.due_date)}
+                            </Typography>
+                          </Stack>
+                          {isOverdue && (
+                            <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
+                              Overdue
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={priority.label} 
+                            color={priority.color} 
+                            size="small"
+                            sx={{ fontWeight: 500 }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ minWidth: 100 }}>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Box sx={{ 
+                              flex: 1, 
+                              bgcolor: alpha(theme.palette.text.disabled, 0.2), 
+                              borderRadius: 2, 
+                              height: 6,
+                              overflow: 'hidden'
+                            }}>
+                              <Box sx={{ 
+                                width: `${task.overall_progress_percentage || 0}%`, 
+                                bgcolor: isOverdue ? 'error.main' : 'primary.main', 
+                                height: 6, 
+                                borderRadius: 2,
+                                transition: 'width 0.3s ease'
+                              }} />
+                            </Box>
+                            <Typography variant="caption" fontWeight={500} sx={{ color: 'text.secondary' }}>
+                              {task.overall_progress_percentage || 0}%
+                            </Typography>
                           </Box>
-                          <Typography variant="caption" fontWeight={500}>{task.overall_progress_percentage || 0}%</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Details">
-                          <IconButton size="small" onClick={() => handleViewTask(task.id)} color="primary">
-                            <Visibility />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Tooltip title="View Details">
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleViewTask(task.id)} 
+                              sx={{ color: 'primary.main' }}
+                            >
+                              <Visibility fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
 
-          {totalPages > 1 && (
-            <Stack alignItems="center" mt={3}>
-              <Pagination
-                count={totalPages}
-                page={page}
-                onChange={(_, val) => setPage(val)}
-                color="primary"
-                showFirstButton
-                showLastButton
-              />
-            </Stack>
-          )}
-        </>
-      )}
-    </Container>
+            {totalPages > 1 && (
+              <Stack alignItems="center" mt={3}>
+                <Pagination
+                  count={totalPages}
+                  page={page}
+                  onChange={(_, val) => setPage(val)}
+                  color="primary"
+                  showFirstButton
+                  showLastButton
+                  sx={{
+                    '& .MuiPaginationItem-root': {
+                      color: 'text.primary',
+                    }
+                  }}
+                />
+              </Stack>
+            )}
+          </>
+        )}
+      </Container>
+    </Box>
   );
 };
 

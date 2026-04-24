@@ -1,72 +1,43 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
-  Card,
-  CardContent,
-  TextField,
-  Button,
-  Typography,
-  Box,
-  InputAdornment,
-  IconButton,
-  Alert,
-  CircularProgress,
-  Divider,
-  Link,
-  Snackbar,
-  Slide,
-  Fade,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogContentText,
-  DialogActions,
-  Paper,
-  Stack,
+  Card, CardContent, TextField, Button, Typography, Box,
+  InputAdornment, IconButton, Alert, CircularProgress, Divider,
+  Link, Snackbar, Slide, Dialog, DialogTitle, DialogContent,
+  DialogContentText, DialogActions, Paper, Stack, Fade
 } from '@mui/material';
 import {
-  Visibility,
-  VisibilityOff,
-  PersonOutline,
-  LockOutlined,
-  Business,
-  CheckCircleOutline,
-  ErrorOutline,
-  EmailOutlined,
-  SendOutlined,
-  CloseOutlined,
+  Visibility, VisibilityOff, PersonOutline, LockOutlined,
+  Business, CheckCircleOutline, ErrorOutline, EmailOutlined,
+  SendOutlined, CloseOutlined
 } from '@mui/icons-material';
 import { login, clearError, resetLoginSuccess, resendVerification } from '../../store/slices/authSlice';
 
-function SlideTransition(props) {
-  return <Slide {...props} direction="up" />;
-}
+const SlideTransition = (props) => <Slide {...props} direction="up" />;
 
 const SignInCard = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { isLoading, error, isAuthenticated, loginSuccess, verificationEmailSent } = useSelector((state) => state.auth);
 
-  const [formData, setFormData] = useState({
-    username: '',
-    password: '',
-  });
+  const [formData, setFormData] = useState({ username: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched] = useState({});
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [resendEmail, setResendEmail] = useState('');
-  const [isResending, setIsResending] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
-  const [resendError, setResendError] = useState('');
 
-  // Extract error message safely
-  const errorMessage = error?.message || (typeof error === 'string' ? error : '');
-  const isUnverifiedError = errorMessage.toLowerCase().includes('not verified') || 
-                           errorMessage.toLowerCase().includes('verification link');
+  const errorMessage = useMemo(() => 
+    error?.message || (typeof error === 'string' ? error : ''), 
+  [error]);
 
-  // Validation
+  const isUnverifiedError = useMemo(() => 
+    errorMessage.toLowerCase().includes('not verified') || 
+    errorMessage.toLowerCase().includes('verification link'),
+  [errorMessage]);
+
+  // Full Validation Logic
   const validateField = useCallback((name, value) => {
     switch (name) {
       case 'username':
@@ -78,48 +49,19 @@ const SignInCard = () => {
         if (!value) return 'Password is required';
         if (value.length < 6) return 'Password must be at least 6 characters';
         return '';
-      default:
-        return '';
+      default: return '';
     }
   }, []);
 
-  const getFieldError = useCallback((name) => {
-    if (!touched[name]) return '';
-    return validateField(name, formData[name]);
-  }, [touched, formData, validateField]);
+  const getFieldError = (name) => touched[name] ? validateField(name, formData[name]) : '';
 
-  const isFormValid = () => {
-    return formData.username?.trim() && 
-           formData.password &&
-           !validateField('username', formData.username) &&
-           !validateField('password', formData.password);
-  };
-
-  // Redirect if authenticated
+  // Lifecycle & Navigation
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
-  // Show error snackbar when error occurs
-  useEffect(() => {
-    if (errorMessage && !isUnverifiedError) {
-      setSnackbarOpen(true);
-    }
-  }, [errorMessage, isUnverifiedError]);
-
-  // Handle unverified email error - only open dialog once
-  useEffect(() => {
-    if (isUnverifiedError && !resendDialogOpen && !resendSuccess) {
-      // Extract email from username field if it looks like an email
-      const email = formData.username.includes('@') ? formData.username : '';
-      setResendEmail(email);
-      setResendDialogOpen(true);
-    }
-  }, [isUnverifiedError, formData.username, resendDialogOpen, resendSuccess]);
-
-  // Handle login success
   useEffect(() => {
     if (loginSuccess) {
       navigate('/dashboard', { replace: true });
@@ -127,89 +69,40 @@ const SignInCard = () => {
     }
   }, [loginSuccess, navigate, dispatch]);
 
-  // Close dialog when verification email is sent successfully
+  // Handle Unverified State
   useEffect(() => {
-    if (verificationEmailSent && resendDialogOpen) {
-      setResendSuccess(true);
-      setResendError('');
-      setTimeout(() => {
-        setResendDialogOpen(false);
-        setResendSuccess(false);
-        dispatch(clearError());
-      }, 3000);
+    if (isUnverifiedError && !resendDialogOpen) {
+      const email = formData.username.includes('@') ? formData.username : '';
+      setResendEmail(email);
+      setResendDialogOpen(true);
     }
-  }, [verificationEmailSent, resendDialogOpen, dispatch]);
+  }, [isUnverifiedError, formData.username, resendDialogOpen]);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    if (touched[name]) {
-      dispatch(clearError());
-    }
-  };
-
-  const handleBlur = (e) => {
-    const { name } = e.target;
-    setTouched(prev => ({ ...prev, [name]: true }));
-  };
+  useEffect(() => {
+    if (errorMessage && !isUnverifiedError) setSnackbarOpen(true);
+  }, [errorMessage, isUnverifiedError]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Mark all fields as touched
     setTouched({ username: true, password: true });
     
-    if (!isFormValid()) {
-      return;
-    }
+    if (validateField('username', formData.username) || validateField('password', formData.password)) return;
     
     dispatch(clearError());
-    
     try {
       await dispatch(login({
         username: formData.username.trim(),
         password: formData.password,
       })).unwrap();
-    } catch (err) {
-      // Error is handled by the rejected action
-      console.error('Login failed:', err);
+    } catch (err) { 
+      console.debug('Login failed:', err); 
     }
   };
 
-  const handleResendVerification = async () => {
-    const emailToResend = resendEmail || formData.username;
-    
-    // Validate email format
-    if (!emailToResend || !emailToResend.includes('@')) {
-      setResendError('Please enter a valid email address');
-      return;
-    }
-    
-    setIsResending(true);
-    setResendError('');
-    
-    try {
-      // Use the Redux thunk instead of direct fetch
-      await dispatch(resendVerification(emailToResend)).unwrap();
-      // Success is handled by the useEffect above
-    } catch (err) {
-      const errorMsg = err?.message || 'Failed to resend verification email. Please try again.';
-      setResendError(errorMsg);
-      console.error('Failed to resend:', err);
-    } finally {
-      setIsResending(false);
-    }
-  };
-
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
-    dispatch(clearError());
-  };
-
-  const handleCloseResendDialog = () => {
+  // Function to close dialog and clear related states
+  const handleCloseDialog = () => {
     setResendDialogOpen(false);
-    setResendError('');
-    setResendSuccess(false);
+    // Clear the verification email sent state after dialog closes
     dispatch(clearError());
   };
 
@@ -218,74 +111,34 @@ const SignInCard = () => {
       <Card
         sx={{
           width: { xs: '100%', sm: 450, md: 500 },
-          maxWidth: '95vw',
           borderRadius: 4,
           boxShadow: '0 12px 40px rgba(0,0,0,0.13)',
           mx: 'auto',
-          position: 'relative',
-          overflow: 'visible',
+          p: { xs: 1, sm: 2 }
         }}
       >
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
-          {/* Header */}
           <Box sx={{ textAlign: 'center', mb: 4 }}>
             <Business sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-            <Typography variant="h4" fontWeight={700} gutterBottom>
-              Welcome Back
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Sign in to manage your rental properties
-            </Typography>
+            <Typography variant="h4" fontWeight={700} gutterBottom>Welcome Back</Typography>
+            <Typography variant="body2" color="text.secondary">Sign in to manage your rental properties</Typography>
           </Box>
 
-          {/* Unverified Email Alert - Inline */}
-          {isUnverifiedError && !resendDialogOpen && (
-            <Fade in>
-              <Alert 
-                severity="warning" 
-                icon={<EmailOutlined />}
-                sx={{ mb: 3 }}
-                action={
-                  <Button 
-                    color="inherit" 
-                    size="small" 
-                    onClick={() => setResendDialogOpen(true)}
-                    startIcon={<SendOutlined />}
-                  >
-                    Resend
-                  </Button>
-                }
-                onClose={() => dispatch(clearError())}
-              >
-                <Typography variant="body2" fontWeight={500}>
-                  Email Not Verified
-                </Typography>
-                <Typography variant="caption" display="block">
-                  A verification link has been sent to your email. Please check your inbox (and spam folder).
-                </Typography>
-              </Alert>
-            </Fade>
-          )}
-
-          {/* Form */}
           <form onSubmit={handleSubmit}>
             <TextField
               fullWidth
               label="Email or Username"
               name="username"
               value={formData.username}
-              onChange={handleChange}
-              onBlur={handleBlur}
+              onChange={(e) => setFormData(p => ({ ...p, username: e.target.value }))}
+              onBlur={() => setTouched(p => ({ ...p, username: true }))}
               margin="normal"
               required
-              disabled={isLoading}
               error={!!getFieldError('username')}
               helperText={getFieldError('username')}
               InputProps={{
                 startAdornment: (
-                  <InputAdornment position="start">
-                    <PersonOutline color="action" />
-                  </InputAdornment>
+                  <InputAdornment position="start"><PersonOutline color="action" /></InputAdornment>
                 ),
               }}
             />
@@ -296,27 +149,19 @@ const SignInCard = () => {
               name="password"
               type={showPassword ? 'text' : 'password'}
               value={formData.password}
-              onChange={handleChange}
-              onBlur={handleBlur}
+              onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
+              onBlur={() => setTouched(p => ({ ...p, password: true }))}
               margin="normal"
               required
-              disabled={isLoading}
               error={!!getFieldError('password')}
               helperText={getFieldError('password')}
               InputProps={{
                 startAdornment: (
-                  <InputAdornment position="start">
-                    <LockOutlined color="action" />
-                  </InputAdornment>
+                  <InputAdornment position="start"><LockOutlined color="action" /></InputAdornment>
                 ),
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton 
-                      onClick={() => setShowPassword(!showPassword)} 
-                      type="button"
-                      edge="end"
-                      disabled={isLoading}
-                    >
+                    <IconButton onClick={() => setShowPassword(!showPassword)}>
                       {showPassword ? <VisibilityOff /> : <Visibility />}
                     </IconButton>
                   </InputAdornment>
@@ -325,12 +170,7 @@ const SignInCard = () => {
             />
 
             <Box sx={{ textAlign: 'right', mt: 1 }}>
-              <Link 
-                component={RouterLink} 
-                to="/forgot-password" 
-                variant="body2"
-                underline="hover"
-              >
+              <Link component={RouterLink} to="/forgot-password" variant="body2" underline="hover">
                 Forgot password?
               </Link>
             </Box>
@@ -340,132 +180,86 @@ const SignInCard = () => {
               fullWidth
               variant="contained"
               size="large"
-              disabled={isLoading || !isFormValid()}
-              sx={{ mt: 3, mb: 2, py: 1.5 }}
+              disabled={isLoading}
+              sx={{ mt: 3, mb: 2, py: 1.8 }}
             >
-              {isLoading ? (
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <CircularProgress size={20} color="inherit" />
-                  <span>Signing in...</span>
-                </Stack>
-              ) : (
-                'Sign In'
-              )}
+              {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Sign In'}
             </Button>
           </form>
 
           <Divider sx={{ my: 3 }}>
-            <Typography variant="caption" color="text.secondary">
-              Don't have an account?
-            </Typography>
+            <Typography variant="caption" color="text.secondary">Don't have an account?</Typography>
           </Divider>
 
           <Button
-            component={RouterLink}
-            to="/signup"
-            fullWidth
-            variant="outlined"
-            size="large"
-            disabled={isLoading}
-            sx={{ py: 1.5 }}
+            component={RouterLink} to="/signup"
+            fullWidth variant="outlined" size="large" sx={{ py: 1.5 }}
           >
             Create New Account
           </Button>
         </CardContent>
       </Card>
 
-      {/* Error Snackbar */}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        TransitionComponent={SlideTransition}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert 
-          onClose={handleCloseSnackbar} 
-          severity="error" 
-          variant="filled"
-          icon={<ErrorOutline />}
-          sx={{ width: '100%', boxShadow: 3 }}
-        >
-          {errorMessage}
-        </Alert>
-      </Snackbar>
-
-      {/* Resend Verification Dialog */}
+      {/* Verification Dialog - FIXED Close Button */}
       <Dialog
         open={resendDialogOpen}
-        onClose={handleCloseResendDialog}
-        aria-labelledby="resend-dialog-title"
-        maxWidth="sm"
-        fullWidth
+        onClose={handleCloseDialog}
         TransitionComponent={SlideTransition}
+        maxWidth="xs"
+        fullWidth
       >
-        <DialogTitle id="resend-dialog-title">
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Typography variant="h6">Email Not Verified</Typography>
-            <IconButton onClick={handleCloseResendDialog} size="small">
-              <CloseOutlined />
-            </IconButton>
-          </Stack>
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText paragraph>
-            Your email address has not been verified yet. 
-            We can send you a new verification link to:
-          </DialogContentText>
-          
-          <Paper 
-            variant="outlined" 
-            sx={{ 
-              p: 2, 
-              mb: 2, 
-              bgcolor: 'action.hover',
-              textAlign: 'center',
-              borderRadius: 2
+        <DialogTitle>
+          Verify Your Email
+          <IconButton
+            aria-label="close"
+            onClick={handleCloseDialog}
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+              color: (theme) => theme.palette.grey[500],
             }}
           >
-            <Typography variant="body1" fontWeight="bold" color="primary">
-              {resendEmail || formData.username || 'your email address'}
+            <CloseOutlined />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Your account is unverified. We can send a new link to:
+          </DialogContentText>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover', textAlign: 'center' }}>
+            <Typography variant="subtitle1" fontWeight="bold" color="primary">
+              {resendEmail || formData.username || "your email"}
             </Typography>
           </Paper>
-          
-          <DialogContentText variant="body2">
-            Please check your inbox and click the verification link to activate your account.
-            Don't forget to check your spam folder.
-          </DialogContentText>
-          
-          {resendError && (
-            <Alert severity="error" sx={{ mt: 2 }} onClose={() => setResendError('')}>
-              {resendError}
-            </Alert>
-          )}
-          
-          {resendSuccess && (
-            <Alert 
-              severity="success" 
-              icon={<CheckCircleOutline />}
-              sx={{ mt: 2 }}
-            >
-              Verification email resent successfully! Please check your inbox.
-            </Alert>
+          {verificationEmailSent && (
+            <Alert severity="success" sx={{ mt: 2 }}>Link sent! Check your inbox.</Alert>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 3, pt: 0 }}>
-          <Button onClick={handleCloseResendDialog} color="inherit">
+        <DialogActions sx={{ p: 3 }}>
+          <Button onClick={handleCloseDialog} variant="outlined">
             Close
           </Button>
           <Button 
-            onClick={handleResendVerification} 
+            onClick={() => dispatch(resendVerification(resendEmail || formData.username))}
             variant="contained"
-            disabled={isResending || resendSuccess}
-            startIcon={isResending ? <CircularProgress size={18} /> : <SendOutlined />}
+            disabled={isLoading || verificationEmailSent}
           >
-            {isResending ? 'Sending...' : 'Resend Verification Email'}
+            Resend Email
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={() => setSnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="error" variant="filled" onClose={() => setSnackbarOpen(false)}>
+          {errorMessage}
+        </Alert>
+      </Snackbar>
     </>
   );
 };

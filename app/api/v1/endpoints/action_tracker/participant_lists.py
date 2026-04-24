@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from asyncio.log import logger
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request,  status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -10,17 +12,21 @@ from app.crud.action_tracker import participant_list
 from app.schemas.action_tracker_participants import (
     AddParticipantsToListRequest,
     BulkAddParticipantsResponse,
+    PaginatedParticipantListResponse,
     PaginatedParticipantResponse,
     ParticipantListCreate,
     ParticipantListDetailResponse,
     ParticipantListUpdate,
-    ParticipantListResponse
+    ParticipantListResponse,
+    ParticipantResponse
 )
 
 router = APIRouter()
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+# app/api/v1/endpoints/action_tracker/participant_lists.py
 
 async def get_and_verify_list(
     db: AsyncSession,
@@ -38,34 +44,35 @@ async def get_and_verify_list(
         require_ownership: If True, requires user to be the owner
     
     Returns:
-        The participant list object
+        The participant list dictionary
     
     Raises:
         HTTPException: If list not found or permission denied
     """
-    list_obj = await participant_list.get(db, list_id)
-    if not list_obj:
+    # Now returns a dictionary, not an ORM object
+    list_dict = await participant_list.get(db, list_id, include_participants=False)
+    
+    if not list_dict:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Participant list not found"
         )
     
-    # Check access permissions
-    if not list_obj.is_global and list_obj.created_by_id != current_user.id:
+    # Check access permissions using dictionary keys
+    if not list_dict.get('is_global') and list_dict.get('created_by_id') != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied to this list"
         )
     
     # Check ownership if required
-    if require_ownership and list_obj.created_by_id != current_user.id:
+    if require_ownership and list_dict.get('created_by_id') != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the owner can perform this action"
         )
     
-    return list_obj
-
+    return list_dict
 
 # ==================== CREATE OPERATIONS ====================
 
@@ -89,19 +96,14 @@ async def create_participant_list(
     - **is_global**: Whether the list is accessible by all users (default: false)
     - **participant_ids**: Optional list of participant IDs to add initially
     """
-    return await participant_list.create_with_participants(
-        db, list_in, list_in.participant_ids, current_user.id
+    return await participant_list.create(
+        db, list_in, current_user.id
     )
 
 
 # ==================== READ OPERATIONS ====================
 
-@router.get(
-    "/",
-    response_model=List[ParticipantListResponse],
-    summary="Get all accessible participant lists",
-    description="Get all participant lists accessible to the current user (owned lists + global lists)."
-)
+@router.get("/", response_model=PaginatedParticipantListResponse)
 async def get_participant_lists(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -114,11 +116,32 @@ async def get_participant_lists(
     This includes:
     - Lists created by the current user
     - Global lists created by other users
-    
-    Results are paginated using skip and limit parameters.
     """
-    lists = await participant_list.get_accessible_lists(db, current_user.id, skip, limit)
-    return lists
+    try:
+        # Get lists and total count
+        lists, total = await participant_list.get_accessible_lists(
+            db, current_user.id, skip, limit
+        )
+        
+        # Calculate pagination
+        page = skip // limit + 1 if limit > 0 else 1
+        pages = (total + limit - 1) // limit if limit > 0 else 1
+        # Return in the expected format
+        return {
+            "items": lists,
+            "total": total,
+            "page": page,
+            "size": limit,
+            "pages": pages
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching participant lists: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch participant lists: {str(e)}"
+        )
+    
 
 
 @router.get(
@@ -218,32 +241,50 @@ async def delete_participant_list(
     summary="Get list members",
     description="Get all participants in a specific list with pagination."
 )
+# app/api/v1/endpoints/action_tracker/participant_lists.py
+
+@router.get("/{list_id}/members", response_model=PaginatedParticipantResponse)
 async def get_list_members(
     list_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(20, ge=1, le=100, description="Maximum number of records to return"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None),
 ):
     """
     Get all members of a participant list with pagination.
-    
-    Returns a paginated list of participants in the list.
     """
-    await get_and_verify_list(db, list_id, current_user, require_ownership=False)
+    try:
+        # Verify access using the helper (now works with dict)
+        await get_and_verify_list(db, list_id, current_user, require_ownership=False)
+        
+        # Get members - this now returns dictionaries
+        members, total = await participant_list.get_list_participants(
+            db, list_id, skip, limit, search
+        )
+        
+        # Calculate pagination
+        page = skip // limit + 1 if limit > 0 else 1
+        pages = (total + limit - 1) // limit if limit > 0 else 1
+        
+        return {
+            "items": members,  # Already dictionaries
+            "total": total,
+            "page": page,
+            "size": limit,
+            "pages": pages
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting list members: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get list members: {str(e)}"
+        )
     
-    members = await participant_list.get_list_participants(db, list_id, skip, limit)
-    total = len(members)
-    
-    return {
-        "items": members,
-        "total": total,
-        "page": skip // limit + 1 if limit > 0 else 1,
-        "size": limit,
-        "pages": (total + limit - 1) // limit if limit > 0 else 1
-    }
-
-
 @router.post(
     "/{list_id}/members",
     response_model=BulkAddParticipantsResponse,
@@ -278,69 +319,100 @@ async def add_members_to_list(
     return result
 
 
-@router.delete(
-    "/{list_id}/members/{participant_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Remove a member from list",
-    description="Remove a specific participant from a list. Only the owner can remove members."
-)
+
+
+@router.get("/{list_id}/available-participants")
+async def get_available_participants(
+    list_id: UUID,
+    request: Request,
+    search: Optional[str] = Query(None, description="Search by name, email, or organization"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Number of records to return"),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Get participants that are not in the specified list.
+    Useful for adding new members to a list.
+    """
+    # Verify user has access to the list
+    await get_and_verify_list(db, list_id, current_user, require_ownership=False)
+    
+    # Get participants not in the list
+    participants, total = await participant_list.get_participants_not_in_list_paginated(
+        db, list_id, search, skip, limit
+    )
+    
+    # Convert SQLAlchemy models to Pydantic schemas
+    participant_responses = [
+        ParticipantResponse.model_validate(participant) 
+        for participant in participants
+    ]
+    
+    # Return properly serialized response
+    return {
+        "items": participant_responses,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "has_more": skip + limit < total
+    }
+
+
+
+@router.delete("/{list_id}/members/{participant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_member_from_list(
     list_id: UUID,
     participant_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """
-    Remove a participant from a list.
     
-    Only the owner of the list can remove members.
-    """
-    await get_and_verify_list(db, list_id, current_user, require_ownership=True)
-    
-    success = await participant_list.remove_participant_from_list(db, list_id, participant_id)
-    if not success:
+    print("=" * 50)
+    print("DELETE ENDPOINT WAS REACHED!")
+    print(f"list_id: {list_id}")
+    print(f"participant_id: {participant_id}")
+    print(f"current_user: {current_user.id}")
+    print("=" * 50)
+    """Remove a participant from a list"""
+    try:
+        # First check if list exists and user has access
+        list_obj = await participant_list.get(db, list_id)
+        if not list_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant list not found"
+            )
+        # Check access
+        if list_obj['created_by_id']  != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this list"
+            )
+        print(f"Attempting to remove participant {participant_id} from list {list_id} by user {current_user.id}"   )
+        # Remove the member
+        success = await participant_list.remove_participant_from_list(
+            db, list_id, participant_id, updated_by_id=current_user.id
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found in this list"
+            )
+        
+        return None
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing member from list: {e}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Participant not found in this list"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove member: {str(e)}"
         )
     
-    return None
-
-
-@router.get(
-    "/{list_id}/available-participants",
-    response_model=PaginatedParticipantResponse,
-    summary="Get available participants",
-    description="Get participants that are not already in the list and can be added."
-)
-async def get_available_participants(
-    list_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    search: Optional[str] = Query(None, min_length=1, description="Search term to filter participants"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(20, ge=1, le=100, description="Maximum number of records to return"),
-):
-    """
-    Get participants that are not already in the list.
     
-    This is useful for adding new members to a list.
-    You can optionally search by name, email, or organization.
-    """
-    await get_and_verify_list(db, list_id, current_user, require_ownership=False)
-    
-    participants, total = await participant_list.get_participants_not_in_list_paginated(
-        db, list_id, search, skip, limit
-    )
-    
-    return {
-        "items": participants,
-        "total": total,
-        "page": skip // limit + 1 if limit > 0 else 1,
-        "size": limit,
-        "pages": (total + limit - 1) // limit if limit > 0 else 1
-    }
-
 @router.get("/{list_id}/members", response_model=PaginatedParticipantResponse)
 async def get_list_members(
     list_id: UUID,

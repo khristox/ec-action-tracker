@@ -6,7 +6,8 @@ import {
   Grid, Paper, Typography, Box, Card, CardContent, Avatar, Container,
   CircularProgress, Button, List, ListItem, ListItemText, 
   Divider, LinearProgress, Alert, Stack, Chip, IconButton,
-  Tooltip, useTheme, useMediaQuery, ToggleButton, ToggleButtonGroup
+  Tooltip, useTheme, useMediaQuery, ToggleButton, ToggleButtonGroup,
+  alpha
 } from '@mui/material';
 import {
   Event as EventIcon,
@@ -80,81 +81,100 @@ const safeGetDayOfWeek = (dateValue) => {
 };
 
 // ==================== Stat Card Component ====================
-const StatCard = ({ title, value, icon, color, loading, trend, subtitle }) => (
-  <Card sx={{ 
-    borderRadius: 3, 
-    boxShadow: '0 2px 6px rgba(0,0,0,0.04)', 
-    height: '100%',
-    transition: 'transform 0.2s, box-shadow 0.2s',
-    '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }
-  }}>
-    <CardContent sx={{ p: 2 }}>
-      <Stack direction="row" spacing={1.5} alignItems="flex-start">
-        <Avatar sx={{ bgcolor: `${color}12`, color: color, width: 40, height: 40 }}>
-          {icon}
-        </Avatar>
-        <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography variant="caption" color="textSecondary" noWrap sx={{ 
-            fontWeight: 700, 
-            textTransform: 'uppercase', 
-            display: 'block', 
-            fontSize: '0.6rem', 
-            letterSpacing: 0.5 
+const StatCard = ({ title, value, icon, color, loading, trend, subtitle }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  return (
+    <Card sx={{ 
+      borderRadius: 3, 
+      boxShadow: '0 2px 6px rgba(0,0,0,0.04)', 
+      height: '100%',
+      transition: 'transform 0.2s, box-shadow 0.2s',
+      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
+      bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+      border: isDarkMode ? `1px solid ${alpha(theme.palette.common.white, 0.1)}` : 'none',
+    }}>
+      <CardContent sx={{ p: 2 }}>
+        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+          <Avatar sx={{ 
+            bgcolor: isDarkMode ? alpha(color, 0.2) : `${color}12`, 
+            color: color, 
+            width: 40, 
+            height: 40 
           }}>
-            {title}
-          </Typography>
-          <Typography variant="h5" fontWeight="800" sx={{ lineHeight: 1.2 }}>
-            {loading ? <CircularProgress size={16} /> : value}
-          </Typography>
-          {trend !== undefined && !loading && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-              {trend > 0 ? (
-                <TrendingUpIcon sx={{ fontSize: 12, color: 'success.main' }} />
-              ) : trend < 0 ? (
-                <TrendingDownIcon sx={{ fontSize: 12, color: 'error.main' }} />
-              ) : null}
-              <Typography variant="caption" color={trend > 0 ? 'success.main' : trend < 0 ? 'error.main' : 'text.secondary'}>
-                {Math.abs(trend)}% from last month
-              </Typography>
-            </Box>
-          )}
-          {subtitle && !loading && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-              {subtitle}
+            {icon}
+          </Avatar>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="caption" color="textSecondary" noWrap sx={{ 
+              fontWeight: 700, 
+              textTransform: 'uppercase', 
+              display: 'block', 
+              fontSize: '0.6rem', 
+              letterSpacing: 0.5 
+            }}>
+              {title}
             </Typography>
-          )}
-        </Box>
-      </Stack>
-    </CardContent>
-  </Card>
-);
+            <Typography variant="h5" fontWeight="800" sx={{ lineHeight: 1.2 }}>
+              {loading ? <CircularProgress size={16} /> : value}
+            </Typography>
+            {trend !== undefined && !loading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                {trend > 0 ? (
+                  <TrendingUpIcon sx={{ fontSize: 12, color: 'success.main' }} />
+                ) : trend < 0 ? (
+                  <TrendingDownIcon sx={{ fontSize: 12, color: 'error.main' }} />
+                ) : null}
+                <Typography variant="caption" color={trend > 0 ? 'success.main' : trend < 0 ? 'error.main' : 'text.secondary'}>
+                  {Math.abs(trend)}% from last month
+                </Typography>
+              </Box>
+            )}
+            {subtitle && !loading && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                {subtitle}
+              </Typography>
+            )}
+          </Box>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+};
 
 // ==================== Chart Card Component ====================
-const ChartCard = ({ title, children, action, height = 300 }) => (
-  <Paper sx={{ 
-    borderRadius: 3, 
-    p: 2, 
-    height: '100%',
-    border: '1px solid',
-    borderColor: 'divider',
-    boxShadow: 'none'
-  }}>
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-      <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
-        {title}
-      </Typography>
-      {action}
-    </Box>
-    <Box sx={{ height, position: 'relative' }}>
-      {children}
-    </Box>
-  </Paper>
-);
+const ChartCard = ({ title, children, action, height = 300 }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  return (
+    <Paper sx={{ 
+      borderRadius: 3, 
+      p: 2, 
+      height: '100%',
+      border: '1px solid',
+      borderColor: 'divider',
+      boxShadow: 'none',
+      bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+    }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
+          {title}
+        </Typography>
+        {action}
+      </Box>
+      <Box sx={{ height, position: 'relative' }}>
+        {children}
+      </Box>
+    </Paper>
+  );
+};
 
 // ==================== Main Dashboard Component ====================
 const Dashboard = () => {
   const navigate = useNavigate();
   const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useSelector((state) => state.auth);
   
@@ -171,7 +191,17 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [chartType, setChartType] = useState('bar');
 
-  // Process chart data from tasks - FIXED date handling
+  // Get chart text color based on theme
+  const getChartTextColor = useCallback(() => {
+    return isDarkMode ? '#e0e0e0' : '#666666';
+  }, [isDarkMode]);
+
+  // Get chart grid color based on theme
+  const getChartGridColor = useCallback(() => {
+    return isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+  }, [isDarkMode]);
+
+  // Process chart data from tasks
   const processChartData = useCallback((tasks) => {
     // Weekly Activity (last 7 days)
     const last7Days = eachDayOfInterval({
@@ -374,20 +404,83 @@ const Dashboard = () => {
     plugins: {
       legend: {
         position: 'bottom',
-        labels: { boxWidth: 10, fontSize: 10 }
+        labels: { 
+          boxWidth: 10, 
+          fontSize: 10,
+          color: getChartTextColor()
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        backgroundColor: isDarkMode ? '#424242' : '#ffffff',
+        titleColor: isDarkMode ? '#ffffff' : '#000000',
+        bodyColor: isDarkMode ? '#e0e0e0' : '#666666',
+        borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+        borderWidth: 1
+      }
+    },
+    scales: {
+      y: {
+        grid: {
+          color: getChartGridColor()
+        },
+        ticks: {
+          color: getChartTextColor()
+        }
+      },
+      x: {
+        grid: {
+          color: getChartGridColor()
+        },
+        ticks: {
+          color: getChartTextColor()
+        }
       }
     }
-  }), []);
+  }), [getChartTextColor, getChartGridColor, isDarkMode]);
 
   const lineChartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { position: 'bottom', labels: { boxWidth: 10, fontSize: 10 } },
-      tooltip: { mode: 'index', intersect: false }
+      legend: { 
+        position: 'bottom', 
+        labels: { 
+          boxWidth: 10, 
+          fontSize: 10,
+          color: getChartTextColor()
+        } 
+      },
+      tooltip: { 
+        mode: 'index', 
+        intersect: false,
+        backgroundColor: isDarkMode ? '#424242' : '#ffffff',
+        titleColor: isDarkMode ? '#ffffff' : '#000000',
+        bodyColor: isDarkMode ? '#e0e0e0' : '#666666',
+      }
     },
-    scales: { y: { beginAtZero: true, grid: { display: true } } }
-  }), []);
+    scales: { 
+      y: { 
+        beginAtZero: true, 
+        grid: { 
+          display: true,
+          color: getChartGridColor()
+        },
+        ticks: {
+          color: getChartTextColor()
+        }
+      },
+      x: {
+        grid: {
+          color: getChartGridColor()
+        },
+        ticks: {
+          color: getChartTextColor()
+        }
+      }
+    }
+  }), [getChartTextColor, getChartGridColor, isDarkMode]);
 
   if (loading && !stats) {
     return (
@@ -403,19 +496,32 @@ const Dashboard = () => {
       sx={{ 
         py: { xs: 2, md: 4 }, 
         px: { xs: 2, sm: 3 },
-        pb: 10
+        pb: 10,
+        bgcolor: 'background.default',
+        minHeight: '100vh'
       }}
     >
       {/* Header */}
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box>
-          <Typography variant="h4" fontWeight={900}>Dashboard</Typography>
+          <Typography variant="h4" fontWeight={900} sx={{ color: isDarkMode ? 'primary.light' : 'inherit' }}>
+            Dashboard
+          </Typography>
           <Typography variant="body2" color="text.secondary">
             Welcome back, {user?.full_name || user?.username || 'Officer'}
           </Typography>
         </Box>
         <Tooltip title="Refresh Data">
-          <IconButton onClick={handleRefresh} disabled={refreshing}>
+          <IconButton 
+            onClick={handleRefresh} 
+            disabled={refreshing}
+            sx={{
+              color: isDarkMode ? 'primary.light' : 'primary.main',
+              '&:hover': {
+                bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : alpha(theme.palette.primary.main, 0.1)
+              }
+            }}
+          >
             <RefreshIcon sx={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
           </IconButton>
         </Tooltip>
@@ -428,7 +534,7 @@ const Dashboard = () => {
         </Alert>
       )}
 
-      {/* Stats Grid - Using size prop instead of item/xs/sm/md */}
+      {/* Stats Grid */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
         <StatCard 
           title="Total Meetings" 
@@ -472,6 +578,16 @@ const Dashboard = () => {
               value={chartType}
               exclusive
               onChange={(e, val) => val && setChartType(val)}
+              sx={{
+                '& .MuiToggleButton-root': {
+                  color: isDarkMode ? '#e0e0e0' : '#666666',
+                  borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+                  '&.Mui-selected': {
+                    bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : alpha(theme.palette.primary.main, 0.1),
+                    color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
+                  }
+                }
+              }}
             >
               <ToggleButton value="bar"><BarChartIcon fontSize="small" /></ToggleButton>
               <ToggleButton value="line"><TimelineIcon fontSize="small" /></ToggleButton>
@@ -505,12 +621,26 @@ const Dashboard = () => {
       {/* Pending Tasks and Upcoming Meetings Row */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
         {/* Pending Tasks */}
-        <Paper sx={{ borderRadius: 3, p: 2, border: '1px solid', borderColor: 'divider', boxShadow: 'none', height: '100%' }}>
+        <Paper sx={{ 
+          borderRadius: 3, 
+          p: 2, 
+          border: '1px solid', 
+          borderColor: 'divider', 
+          boxShadow: 'none', 
+          height: '100%',
+          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+        }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
               My Pending Tasks ({pendingTasks.length})
             </Typography>
-            <Button size="small" onClick={() => navigate('/actions/my-tasks')}>
+            <Button 
+              size="small" 
+              onClick={() => navigate('/actions/my-tasks')}
+              sx={{
+                color: isDarkMode ? 'primary.light' : 'primary.main',
+              }}
+            >
               View All
             </Button>
           </Box>
@@ -532,12 +662,16 @@ const Dashboard = () => {
                       borderColor: 'divider',
                       cursor: 'pointer',
                       transition: 'all 0.2s',
-                      '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+                      bgcolor: isDarkMode ? 'background.default' : '#ffffff',
+                      '&:hover': { 
+                        borderColor: 'primary.main', 
+                        bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : 'action.hover' 
+                      }
                     }}
                   >
                     <CardContent sx={{ p: 2 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                        <Typography variant="body2" fontWeight={700} sx={{ flex: 1 }}>
+                        <Typography variant="body2" fontWeight={700} sx={{ flex: 1, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>
                           {task.title || task.description}
                         </Typography>
                         {isOverdue && (
@@ -559,7 +693,11 @@ const Dashboard = () => {
                       <LinearProgress 
                         variant="determinate" 
                         value={task.overall_progress_percentage} 
-                        sx={{ height: 4, borderRadius: 2 }}
+                        sx={{ 
+                          height: 4, 
+                          borderRadius: 2,
+                          bgcolor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined,
+                        }}
                         color={isOverdue ? 'error' : 'primary'}
                       />
                     </CardContent>
@@ -576,12 +714,26 @@ const Dashboard = () => {
         </Paper>
 
         {/* Upcoming Meetings */}
-        <Paper sx={{ borderRadius: 3, p: 2, border: '1px solid', borderColor: 'divider', boxShadow: 'none', height: '100%' }}>
+        <Paper sx={{ 
+          borderRadius: 3, 
+          p: 2, 
+          border: '1px solid', 
+          borderColor: 'divider', 
+          boxShadow: 'none', 
+          height: '100%',
+          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+        }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
               Upcoming Meetings
             </Typography>
-            <Button size="small" onClick={() => navigate('/meetings')}>
+            <Button 
+              size="small" 
+              onClick={() => navigate('/meetings')}
+              sx={{
+                color: isDarkMode ? 'primary.light' : 'primary.main',
+              }}
+            >
               View All
             </Button>
           </Box>
@@ -596,13 +748,26 @@ const Dashboard = () => {
                   <React.Fragment key={meeting.id}>
                     <ListItem 
                       onClick={() => navigate(`/meetings/${meeting.id}`)}
-                      sx={{ py: 1.5, px: 0, cursor: 'pointer' }}
+                      sx={{ 
+                        py: 1.5, 
+                        px: 0, 
+                        cursor: 'pointer',
+                        '&:hover': {
+                          bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : 'action.hover',
+                          borderRadius: 1
+                        }
+                      }}
                     >
-                      <Avatar sx={{ bgcolor: 'action.hover', mr: 2, width: 40, height: 40 }}>
+                      <Avatar sx={{ 
+                        bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : 'action.hover', 
+                        mr: 2, 
+                        width: 40, 
+                        height: 40 
+                      }}>
                         <AccessTimeIcon sx={{ fontSize: 18, color: 'primary.main' }} />
                       </Avatar>
                       <ListItemText 
-                        primary={<Typography variant="body2" fontWeight={700}>{meeting.title}</Typography>}
+                        primary={<Typography variant="body2" fontWeight={700} sx={{ color: isDarkMode ? '#e0e0e0' : 'inherit' }}>{meeting.title}</Typography>}
                         secondary={
                           <Typography variant="caption" color="text.secondary">
                             {formattedDate}
@@ -611,7 +776,7 @@ const Dashboard = () => {
                       />
                       <ChevronRightIcon fontSize="small" color="disabled" />
                     </ListItem>
-                    {index < arr.length - 1 && <Divider />}
+                    {index < arr.length - 1 && <Divider sx={{ borderColor: 'divider' }} />}
                   </React.Fragment>
                 );
               })}

@@ -17,9 +17,7 @@ const ColorModeSelect = ({ sx }) => {
           zIndex: 1000,
           bgcolor: 'background.paper',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          '&:hover': {
-            bgcolor: 'action.hover',
-          },
+          '&:hover': { bgcolor: 'action.hover' },
           ...sx,
         }}
       >

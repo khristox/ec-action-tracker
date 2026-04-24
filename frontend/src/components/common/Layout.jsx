@@ -26,44 +26,40 @@ const Layout = () => {
 
       {/* Row 1: Navbar */}
       <Box sx={{ height: NAVBAR_HEIGHT, zIndex: 1300, flexShrink: 0 }}>
-        <Navbar 
-          handleDrawerToggle={() => setMobileOpen(!mobileOpen)} 
-          isMobile={isMobile} 
-          sidebarWidth={sidebarWidth} 
+        <Navbar
+          handleDrawerToggle={() => setMobileOpen(!mobileOpen)}
+          isMobile={isMobile}
+          sidebarWidth={sidebarWidth}
         />
       </Box>
 
       {/* Row 2: Body Container */}
       <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
-        
+
         {/* Sidebar Column */}
         {!isMobile && (
-          <Box sx={{ 
-            width: sidebarWidth, 
-            flexShrink: 0, 
+          <Box sx={{
+            width: sidebarWidth,
+            flexShrink: 0,
             borderRight: `1px solid ${theme.palette.divider}`,
             transition: theme.transitions.create('width', {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.enteringScreen,
             }),
-            bgcolor: 'background.paper'
+            bgcolor: 'background.paper'  // ✅ theme-aware
           }}>
             <Sidebar isMobile={false} isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} />
           </Box>
         )}
 
-        {/* ✅ Main Content Column with responsive padding */}
-        <Box 
-          component="main" 
-          sx={{ 
-            flexGrow: 1, 
-            overflowY: 'auto', 
-            bgcolor: '#f8fafc',
-            // 🟢 PADDING ADDED HERE:
-            // p: 3 is standard (24px). Adjust to 2 for tighter layout.
-            p: { xs: 2, sm: 3, md: 4 }, 
-            // Ensures space at the bottom for the mobile nav bar
-            pb: isMobile ? `${BOTTOM_NAV_HEIGHT + 16}px` : 4,
+        {/* Main Content Column */}
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            overflowY: 'auto',
+            bgcolor: 'background.default',  // ✅ was '#f8fafc' — THIS was the bug
+            ...(isMobile && { pb: `${BOTTOM_NAV_HEIGHT}px` }),
             width: '100%',
             minWidth: 0,
           }}

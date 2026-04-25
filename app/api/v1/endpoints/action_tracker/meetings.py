@@ -10,6 +10,7 @@ import logging
 from math import radians, sin, cos, sqrt, atan2
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from sqlalchemy import and_, distinct, func, select, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -64,14 +65,7 @@ def apply_meeting_filters(query, filters):
     
     # Status filter
     if filters.get("status"):
-            status_value = filters["status"]
-            # Try to match by short_name first, then by code
-            query = query.where(
-                or_(
-                    Meeting.status.has(short_name=status_value),
-                    Meeting.status.has(code=f"MEETING_STATUS_{status_value.upper()}")
-                )
-            )
+        query = query.where(Meeting.status.has(code=filters["status"]))
     
     # Search filter (title, description, purpose)
     if filters.get("search"):
@@ -451,12 +445,14 @@ async def get_meetings(
     
     skip = (page - 1) * limit
     
-    # Build base query with relationships
+    # Build base query with relationships - ADD is_active filter
     query = select(Meeting).options(
         selectinload(Meeting.status),
         selectinload(Meeting.participants),
         selectinload(Meeting.created_by),
         selectinload(Meeting.updated_by),
+    ).where(
+        Meeting.is_active == True  # ADD THIS LINE - Only show active meetings
     ).order_by(desc(Meeting.meeting_date), desc(Meeting.start_time))
     
     # Create filters dictionary
@@ -484,8 +480,8 @@ async def get_meetings(
     result = await db.execute(query)
     meetings_list = result.scalars().all()
     
-    # Count total with all filters
-    count_query = select(func.count(Meeting.id))
+    # Count total with all filters - ADD is_active filter to count query
+    count_query = select(func.count(Meeting.id)).where(Meeting.is_active == True)
     count_query = apply_meeting_filters(count_query, filters)
     
     if lat is not None and lng is not None:
@@ -520,6 +516,7 @@ async def get_meetings(
             
             # Calculate distance if geo-search was used
             if lat is not None and lng is not None and meeting.latitude and meeting.longitude:
+                from math import radians, sin, cos, sqrt, atan2
                 R = 6371
                 lat1, lon1 = radians(lat), radians(lng)
                 lat2, lon2 = radians(meeting.latitude), radians(meeting.longitude)
@@ -539,7 +536,6 @@ async def get_meetings(
         size=limit,
         pages=(total_count + limit - 1) // limit
     )
-
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(
@@ -728,7 +724,7 @@ async def get_latest_meeting_status_history(
 
 # ==================== MEETING PARTICIPANTS ====================
 
-@router.get("/{meeting_id}/participants/", response_model=List[MeetingParticipantResponse])
+@router.get("/{meeting_id}/participants", response_model=List[MeetingParticipantResponse])
 async def get_meeting_participants(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -942,3 +938,503 @@ async def create_zoom_meeting(
         "id": "123456789",
         "password": "123456"
     }
+
+
+
+
+# ==================== MEETING AUDIT LOGS ====================
+
+
+from sqlalchemy import cast, String
+@router.get("/{meeting_id}/audit-logs")
+async def get_meeting_audit_logs(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    user_id: Optional[UUID] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+):
+    """Get audit logs for a specific meeting by collecting all related record IDs"""
+    await get_meeting_or_404(db, meeting_id)
+    
+    meeting_id_str = str(meeting_id)
+    
+    # Collect all related record IDs from different tables
+    
+    # 1. Get all participant IDs for this meeting
+    participants_query = select(MeetingParticipant.id).where(
+        MeetingParticipant.meeting_id == meeting_id,
+        MeetingParticipant.is_active == True
+    )
+    participants_result = await db.execute(participants_query)
+    participant_ids = [str(row) for row in participants_result.scalars().all()]
+    
+    # 2. Get all minutes IDs for this meeting
+    minutes_query = select(MeetingMinutes.id).where(
+        MeetingMinutes.meeting_id == meeting_id,
+        MeetingMinutes.is_active == True
+    )
+    minutes_result = await db.execute(minutes_query)
+    minutes_ids = [str(row) for row in minutes_result.scalars().all()]
+    
+    # 3. Get all action IDs for this meeting (via minutes)
+    # MeetingAction has minute_id that references MeetingMinutes.id
+    action_ids = []
+    if minutes_ids:
+        actions_query = select(MeetingAction.id).where(
+            MeetingAction.minute_id.in_(minutes_ids),
+            MeetingAction.is_active == True
+        )
+        actions_result = await db.execute(actions_query)
+        action_ids = [str(row) for row in actions_result.scalars().all()]
+    
+    # 4. Get all document IDs for this meeting
+    documents_query = select(MeetingDocument.id).where(
+        MeetingDocument.meeting_id == meeting_id,
+        MeetingDocument.is_active == True
+    )
+    documents_result = await db.execute(documents_query)
+    document_ids = [str(row) for row in documents_result.scalars().all()]
+    
+    # 5. Get all status history IDs for this meeting
+    history_query = select(MeetingStatusHistory.id).where(
+        MeetingStatusHistory.meeting_id == meeting_id,
+        MeetingStatusHistory.is_active == True
+    )
+    history_result = await db.execute(history_query)
+    history_ids = [str(row) for row in history_result.scalars().all()]
+    
+    # 6. Get meeting series IDs if they exist (meeting_series table)
+    # This depends on your schema - you might have meeting_series table
+    series_ids = []
+    # If you have meeting_series table with meeting_id reference
+    # series_query = select(MeetingSeries.id).where(MeetingSeries.meeting_id == meeting_id)
+    # series_result = await db.execute(series_query)
+    # series_ids = [str(row) for row in series_result.scalars().all()]
+    
+    # Build OR conditions for audit log query
+    conditions = [
+        # Direct meeting record
+        and_(
+            AuditLog.table_name == 'meetings',
+            AuditLog.record_id == meeting_id_str
+        )
+    ]
+    
+    # Add conditions for each related table
+    if participant_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_participants',
+                AuditLog.record_id.in_(participant_ids)
+            )
+        )
+    
+    if minutes_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_minutes',
+                AuditLog.record_id.in_(minutes_ids)
+            )
+        )
+    
+    if action_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_actions',
+                AuditLog.record_id.in_(action_ids)
+            )
+        )
+    
+    if document_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_documents',
+                AuditLog.record_id.in_(document_ids)
+            )
+        )
+    
+    if history_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_status_history',
+                AuditLog.record_id.in_(history_ids)
+            )
+        )
+    
+    if series_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_series',
+                AuditLog.record_id.in_(series_ids)
+            )
+        )
+    
+    # Build main query
+    query = select(AuditLog).where(or_(*conditions))
+    
+    # Apply additional filters
+    if search:
+        query = query.where(
+            or_(
+                AuditLog.action.ilike(f"%{search}%"),
+                AuditLog.changes_summary.ilike(f"%{search}%"),
+                AuditLog.username.ilike(f"%{search}%")
+            )
+        )
+    
+    if action:
+        query = query.where(AuditLog.action == action)
+    
+    if user_id:
+        query = query.where(AuditLog.user_id == user_id)
+    
+    if start_date:
+        query = query.where(AuditLog.timestamp >= start_date)
+    
+    if end_date:
+        query = query.where(AuditLog.timestamp <= end_date)
+    
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Apply pagination and ordering
+    query = query.order_by(desc(AuditLog.timestamp)).offset(skip).limit(limit)
+    
+    result = await db.execute(query)
+    logs = result.scalars().all()
+    
+    # Build response
+    items = []
+    for log in logs:
+        items.append({
+            "id": str(log.id),
+            "timestamp": log.timestamp,
+            "action": log.action,
+            "table_name": log.table_name,
+            "record_id": log.record_id,
+            "user_id": str(log.user_id) if log.user_id else None,
+            "username": log.username,
+            "user_email": log.user_email,
+            "old_values": log.old_values,
+            "new_values": log.new_values,
+            "changes_summary": log.changes_summary,
+            "ip_address": log.ip_address,
+            "endpoint": log.endpoint,
+            "user_agent": log.user_agent,
+            "status": log.status,
+           
+            "extra_data": log.extra_data,
+            "created_at": log.timestamp
+        })
+    
+    return {
+        "items": items,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "pages": (total + limit - 1) // limit if limit > 0 else 1
+    }
+
+
+@router.get("/{meeting_id}/audit-logs/filters")
+async def get_audit_log_filters(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get available filter options for audit logs"""
+    await get_meeting_or_404(db, meeting_id)
+    
+    meeting_id_str = str(meeting_id)
+    
+    # Collect all related record IDs
+    participants_query = select(MeetingParticipant.id).where(
+        MeetingParticipant.meeting_id == meeting_id,
+        MeetingParticipant.is_active == True
+    )
+    participants_result = await db.execute(participants_query)
+    participant_ids = [str(row) for row in participants_result.scalars().all()]
+    
+    minutes_query = select(MeetingMinutes.id).where(
+        MeetingMinutes.meeting_id == meeting_id,
+        MeetingMinutes.is_active == True
+    )
+    minutes_result = await db.execute(minutes_query)
+    minutes_ids = [str(row) for row in minutes_result.scalars().all()]
+    
+    # Get action IDs via minutes (NOT directly by meeting_id)
+    action_ids = []
+    if minutes_ids:
+        actions_query = select(MeetingAction.id).where(
+            MeetingAction.minute_id.in_(minutes_ids),
+            MeetingAction.is_active == True
+        )
+        actions_result = await db.execute(actions_query)
+        action_ids = [str(row) for row in actions_result.scalars().all()]
+    
+    documents_query = select(MeetingDocument.id).where(
+        MeetingDocument.meeting_id == meeting_id,
+        MeetingDocument.is_active == True
+    )
+    documents_result = await db.execute(documents_query)
+    document_ids = [str(row) for row in documents_result.scalars().all()]
+    
+    history_query = select(MeetingStatusHistory.id).where(
+        MeetingStatusHistory.meeting_id == meeting_id,
+        MeetingStatusHistory.is_active == True
+    )
+    history_result = await db.execute(history_query)
+    history_ids = [str(row) for row in history_result.scalars().all()]
+    
+    # Build conditions for filters
+    conditions = [
+        # Direct meeting record
+        and_(
+            AuditLog.table_name == 'meetings',
+            AuditLog.record_id == meeting_id_str
+        )
+    ]
+    
+    if participant_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_participants',
+                AuditLog.record_id.in_(participant_ids)
+            )
+        )
+    
+    if minutes_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_minutes',
+                AuditLog.record_id.in_(minutes_ids)
+            )
+        )
+    
+    if action_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_actions',
+                AuditLog.record_id.in_(action_ids)
+            )
+        )
+    
+    if document_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_documents',
+                AuditLog.record_id.in_(document_ids)
+            )
+        )
+    
+    if history_ids:
+        conditions.append(
+            and_(
+                AuditLog.table_name == 'meeting_status_history',
+                AuditLog.record_id.in_(history_ids)
+            )
+        )
+    
+    # Get unique actions
+    action_query = select(distinct(AuditLog.action)).where(or_(*conditions))
+    action_result = await db.execute(action_query)
+    actions = [a for a in action_result.scalars().all() if a]
+    
+    # Get unique users
+    user_query = select(
+        AuditLog.user_id,
+        AuditLog.username,
+        AuditLog.user_email
+    ).where(or_(*conditions)).distinct()
+    
+    user_result = await db.execute(user_query)
+    users = []
+    for row in user_result:
+        if row.user_id:
+            users.append({
+                "id": str(row.user_id),
+                "name": row.username or row.user_email or str(row.user_id),
+                "email": row.user_email
+            })
+    
+    return {
+        "actions": sorted(actions),
+        "users": users
+    }
+
+
+
+
+from fastapi import UploadFile, File, Form
+from pathlib import Path
+import shutil
+
+
+# ==================== MEETING DOCUMENTS ====================
+
+@router.get("/{meeting_id}/documents")
+async def get_meeting_documents(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Get all documents for a meeting"""
+    await get_meeting_or_404(db, meeting_id)
+    
+    query = select(MeetingDocument).where(
+        MeetingDocument.meeting_id == meeting_id,
+        MeetingDocument.is_active == True
+    ).offset(skip).limit(limit).order_by(desc(MeetingDocument.created_at))
+    
+    result = await db.execute(query)
+    documents = result.scalars().all()
+    
+    items = []
+    for doc in documents:
+        items.append({
+            "id": str(doc.id),
+            "title": doc.title or doc.file_name,
+            "file_name": doc.file_name,
+            "file_size": doc.file_size,
+            "mime_type": doc.mime_type or doc.content_type,
+            "description": doc.description,
+            "uploaded_by_name": doc.uploaded_by.username if doc.uploaded_by else None,
+            "uploaded_at": doc.created_at,
+            "created_at": doc.created_at,
+        })
+    
+    return {
+        "items": items,
+        "total": len(items),
+        "skip": skip,
+        "limit": limit
+    }
+
+
+@router.post("/{meeting_id}/documents", status_code=status.HTTP_201_CREATED)
+async def upload_meeting_document(
+    meeting_id: UUID,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    document_type_id: Optional[UUID] = Form(None),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Upload a document for a meeting"""
+    await get_meeting_or_404(db, meeting_id)
+    
+    # Create upload directory if it doesn't exist
+    upload_dir = Path("uploads/meeting_documents")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate unique filename
+    file_extension = Path(file.filename).suffix
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = upload_dir / unique_filename
+    
+    # Read file content
+    content = await file.read()
+    file_size = len(content)
+    
+    # Save file
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+    
+    # Create document record
+    document = MeetingDocument(
+        id=uuid.uuid4(),
+        meeting_id=meeting_id,
+        title=title or file.filename,
+        file_name=file.filename,
+        file_path=str(file_path),
+        file_size=file_size,
+        mime_type=file.content_type,
+        content_type=file.content_type,
+        description=description,
+        document_type_id=document_type_id,
+        uploaded_by_id=current_user.id,
+        created_by_id=current_user.id,
+        created_at=datetime.now(),
+        is_active=True
+    )
+    
+    db.add(document)
+    await db.commit()
+    await db.refresh(document)
+    
+    return {
+        "id": str(document.id),
+        "title": document.title,
+        "file_name": document.file_name,
+        "message": "Document uploaded successfully"
+    }
+
+
+@router.get("/documents/document/{document_id}/download")
+async def download_document(
+    document_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Download a document by its ID"""
+    # Find document
+    query = select(MeetingDocument).where(
+        MeetingDocument.id == document_id,
+        MeetingDocument.is_active == True
+    )
+    result = await db.execute(query)
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    # Check if file exists
+    file_path = Path(document.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    
+    # Return file for download
+    return FileResponse(
+        path=file_path,
+        filename=document.file_name,
+        media_type=document.mime_type or "application/octet-stream"
+    )
+
+
+@router.delete("/documents/document/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Delete a document (soft delete)"""
+    # Find document
+    query = select(MeetingDocument).where(
+        MeetingDocument.id == document_id,
+        MeetingDocument.is_active == True
+    )
+    result = await db.execute(query)
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    # Soft delete
+    document.is_active = False
+    document.updated_by_id = current_user.id
+    document.updated_at = datetime.now()
+    
+    await db.commit()
+    
+    return None

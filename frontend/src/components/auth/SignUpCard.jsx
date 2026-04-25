@@ -1176,4 +1176,4 @@ const SignUpCard = () => {
   );
 };
 
-export default SignUpCard;x
+export default SignUpCard;

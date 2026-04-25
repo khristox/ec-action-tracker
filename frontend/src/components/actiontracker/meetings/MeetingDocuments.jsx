@@ -43,7 +43,8 @@ import {
   SwipeableDrawer,
   Switch,
   FormControlLabel,
-  FormHelperText
+  FormHelperText,
+  alpha
 } from '@mui/material';
 
 import {
@@ -64,16 +65,69 @@ import {
   FolderOpen as FolderOpenIcon,
   Error as ErrorIcon,
   MoreVert as MoreVertIcon,
-  Description as TextSnippetIcon,
+  TextSnippet as TextSnippetIcon,
   CenterFocusStrong as ScanIcon,
-  TextFields as TextFieldsIcon
+  TextFields as TextFieldsIcon,
+  Description as DescriptionIcon,
+  AttachFile as AttachFileIcon,
+  CheckCircle as CheckCircleIcon,
+  Pending as PendingIcon,
+  DownloadDone as DownloadDoneIcon
 } from '@mui/icons-material';
 
 import api from '../../../services/api';
 
+// Elegant color palette with dark mode support
+const getColors = (theme) => ({
+  primary: {
+    main: theme.palette.primary.main,
+    light: theme.palette.primary.light,
+    dark: theme.palette.primary.dark,
+    gradient: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`
+  },
+  success: {
+    main: '#10B981',
+    light: '#34D399',
+    dark: '#059669',
+    bg: alpha('#10B981', 0.1)
+  },
+  warning: {
+    main: '#F59E0B',
+    light: '#FBBF24',
+    dark: '#D97706',
+    bg: alpha('#F59E0B', 0.1)
+  },
+  error: {
+    main: '#EF4444',
+    light: '#F87171',
+    dark: '#DC2626',
+    bg: alpha('#EF4444', 0.1)
+  },
+  info: {
+    main: '#3B82F6',
+    light: '#60A5FA',
+    dark: '#2563EB',
+    bg: alpha('#3B82F6', 0.1)
+  },
+  purple: {
+    main: '#8B5CF6',
+    light: '#A78BFA',
+    dark: '#7C3AED',
+    bg: alpha('#8B5CF6', 0.1)
+  },
+  surface: {
+    light: theme.palette.background.paper,
+    dark: theme.palette.background.default,
+    hover: theme.palette.action.hover,
+    border: theme.palette.divider
+  }
+});
+
 const MeetingDocuments = ({ meetingId, onRefresh }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const colors = getColors(theme);
+  const isDarkMode = theme.palette.mode === 'dark';
 
   // State Management
   const [documents, setDocuments] = useState([]);
@@ -149,7 +203,6 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
     setSnackbar({ ...snackbar, open: false });
   };
 
-  // Check if file is OCR-compatible (PDF or image)
   const isOcrCompatible = (file) => {
     if (!file) return false;
     const compatibleTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff', 'image/bmp'];
@@ -162,6 +215,7 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
     try {
       const response = await api.get('/action-tracker/documents/attribute-groups/DOCUMENT_TYPE/attributes');
       let types = [];
+     
       if (response.data?.items) {
         types = response.data.items;
       } else if (Array.isArray(response.data)) {
@@ -180,34 +234,43 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
   }, [selectedDocumentTypeId]);
 
   // Fetch documents
-  const fetchDocuments = useCallback(async () => {
-    if (!meetingId) return;
-    
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    
-    abortControllerRef.current = new AbortController();
-    setLoading(true);
-    setError(null);
+const fetchDocuments = useCallback(async () => {
+  if (!meetingId) return;
+  
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort();
+  }
+  
+  abortControllerRef.current = new AbortController();
+  setLoading(true);
+  setError(null);
 
-    try {
-      const response = await api.get(`/action-tracker/documents/meetings/${meetingId}/documents`, {
-        signal: abortControllerRef.current.signal
-      });
-      const docs = response.data?.items || response.data || [];
-      setDocuments(docs);
-      setPage(1);
-    } catch (err) {
-      if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
+  try {
+    // CORRECT URL based on working curl test
+    const response = await api.get(`/action-tracker/documents/${meetingId}/documents`, {
+      signal: abortControllerRef.current.signal
+    });
+    const docs = response.data?.items || response.data || [];
+    setDocuments(docs);
+    setPage(1);
+  } catch (err) {
+    if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
+      // Don't show error for 404 - just show empty state
+      if (err.response?.status === 404) {
+        console.warn('Documents endpoint not implemented yet');
+        setDocuments([]);
+      } else {
         const errorMsg = err.response?.data?.detail || 'Failed to load documents';
         setError(errorMsg);
         showNotification(errorMsg, 'error');
       }
-    } finally {
-      setLoading(false);
     }
-  }, [meetingId]);
+  } finally {
+    setLoading(false);
+  }
+}, [meetingId]);
+
+
 
   useEffect(() => {
     if (meetingId) {
@@ -242,57 +305,57 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile || !fileTitle.trim() || !selectedDocumentTypeId) {
-      showNotification('Please fill all required fields', 'warning');
-      return;
-    }
+const handleUpload = async () => {
+  if (!selectedFile || !fileTitle.trim() || !selectedDocumentTypeId) {
+    showNotification('Please fill all required fields', 'warning');
+    return;
+  }
 
-    setUploading(true);
-    setError(null);
+  setUploading(true);
+  setError(null);
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('title', fileTitle.trim());
-    formData.append('description', fileDescription);
-    formData.append('document_type_id', selectedDocumentTypeId);
-    
-    if (enableOCR && isOcrCompatible(selectedFile)) {
-      formData.append('ocr_enabled', 'true');
-      formData.append('ocr_language', ocrLanguage);
-    }
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+  formData.append('title', fileTitle.trim());
+  formData.append('description', fileDescription);
+  formData.append('document_type_id', selectedDocumentTypeId);
+  
+  if (enableOCR && isOcrCompatible(selectedFile)) {
+    formData.append('ocr_enabled', 'true');
+    formData.append('ocr_language', ocrLanguage);
+  }
 
-    try {
-      await api.post(`/action-tracker/documents/meetings/${meetingId}/documents`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setUploadProgress(percent);
-          }
+  try {
+    // SAME URL pattern as GET
+    await api.post(`/action-tracker/documents/${meetingId}/documents`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(percent);
         }
-      });
+      }
+    });
 
-      setUploadDialogOpen(false);
-      setSelectedFile(null);
-      setFileTitle('');
-      setFileDescription('');
-      setUploadProgress(0);
-      setEnableOCR(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      await fetchDocuments();
-      if (onRefresh) onRefresh();
-      showNotification('Document uploaded successfully!', 'success');
-    } catch (err) {
-      const errorMsg = err.response?.data?.detail || 'Failed to upload document';
-      setError(errorMsg);
-      showNotification(errorMsg, 'error');
-    } finally {
-      setUploading(false);
-    }
-  };
+    setUploadDialogOpen(false);
+    setSelectedFile(null);
+    setFileTitle('');
+    setFileDescription('');
+    setUploadProgress(0);
+    setEnableOCR(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    await fetchDocuments();
+    if (onRefresh) onRefresh();
+    showNotification('Document uploaded successfully!', 'success');
+  } catch (err) {
+    const errorMsg = err.response?.data?.detail || 'Failed to upload document';
+    setError(errorMsg);
+    showNotification(errorMsg, 'error');
+  } finally {
+    setUploading(false);
+  }
+};
 
-  // OCR Processing for existing documents
   const handleProcessOCR = async (doc) => {
     setProcessingDocId(doc.id);
     setOcrDialogOpen(true);
@@ -444,12 +507,14 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
   };
 
   const getFileIcon = (fileName, mimeType) => {
-    if (mimeType === 'application/pdf') return <PdfIcon sx={{ color: '#ef4444', fontSize: isMobile ? 28 : 40 }} />;
-    if (mimeType?.startsWith('image/')) return <ImageIcon sx={{ color: '#10b981', fontSize: isMobile ? 28 : 40 }} />;
+    if (mimeType === 'application/pdf') return <PdfIcon sx={{ color: colors.error.main, fontSize: isMobile ? 28 : 40 }} />;
+    if (mimeType?.startsWith('image/')) return <ImageIcon sx={{ color: colors.success.main, fontSize: isMobile ? 28 : 40 }} />;
     const ext = fileName?.split('.').pop()?.toLowerCase();
-    if (ext === 'pdf') return <PdfIcon sx={{ color: '#ef4444', fontSize: isMobile ? 28 : 40 }} />;
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) return <ImageIcon sx={{ color: '#10b981', fontSize: isMobile ? 28 : 40 }} />;
-    return <FileIcon sx={{ color: '#6b7280', fontSize: isMobile ? 28 : 40 }} />;
+    if (ext === 'pdf') return <PdfIcon sx={{ color: colors.error.main, fontSize: isMobile ? 28 : 40 }} />;
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) return <ImageIcon sx={{ color: colors.success.main, fontSize: isMobile ? 28 : 40 }} />;
+    if (['doc', 'docx'].includes(ext)) return <DescriptionIcon sx={{ color: colors.info.main, fontSize: isMobile ? 28 : 40 }} />;
+    if (['txt', 'rtf'].includes(ext)) return <TextSnippetIcon sx={{ color: colors.purple.main, fontSize: isMobile ? 28 : 40 }} />;
+    return <FileIcon sx={{ color: colors.secondary, fontSize: isMobile ? 28 : 40 }} />;
   };
 
   const formatFileSize = (bytes) => {
@@ -480,19 +545,47 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
   };
 
   const MobileDocumentCard = ({ doc, index }) => (
-    <Card key={doc.id || index} sx={{ mb: 2, borderRadius: 2 }}>
+    <Card 
+      key={doc.id || index} 
+      sx={{ 
+        mb: 2, 
+        borderRadius: 2,
+        bgcolor: 'background.paper',
+        border: `1px solid ${colors.surface.border}`,
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          borderColor: colors.primary.main,
+          boxShadow: `0 4px 12px ${alpha(colors.primary.main, 0.1)}`
+        }
+      }}
+    >
       <CardContent sx={{ p: 2 }}>
         <Stack direction="row" spacing={2}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             {getFileIcon(doc.file_name, doc.mime_type)}
           </Box>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="subtitle2" fontWeight={600} noWrap>
+            <Typography variant="subtitle2" fontWeight={600} noWrap color="text.primary">
               {doc.title || doc.file_name || 'Untitled Document'}
             </Typography>
             <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap">
-              <Chip label={getDocumentTypeName(doc)} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.65rem' }} />
-              <Chip label={formatFileSize(doc.file_size)} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.65rem' }} />
+              <Chip 
+                label={getDocumentTypeName(doc)} 
+                size="small" 
+                variant="outlined" 
+                sx={{ 
+                  height: 20, 
+                  fontSize: '0.65rem',
+                  borderColor: alpha(colors.primary.main, 0.3),
+                  color: colors.primary.main
+                }} 
+              />
+              <Chip 
+                label={formatFileSize(doc.file_size)} 
+                size="small" 
+                variant="outlined" 
+                sx={{ height: 20, fontSize: '0.65rem' }} 
+              />
               <Typography variant="caption" color="text.secondary">{formatDate(doc.uploaded_at)}</Typography>
             </Stack>
             {doc.description && (
@@ -501,10 +594,21 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
               </Typography>
             )}
             {doc.ocr_text && (
-              <Chip icon={<TextSnippetIcon />} label="OCR Available" size="small" color="info" variant="outlined" sx={{ mt: 0.5, height: 20 }} />
+              <Chip 
+                icon={<TextSnippetIcon />} 
+                label="OCR Available" 
+                size="small" 
+                color="info" 
+                variant="outlined" 
+                sx={{ mt: 0.5, height: 20 }} 
+              />
             )}
           </Box>
-          <IconButton size="small" onClick={() => { setSelectedDocForMenu(doc); setMobileMenuOpen(true); }}>
+          <IconButton 
+            size="small" 
+            onClick={() => { setSelectedDocForMenu(doc); setMobileMenuOpen(true); }}
+            sx={{ color: 'text.secondary' }}
+          >
             <MoreVertIcon />
           </IconButton>
         </Stack>
@@ -515,7 +619,7 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
   const LoadingSkeleton = () => (
     <Stack spacing={2}>
       {[1, 2, 3].map((i) => (
-        <Paper key={i} sx={{ p: 2, borderRadius: 2 }}>
+        <Paper key={i} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
           <Stack direction="row" spacing={2} alignItems="center">
             <Skeleton variant="circular" width={isMobile ? 36 : 40} height={isMobile ? 36 : 40} />
             <Box sx={{ flex: 1 }}>
@@ -536,33 +640,83 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
     <Fade in timeout={400}>
       <Box>
         {/* Header */}
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }} flexWrap="wrap" gap={2}>
-          <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight={700}>
+        <Stack 
+          direction="row" 
+          justifyContent="space-between" 
+          alignItems="center" 
+          sx={{ mb: 3, pb: 1, borderBottom: `1px solid ${colors.surface.border}` }} 
+          flexWrap="wrap" 
+          gap={2}
+        >
+          <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight={700} color="text.primary">
             Documents ({documents.length})
           </Typography>
           <Stack direction="row" spacing={1}>
             <Tooltip title="Refresh">
-              <IconButton onClick={handleRefresh} disabled={loading} size="small"><RefreshIcon /></IconButton>
+              <IconButton 
+                onClick={handleRefresh} 
+                disabled={loading} 
+                size="small"
+                sx={{ 
+                  color: 'text.secondary',
+                  '&:hover': { bgcolor: alpha(colors.primary.main, 0.1), color: colors.primary.main }
+                }}
+              >
+                <RefreshIcon />
+              </IconButton>
             </Tooltip>
-            <Button variant="contained" startIcon={<UploadIcon />} onClick={() => setUploadDialogOpen(true)} size={isMobile ? "small" : "medium"}>
+            <Button 
+              variant="contained" 
+              startIcon={<UploadIcon />} 
+              onClick={() => setUploadDialogOpen(true)} 
+              size={isMobile ? "small" : "medium"}
+              sx={{ 
+                background: colors.primary.gradient,
+                '&:hover': { transform: 'translateY(-1px)', boxShadow: theme.shadows[4] }
+              }}
+            >
               {isMobile ? "Upload" : "Upload Document"}
             </Button>
           </Stack>
         </Stack>
 
         {/* Error Alert */}
-        {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>{error}</Alert>}
+        {error && (
+          <Alert 
+            severity="error" 
+            sx={{ mb: 3, borderRadius: 2 }} 
+            onClose={() => setError(null)}
+          >
+            {error}
+          </Alert>
+        )}
 
         {/* Empty State */}
         {documents.length === 0 ? (
           <Grow in timeout={500}>
-            <Paper sx={{ p: isMobile ? 4 : 8, textAlign: 'center', borderRadius: 3, border: '1px dashed', borderColor: 'divider' }}>
+            <Paper 
+              sx={{ 
+                p: isMobile ? 4 : 8, 
+                textAlign: 'center', 
+                borderRadius: 3, 
+                border: `2px dashed ${colors.surface.border}`,
+                bgcolor: 'background.paper'
+              }}
+            >
               <FolderOpenIcon sx={{ fontSize: isMobile ? 60 : 90, color: 'text.disabled', mb: 2 }} />
-              <Typography variant={isMobile ? "subtitle1" : "h6"} color="text.secondary" gutterBottom>No Documents Yet</Typography>
+              <Typography variant={isMobile ? "subtitle1" : "h6"} color="text.secondary" gutterBottom>
+                No Documents Yet
+              </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420, mx: 'auto', mb: 3 }}>
                 Upload meeting agendas, presentations, minutes, or any supporting documents here.
               </Typography>
-              <Button variant="contained" startIcon={<UploadIcon />} onClick={() => setUploadDialogOpen(true)} size={isMobile ? "medium" : "large"}>
+              <Button 
+                variant="contained" 
+                startIcon={<UploadIcon />} 
+                onClick={() => setUploadDialogOpen(true)} 
+                size={isMobile ? "medium" : "large"}
+                sx={{ background: colors.primary.gradient }}
+              >
                 Upload First Document
               </Button>
             </Paper>
@@ -572,11 +726,19 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
             {isMobile ? (
               <Box>{paginatedDocs.map((doc, index) => <MobileDocumentCard key={doc.id || index} doc={doc} index={index} />)}</Box>
             ) : (
-              <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'auto' }}>
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  borderRadius: 2, 
+                  overflow: 'auto',
+                  borderColor: colors.surface.border,
+                  bgcolor: 'background.paper'
+                }}
+              >
                 <TableContainer>
                   <Table size="small">
                     <TableHead>
-                      <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                      <TableRow sx={{ bgcolor: alpha(colors.primary.main, 0.04) }}>
                         <TableCell sx={{ fontWeight: 700, width: '35%' }}>Document</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Size</TableCell>
@@ -591,38 +753,81 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
                             <Stack direction="row" spacing={1.5} alignItems="center">
                               {getFileIcon(doc.file_name, doc.mime_type)}
                               <Box>
-                                <Typography variant="body2" fontWeight={500}>
+                                <Typography variant="body2" fontWeight={500} color="text.primary">
                                   {doc.title || doc.file_name || 'Untitled Document'}
                                 </Typography>
-                                {doc.description && <Typography variant="caption" color="text.secondary">{doc.description}</Typography>}
+                                {doc.description && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {doc.description}
+                                  </Typography>
+                                )}
                                 {doc.ocr_text && (
-                                  <Chip icon={<TextSnippetIcon />} label="OCR Available" size="small" color="info" variant="outlined" sx={{ mt: 0.5, height: 20 }} />
+                                  <Chip 
+                                    icon={<TextSnippetIcon />} 
+                                    label="OCR Available" 
+                                    size="small" 
+                                    color="info" 
+                                    variant="outlined" 
+                                    sx={{ mt: 0.5, height: 20 }} 
+                                  />
                                 )}
                               </Box>
                             </Stack>
                           </TableCell>
-                          <TableCell><Chip label={getDocumentTypeName(doc)} size="small" variant="outlined" /></TableCell>
-                          <TableCell><Typography variant="body2">{formatFileSize(doc.file_size)}</Typography></TableCell>
-                          <TableCell><Typography variant="caption" color="text.secondary">{formatDate(doc.uploaded_at)}</Typography></TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={getDocumentTypeName(doc)} 
+                              size="small" 
+                              variant="outlined" 
+                              sx={{ borderColor: alpha(colors.primary.main, 0.3), color: colors.primary.main }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" color="text.secondary">{formatFileSize(doc.file_size)}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption" color="text.secondary">{formatDate(doc.uploaded_at)}</Typography>
+                          </TableCell>
                           <TableCell align="center">
                             <Stack direction="row" spacing={0.5} justifyContent="center">
                               <Tooltip title="Preview">
-                                <IconButton onClick={() => handlePreview(doc)} size="small"><VisibilityIcon fontSize="small" /></IconButton>
+                                <IconButton 
+                                  onClick={() => handlePreview(doc)} 
+                                  size="small"
+                                  sx={{ color: colors.info.main, '&:hover': { bgcolor: alpha(colors.info.main, 0.1) } }}
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
                               </Tooltip>
                               <Tooltip title="Download">
-                                <IconButton onClick={() => handleDownload(doc)} size="small" disabled={downloadingId === doc.id}>
+                                <IconButton 
+                                  onClick={() => handleDownload(doc)} 
+                                  size="small" 
+                                  disabled={downloadingId === doc.id}
+                                  sx={{ color: colors.success.main, '&:hover': { bgcolor: alpha(colors.success.main, 0.1) } }}
+                                >
                                   {downloadingId === doc.id ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
                                 </IconButton>
                               </Tooltip>
                               {isOcrCompatible({ type: doc.mime_type }) && !doc.ocr_text && (
                                 <Tooltip title="Process OCR">
-                                  <IconButton onClick={() => handleProcessOCR(doc)} size="small" disabled={processingDocId === doc.id} color="secondary">
+                                  <IconButton 
+                                    onClick={() => handleProcessOCR(doc)} 
+                                    size="small" 
+                                    disabled={processingDocId === doc.id} 
+                                    sx={{ color: colors.purple.main, '&:hover': { bgcolor: alpha(colors.purple.main, 0.1) } }}
+                                  >
                                     {processingDocId === doc.id ? <CircularProgress size={16} /> : <ScanIcon fontSize="small" />}
                                   </IconButton>
                                 </Tooltip>
                               )}
                               <Tooltip title="Delete">
-                                <IconButton onClick={() => handleDelete(doc)} color="error" size="small" disabled={deletingId === doc.id}>
+                                <IconButton 
+                                  onClick={() => handleDelete(doc)} 
+                                  size="small" 
+                                  disabled={deletingId === doc.id}
+                                  sx={{ color: colors.error.main, '&:hover': { bgcolor: alpha(colors.error.main, 0.1) } }}
+                                >
                                   {deletingId === doc.id ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
                                 </IconButton>
                               </Tooltip>
@@ -638,56 +843,154 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
 
             {totalPages > 1 && (
               <Stack alignItems="center" sx={{ mt: 3 }}>
-                <Pagination count={totalPages} page={page} onChange={(e, value) => setPage(value)} color="primary" size={isMobile ? "small" : "large"} siblingCount={isMobile ? 0 : 1} />
+                <Pagination 
+                  count={totalPages} 
+                  page={page} 
+                  onChange={(e, value) => setPage(value)} 
+                  color="primary" 
+                  size={isMobile ? "small" : "large"} 
+                  siblingCount={isMobile ? 0 : 1}
+                  sx={{
+                    '& .MuiPaginationItem-root': {
+                      color: 'text.secondary',
+                      '&.Mui-selected': {
+                        background: colors.primary.gradient,
+                        color: 'white'
+                      }
+                    }
+                  }}
+                />
               </Stack>
             )}
           </>
         )}
 
         {/* Mobile Action Menu */}
-        <SwipeableDrawer anchor="bottom" open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} onOpen={() => {}} disableBackdropTransition>
+        <SwipeableDrawer 
+          anchor="bottom" 
+          open={mobileMenuOpen} 
+          onClose={() => setMobileMenuOpen(false)} 
+          onOpen={() => {}} 
+          disableBackdropTransition
+          PaperProps={{
+            sx: {
+              bgcolor: 'background.paper',
+              borderTopLeftRadius: 16,
+              borderTopRightRadius: 16
+            }
+          }}
+        >
           <Box sx={{ p: 2 }}>
-            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>{selectedDocForMenu?.title || selectedDocForMenu?.file_name}</Typography>
+            <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2, color: 'text.primary' }}>
+              {selectedDocForMenu?.title || selectedDocForMenu?.file_name}
+            </Typography>
             <Divider sx={{ mb: 2 }} />
             <Stack spacing={1}>
-              <Button fullWidth startIcon={<VisibilityIcon />} onClick={() => handlePreview(selectedDocForMenu)} sx={{ justifyContent: 'flex-start' }}>Preview</Button>
-              <Button fullWidth startIcon={<DownloadIcon />} onClick={() => handleDownload(selectedDocForMenu)} sx={{ justifyContent: 'flex-start' }}>Download</Button>
+              <Button 
+                fullWidth 
+                startIcon={<VisibilityIcon />} 
+                onClick={() => handlePreview(selectedDocForMenu)} 
+                sx={{ justifyContent: 'flex-start', color: colors.info.main }}
+              >
+                Preview
+              </Button>
+              <Button 
+                fullWidth 
+                startIcon={<DownloadIcon />} 
+                onClick={() => handleDownload(selectedDocForMenu)} 
+                sx={{ justifyContent: 'flex-start', color: colors.success.main }}
+              >
+                Download
+              </Button>
               {isOcrCompatible({ type: selectedDocForMenu?.mime_type }) && !selectedDocForMenu?.ocr_text && (
-                <Button fullWidth startIcon={<ScanIcon />} onClick={() => handleProcessOCR(selectedDocForMenu)} sx={{ justifyContent: 'flex-start' }} disabled={processingDocId === selectedDocForMenu?.id}>
+                <Button 
+                  fullWidth 
+                  startIcon={<ScanIcon />} 
+                  onClick={() => handleProcessOCR(selectedDocForMenu)} 
+                  sx={{ justifyContent: 'flex-start', color: colors.purple.main }}
+                  disabled={processingDocId === selectedDocForMenu?.id}
+                >
                   Process OCR
                 </Button>
               )}
-              <Button fullWidth startIcon={<DeleteIcon />} onClick={() => handleDelete(selectedDocForMenu)} color="error" sx={{ justifyContent: 'flex-start' }}>Delete</Button>
+              <Button 
+                fullWidth 
+                startIcon={<DeleteIcon />} 
+                onClick={() => handleDelete(selectedDocForMenu)} 
+                color="error" 
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                Delete
+              </Button>
             </Stack>
           </Box>
         </SwipeableDrawer>
 
         {/* OCR Progress Dialog */}
-        <Dialog open={ocrDialogOpen} onClose={handleCloseOcrDialog} maxWidth="md" fullWidth>
+        <Dialog 
+          open={ocrDialogOpen} 
+          onClose={handleCloseOcrDialog} 
+          maxWidth="md" 
+          fullWidth
+          PaperProps={{ sx: { borderRadius: 3, bgcolor: 'background.paper' } }}
+        >
           <DialogTitle>
             <Stack direction="row" alignItems="center" spacing={1}>
-              <ScanIcon color="primary" />
-              <Typography variant="h6">OCR Processing</Typography>
+              <ScanIcon sx={{ color: colors.purple.main }} />
+              <Typography variant="h6" color="text.primary">OCR Processing</Typography>
             </Stack>
           </DialogTitle>
           <DialogContent>
             {ocrProgress < 100 ? (
               <Box sx={{ py: 3 }}>
-                <LinearProgress variant="determinate" value={ocrProgress} sx={{ height: 8, borderRadius: 4, mb: 2 }} />
-                <Typography variant="body2" color="text.secondary" align="center">Processing document with OCR... {ocrProgress}%</Typography>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={ocrProgress} 
+                  sx={{ 
+                    height: 8, 
+                    borderRadius: 4, 
+                    mb: 2,
+                    bgcolor: alpha(colors.purple.main, 0.2),
+                    '& .MuiLinearProgress-bar': { background: colors.purple.gradient || colors.purple.main }
+                  }} 
+                />
+                <Typography variant="body2" color="text.secondary" align="center">
+                  Processing document with OCR... {ocrProgress}%
+                </Typography>
               </Box>
             ) : ocrResult ? (
               <Box sx={{ py: 2 }}>
                 {ocrResult.error ? (
-                  <Alert severity="error" sx={{ mb: 2 }}>{ocrResult.error}</Alert>
+                  <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{ocrResult.error}</Alert>
                 ) : (
                   <>
-                    <Alert severity="success" sx={{ mb: 2 }}>OCR processing completed successfully!</Alert>
-                    <Paper variant="outlined" sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
-                      <Typography variant="subtitle2" gutterBottom>Extracted Text:</Typography>
-                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{ocrResult.text || 'No text extracted'}</Typography>
+                    <Alert 
+                      severity="success" 
+                      sx={{ mb: 2, borderRadius: 2 }}
+                      icon={<CheckCircleIcon />}
+                    >
+                      OCR processing completed successfully!
+                    </Alert>
+                    <Paper 
+                      variant="outlined" 
+                      sx={{ 
+                        p: 2, 
+                        maxHeight: 400, 
+                        overflow: 'auto',
+                        bgcolor: alpha(colors.primary.main, 0.02),
+                        borderColor: alpha(colors.primary.main, 0.1)
+                      }}
+                    >
+                      <Typography variant="subtitle2" gutterBottom color="text.primary">
+                        Extracted Text:
+                      </Typography>
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
+                        {ocrResult.text || 'No text extracted'}
+                      </Typography>
                       {ocrResult.pages && (
-                        <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>Pages processed: {ocrResult.pages}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                          Pages processed: {ocrResult.pages}
+                        </Typography>
                       )}
                     </Paper>
                   </>
@@ -700,27 +1003,71 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
           </DialogActions>
         </Dialog>
 
-        {/* Preview Dialog with OCR Text Tab */}
-        <Dialog open={previewDialogOpen} onClose={handleClosePreview} maxWidth="xl" fullWidth fullScreen={isMobile || isFullscreen}>
-          <DialogTitle sx={{ p: isMobile ? 1.5 : 2, borderBottom: 1, borderColor: 'divider' }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="subtitle1" fontWeight={600}>{selectedDoc?.title || selectedDoc?.file_name || 'Document Preview'}</Typography>
+        {/* Preview Dialog */}
+        <Dialog 
+          open={previewDialogOpen} 
+          onClose={handleClosePreview} 
+          maxWidth="xl" 
+          fullWidth 
+          fullScreen={isMobile || isFullscreen}
+          PaperProps={{ 
+            sx: { 
+              borderRadius: isMobile ? 0 : 3,
+              bgcolor: 'background.paper',
+              overflow: 'hidden'
+            } 
+          }}
+        >
+          <DialogTitle sx={{ 
+            p: isMobile ? 1.5 : 2, 
+            borderBottom: `1px solid ${colors.surface.border}`,
+            bgcolor: alpha(colors.primary.main, 0.02)
+          }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+              <Typography variant="subtitle1" fontWeight={600} color="text.primary" noWrap sx={{ maxWidth: '60%' }}>
+                {selectedDoc?.title || selectedDoc?.file_name || 'Document Preview'}
+              </Typography>
               <Stack direction="row" spacing={1}>
                 {selectedDoc?.mime_type?.startsWith('image/') && !isMobile && (
                   <>
-                    <IconButton onClick={handleZoomOut} size="small"><ZoomOutIcon /></IconButton>
-                    <IconButton onClick={handleResetZoom} size="small"><Typography variant="caption" fontWeight="bold">{Math.round(imageZoom * 100)}%</Typography></IconButton>
-                    <IconButton onClick={handleZoomIn} size="small"><ZoomInIcon /></IconButton>
+                    <IconButton onClick={handleZoomOut} size="small" sx={{ color: 'text.secondary' }}>
+                      <ZoomOutIcon />
+                    </IconButton>
+                    <IconButton onClick={handleResetZoom} size="small">
+                      <Typography variant="caption" fontWeight="bold" color="text.secondary">
+                        {Math.round(imageZoom * 100)}%
+                      </Typography>
+                    </IconButton>
+                    <IconButton onClick={handleZoomIn} size="small" sx={{ color: 'text.secondary' }}>
+                      <ZoomInIcon />
+                    </IconButton>
                   </>
                 )}
-                <IconButton onClick={handlePrint} size="small"><PrintIcon /></IconButton>
-                <IconButton onClick={toggleFullscreen} size="small"><FullscreenIcon /></IconButton>
-                <IconButton onClick={handleClosePreview} size="small"><CloseIcon /></IconButton>
+                <IconButton onClick={handlePrint} size="small" sx={{ color: 'text.secondary' }}>
+                  <PrintIcon />
+                </IconButton>
+                <IconButton onClick={toggleFullscreen} size="small" sx={{ color: 'text.secondary' }}>
+                  <FullscreenIcon />
+                </IconButton>
+                <IconButton onClick={handleClosePreview} size="small" sx={{ color: 'text.secondary' }}>
+                  <CloseIcon />
+                </IconButton>
               </Stack>
             </Stack>
           </DialogTitle>
-          <DialogContent sx={{ p: 0, bgcolor: '#fafafa' }}>
-            <Tabs value={previewTab} onChange={(e, v) => setPreviewTab(v)} sx={{ px: isMobile ? 1 : 3, borderBottom: 1, borderColor: 'divider', bgcolor: '#fff' }} variant={isMobile ? "fullWidth" : "standard"}>
+          <DialogContent sx={{ p: 0 }}>
+            <Tabs 
+              value={previewTab} 
+              onChange={(e, v) => setPreviewTab(v)} 
+              sx={{ 
+                px: isMobile ? 1 : 3, 
+                borderBottom: `1px solid ${colors.surface.border}`, 
+                bgcolor: 'background.paper',
+                '& .MuiTab-root': { color: 'text.secondary', '&.Mui-selected': { color: colors.primary.main } },
+                '& .MuiTabs-indicator': { bgcolor: colors.primary.main }
+              }} 
+              variant={isMobile ? "fullWidth" : "standard"}
+            >
               <Tab label="Preview" icon={<VisibilityIcon />} iconPosition="start" />
               <Tab label="Details" icon={<InfoIcon />} iconPosition="start" />
               {selectedDoc?.ocr_text && <Tab label="OCR Text" icon={<TextSnippetIcon />} iconPosition="start" />}
@@ -728,25 +1075,59 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
             
             {/* Preview Tab */}
             {previewTab === 0 && (
-              <Box sx={{ height: isMobile ? 'calc(100vh - 180px)' : 'calc(100% - 48px)', display: 'flex', alignItems: 'center', justifyContent: 'center', p: isMobile ? 1 : 3, overflow: 'auto' }}>
-                {previewLoading && <Backdrop open sx={{ position: 'absolute', bgcolor: 'rgba(0,0,0,0.7)', zIndex: 1 }}><CircularProgress color="inherit" /></Backdrop>}
+              <Box sx={{ 
+                height: isMobile ? 'calc(100vh - 180px)' : 'calc(100% - 48px)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                p: isMobile ? 1 : 3, 
+                overflow: 'auto',
+                bgcolor: isDarkMode ? '#1a1a1a' : '#fafafa'
+              }}>
+                {previewLoading && (
+                  <Backdrop open sx={{ position: 'absolute', bgcolor: 'rgba(0,0,0,0.7)', zIndex: 1 }}>
+                    <CircularProgress color="inherit" />
+                  </Backdrop>
+                )}
                 {previewError ? (
                   <Box textAlign="center">
-                    <ErrorIcon sx={{ fontSize: isMobile ? 60 : 80, color: '#ef4444', mb: 2 }} />
+                    <ErrorIcon sx={{ fontSize: isMobile ? 60 : 80, color: colors.error.main, mb: 2 }} />
                     <Typography color="error">{previewError}</Typography>
-                    <Button variant="contained" startIcon={<DownloadIcon />} onClick={() => handleDownload(selectedDoc)} sx={{ mt: 2 }}>Download File</Button>
+                    <Button 
+                      variant="contained" 
+                      startIcon={<DownloadIcon />} 
+                      onClick={() => handleDownload(selectedDoc)} 
+                      sx={{ mt: 2, background: colors.primary.gradient }}
+                    >
+                      Download File
+                    </Button>
                   </Box>
                 ) : selectedDoc?.mime_type === 'application/pdf' && previewUrl ? (
-                  <iframe src={previewUrl} title={selectedDoc.file_name} style={{ width: '100%', height: '100%', border: 'none', minHeight: 400 }} />
+                  <iframe 
+                    src={previewUrl} 
+                    title={selectedDoc.file_name} 
+                    style={{ width: '100%', height: '100%', border: 'none', minHeight: 400 }}
+                  />
                 ) : selectedDoc?.mime_type?.startsWith('image/') && previewUrl ? (
                   <Box sx={{ transform: `scale(${imageZoom})`, transition: 'transform 0.25s ease' }}>
-                    <img src={previewUrl} alt={selectedDoc.file_name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                    <img 
+                      src={previewUrl} 
+                      alt={selectedDoc.file_name} 
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
+                    />
                   </Box>
                 ) : (
                   <Box textAlign="center">
-                    <FileIcon sx={{ fontSize: isMobile ? 60 : 100, color: '#cbd5e1', mb: 2 }} />
+                    <FileIcon sx={{ fontSize: isMobile ? 60 : 100, color: 'text.disabled', mb: 2 }} />
                     <Typography variant="body1" color="text.secondary">Preview not available</Typography>
-                    <Button variant="contained" startIcon={<DownloadIcon />} onClick={() => handleDownload(selectedDoc)} sx={{ mt: 2 }}>Download to View</Button>
+                    <Button 
+                      variant="contained" 
+                      startIcon={<DownloadIcon />} 
+                      onClick={() => handleDownload(selectedDoc)} 
+                      sx={{ mt: 2, background: colors.primary.gradient }}
+                    >
+                      Download to View
+                    </Button>
                   </Box>
                 )}
               </Box>
@@ -757,19 +1138,49 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
               <TableContainer sx={{ p: isMobile ? 2 : 4 }}>
                 <Table size={isMobile ? "small" : "medium"}>
                   <TableBody>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>File Name</TableCell><TableCell>{selectedDoc.file_name || '—'}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Title</TableCell><TableCell>{selectedDoc.title || '—'}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Description</TableCell><TableCell>{selectedDoc.description || 'No description'}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Document Type</TableCell><TableCell>{getDocumentTypeName(selectedDoc)}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>File Size</TableCell><TableCell>{formatFileSize(selectedDoc.file_size)}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>MIME Type</TableCell><TableCell>{selectedDoc.mime_type || 'Unknown'}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Uploaded By</TableCell><TableCell>{selectedDoc.uploaded_by_name || 'Unknown'}</TableCell></TableRow>
-                    <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>Uploaded At</TableCell><TableCell>{formatDate(selectedDoc.uploaded_at)}</TableCell></TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>File Name</TableCell>
+                      <TableCell>{selectedDoc.file_name || '—'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>Title</TableCell>
+                      <TableCell>{selectedDoc.title || '—'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>Description</TableCell>
+                      <TableCell>{selectedDoc.description || 'No description'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>Document Type</TableCell>
+                      <TableCell>{getDocumentTypeName(selectedDoc)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>File Size</TableCell>
+                      <TableCell>{formatFileSize(selectedDoc.file_size)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>MIME Type</TableCell>
+                      <TableCell>{selectedDoc.mime_type || 'Unknown'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>Uploaded By</TableCell>
+                      <TableCell>{selectedDoc.uploaded_by_name || 'Unknown'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>Uploaded At</TableCell>
+                      <TableCell>{formatDate(selectedDoc.uploaded_at)}</TableCell>
+                    </TableRow>
                     {selectedDoc.ocr_processed_at && (
-                      <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>OCR Processed</TableCell><TableCell>{formatDate(selectedDoc.ocr_processed_at)}</TableCell></TableRow>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>OCR Processed</TableCell>
+                        <TableCell>{formatDate(selectedDoc.ocr_processed_at)}</TableCell>
+                      </TableRow>
                     )}
                     {selectedDoc.ocr_language && (
-                      <TableRow><TableCell sx={{ fontWeight: 700, bgcolor: '#f8fafc' }}>OCR Language</TableCell><TableCell>{selectedDoc.ocr_language}</TableCell></TableRow>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700, bgcolor: alpha(colors.primary.main, 0.04) }}>OCR Language</TableCell>
+                        <TableCell>{selectedDoc.ocr_language}</TableCell>
+                      </TableRow>
                     )}
                   </TableBody>
                 </Table>
@@ -779,47 +1190,90 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
             {/* OCR Text Tab */}
             {previewTab === 2 && selectedDoc?.ocr_text && (
               <Box sx={{ p: 3 }}>
-                <Paper variant="outlined" sx={{ p: 2, maxHeight: 500, overflow: 'auto' }}>
-                  <Typography variant="subtitle2" gutterBottom>Extracted Text:</Typography>
-                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 2, 
+                    maxHeight: 500, 
+                    overflow: 'auto',
+                    bgcolor: alpha(colors.primary.main, 0.02),
+                    borderColor: alpha(colors.primary.main, 0.1)
+                  }}
+                >
+                  <Typography variant="subtitle2" gutterBottom color="text.primary">
+                    Extracted Text:
+                  </Typography>
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
                     {selectedDoc.ocr_text}
                   </Typography>
                 </Paper>
               </Box>
             )}
           </DialogContent>
-          <DialogActions>
+          <DialogActions sx={{ p: 2, borderTop: `1px solid ${colors.surface.border}` }}>
             <Button onClick={handleClosePreview}>Close</Button>
-            <Button variant="contained" startIcon={<DownloadIcon />} onClick={() => handleDownload(selectedDoc)}>Download</Button>
+            <Button 
+              variant="contained" 
+              startIcon={<DownloadIcon />} 
+              onClick={() => handleDownload(selectedDoc)}
+              sx={{ background: colors.primary.gradient }}
+            >
+              Download
+            </Button>
           </DialogActions>
         </Dialog>
 
-        {/* Upload Dialog with OCR Option */}
-        <Dialog open={uploadDialogOpen} onClose={() => !uploading && setUploadDialogOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
-          <DialogTitle>
+        {/* Upload Dialog */}
+        <Dialog 
+          open={uploadDialogOpen} 
+          onClose={() => !uploading && setUploadDialogOpen(false)} 
+          maxWidth="sm" 
+          fullWidth 
+          fullScreen={isMobile}
+          PaperProps={{ sx: { borderRadius: isMobile ? 0 : 3, bgcolor: 'background.paper' } }}
+        >
+          <DialogTitle sx={{ borderBottom: `1px solid ${colors.surface.border}`, bgcolor: alpha(colors.primary.main, 0.02) }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h6" fontWeight={700}>Upload Document</Typography>
-              <IconButton onClick={() => !uploading && setUploadDialogOpen(false)} size="small"><CloseIcon /></IconButton>
+              <Typography variant="h6" fontWeight={700} color="text.primary">Upload Document</Typography>
+              <IconButton onClick={() => !uploading && setUploadDialogOpen(false)} size="small" sx={{ color: 'text.secondary' }}>
+                <CloseIcon />
+              </IconButton>
             </Stack>
           </DialogTitle>
-          <Divider />
           <DialogContent sx={{ pt: 3 }}>
             <Stack spacing={3}>
-              <Button variant="outlined" component="label" startIcon={<UploadIcon />} fullWidth sx={{ py: isMobile ? 2 : 3, borderStyle: 'dashed' }} disabled={uploading}>
+              <Button 
+                variant="outlined" 
+                component="label" 
+                startIcon={<UploadIcon />} 
+                fullWidth 
+                sx={{ 
+                  py: isMobile ? 2 : 3, 
+                  borderStyle: 'dashed',
+                  borderColor: colors.primary.main,
+                  color: colors.primary.main,
+                  '&:hover': { borderColor: colors.primary.light, bgcolor: alpha(colors.primary.main, 0.05) }
+                }} 
+                disabled={uploading}
+              >
                 {selectedFile ? 'Change File' : 'Select File'}
                 <input type="file" hidden onChange={handleFileSelect} disabled={uploading} ref={fileInputRef} accept=".pdf,.jpg,.jpeg,.png,.tiff,.bmp,.doc,.docx,.txt" />
               </Button>
               
               {selectedFile && (
-                <Card variant="outlined" sx={{ bgcolor: '#f8fafc' }}>
+                <Card variant="outlined" sx={{ bgcolor: alpha(colors.primary.main, 0.02), borderRadius: 2 }}>
                   <CardContent>
                     <Stack direction="row" spacing={2} alignItems="center">
                       {getFileIcon(selectedFile.name, selectedFile.type)}
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" fontWeight={500}>{selectedFile.name}</Typography>
+                        <Typography variant="body2" fontWeight={500} color="text.primary">{selectedFile.name}</Typography>
                         <Typography variant="caption" color="text.secondary">{formatFileSize(selectedFile.size)}</Typography>
                       </Box>
-                      {!uploading && <IconButton size="small" onClick={() => setSelectedFile(null)}><CloseIcon fontSize="small" /></IconButton>}
+                      {!uploading && (
+                        <IconButton size="small" onClick={() => setSelectedFile(null)} sx={{ color: 'text.secondary' }}>
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      )}
                     </Stack>
                   </CardContent>
                 </Card>
@@ -827,34 +1281,91 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
               
               {uploading && (
                 <Box>
-                  <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}><Typography variant="caption">Uploading...</Typography><Typography variant="caption">{uploadProgress}%</Typography></Stack>
-                  <LinearProgress variant="determinate" value={uploadProgress} sx={{ height: 6, borderRadius: 3 }} />
+                  <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
+                    <Typography variant="caption" color="text.secondary">Uploading...</Typography>
+                    <Typography variant="caption" color="text.secondary">{uploadProgress}%</Typography>
+                  </Stack>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={uploadProgress} 
+                    sx={{ 
+                      height: 6, 
+                      borderRadius: 3,
+                      bgcolor: alpha(colors.primary.main, 0.2),
+                      '& .MuiLinearProgress-bar': { background: colors.primary.gradient }
+                    }} 
+                  />
                 </Box>
               )}
               
-              {selectedFile && <TextField fullWidth label="Document Title *" value={fileTitle} onChange={(e) => setFileTitle(e.target.value)} disabled={uploading} required />}
+              {selectedFile && (
+                <TextField 
+                  fullWidth 
+                  label="Document Title *" 
+                  value={fileTitle} 
+                  onChange={(e) => setFileTitle(e.target.value)} 
+                  disabled={uploading} 
+                  required
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                />
+              )}
               
               {selectedFile && documentTypes.length > 0 && (
                 <FormControl fullWidth>
                   <InputLabel>Document Type *</InputLabel>
-                  <Select value={selectedDocumentTypeId} label="Document Type *" onChange={(e) => setSelectedDocumentTypeId(e.target.value)} disabled={uploading}>
-                    {documentTypes.map((type) => <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>)}
+                  <Select 
+                    value={selectedDocumentTypeId} 
+                    label="Document Type *" 
+                    onChange={(e) => setSelectedDocumentTypeId(e.target.value)} 
+                    disabled={uploading}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    {documentTypes.map((type) => (
+                      <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               )}
               
-              <TextField fullWidth label="Description (Optional)" multiline rows={isMobile ? 2 : 3} value={fileDescription} onChange={(e) => setFileDescription(e.target.value)} disabled={uploading} placeholder="Add notes about this document..." />
+              <TextField 
+                fullWidth 
+                label="Description (Optional)" 
+                multiline 
+                rows={isMobile ? 2 : 3} 
+                value={fileDescription} 
+                onChange={(e) => setFileDescription(e.target.value)} 
+                disabled={uploading} 
+                placeholder="Add notes about this document..."
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              />
               
               {/* OCR Option */}
               {selectedFile && isOcrCompatible(selectedFile) && (
-                <Card variant="outlined" sx={{ bgcolor: '#f0fdf4', borderRadius: 2 }}>
+                <Card 
+                  variant="outlined" 
+                  sx={{ 
+                    bgcolor: alpha(colors.purple.main, 0.05), 
+                    borderRadius: 2,
+                    borderColor: alpha(colors.purple.main, 0.2)
+                  }}
+                >
                   <CardContent sx={{ p: 2 }}>
                     <Stack spacing={2}>
                       <FormControlLabel
-                        control={<Switch checked={enableOCR} onChange={(e) => setEnableOCR(e.target.checked)} disabled={uploading} color="primary" />}
+                        control={
+                          <Switch 
+                            checked={enableOCR} 
+                            onChange={(e) => setEnableOCR(e.target.checked)} 
+                            disabled={uploading} 
+                            sx={{ 
+                              '& .MuiSwitch-switchBase.Mui-checked': { color: colors.purple.main },
+                              '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: alpha(colors.purple.main, 0.5) }
+                            }}
+                          />
+                        }
                         label={
                           <Stack direction="row" alignItems="center" spacing={1}>
-                            <ScanIcon color="primary" />
+                            <ScanIcon sx={{ color: colors.purple.main }} />
                             <Typography variant="body2" fontWeight={500}>Enable OCR (Text Recognition)</Typography>
                           </Stack>
                         }
@@ -863,13 +1374,25 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
                         <>
                           <FormControl fullWidth size="small">
                             <InputLabel>OCR Language</InputLabel>
-                            <Select value={ocrLanguage} label="OCR Language" onChange={(e) => setOcrLanguage(e.target.value)} disabled={uploading}>
-                              {ocrLanguages.map((lang) => <MenuItem key={lang.code} value={lang.code}>{lang.name}</MenuItem>)}
+                            <Select 
+                              value={ocrLanguage} 
+                              label="OCR Language" 
+                              onChange={(e) => setOcrLanguage(e.target.value)} 
+                              disabled={uploading}
+                              sx={{ borderRadius: 2 }}
+                            >
+                              {ocrLanguages.map((lang) => (
+                                <MenuItem key={lang.code} value={lang.code}>{lang.name}</MenuItem>
+                              ))}
                             </Select>
                             <FormHelperText>Select the language of the text in your document</FormHelperText>
                           </FormControl>
-                          <Alert severity="info" icon={<InfoIcon />}>
-                            <Typography variant="caption">
+                          <Alert 
+                            severity="info" 
+                            icon={<InfoIcon />} 
+                            sx={{ borderRadius: 2 }}
+                          >
+                            <Typography variant="caption" color="text.secondary">
                               OCR will extract text from your {selectedFile.type.includes('pdf') ? 'PDF' : 'image'} document, 
                               making it searchable and selectable. This process may take a few moments.
                             </Typography>
@@ -882,17 +1405,38 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
               )}
             </Stack>
           </DialogContent>
-          <DialogActions>
+          <DialogActions sx={{ p: 3, borderTop: `1px solid ${colors.surface.border}` }}>
             <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading}>Cancel</Button>
-            <Button variant="contained" onClick={handleUpload} disabled={uploading || !selectedFile || !fileTitle.trim() || !selectedDocumentTypeId} startIcon={uploading ? <CircularProgress size={20} /> : <UploadIcon />}>
+            <Button 
+              variant="contained" 
+              onClick={handleUpload} 
+              disabled={uploading || !selectedFile || !fileTitle.trim() || !selectedDocumentTypeId} 
+              startIcon={uploading ? <CircularProgress size={20} /> : <UploadIcon />}
+              sx={{ background: colors.primary.gradient }}
+            >
               {uploading ? 'Uploading...' : 'Upload'}
             </Button>
           </DialogActions>
         </Dialog>
 
         {/* Snackbar */}
-        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-          <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%', borderRadius: 2 }}>{snackbar.message}</Alert>
+        <Snackbar 
+          open={snackbar.open} 
+          autoHideDuration={4000} 
+          onClose={handleCloseSnackbar} 
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert 
+            onClose={handleCloseSnackbar} 
+            severity={snackbar.severity} 
+            sx={{ 
+              width: '100%', 
+              borderRadius: 2,
+              boxShadow: theme.shadows[4]
+            }}
+          >
+            {snackbar.message}
+          </Alert>
         </Snackbar>
       </Box>
     </Fade>

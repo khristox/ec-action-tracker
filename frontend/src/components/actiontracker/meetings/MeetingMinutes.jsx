@@ -34,7 +34,21 @@ import {
   Skeleton,
   LinearProgress,
   alpha,
-  Snackbar
+  Snackbar,
+  useMediaQuery,
+  useTheme,
+  Card,
+  CardContent,
+  Grid,
+  Fade,
+  Grow,
+  Zoom,
+  Badge,
+  SpeedDial,
+  SpeedDialAction,
+  SpeedDialIcon,
+  Fab,
+  useScrollTrigger
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -54,7 +68,19 @@ import {
   AccessTime as AccessTimeIcon,
   Notes as NotesIcon,
   AutoAwesome as AutoAwesomeIcon,
-  Lock as LockIcon
+  Lock as LockIcon,
+  Download as DownloadIcon,
+  Print as PrintIcon,
+  Share as ShareIcon,
+  FilterList as FilterListIcon,
+  Search as SearchIcon,
+  SortByAlpha as SortIcon,
+  Visibility as VisibilityIcon,
+  DoneAll as DoneAllIcon,
+  Person as PersonIcon,
+  DateRange as DateRangeIcon,
+  Comment as CommentIcon,
+  PlaylistAddCheck as PlaylistAddCheckIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import api from '../../../services/api';
@@ -96,19 +122,24 @@ const getStatusConfig = (action) => {
   return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" /> };
 };
 
-// Check if meeting allows adding/editing minutes
 const canEditMinutes = (meetingStatus) => {
   if (!meetingStatus) return false;
   const statusLower = String(meetingStatus).toLowerCase();
-  const allowedStatuses = ['started','started', 'ongoing', 'in_progress', 'in progress', 'completed'];
+  const allowedStatuses = ['started', 'ongoing', 'in_progress', 'in progress', 'completed'];
   return allowedStatuses.some(status => statusLower.includes(status));
 };
 
-// ==================== Improved Rich Text Display ====================
+// ==================== Dark Mode Rich Text Display ====================
 const RichTextContent = ({ content }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
   if (!content || content.trim() === '' || content === '<p></p>') {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+      <Typography variant="body2" sx={{ 
+        fontStyle: 'italic',
+        color: isDarkMode ? '#9CA3AF' : 'text.secondary'
+      }}>
         No content provided.
       </Typography>
     );
@@ -119,45 +150,52 @@ const RichTextContent = ({ content }) => {
       sx={{
         textAlign: 'left',
         lineHeight: 1.7,
-        color: 'text.primary',
+        color: isDarkMode ? '#E5E7EB' : 'text.primary',
         '& p': {
           margin: '0 0 12px 0',
-          '&:last-child': { marginBottom: 0 }
+          '&:last-child': { marginBottom: 0 },
+          color: isDarkMode ? '#D1D5DB' : 'inherit'
         },
         '& ul, & ol': {
           paddingLeft: '24px',
-          margin: '8px 0 16px 0'
+          margin: '8px 0 16px 0',
+          color: isDarkMode ? '#D1D5DB' : 'inherit'
         },
         '& li': {
-          marginBottom: '6px'
+          marginBottom: '6px',
+          color: isDarkMode ? '#D1D5DB' : 'inherit'
         },
         '& h1, & h2, & h3': {
           margin: '16px 0 8px 0',
-          fontWeight: 600
+          fontWeight: 600,
+          color: isDarkMode ? '#FFFFFF' : 'inherit'
         },
         '& blockquote': {
           margin: '16px 0',
           paddingLeft: '16px',
           borderLeft: '4px solid',
-          borderColor: 'primary.main',
-          color: 'text.secondary',
-          fontStyle: 'italic'
+          borderColor: isDarkMode ? '#A78BFA' : 'primary.main',
+          color: isDarkMode ? '#9CA3AF' : 'text.secondary',
+          fontStyle: 'italic',
+          backgroundColor: isDarkMode ? alpha('#A78BFA', 0.05) : 'transparent'
         },
         '& pre': {
-          backgroundColor: '#f8fafc',
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.05) : '#F8FAFC',
           padding: '12px',
           borderRadius: 1,
           overflowX: 'auto',
           fontFamily: 'monospace',
           fontSize: '0.9rem',
-          border: '1px solid #e2e8f0'
+          border: `1px solid ${isDarkMode ? '#374151' : '#E2E8F0'}`,
+          color: isDarkMode ? '#E5E7EB' : 'inherit'
         },
         '& code': {
-          backgroundColor: '#f1f5f9',
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.05) : '#F1F5F9',
           padding: '2px 6px',
           borderRadius: 1,
           fontFamily: 'monospace',
-          fontSize: '0.9rem'
+          fontSize: '0.9rem',
+          color: isDarkMode ? '#A78BFA' : '#7C3AED'
         },
         '& img': {
           maxWidth: '100%',
@@ -168,7 +206,18 @@ const RichTextContent = ({ content }) => {
         '& hr': {
           margin: '20px 0',
           border: 'none',
-          borderTop: '1px solid #e2e8f0'
+          borderTop: `1px solid ${isDarkMode ? '#374151' : '#E2E8F0'}`
+        },
+        '& a': {
+          color: isDarkMode ? '#A78BFA' : '#7C3AED',
+          textDecoration: 'none',
+          '&:hover': {
+            textDecoration: 'underline'
+          }
+        },
+        '& strong, & b': {
+          color: isDarkMode ? '#FFFFFF' : 'inherit',
+          fontWeight: 700
         }
       }}
       dangerouslySetInnerHTML={{ __html: content }}
@@ -178,6 +227,8 @@ const RichTextContent = ({ content }) => {
 
 // ==================== Action Row Component ====================
 const ActionRow = ({ action, onEdit, canEdit }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
   const statusConfig = getStatusConfig(action);
   
@@ -190,27 +241,37 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
   const progress = action.overall_progress_percentage || 0;
 
   return (
-    <TableRow hover>
+    <TableRow hover sx={{ '&:hover': { bgcolor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.02) } }}>
       <TableCell sx={{ pl: 2 }}>
-        <Typography variant="body2" fontWeight={500}>{action.description}</Typography>
+        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
+          {action.description}
+        </Typography>
         {action.remarks && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+          <Typography variant="caption" sx={{ mt: 0.5, display: 'block', color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
             {action.remarks}
           </Typography>
         )}
       </TableCell>
       <TableCell>
         <Stack direction="row" alignItems="center" spacing={1}>
-          <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.light', fontSize: '0.75rem' }}>
+          <Avatar sx={{ 
+            width: 28, 
+            height: 28, 
+            bgcolor: isDarkMode ? alpha('#A78BFA', 0.2) : 'primary.light',
+            fontSize: '0.75rem',
+            color: isDarkMode ? '#A78BFA' : 'primary.main'
+          }}>
             {assignedToName?.[0]?.toUpperCase() || '?'}
           </Avatar>
-          <Typography variant="body2">{assignedToName}</Typography>
+          <Typography variant="body2" sx={{ color: isDarkMode ? '#D1D5DB' : 'inherit' }}>
+            {assignedToName}
+          </Typography>
         </Stack>
       </TableCell>
       <TableCell>
         <Stack direction="row" alignItems="center" spacing={1}>
-          <AccessTimeIcon fontSize="small" color={isOverdue ? 'error' : 'action'} />
-          <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
+          <AccessTimeIcon fontSize="small" sx={{ color: isOverdue ? (isDarkMode ? '#F87171' : 'error') : (isDarkMode ? '#6B7280' : 'action') }} />
+          <Typography variant="body2" sx={{ color: isOverdue ? (isDarkMode ? '#F87171' : 'error') : (isDarkMode ? '#D1D5DB' : 'inherit') }}>
             {action.due_date ? format(new Date(action.due_date), 'MMM d, yyyy') : 'No due date'}
           </Typography>
         </Stack>
@@ -221,13 +282,26 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
           label={statusConfig.label}
           color={statusConfig.color}
           icon={statusConfig.icon}
-          sx={{ height: 26, fontWeight: 500 }}
+          sx={{ 
+            height: 26, 
+            fontWeight: 500,
+            ...(isDarkMode && statusConfig.color === 'warning' && {
+              bgcolor: alpha('#F59E0B', 0.2),
+              color: '#FBBF24'
+            }),
+            ...(isDarkMode && statusConfig.color === 'info' && {
+              bgcolor: alpha('#3B82F6', 0.2),
+              color: '#60A5FA'
+            })
+          }}
         />
       </TableCell>
       <TableCell sx={{ minWidth: 120 }}>
         <Stack spacing={0.5}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Typography variant="caption" fontWeight={500}>{progress}%</Typography>
+            <Typography variant="caption" fontWeight={500} sx={{ color: isDarkMode ? '#9CA3AF' : 'inherit' }}>
+              {progress}%
+            </Typography>
           </Box>
           <LinearProgress 
             variant="determinate" 
@@ -235,9 +309,9 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
             sx={{ 
               height: 6, 
               borderRadius: 3,
-              bgcolor: '#e2e8f0',
+              bgcolor: isDarkMode ? '#374151' : '#E2E8F0',
               '& .MuiLinearProgress-bar': {
-                bgcolor: statusConfig.label === 'Completed' ? '#10b981' : (isOverdue ? '#ef4444' : '#3b82f6')
+                bgcolor: statusConfig.label === 'Completed' ? '#10B981' : (isOverdue ? '#EF4444' : (isDarkMode ? '#A78BFA' : '#3B82F6'))
               }
             }} 
           />
@@ -249,8 +323,13 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
             <IconButton 
               size="small" 
               onClick={() => onEdit(action.id)} 
-              color="primary"
               disabled={!canEdit}
+              sx={{
+                color: isDarkMode ? '#A78BFA' : 'primary.main',
+                '&:hover': {
+                  backgroundColor: isDarkMode ? alpha('#A78BFA', 0.1) : alpha('#7C3AED', 0.1)
+                }
+              }}
             >
               <EditIcon fontSize="small" />
             </IconButton>
@@ -262,7 +341,9 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
 };
 
 // ==================== Minutes Card Component ====================
-const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, onEditMinute, onDelete, onMenuOpen, canEdit }) => {
+const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, onEditMinute, onMenuOpen, canEdit }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   const minuteId = minute.id;
   const title = minute.topic || minute.title || 'Untitled Minutes';
   const discussion = minute.discussion || minute.content || '';
@@ -273,155 +354,298 @@ const MinutesCard = ({ minute, expanded, onToggle, onAddAction, onEditAction, on
   const recordedByName = minute.recorded_by_name || minute.created_by_name;
 
   return (
-    <Accordion
-      expanded={expanded}
-      onChange={onToggle}
-      sx={{
-        borderRadius: 2,
-        '&:before': { display: 'none' },
-        boxShadow: expanded ? 3 : 1
-      }}
-    >
-      <AccordionSummary
-        expandIcon={<ExpandMoreIcon />}
-        sx={{ '&:hover': { bgcolor: alpha('#000', 0.02) } }}
+    <Zoom in timeout={300}>
+      <Accordion
+        expanded={expanded}
+        onChange={onToggle}
+        sx={{
+          borderRadius: 2,
+          '&:before': { display: 'none' },
+          boxShadow: expanded ? 3 : 1,
+          bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            boxShadow: 4
+          }
+        }}
       >
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ flex: 1 }}>
-          <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40 }}>
-            <DescriptionIcon />
-          </Avatar>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle1" fontWeight={600}>{title}</Typography>
-            <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-              <Typography variant="caption" color="text.secondary">{formatDate(timestamp)}</Typography>
-              {recordedByName && (
-                <Typography variant="caption" color="text.secondary">Recorded by: {recordedByName}</Typography>
-              )}
-              <Chip 
-                label={`${actionCount} action${actionCount !== 1 ? 's' : ''}`}
-                size="small"
-                color="primary"
-                variant="outlined"
-              />
-            </Stack>
-          </Box>
-          {canEdit && (
-            <Stack direction="row" spacing={0.5}>
-              <Tooltip title="Edit Minutes">
-                <IconButton size="small" onClick={(e) => { e.stopPropagation(); onEditMinute(minute); }}>
-                  <EditIcon fontSize="small" />
+        <AccordionSummary
+          expandIcon={<ExpandMoreIcon sx={{ color: isDarkMode ? '#9CA3AF' : 'inherit' }} />}
+          sx={{ 
+            '&:hover': { bgcolor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.02) },
+            borderRadius: expanded ? '8px 8px 0 0' : '8px'
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={2} sx={{ flex: 1 }}>
+            <Avatar sx={{ 
+              bgcolor: isDarkMode ? alpha('#A78BFA', 0.2) : 'primary.main',
+              color: isDarkMode ? '#A78BFA' : '#FFFFFF',
+              width: 40, 
+              height: 40 
+            }}>
+              <DescriptionIcon />
+            </Avatar>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="subtitle1" fontWeight={600} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
+                {title}
+              </Typography>
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                  {formatDate(timestamp)}
+                </Typography>
+                {recordedByName && (
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                    Recorded by: {recordedByName}
+                  </Typography>
+                )}
+                <Badge 
+                  badgeContent={actionCount} 
+                  color="primary"
+                  sx={{ '& .MuiBadge-badge': { bgcolor: isDarkMode ? '#A78BFA' : undefined } }}
+                >
+                  <AssignmentIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
+                </Badge>
+              </Stack>
+            </Box>
+            {canEdit && (
+              <Stack direction="row" spacing={0.5}>
+                <Tooltip title="Edit Minutes">
+                  <IconButton 
+                    size="small" 
+                    onClick={(e) => { e.stopPropagation(); onEditMinute(minute); }}
+                    sx={{ color: isDarkMode ? '#A78BFA' : 'primary.main' }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <IconButton 
+                  size="small" 
+                  onClick={(e) => { e.stopPropagation(); onMenuOpen(e, minute); }}
+                  sx={{ color: isDarkMode ? '#9CA3AF' : 'inherit' }}
+                >
+                  <MoreVertIcon fontSize="small" />
                 </IconButton>
-              </Tooltip>
-              <IconButton size="small" onClick={(e) => { e.stopPropagation(); onMenuOpen(e, minute); }}>
-                <MoreVertIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-          )}
-        </Stack>
-      </AccordionSummary>
-      
-      <AccordionDetails sx={{ pt: 0 }}>
-        <Divider sx={{ mb: 3 }} />
-        <Stack spacing={4}>
-          {/* Discussion */}
-          <Box>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
-              <NotesIcon fontSize="small" color="primary" />
-              <Typography variant="subtitle2" fontWeight={600}>Discussion</Typography>
-            </Stack>
-            <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 2 }}>
-              <RichTextContent content={discussion} />
-            </Paper>
-          </Box>
-
-          {/* Decisions */}
-          {decisions && decisions !== '<p></p>' && (
+              </Stack>
+            )}
+          </Stack>
+        </AccordionSummary>
+        
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Divider sx={{ mb: 3, borderColor: isDarkMode ? '#374151' : '#E5E7EB' }} />
+          <Stack spacing={4}>
+            {/* Discussion */}
             <Box>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
-                <AssignmentIcon fontSize="small" color="success" />
-                <Typography variant="subtitle2" fontWeight={600} color="success.main">Decisions</Typography>
+                <NotesIcon fontSize="small" sx={{ color: isDarkMode ? '#A78BFA' : 'primary.main' }} />
+                <Typography variant="subtitle2" fontWeight={600} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
+                  Discussion
+                </Typography>
               </Stack>
-              <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f0fdf4', borderRadius: 2 }}>
-                <RichTextContent content={decisions} />
+              <Paper 
+                variant="outlined" 
+                sx={{ 
+                  p: 3, 
+                  bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : '#F8FAFC', 
+                  borderRadius: 2,
+                  borderColor: isDarkMode ? '#374151' : '#E5E7EB'
+                }}
+              >
+                <RichTextContent content={discussion} />
               </Paper>
             </Box>
-          )}
 
-          {/* Actions Section */}
-          <Box>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <AssignmentIcon fontSize="small" color="primary" />
-                <Typography variant="subtitle2" fontWeight={600}>Action Items</Typography>
-                {actionCount > 0 && (
-                  <Chip label={`${completedActions}/${actionCount} completed`} size="small" color="success" variant="outlined" />
-                )}
-              </Stack>
-              {canEdit && (
-                <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => onAddAction(minuteId)}>
-                  Add Action
-                </Button>
-              )}
-            </Stack>
+            {/* Decisions */}
+            {decisions && decisions !== '<p></p>' && (
+              <Box>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+                  <AssignmentIcon fontSize="small" sx={{ color: isDarkMode ? '#34D399' : 'success.main' }} />
+                  <Typography variant="subtitle2" fontWeight={600} sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}>
+                    Decisions
+                  </Typography>
+                </Stack>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 3, 
+                    bgcolor: isDarkMode ? alpha('#34D399', 0.05) : '#F0FDF4', 
+                    borderRadius: 2,
+                    borderColor: isDarkMode ? alpha('#34D399', 0.2) : '#E5E7EB'
+                  }}
+                >
+                  <RichTextContent content={decisions} />
+                </Paper>
+              </Box>
+            )}
 
-            {actionCount > 0 ? (
-              <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-                      <TableCell sx={{ fontWeight: 700, pl: 2 }}>Description</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {minute.actions.map((action) => (
-                      <ActionRow key={action.id} action={action} onEdit={onEditAction} canEdit={canEdit} />
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            ) : (
-              <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', bgcolor: '#fafafa' }}>
-                <AssignmentIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 2 }} />
-                <Typography variant="body2" color="text.secondary">No action items yet.</Typography>
+            {/* Actions Section */}
+            <Box>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <PlaylistAddCheckIcon fontSize="small" sx={{ color: isDarkMode ? '#A78BFA' : 'primary.main' }} />
+                  <Typography variant="subtitle2" fontWeight={600} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
+                    Action Items
+                  </Typography>
+                  {actionCount > 0 && (
+                    <Chip 
+                      label={`${completedActions}/${actionCount} completed`} 
+                      size="small" 
+                      color="success" 
+                      variant="outlined"
+                      sx={{
+                        borderColor: isDarkMode ? '#34D399' : undefined,
+                        color: isDarkMode ? '#34D399' : undefined
+                      }}
+                    />
+                  )}
+                </Stack>
                 {canEdit && (
-                  <Button size="small" startIcon={<AddIcon />} onClick={() => onAddAction(minuteId)} sx={{ mt: 2 }}>
-                    Create First Action
+                  <Button 
+                    size="small" 
+                    variant="contained" 
+                    startIcon={<AddIcon />} 
+                    onClick={() => onAddAction(minuteId)}
+                    sx={{
+                      bgcolor: isDarkMode ? '#7C3AED' : '#7C3AED',
+                      '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : '#6D28D9' }
+                    }}
+                  >
+                    Add Action
                   </Button>
                 )}
-              </Paper>
-            )}
-          </Box>
-        </Stack>
-      </AccordionDetails>
-    </Accordion>
+              </Stack>
+
+              {actionCount > 0 ? (
+                <TableContainer 
+                  component={Paper} 
+                  variant="outlined" 
+                  sx={{ 
+                    borderRadius: 2,
+                    borderColor: isDarkMode ? '#374151' : '#E5E7EB',
+                    bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF'
+                  }}
+                >
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: isDarkMode ? alpha('#A78BFA', 0.1) : '#F1F5F9' }}>
+                        <TableCell sx={{ fontWeight: 700, pl: 2, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Description</TableCell>
+                        <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Assigned To</TableCell>
+                        <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Due Date</TableCell>
+                        <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Status</TableCell>
+                        <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Progress</TableCell>
+                        <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {minute.actions.map((action) => (
+                        <ActionRow key={action.id} action={action} onEdit={onEditAction} canEdit={canEdit} />
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 4, 
+                    textAlign: 'center', 
+                    bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : '#FAFAFA',
+                    borderColor: isDarkMode ? '#374151' : '#E5E7EB'
+                  }}
+                >
+                  <AssignmentIcon sx={{ fontSize: 48, color: isDarkMode ? '#6B7280' : '#CBD5E1', mb: 2 }} />
+                  <Typography variant="body2" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                    No action items yet.
+                  </Typography>
+                  {canEdit && (
+                    <Button 
+                      size="small" 
+                      startIcon={<AddIcon />} 
+                      onClick={() => onAddAction(minuteId)} 
+                      sx={{ mt: 2, color: isDarkMode ? '#A78BFA' : 'primary.main' }}
+                    >
+                      Create First Action
+                    </Button>
+                  )}
+                </Paper>
+              )}
+            </Box>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+    </Zoom>
   );
 };
 
 // ==================== Loading Skeleton ====================
-const LoadingSkeleton = () => (
-  <Stack spacing={2}>
-    {[1, 2, 3].map((i) => (
-      <Paper key={i} sx={{ p: 2, borderRadius: 2 }}>
-        <Stack direction="row" spacing={2} alignItems="center">
-          <Skeleton variant="circular" width={40} height={40} />
-          <Box sx={{ flex: 1 }}>
-            <Skeleton variant="text" width="60%" height={24} />
-            <Skeleton variant="text" width="30%" height={20} />
-          </Box>
-        </Stack>
+const LoadingSkeleton = () => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  return (
+    <Stack spacing={2}>
+      {[1, 2, 3].map((i) => (
+        <Paper key={i} sx={{ p: 2, borderRadius: 2, bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF' }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Skeleton variant="circular" width={40} height={40} sx={{ bgcolor: isDarkMode ? '#374151' : undefined }} />
+            <Box sx={{ flex: 1 }}>
+              <Skeleton variant="text" width="60%" height={24} sx={{ bgcolor: isDarkMode ? '#374151' : undefined }} />
+              <Skeleton variant="text" width="30%" height={20} sx={{ bgcolor: isDarkMode ? '#374151' : undefined }} />
+            </Box>
+          </Stack>
+        </Paper>
+      ))}
+    </Stack>
+  );
+};
+
+// ==================== Empty State Component ====================
+const EmptyState = ({ canEdit, statusMessage, onAddClick }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  return (
+    <Grow in timeout={500}>
+      <Paper sx={{ 
+        p: 8, 
+        textAlign: 'center', 
+        borderRadius: 3,
+        bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+        border: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`
+      }}>
+        <AutoAwesomeIcon sx={{ fontSize: 80, color: isDarkMode ? '#6B7280' : '#CBD5E1', mb: 2 }} />
+        <Typography variant="h6" sx={{ color: isDarkMode ? '#FFFFFF' : 'text.secondary' }} gutterBottom>
+          No Minutes Yet
+        </Typography>
+        <Typography variant="body2" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', mb: 3 }}>
+          {canEdit 
+            ? "Start by adding the first meeting minutes" 
+            : statusMessage || "Minutes can only be added once the meeting is in progress"}
+        </Typography>
+        {canEdit && (
+          <Button 
+            variant="contained" 
+            startIcon={<AddIcon />} 
+            onClick={onAddClick}
+            size="large"
+            sx={{
+              bgcolor: isDarkMode ? '#7C3AED' : '#7C3AED',
+              '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : '#6D28D9' }
+            }}
+          >
+            Add First Minutes
+          </Button>
+        )}
       </Paper>
-    ))}
-  </Stack>
-);
+    </Grow>
+  );
+};
 
 // ==================== Main Component ====================
 const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isDarkMode = theme.palette.mode === 'dark';
   
   const minutesList = useSelector(selectMeetingMinutes);
   const isLoading = useSelector(selectMinutesLoading);
@@ -440,11 +664,11 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const [anchorEl, setAnchorEl] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [deleting, setDeleting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
 
-  // Check if user can edit minutes based on meeting status
   const canEdit = canEditMinutes(meetingStatus);
   
-  // Get status display message
   const getStatusMessage = () => {
     if (!meetingStatus) return null;
     const statusLower = String(meetingStatus).toLowerCase();
@@ -560,22 +784,74 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     setExpandedMinute(expandedMinute === minuteId ? null : minuteId);
   };
 
+  // Filter minutes based on search term
+  const filteredMinutes = minutesList.filter(minute => {
+    if (!searchTerm) return true;
+    const searchLower = searchTerm.toLowerCase();
+    return minute.topic?.toLowerCase().includes(searchLower) ||
+           minute.discussion?.toLowerCase().includes(searchLower) ||
+           minute.decisions?.toLowerCase().includes(searchLower);
+  });
+
   const statusMessage = getStatusMessage();
 
   if (isLoading && minutesList.length === 0) return <LoadingSkeleton />;
 
   return (
     <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-        <Typography variant="h6" fontWeight={700}>
-          Meeting Minutes ({minutesList.length})
+      {/* Header with Actions */}
+      <Stack 
+        direction={{ xs: 'column', sm: 'row' }} 
+        justifyContent="space-between" 
+        alignItems={{ xs: 'stretch', sm: 'center' }}
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
+          Meeting Minutes ({filteredMinutes.length})
         </Typography>
+        
         <Stack direction="row" spacing={1}>
+          {/* Search Field */}
+          <TextField
+            size="small"
+            placeholder="Search minutes..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            sx={{ 
+              width: isMobile ? '100%' : 200,
+              '& .MuiOutlinedInput-root': {
+                color: isDarkMode ? '#D1D5DB' : 'inherit',
+                '& fieldset': {
+                  borderColor: isDarkMode ? '#4B5563' : '#E5E7EB'
+                },
+                '&:hover fieldset': {
+                  borderColor: isDarkMode ? '#6B7280' : '#D1D5DB'
+                }
+              }
+            }}
+            InputProps={{
+              startAdornment: (
+                <SearchIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : '#6B7280', mr: 1 }} />
+              )
+            }}
+          />
+          
           <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh} disabled={isLoading}>
+            <IconButton 
+              onClick={handleRefresh} 
+              disabled={isLoading}
+              sx={{
+                color: isDarkMode ? '#D1D5DB' : 'inherit',
+                '&:hover': {
+                  backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.04)
+                }
+              }}
+            >
               <RefreshIcon />
             </IconButton>
           </Tooltip>
+          
           <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to add minutes") : "Add meeting minutes"}>
             <span>
               <Button 
@@ -583,6 +859,14 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                 startIcon={!canEdit ? <LockIcon /> : <AddIcon />} 
                 onClick={() => setShowAddMinutesDialog(true)}
                 disabled={!canEdit}
+                sx={{
+                  bgcolor: isDarkMode ? '#7C3AED' : '#7C3AED',
+                  '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : '#6D28D9' },
+                  '&.Mui-disabled': {
+                    bgcolor: isDarkMode ? '#374151' : '#E5E7EB',
+                    color: isDarkMode ? '#6B7280' : '#9CA3AF'
+                  }
+                }}
               >
                 Add Minutes
               </Button>
@@ -593,42 +877,60 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
       {/* Status message when meeting hasn't started */}
       {statusMessage && (
-        <Alert severity="info" icon={<LockIcon />} sx={{ mb: 2 }}>
+        <Alert 
+          severity="info" 
+          icon={<LockIcon />} 
+          sx={{ 
+            mb: 2, 
+            borderRadius: 2,
+            bgcolor: isDarkMode ? alpha('#3B82F6', 0.1) : undefined,
+            color: isDarkMode ? '#60A5FA' : undefined,
+            '& .MuiAlert-icon': {
+              color: isDarkMode ? '#60A5FA' : undefined
+            }
+          }}
+        >
           {statusMessage}
         </Alert>
       )}
 
       {error && (
-        <Alert severity="error" onClose={() => dispatch(clearMinutesError())} sx={{ mb: 2 }}>
+        <Alert 
+          severity="error" 
+          onClose={() => dispatch(clearMinutesError())} 
+          sx={{ 
+            mb: 2, 
+            borderRadius: 2,
+            bgcolor: isDarkMode ? '#7F1D1D' : undefined,
+            color: isDarkMode ? '#FCA5A5' : undefined
+          }}
+        >
           {error}
         </Alert>
       )}
 
-      {!isLoading && minutesList.length === 0 ? (
-        <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
-          <AutoAwesomeIcon sx={{ fontSize: 80, color: '#cbd5e1', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No Minutes Yet
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            {canEdit 
-              ? "Start by adding the first meeting minutes" 
-              : statusMessage || "Minutes can only be added once the meeting is in progress"}
-          </Typography>
-          {canEdit && (
-            <Button 
-              variant="contained" 
-              startIcon={<AddIcon />} 
-              onClick={() => setShowAddMinutesDialog(true)}
-              size="large"
-            >
-              Add First Minutes
-            </Button>
-          )}
-        </Paper>
+      {/* Minutes List or Empty State */}
+      {!isLoading && filteredMinutes.length === 0 ? (
+        searchTerm ? (
+          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3, bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF' }}>
+            <SearchIcon sx={{ fontSize: 80, color: isDarkMode ? '#6B7280' : '#CBD5E1', mb: 2 }} />
+            <Typography variant="h6" sx={{ color: isDarkMode ? '#FFFFFF' : 'text.secondary' }} gutterBottom>
+              No matching minutes found
+            </Typography>
+            <Typography variant="body2" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+              Try adjusting your search terms
+            </Typography>
+          </Paper>
+        ) : (
+          <EmptyState 
+            canEdit={canEdit} 
+            statusMessage={statusMessage} 
+            onAddClick={() => setShowAddMinutesDialog(true)} 
+          />
+        )
       ) : (
         <Stack spacing={2}>
-          {minutesList.map((minute) => (
+          {filteredMinutes.map((minute) => (
             <MinutesCard
               key={minute.id}
               minute={minute}
@@ -651,13 +953,51 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         onClose={() => !submitting && setShowAddMinutesDialog(false)} 
         maxWidth="md" 
         fullWidth
+        fullScreen={isMobile}
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+            borderRadius: isMobile ? 0 : 2,
+            backgroundImage: 'none'
+          }
+        }}
       >
-        <DialogTitle>
-          Add Meeting Minutes
-          {submitting && <LinearProgress sx={{ mt: 1 }} />}
+        <DialogTitle sx={{ 
+          borderBottom: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+          bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+          p: isMobile ? 2 : 3
+        }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant={isMobile ? "h6" : "h5"} fontWeight={600} sx={{ color: isDarkMode ? '#FFFFFF' : '#111827' }}>
+              Add Meeting Minutes
+            </Typography>
+            {!isMobile && (
+              <IconButton 
+                onClick={() => !submitting && setShowAddMinutesDialog(false)} 
+                size="small"
+                sx={{ color: isDarkMode ? '#9CA3AF' : '#6B7280' }}
+              >
+                <CloseIcon />
+              </IconButton>
+            )}
+          </Stack>
+          {submitting && (
+            <LinearProgress 
+              sx={{ 
+                mt: 2, 
+                bgcolor: isDarkMode ? '#374151' : '#E5E7EB',
+                '& .MuiLinearProgress-bar': {
+                  bgcolor: isDarkMode ? '#A78BFA' : '#7C3AED'
+                }
+              }} 
+            />
+          )}
         </DialogTitle>
-        <Divider />
-        <DialogContent sx={{ pt: 3 }}>
+        
+        <DialogContent sx={{ 
+          p: isMobile ? 2 : 3,
+          bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF'
+        }}>
           <Stack spacing={3}>
             <TextField
               fullWidth
@@ -667,9 +1007,35 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
               required
               disabled={submitting}
               helperText="Required - A descriptive title for these minutes"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  color: isDarkMode ? '#D1D5DB' : 'inherit',
+                  '& fieldset': {
+                    borderColor: isDarkMode ? '#4B5563' : '#E5E7EB'
+                  },
+                  '&:hover fieldset': {
+                    borderColor: isDarkMode ? '#6B7280' : '#D1D5DB'
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: isDarkMode ? '#A78BFA' : '#7C3AED'
+                  }
+                },
+                '& .MuiInputLabel-root': {
+                  color: isDarkMode ? '#9CA3AF' : '#6B7280',
+                  '&.Mui-focused': {
+                    color: isDarkMode ? '#A78BFA' : '#7C3AED'
+                  }
+                },
+                '& .MuiFormHelperText-root': {
+                  color: isDarkMode ? '#9CA3AF' : '#6B7280'
+                }
+              }}
             />
+            
             <Box>
-              <Typography variant="subtitle2" gutterBottom>Discussion</Typography>
+              <Typography variant="subtitle2" gutterBottom sx={{ color: isDarkMode ? '#D1D5DB' : '#374151' }}>
+                Discussion
+              </Typography>
               <RichTextEditor
                 value={newMinutes.discussion}
                 onChange={(html) => setNewMinutes({ ...newMinutes, discussion: html })}
@@ -678,8 +1044,11 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                 disabled={submitting}
               />
             </Box>
+            
             <Box>
-              <Typography variant="subtitle2" gutterBottom>Decisions (Optional)</Typography>
+              <Typography variant="subtitle2" gutterBottom sx={{ color: isDarkMode ? '#D1D5DB' : '#374151' }}>
+                Decisions (Optional)
+              </Typography>
               <RichTextEditor
                 value={newMinutes.decisions}
                 onChange={(html) => setNewMinutes({ ...newMinutes, decisions: html })}
@@ -690,14 +1059,42 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
             </Box>
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowAddMinutesDialog(false)} disabled={submitting}>
+        
+        <DialogActions sx={{ 
+          p: isMobile ? 2 : 3, 
+          borderTop: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+          bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+          flexDirection: isMobile ? 'column-reverse' : 'row',
+          gap: isMobile ? 1 : 0
+        }}>
+          <Button 
+            onClick={() => setShowAddMinutesDialog(false)} 
+            disabled={submitting}
+            fullWidth={isMobile}
+            sx={{
+              color: isDarkMode ? '#9CA3AF' : '#6B7280',
+              '&:hover': {
+                backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.04)
+              }
+            }}
+          >
             Cancel
           </Button>
           <Button 
             variant="contained" 
             onClick={handleAddMinutes} 
             disabled={submitting || !newMinutes.topic.trim()}
+            fullWidth={isMobile}
+            sx={{
+              bgcolor: isDarkMode ? '#7C3AED' : '#7C3AED',
+              '&:hover': {
+                bgcolor: isDarkMode ? '#6D28D9' : '#6D28D9'
+              },
+              '&.Mui-disabled': {
+                bgcolor: isDarkMode ? '#374151' : '#E5E7EB',
+                color: isDarkMode ? '#6B7280' : '#9CA3AF'
+              }
+            }}
           >
             {submitting ? 'Saving...' : 'Save Minutes'}
           </Button>
@@ -759,17 +1156,31 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       )}
 
       {/* Menu for minutes actions */}
-      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose}>
+      <Menu 
+        anchorEl={anchorEl} 
+        open={Boolean(anchorEl)} 
+        onClose={handleMenuClose}
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+            border: isDarkMode ? '1px solid #374151' : 'none'
+          }
+        }}
+      >
         <MenuItem 
           onClick={() => { 
             handleMenuClose(); 
             if (selectedMinute) handleAddAction(selectedMinute.id); 
           }}
+          sx={{ color: isDarkMode ? '#D1D5DB' : 'inherit' }}
         >
-          <AssignmentIcon fontSize="small" sx={{ mr: 1 }} />
+          <AssignmentIcon fontSize="small" sx={{ mr: 1, color: isDarkMode ? '#A78BFA' : 'primary.main' }} />
           Add Action Item
         </MenuItem>
-        <MenuItem onClick={handleDeleteMinutes} sx={{ color: 'error.main' }}>
+        <MenuItem 
+          onClick={handleDeleteMinutes} 
+          sx={{ color: isDarkMode ? '#F87171' : 'error.main' }}
+        >
           <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
           Delete Minutes
         </MenuItem>
@@ -786,6 +1197,10 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           severity={snackbar.severity} 
           onClose={() => setSnackbar({ ...snackbar, open: false })}
           variant="filled"
+          sx={{
+            bgcolor: snackbar.severity === 'success' && isDarkMode ? '#065F46' : undefined,
+            color: snackbar.severity === 'success' && isDarkMode ? '#A7F3D0' : undefined
+          }}
         >
           {snackbar.message}
         </Alert>

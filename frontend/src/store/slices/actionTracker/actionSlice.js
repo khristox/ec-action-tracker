@@ -207,6 +207,17 @@ export const fetchActionStatistics = createAsyncThunk(
   }
 );
 
+export const createActionFromMinutes = createAsyncThunk(
+  'actions/createActionFromMinutes',
+  async ({ minuteId, actionData }, { rejectWithValue }) => {
+    try {
+      const response = await api.post(`/action-tracker/minutes/${minuteId}/actions`, actionData);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.detail || error.message);
+    }
+  }
+);
 // ==================== INITIAL STATE ====================
 
 const initialState = {
@@ -533,6 +544,22 @@ const actionSlice = createSlice({
         state.loading = false;
       })
       .addCase(bulkUpdateStatus.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+
+      // ========== CREATE ACTION FROM MINUTES ==========
+      .addCase(createActionFromMinutes.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(createActionFromMinutes.fulfilled, (state, action) => {
+        state.loading = false;
+        state.actions.unshift(action.payload);
+        state.total += 1;
+        state.currentAction = action.payload; // Optional: set as current
+      })
+      .addCase(createActionFromMinutes.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       });

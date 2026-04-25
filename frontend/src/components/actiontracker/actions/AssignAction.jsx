@@ -10,22 +10,26 @@ import {
 import {
   Save as SaveIcon,
   Cancel as CancelIcon,
-  PersonAdd as PersonAddIcon,
   Assignment as AssignmentIcon,
-  Event as EventIcon,
-  Description as DescriptionIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import api from '../../../services/api';
-import { fetchActionById, clearCurrentAction } from '../../../store/slices/actionTracker/actionSlice';
+import { 
+  fetchActionById, 
+  updateAction, 
+  createActionFromMinutes,  // Import the new thunk
+  clearCurrentAction,
+  clearError
+} from '../../../store/slices/actionTracker/actionSlice';
 
 const AssignAction = () => {
-  const { id, minuteId } = useParams(); // Get both action ID and minute ID
+  const { id, minuteId } = useParams();
   const navigate = useNavigate();
   const dispatch = useDispatch();
   
+  // Use selectors from the slice
   const { currentAction, loading, error } = useSelector((state) => state.actions);
   const { user } = useSelector((state) => state.auth);
   
@@ -43,22 +47,18 @@ const AssignAction = () => {
   const [localError, setLocalError] = useState('');
   const [loadingMeeting, setLoadingMeeting] = useState(false);
 
-  // Check if we have an ID (edit mode) or minuteId (create mode)
   const isEditMode = id && id !== 'undefined' && id !== 'null';
   const isCreateMode = minuteId && minuteId !== 'undefined' && minuteId !== 'null';
 
-  // Fetch meeting info when in create mode
   const fetchMeetingInfo = useCallback(async () => {
     if (!isCreateMode) return;
     
     setLoadingMeeting(true);
     try {
-      // First get the minutes to find meeting ID
       const minutesRes = await api.get(`/action-tracker/minutes/${minuteId}`);
       const minutes = minutesRes.data;
       const meetingId = minutes.meeting_id;
       
-      // Then get meeting details
       const meetingRes = await api.get(`/action-tracker/meetings/${meetingId}`);
       setMeetingInfo(meetingRes.data);
     } catch (err) {
@@ -69,7 +69,6 @@ const AssignAction = () => {
     }
   }, [minuteId, isCreateMode]);
 
-  // Fetch users for assignment
   const fetchUsers = useCallback(async () => {
     try {
       const response = await api.get('/users/', {
@@ -82,7 +81,7 @@ const AssignAction = () => {
     }
   }, []);
 
-  // Fetch action data if in edit mode
+  // Fetch action data if in edit mode using the slice
   const fetchAction = useCallback(async () => {
     if (!isEditMode) return;
     
@@ -115,6 +114,7 @@ const AssignAction = () => {
     
     return () => {
       dispatch(clearCurrentAction());
+      dispatch(clearError());
     };
   }, [fetchUsers, fetchAction, fetchMeetingInfo, isEditMode, isCreateMode, dispatch]);
 
@@ -162,16 +162,16 @@ const AssignAction = () => {
       
       let response;
       if (isEditMode) {
-        // Update existing action
-        response = await api.put(`/action-tracker/actions/${id}`, payload);
+        // Use the slice's updateAction thunk
+        response = await dispatch(updateAction({ id, actionData: payload })).unwrap();
       } else if (isCreateMode) {
-        // Create new action from minutes
-        response = await api.post(`/action-tracker/actions/minutes/${minuteId}/actions`, payload);
+        // Use the slice's createActionFromMinutes thunk - CORRECT URL
+        response = await dispatch(createActionFromMinutes({ minuteId, actionData: payload })).unwrap();
       } else {
         throw new Error('Invalid mode: neither edit nor create');
       }
       
-      if (response.data) {
+      if (response) {
         // Navigate back to the meeting detail page if coming from there
         if (isCreateMode && meetingInfo) {
           navigate(`/meetings/${meetingInfo.id}`);
@@ -200,7 +200,6 @@ const AssignAction = () => {
     }
   };
 
-  // Priority options
   const priorities = [
     { value: 1, label: 'High', color: 'error' },
     { value: 2, label: 'Medium', color: 'warning' },
@@ -208,8 +207,8 @@ const AssignAction = () => {
     { value: 4, label: 'Very Low', color: 'default' },
   ];
 
-  // Loading states
-  if ((loading && isEditMode) || (loadingMeeting && isCreateMode)) {
+  // Use loading from Redux state
+  if ((loading || (loading && isEditMode)) || (loadingMeeting && isCreateMode)) {
     return (
       <Container sx={{ py: 4, textAlign: 'center' }}>
         <CircularProgress />
@@ -217,7 +216,6 @@ const AssignAction = () => {
     );
   }
 
-  // Get page title
   const getPageTitle = () => {
     if (isEditMode) return 'Edit Action';
     if (isCreateMode && meetingInfo) return `Add Action to: ${meetingInfo.title}`;
@@ -228,7 +226,6 @@ const AssignAction = () => {
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, borderRadius: 3 }}>
-          {/* Header */}
           <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
             <AssignmentIcon color="primary" sx={{ fontSize: 32 }} />
             <Box>
@@ -245,16 +242,18 @@ const AssignAction = () => {
           
           <Divider sx={{ mb: 3 }} />
           
-          {/* Error Alert */}
+          {/* Error Alert - show both local and Redux errors */}
           {(localError || error) && (
-            <Alert severity="error" sx={{ mb: 3 }} onClose={() => { setLocalError(''); dispatch(clearCurrentAction()); }}>
+            <Alert severity="error" sx={{ mb: 3 }} onClose={() => { 
+              setLocalError(''); 
+              dispatch(clearError()); 
+            }}>
               {localError || (typeof error === 'string' ? error : JSON.stringify(error))}
             </Alert>
           )}
           
           <form onSubmit={handleSubmit}>
             <Stack spacing={3}>
-              {/* Description */}
               <TextField
                 fullWidth
                 label="Action Description"
@@ -267,7 +266,6 @@ const AssignAction = () => {
                 placeholder="Describe the action item to be completed..."
               />
               
-              {/* Assign To */}
               <FormControl fullWidth required>
                 <InputLabel>Assign To</InputLabel>
                 <Select
@@ -285,7 +283,6 @@ const AssignAction = () => {
                 <FormHelperText>Select the person responsible for this action</FormHelperText>
               </FormControl>
               
-              {/* Due Date */}
               <DatePicker
                 label="Due Date"
                 value={formData.due_date}
@@ -293,7 +290,6 @@ const AssignAction = () => {
                 slotProps={{ textField: { fullWidth: true, required: true } }}
               />
               
-              {/* Priority */}
               <FormControl fullWidth>
                 <InputLabel>Priority</InputLabel>
                 <Select
@@ -315,7 +311,6 @@ const AssignAction = () => {
                 </Select>
               </FormControl>
               
-              {/* Estimated Hours */}
               <TextField
                 fullWidth
                 label="Estimated Hours"
@@ -327,7 +322,6 @@ const AssignAction = () => {
                 placeholder="Estimated time to complete (in hours)"
               />
               
-              {/* Remarks */}
               <TextField
                 fullWidth
                 label="Additional Remarks"
@@ -339,7 +333,6 @@ const AssignAction = () => {
                 placeholder="Any additional notes or instructions..."
               />
               
-              {/* Action Buttons */}
               <Grid container spacing={2} sx={{ mt: 2 }}>
                 <Grid item xs={12} sm={6}>
                   <Button

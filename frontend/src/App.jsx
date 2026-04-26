@@ -83,6 +83,8 @@ const COMPONENT_IMPORTS = {
   // Auth Pages
   'SignInSide': () => import('./pages/SignInSide'),
   'SignUp': () => import('./pages/SignUp'),
+  'ForgotPassword': () => import('./components/auth/ForgotPassword'),
+  'ResetPassword': () => import('./components/auth/ResetPassword'),
   
   // Action Tracker - Dashboard
   'Dashboard': () => import('./components/actiontracker/dashboard/Dashboard'),
@@ -93,7 +95,7 @@ const COMPONENT_IMPORTS = {
   'MeetingDetail': () => import('./components/actiontracker/meetings/MeetingDetail'),
   'EditMeeting': () => import('./components/actiontracker/meetings/EditMeeting'),
 
-   'MeetingForm': () => import('./components/actiontracker/meetings/MeetingForm'),
+  'MeetingForm': () => import('./components/actiontracker/meetings/MeetingForm'),
   
    
   // Action Tracker - Actions
@@ -123,7 +125,7 @@ const COMPONENT_IMPORTS = {
 
   
   // Profile Components
-  'Profile': () => import('./components/profile/Profile'),
+  'Profile': () => import('./components/profile/ProfileSettings'),
   'ProfileSettings': () => import('./components/profile/ProfileSettings'),
   'SecuritySettings': () => import('./components/profile/SecuritySettings'),
   'NotificationSettings': () => import('./components/profile/NotificationSettings'),
@@ -190,7 +192,6 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
   
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      console.log(`[Load] Loading ${componentName}${attempt > 0 ? ` (retry ${attempt})` : ''}`);
       
       const module = await importFn();
       const Component = module.default || module;
@@ -198,7 +199,7 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
       // Cache the component
       componentCache.set(componentName, Promise.resolve(module));
       
-      console.log(`[Success] Loaded ${componentName}`);
+      
       return module;
       
     } catch (error) {
@@ -232,7 +233,6 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
 const preloadCriticalComponents = async () => {
   const criticalComponents = ['Dashboard', 'MyTasks', 'ActionsList'];
   
-  console.log('[Preload] Starting preload of critical components');
   
   const preloadPromises = criticalComponents.map(componentName => 
     loadComponent(componentName, 1, 500).catch(err => 
@@ -241,7 +241,6 @@ const preloadCriticalComponents = async () => {
   );
   
   await Promise.allSettled(preloadPromises);
-  console.log('[Preload] Critical components preloaded');
 };
 
 /**
@@ -263,7 +262,6 @@ const preloadRoleBasedComponents = async (userRoles) => {
   }
   
   if (componentsToPreload.length > 0) {
-    console.log('[Preload] Preloading role-based components:', componentsToPreload);
     
     const preloadPromises = componentsToPreload.map(componentName =>
       loadComponent(componentName, 1, 500).catch(err =>
@@ -280,6 +278,8 @@ const preloadRoleBasedComponents = async (userRoles) => {
 // Auth Pages
 const SignInSide = createLazyComponent('SignInSide');
 const SignUp = createLazyComponent('SignUp');
+const ForgotPassword = createLazyComponent('ForgotPassword');
+const ResetPassword = createLazyComponent('ResetPassword');
 
 // Action Tracker - Dashboard
 const Dashboard = createLazyComponent('Dashboard', { preload: true });
@@ -451,6 +451,8 @@ const routeConfig = {
   publicRoutes: [
     { path: "/login", element: <SignInSide />, wrapper: PublicRoute },
     { path: "/signup", element: <SignUp />, wrapper: PublicRoute },
+    { path: "/forgot-password", element: <ForgotPassword />, wrapper: PublicRoute },
+    { path: "/reset-password/:token", element: <ResetPassword />, wrapper: PublicRoute },
   ],
   errorRoutes: [
     { path: "/403", element: <Forbidden /> },
@@ -468,6 +470,8 @@ const routeConfig = {
     { path: "actions/:id", element: <ActionDetail /> },
     { path: "actions/overdue", element: <OverdueActions /> },
     { path: "actions/assign", element: <AssignAction /> },
+    { path: "actions/assign/minute/:minuteId", element: <AssignAction /> },
+    { path: "actions/edit/:id", element: <AssignAction /> },
     { path: "actions/:id/assign", element: <AssignAction /> },
     { path: "actions/progress", element: <UpdateProgress /> },
     { path: "actions/:id/progress", element: <UpdateProgress /> },
@@ -644,9 +648,6 @@ const AppContent = () => {
           
           {/* Catch-all Route */}
           <Route path="*" element={<Navigate to="/404" replace />} />
-          // In your App.jsx or router configuration
-          <Route path="/actions/assign/minute/:minuteId" element={<AssignAction />} />
-          <Route path="/actions/edit/:id" element={<AssignAction />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>
@@ -659,11 +660,7 @@ const AppContent = () => {
 export default function App() {
   const baseUrl = import.meta.env.BASE_URL;
   
-  useEffect(() => {
-    console.log('App initializing...');
-    console.log(`[Config] Environment: ${import.meta.env.MODE}`);
-    console.log(`[Config] Base URL: ${baseUrl}`);
-  }, []);
+
   
   return (
     <ThemeContextProvider>

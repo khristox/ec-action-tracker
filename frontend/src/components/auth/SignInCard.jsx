@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import {
   Visibility, VisibilityOff, PersonOutline, LockOutlined,
-  Business, CheckCircleOutline, ErrorOutline, EmailOutlined,
+  Business, CheckCircleOutline, ErrorOutline, EmailOutlined,Group,
   SendOutlined, CloseOutlined
 } from '@mui/icons-material';
 import { login, clearError, resetLoginSuccess, resendVerification } from '../../store/slices/authSlice';
@@ -119,9 +119,9 @@ const SignInCard = () => {
       >
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Business sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+            <Group sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
             <Typography variant="h4" fontWeight={700} gutterBottom>Welcome Back</Typography>
-            <Typography variant="body2" color="text.secondary">Sign in to manage your rental properties</Typography>
+            <Typography variant="body2" color="text.secondary">Sign in to manage your Meetings</Typography>
           </Box>
 
           <form onSubmit={handleSubmit}>

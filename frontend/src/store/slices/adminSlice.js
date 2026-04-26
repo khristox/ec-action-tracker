@@ -34,7 +34,6 @@ export const updateUserRoles = createAsyncThunk(
       // Send the array directly, not wrapped in an object
       const requestData = roles;  // Just the array, not { role_names: roles }
       
-      console.log('Updating user roles:', id, requestData);
       
       const response = await apiClient.put(`/admin/users/${id}/roles`, requestData);
       return response.data;
@@ -86,7 +85,6 @@ export const createUser = createAsyncThunk(
         is_verified: userData.is_verified !== undefined ? userData.is_verified : false,
       };
 
-      console.log('Creating user:', createData);
       
       const response = await apiClient.post('/admin/users', createData);
       return response.data;
@@ -123,8 +121,7 @@ export const updateUser = createAsyncThunk(
         }
       });
 
-      console.log('Updating user - ID:', id);
-      console.log('Updating user - Data:', cleanData);
+
       
       const response = await apiClient.put(`/admin/users/${id}`, cleanData);
       return response.data;

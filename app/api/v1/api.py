@@ -18,6 +18,10 @@ try:
     from app.api.v1.endpoints.attributes import router as attributes_router
     from app.api.v1.endpoints.address.locations import router as locations_router
     from app.api.v1.endpoints.menus import router as menus_router
+    from app.api.v1.endpoints.chart_data import router as chart_data
+    from app.api.v1.endpoints.meeting_participants import router as meeting_participants_router
+
+
     
     logger.info("✅ All routers imported successfully")
 except ImportError as e:
@@ -45,9 +49,18 @@ api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 
 api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
 
+api_router.include_router(chart_data, prefix="/charts", tags=["charts"])
+
 
 # Action Tracker (this already includes all sub-routers)
 api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker-documents"])
+
+
+api_router.include_router(
+    meeting_participants_router,
+    prefix="/meetings",
+    tags=["meetings-participants"]
+)
 
 # DO NOT add import_export separately here - it should be inside action_tracker_router
 

@@ -29,8 +29,8 @@ else
     echo -e "${BLUE}  Countries Attribute Setup Script  ${NC}"
     echo -e "${BLUE}=================================${NC}"
     echo ""
-    read -p "Enter API base URL [http://localhost:8000]: " BASE_URL
-    BASE_URL=${BASE_URL:-http://localhost:8000}
+    read -p "Enter API base URL [http://localhost:8001]: " BASE_URL
+    BASE_URL=${BASE_URL:-http://localhost:8001}
 fi
 
 # Check if USERNAME is already set as environment variable
@@ -170,23 +170,40 @@ create_countries_group
 # Wait a moment for group to be created
 sleep 1
 
-# Function to check if country exists - FIXED
+# Function to check if country exists - REWRITTEN
 country_exists() {
     local code=$1
-    local response=$(curl -s -X GET "${BASE_URL}/api/v1/attributes/?group_code=COUNTRY&code=${code}" \
-      -H "Authorization: Bearer $ADMIN_TOKEN")
     
-    # Check if response is an array and has items
-    if echo "$response" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1; then
-        local id=$(echo "$response" | jq -r '.[0].id // ""')
-        if [ -n "$id" ] && [ "$id" != "null" ] && [ "$id" != "" ]; then
-            return 0
-        fi
+    # Try to get attributes for COUNTRY group
+    local response=$(curl -s -X GET "${BASE_URL}/api/v1/attributes/?group_code=COUNTRY" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null)
+    
+    # Check if response is valid JSON
+    if ! echo "$response" | jq -e '.' > /dev/null 2>&1; then
+        return 1
     fi
+    
+    # Handle paginated response format
+    if echo "$response" | jq -e '.items' > /dev/null 2>&1; then
+        # Response is { "items": [...], "total": ..., "page": ... }
+        local exists=$(echo "$response" | jq -r --arg code "$code" '.items[] | select(.code == $code) | .id' 2>/dev/null)
+    elif echo "$response" | jq -e 'type == "array"' > /dev/null 2>&1; then
+        # Response is direct array
+        local exists=$(echo "$response" | jq -r --arg code "$code" '.[] | select(.code == $code) | .id' 2>/dev/null)
+    else
+        # Unexpected format
+        return 1
+    fi
+    
+    # Check if we found a valid ID
+    if [ -n "$exists" ] && [ "$exists" != "null" ] && [ "$exists" != "" ]; then
+        return 0
+    fi
+    
     return 1
 }
 
-# Function to create a country
+# Function to create a country - REWRITTEN with better error handling
 create_country() {
     local code="$1"
     local name="$2"
@@ -229,24 +246,49 @@ create_country() {
 EOF
 )
     
-    # Create the country
-    RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/attributes/" \
-      -H "Authorization: Bearer $ADMIN_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$COUNTRY_JSON")
+    # Create the country with retry logic
+    local max_retries=2
+    local retry_count=0
     
-    if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
-        print_success "Created $name ($code)"
-        return 0
-    else
-        local detail=$(echo "$RESPONSE" | jq -r '.detail // "Unknown error"')
+    while [ $retry_count -lt $max_retries ]; do
+        RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/attributes/" \
+          -H "Authorization: Bearer $ADMIN_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "$COUNTRY_JSON")
+        
+        # Check if successful
+        if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
+            print_success "Created $name ($code)"
+            return 0
+        fi
+        
+        # Check if it already exists (race condition)
+        local detail=$(echo "$RESPONSE" | jq -r '.detail // ""')
+        if [[ "$detail" == *"already exists"* ]]; then
+            print_warning "Country $name ($code) already exists (created by another process)"
+            return 0
+        fi
+        
+        # If we got a server error, wait and retry
+        if [[ "$detail" == *"500"* ]] || [[ "$detail" == *"Internal Server Error"* ]]; then
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -lt $max_retries ]; then
+                print_warning "Retrying $name (attempt $((retry_count + 1))/$max_retries)..."
+                sleep 1
+                continue
+            fi
+        fi
+        
+        # Failed for other reasons
         print_warning "Could not create $name: $detail"
-        echo "Response: $RESPONSE" | head -c 500
-        echo ""
         return 1
-    fi
+    done
+    
+    print_warning "Failed to create $name after $max_retries attempts"
+    return 1
 }
 
+# Main seeding process
 echo ""
 print_info "Seeding countries with enhanced metadata..."
 
@@ -254,54 +296,65 @@ print_info "Seeding countries with enhanced metadata..."
 SUCCESS_COUNT=0
 FAIL_COUNT=0
 
+# Function to seed country with error handling
+seed_country() {
+    if create_country "$@"; then
+        ((SUCCESS_COUNT++))
+        return 0
+    else
+        ((FAIL_COUNT++))
+        return 1
+    fi
+}
+
 # East African Countries
-create_country "UG" "Uganda" "+256" "Africa" "UGX" "USh" "🇺🇬" "Kampala" 1 "Eastern Africa" 45741000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "KE" "Kenya" "+254" "Africa" "KES" "KSh" "🇰🇪" "Nairobi" 2 "Eastern Africa" 53771000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "TZ" "Tanzania" "+255" "Africa" "TZS" "TSh" "🇹🇿" "Dodoma" 3 "Eastern Africa" 59734000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "RW" "Rwanda" "+250" "Africa" "RWF" "FRw" "🇷🇼" "Kigali" 4 "Eastern Africa" 12952000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "BI" "Burundi" "+257" "Africa" "BIF" "FBu" "🇧🇮" "Gitega" 5 "Eastern Africa" 11891000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "SS" "South Sudan" "+211" "Africa" "SSP" "£" "🇸🇸" "Juba" 6 "Eastern Africa" 11494000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "UG" "Uganda" "+256" "Africa" "UGX" "USh" "🇺🇬" "Kampala" 1 "Eastern Africa" 45741000
+seed_country "KE" "Kenya" "+254" "Africa" "KES" "KSh" "🇰🇪" "Nairobi" 2 "Eastern Africa" 53771000
+seed_country "TZ" "Tanzania" "+255" "Africa" "TZS" "TSh" "🇹🇿" "Dodoma" 3 "Eastern Africa" 59734000
+seed_country "RW" "Rwanda" "+250" "Africa" "RWF" "FRw" "🇷🇼" "Kigali" 4 "Eastern Africa" 12952000
+seed_country "BI" "Burundi" "+257" "Africa" "BIF" "FBu" "🇧🇮" "Gitega" 5 "Eastern Africa" 11891000
+seed_country "SS" "South Sudan" "+211" "Africa" "SSP" "£" "🇸🇸" "Juba" 6 "Eastern Africa" 11494000
 
 # Major African Countries
-create_country "NG" "Nigeria" "+234" "Africa" "NGN" "₦" "🇳🇬" "Abuja" 10 "Western Africa" 206140000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "ZA" "South Africa" "+27" "Africa" "ZAR" "R" "🇿🇦" "Pretoria" 11 "Southern Africa" 59309000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "GH" "Ghana" "+233" "Africa" "GHS" "₵" "🇬🇭" "Accra" 12 "Western Africa" 31073000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "ET" "Ethiopia" "+251" "Africa" "ETB" "Br" "🇪🇹" "Addis Ababa" 13 "Eastern Africa" 114964000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "EG" "Egypt" "+20" "Africa" "EGP" "£" "🇪🇬" "Cairo" 14 "Northern Africa" 102334000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "MA" "Morocco" "+212" "Africa" "MAD" "DH" "🇲🇦" "Rabat" 15 "Northern Africa" 36910600 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "NG" "Nigeria" "+234" "Africa" "NGN" "₦" "🇳🇬" "Abuja" 10 "Western Africa" 206140000
+seed_country "ZA" "South Africa" "+27" "Africa" "ZAR" "R" "🇿🇦" "Pretoria" 11 "Southern Africa" 59309000
+seed_country "GH" "Ghana" "+233" "Africa" "GHS" "₵" "🇬🇭" "Accra" 12 "Western Africa" 31073000
+seed_country "ET" "Ethiopia" "+251" "Africa" "ETB" "Br" "🇪🇹" "Addis Ababa" 13 "Eastern Africa" 114964000
+seed_country "EG" "Egypt" "+20" "Africa" "EGP" "£" "🇪🇬" "Cairo" 14 "Northern Africa" 102334000
+seed_country "MA" "Morocco" "+212" "Africa" "MAD" "DH" "🇲🇦" "Rabat" 15 "Northern Africa" 36910600
 
 # North America
-create_country "US" "United States" "+1" "North America" "USD" "$" "🇺🇸" "Washington, D.C." 30 "North America" 331893000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "CA" "Canada" "+1" "North America" "CAD" "$" "🇨🇦" "Ottawa" 31 "North America" 38008000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "MX" "Mexico" "+52" "North America" "MXN" "$" "🇲🇽" "Mexico City" 32 "North America" 128933000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "US" "United States" "+1" "North America" "USD" "$" "🇺🇸" "Washington, D.C." 30 "North America" 331893000
+seed_country "CA" "Canada" "+1" "North America" "CAD" "$" "🇨🇦" "Ottawa" 31 "North America" 38008000
+seed_country "MX" "Mexico" "+52" "North America" "MXN" "$" "🇲🇽" "Mexico City" 32 "North America" 128933000
 
 # Europe
-create_country "GB" "United Kingdom" "+44" "Europe" "GBP" "£" "🇬🇧" "London" 40 "Northern Europe" 67886000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "FR" "France" "+33" "Europe" "EUR" "€" "🇫🇷" "Paris" 41 "Western Europe" 67390000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "DE" "Germany" "+49" "Europe" "EUR" "€" "🇩🇪" "Berlin" 42 "Western Europe" 83200000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "IT" "Italy" "+39" "Europe" "EUR" "€" "🇮🇹" "Rome" 43 "Southern Europe" 60360000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "ES" "Spain" "+34" "Europe" "EUR" "€" "🇪🇸" "Madrid" 44 "Southern Europe" 47350000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "GB" "United Kingdom" "+44" "Europe" "GBP" "£" "🇬🇧" "London" 40 "Northern Europe" 67886000
+seed_country "FR" "France" "+33" "Europe" "EUR" "€" "🇫🇷" "Paris" 41 "Western Europe" 67390000
+seed_country "DE" "Germany" "+49" "Europe" "EUR" "€" "🇩🇪" "Berlin" 42 "Western Europe" 83200000
+seed_country "IT" "Italy" "+39" "Europe" "EUR" "€" "🇮🇹" "Rome" 43 "Southern Europe" 60360000
+seed_country "ES" "Spain" "+34" "Europe" "EUR" "€" "🇪🇸" "Madrid" 44 "Southern Europe" 47350000
 
 # Asia
-create_country "CN" "China" "+86" "Asia" "CNY" "¥" "🇨🇳" "Beijing" 60 "Eastern Asia" 1411778724 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "IN" "India" "+91" "Asia" "INR" "₹" "🇮🇳" "New Delhi" 61 "Southern Asia" 1380004385 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "JP" "Japan" "+81" "Asia" "JPY" "¥" "🇯🇵" "Tokyo" 62 "Eastern Asia" 125800000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "KR" "South Korea" "+82" "Asia" "KRW" "₩" "🇰🇷" "Seoul" 63 "Eastern Asia" 51709000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "ID" "Indonesia" "+62" "Asia" "IDR" "Rp" "🇮🇩" "Jakarta" 64 "Southeastern Asia" 273524000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "CN" "China" "+86" "Asia" "CNY" "¥" "🇨🇳" "Beijing" 60 "Eastern Asia" 1411778724
+seed_country "IN" "India" "+91" "Asia" "INR" "₹" "🇮🇳" "New Delhi" 61 "Southern Asia" 1380004385
+seed_country "JP" "Japan" "+81" "Asia" "JPY" "¥" "🇯🇵" "Tokyo" 62 "Eastern Asia" 125800000
+seed_country "KR" "South Korea" "+82" "Asia" "KRW" "₩" "🇰🇷" "Seoul" 63 "Eastern Asia" 51709000
+seed_country "ID" "Indonesia" "+62" "Asia" "IDR" "Rp" "🇮🇩" "Jakarta" 64 "Southeastern Asia" 273524000
 
 # Oceania
-create_country "AU" "Australia" "+61" "Oceania" "AUD" "$" "🇦🇺" "Canberra" 80 "Australia and New Zealand" 25788000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "NZ" "New Zealand" "+64" "Oceania" "NZD" "$" "🇳🇿" "Wellington" 81 "Australia and New Zealand" 5110000 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "AU" "Australia" "+61" "Oceania" "AUD" "$" "🇦🇺" "Canberra" 80 "Australia and New Zealand" 25788000
+seed_country "NZ" "New Zealand" "+64" "Oceania" "NZD" "$" "🇳🇿" "Wellington" 81 "Australia and New Zealand" 5110000
 
 # South America
-create_country "BR" "Brazil" "+55" "South America" "BRL" "R$" "🇧🇷" "Brasília" 90 "South America" 213993437 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "AR" "Argentina" "+54" "South America" "ARS" "$" "🇦🇷" "Buenos Aires" 91 "South America" 45195774 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "CL" "Chile" "+56" "South America" "CLP" "$" "🇨🇱" "Santiago" 92 "South America" 19116201 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "BR" "Brazil" "+55" "South America" "BRL" "R$" "🇧🇷" "Brasília" 90 "South America" 213993437
+seed_country "AR" "Argentina" "+54" "South America" "ARS" "$" "🇦🇷" "Buenos Aires" 91 "South America" 45195774
+seed_country "CL" "Chile" "+56" "South America" "CLP" "$" "🇨🇱" "Santiago" 92 "South America" 19116201
 
 # Middle East
-create_country "AE" "United Arab Emirates" "+971" "Asia" "AED" "د.إ" "🇦🇪" "Abu Dhabi" 100 "Western Asia" 9890400 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "SA" "Saudi Arabia" "+966" "Asia" "SAR" "﷼" "🇸🇦" "Riyadh" 101 "Western Asia" 34813867 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
-create_country "QA" "Qatar" "+974" "Asia" "QAR" "﷼" "🇶🇦" "Doha" 102 "Western Asia" 2881053 && ((SUCCESS_COUNT++)) || ((FAIL_COUNT++))
+seed_country "AE" "United Arab Emirates" "+971" "Asia" "AED" "د.إ" "🇦🇪" "Abu Dhabi" 100 "Western Asia" 9890400
+seed_country "SA" "Saudi Arabia" "+966" "Asia" "SAR" "﷼" "🇸🇦" "Riyadh" 101 "Western Asia" 34813867
+seed_country "QA" "Qatar" "+974" "Asia" "QAR" "﷼" "🇶🇦" "Doha" 102 "Western Asia" 2881053
 
 echo ""
 print_info "Seeding completed! Success: $SUCCESS_COUNT, Failed: $FAIL_COUNT"
@@ -316,7 +369,14 @@ VERIFY_RESPONSE=$(curl -s -X GET "${BASE_URL}/api/v1/attribute-groups/COUNTRY" \
 
 if echo "$VERIFY_RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
     GROUP_ID=$(echo "$VERIFY_RESPONSE" | jq -r '.id')
-    ATTRIBUTE_COUNT=$(echo "$VERIFY_RESPONSE" | jq -r '.attributes | length // 0')
+    
+    # Count attributes (handle both paginated and array responses)
+    if echo "$VERIFY_RESPONSE" | jq -e '.attributes.items' > /dev/null 2>&1; then
+        ATTRIBUTE_COUNT=$(echo "$VERIFY_RESPONSE" | jq -r '.attributes.items | length // 0')
+    else
+        ATTRIBUTE_COUNT=$(echo "$VERIFY_RESPONSE" | jq -r '.attributes | length // 0')
+    fi
+    
     print_success "Countries group verified (ID: $GROUP_ID)"
     print_info "Total countries seeded: $ATTRIBUTE_COUNT"
     
@@ -324,7 +384,13 @@ if echo "$VERIFY_RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
     if [ $ATTRIBUTE_COUNT -gt 0 ]; then
         echo ""
         echo -e "${BLUE}📋 Sample of seeded countries:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.attributes[0:10] | .[] | "  • \(.name) (\(.code)) - Phone: \(.extra_metadata.phone_code) Capital: \(.extra_metadata.capital) \(.extra_metadata.flag)"' 2>/dev/null || echo "  Unable to display sample"
+        
+        # Extract sample based on response format
+        if echo "$VERIFY_RESPONSE" | jq -e '.attributes.items' > /dev/null 2>&1; then
+            echo "$VERIFY_RESPONSE" | jq -r '.attributes.items[0:10] | .[] | "  • \(.name) (\(.code)) - Phone: \(.extra_metadata.phone_code) Capital: \(.extra_metadata.capital) \(.extra_metadata.flag)"' 2>/dev/null || echo "  Unable to display sample"
+        else
+            echo "$VERIFY_RESPONSE" | jq -r '.attributes[0:10] | .[] | "  • \(.name) (\(.code)) - Phone: \(.extra_metadata.phone_code) Capital: \(.extra_metadata.capital) \(.extra_metadata.flag)"' 2>/dev/null || echo "  Unable to display sample"
+        fi
         
         if [ $ATTRIBUTE_COUNT -gt 10 ]; then
             echo "  ... and $((ATTRIBUTE_COUNT - 10)) more countries"
@@ -344,3 +410,14 @@ echo -e "${GREEN}✅ Countries attribute setup completed!${NC}"
 echo -e "${BLUE}=================================${NC}"
 echo ""
 echo "Total countries seeded: $SUCCESS_COUNT"
+
+# Final status
+if [ $FAIL_COUNT -eq 0 ]; then
+    print_success "All countries seeded successfully!"
+elif [ $SUCCESS_COUNT -gt 0 ]; then
+    print_warning "Partial success: $SUCCESS_COUNT seeded, $FAIL_COUNT failed"
+else
+    print_error "No countries were seeded. Please check your API configuration and logs."
+fi
+
+echo ""

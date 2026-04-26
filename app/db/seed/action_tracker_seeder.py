@@ -7,13 +7,15 @@ Run: python -m app.db.seeders.action_tracker_seeder
 import asyncio
 import sys
 import os
+
+from app.models.general.dynamic_attribute import Attribute, AttributeValue
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select
 from app.core.config import settings
-from app.models.attribute import Attribute, AttributeValue
+#from app.models.attribute import Attribute, AttributeValue
 from app.db.base import Base
 
 # Attribute codes

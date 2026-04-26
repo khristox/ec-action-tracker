@@ -274,6 +274,9 @@ async def update_meeting_common(
     """Common function for updating meeting (used by PUT and PATCH)"""
     db_obj = await get_meeting_or_404(db, meeting_id)
     
+    # Extract custom_participants before processing other fields
+    custom_participants = update_data.pop("custom_participants", None)
+    
     # FIX: Validate and fix start_time and end_time if both are being updated
     new_start_time = update_data.get("start_time")
     new_end_time = update_data.get("end_time")
@@ -328,13 +331,112 @@ async def update_meeting_common(
         )
         db.add(history_entry)
     
+    # Handle participant sync if custom_participants were provided
+    if custom_participants is not None:
+        logger.info(f"Processing {len(custom_participants)} participants for meeting {meeting_id}")
+        await sync_meeting_participants(db, meeting_id, custom_participants, current_user)
+    
     await db.commit()
     await db.refresh(db_obj)
     
-    # Reload with all relationships
+    # Reload with all relationships including participants
     return await meeting_crud.get_meeting_with_details(db, meeting_id)
 
 
+
+# Add this function after the existing helper functions, before @router.put
+
+async def sync_meeting_participants(
+    db: AsyncSession,
+    meeting_id: UUID,
+    custom_participants: List[Dict[str, Any]],
+    current_user: User
+) -> List[MeetingParticipant]:
+    """
+    Sync meeting participants - add new, update existing, remove missing ones.
+    This preserves chairperson and secretary assignments.
+    """
+    # Get existing participants
+    result = await db.execute(
+        select(MeetingParticipant)
+        .where(
+            MeetingParticipant.meeting_id == meeting_id,
+            MeetingParticipant.is_active == True
+        )
+    )
+    existing_participants = result.scalars().all()
+    
+    # Create maps for quick lookup
+    existing_by_id = {str(p.id): p for p in existing_participants}
+    existing_by_email = {p.email: p for p in existing_participants if p.email}
+    existing_by_name = {p.name: p for p in existing_participants}
+    
+    kept_participant_ids = set()
+    updated_participants = []
+    
+    for p_data in custom_participants:
+        participant_id = str(p_data.get('id')) if p_data.get('id') else None
+        email = p_data.get('email')
+        name = p_data.get('name')
+        
+        # Find existing participant
+        existing = None
+        if participant_id and participant_id in existing_by_id:
+            existing = existing_by_id[participant_id]
+            logger.debug(f"Updating participant by ID: {name}")
+        elif email and email in existing_by_email:
+            existing = existing_by_email[email]
+            logger.debug(f"Updating participant by email: {name}")
+        elif name and name in existing_by_name:
+            existing = existing_by_name[name]
+            logger.debug(f"Updating participant by name: {name}")
+        
+        if existing:
+            # Update existing participant
+            existing.name = p_data.get('name', existing.name)
+            existing.email = p_data.get('email', existing.email)
+            existing.telephone = p_data.get('telephone', existing.telephone)
+            existing.title = p_data.get('title', existing.title)
+            existing.organization = p_data.get('organization', existing.organization)
+            existing.is_chairperson = p_data.get('is_chairperson', existing.is_chairperson)
+            existing.is_secretary = p_data.get('is_secretary', False)
+            existing.updated_by_id = current_user.id
+            existing.updated_at = datetime.now()
+            kept_participant_ids.add(str(existing.id))
+            updated_participants.append(existing)
+        else:
+            # Create new participant
+            logger.info(f"Creating new participant: {name}")
+            new_participant = MeetingParticipant(
+                id=uuid.uuid4(),
+                meeting_id=meeting_id,
+                name=name,
+                email=email,
+                telephone=p_data.get('telephone'),
+                title=p_data.get('title'),
+                organization=p_data.get('organization'),
+                is_chairperson=p_data.get('is_chairperson', False),
+                is_secretary=p_data.get('is_secretary', False),
+                created_by_id=current_user.id,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                is_active=True
+            )
+            db.add(new_participant)
+            await db.flush()
+            kept_participant_ids.add(str(new_participant.id))
+            updated_participants.append(new_participant)
+    
+    # Remove participants not in the kept list
+    for participant in existing_participants:
+        if str(participant.id) not in kept_participant_ids:
+            logger.info(f"Removing participant: {participant.name}")
+            participant.is_active = False
+            participant.updated_by_id = current_user.id
+            participant.updated_at = datetime.now()
+    
+    await db.flush()
+    return updated_participants
 
 def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
     """Build response for meeting minutes"""
@@ -564,11 +666,31 @@ async def update_meeting(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Full update meeting with audit fields"""
-    logger.debug(f"Full incoming payload: {meeting_in.model_dump(exclude_unset=True)}")
+    """Full update meeting with audit fields and participant management"""
+    logger.info(f"=== UPDATE MEETING CALLED ===")
+    logger.info(f"Meeting ID: {meeting_id}")
+    logger.info(f"User: {current_user.username} (ID: {current_user.id})")
+    
     update_data = meeting_in.model_dump(exclude_unset=True)
+    logger.debug(f"Full incoming payload: {update_data}")
+    
+    # Log participants specifically for debugging
+    if 'custom_participants' in update_data:
+        logger.info(f"Participants in update: {len(update_data['custom_participants'])}")
+        for i, p in enumerate(update_data['custom_participants']):
+            logger.info(f"  Participant {i+1}: {p.get('name')} - Chair: {p.get('is_chairperson')}, Sec: {p.get('is_secretary')}")
+    else:
+        logger.info("No custom_participants in update data")
+    
     updated_meeting = await update_meeting_common(db, meeting_id, update_data, current_user, "PUT")
-    return build_meeting_response(updated_meeting)
+    
+    # Log result
+    logger.info(f"Meeting updated successfully. Participants count: {len(updated_meeting.participants) if updated_meeting.participants else 0}")
+    
+    response = build_meeting_response(updated_meeting)
+    logger.info(f"Response built with {len(response.participants) if response.participants else 0} participants")
+    
+    return response
 
 
 @router.patch("/{meeting_id}", response_model=MeetingResponse)

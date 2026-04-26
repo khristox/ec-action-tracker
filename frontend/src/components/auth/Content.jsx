@@ -2,8 +2,8 @@ import React from 'react';
 import { Box, Typography, Stack, useTheme, useMediaQuery, Grid, Paper } from '@mui/material';
 import { Event, Group, Assignment, Timeline } from '@mui/icons-material';
 
-const ecLogoLight = "./ec-logo.png";
-const ecLogoDark = "./ec-logo-dark.png";
+const ecLogoLight = "./logo.png";
+const ecLogoDark = "./logo1.png";
 
 const features = [
   { icon: <Event />, title: 'Session Scheduling', desc: 'Plenary & committee meetings' },

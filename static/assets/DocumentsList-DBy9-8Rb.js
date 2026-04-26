@@ -1,0 +1,2 @@
+import"./rolldown-runtime-COnpUsM8.js";import{Ea as e,Ga as t,Na as n,ca as r,za as i}from"./mui-vendor-Chu5OEg7.js";t();var a=i(),o=()=>(0,a.jsx)(r,{maxWidth:`xl`,sx:{py:4},children:(0,a.jsxs)(n,{sx:{p:4,textAlign:`center`},children:[(0,a.jsx)(e,{variant:`h4`,gutterBottom:!0,children:`Documents`}),(0,a.jsx)(e,{variant:`body2`,color:`text.secondary`,children:`Documents management coming soon.`})]})});export{o as default};
+//# sourceMappingURL=DocumentsList-DBy9-8Rb.js.map

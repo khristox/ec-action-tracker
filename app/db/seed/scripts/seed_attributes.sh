@@ -138,7 +138,6 @@ ATTRIBUTES=(
     "MEETING_STATUS_PENDING:Meeting Status - Pending:PENDING:1:#FFC107:schedule:Meeting scheduled but not started"
     "MEETING_STATUS_STARTED:Meeting Status - Started:STARTED:2:#2196F3:play_circle:Meeting in progress"
     "MEETING_STATUS_ENDED:Meeting Status - Ended:ENDED:3:#9E9E9E:stop_circle:Meeting ended"
-    "MEETING_STATUS_AWAITING_ACTION:Meeting Status - Awaiting Action:AWAITING:4:#FF9800:pending_actions:Meeting completed, awaiting action items"
     "MEETING_STATUS_CLOSED:Meeting Status - Closed:CLOSED:5:#4CAF50:check_circle:Meeting fully completed and closed"
     "MEETING_STATUS_CANCELLED:Meeting Status - Cancelled:CANCELLED:6:#F44336:cancel:Meeting cancelled"
 

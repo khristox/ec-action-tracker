@@ -22,10 +22,7 @@ const AssignUserDialog = ({ open, action, onClose, onAssign, meetingId }) => {
 
   // Compute effective meeting ID (fallback to action's meeting_id if prop is null)
   const effectiveMeetingId = meetingId || action?.minutes?.meeting_id || action?.meeting_id;
-  
-  console.log('AssignUserDialog - meetingId prop:', meetingId);
-  console.log('AssignUserDialog - effectiveMeetingId:', effectiveMeetingId);
-  console.log('AssignUserDialog - action:', action?.id);
+
 
   const [formData, setFormData] = useState({
     description: '',
@@ -123,14 +120,12 @@ const AssignUserDialog = ({ open, action, onClose, onAssign, meetingId }) => {
         remarks: formData.remarks
       };
 
-      console.log('Updating action with payload:', payload);
 
       const result = await dispatch(updateAction({ 
         id: action.id, 
         actionData: payload 
       })).unwrap();
       
-      console.log('Update successful:', result);
       
       if (onAssign) onAssign();
       onClose();

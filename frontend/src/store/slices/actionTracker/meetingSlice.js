@@ -1,7 +1,6 @@
 // src/store/slices/actionTracker/meetingSlice.js
-import { createSlice, createAsyncThunk, createSelector, createAction } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
 import api from '../../../services/api';
-
 
 // ==================== Types & Constants ====================
 
@@ -28,22 +27,52 @@ const CACHE_CONFIG = {
   ENABLED: true,
 };
 
-const STATUS_COLOR_MAP = {
-  PENDING: '#F59E0B',
-  STARTED: '#3B82F6',
-  ENDED: '#10B981',
-  AWAITING: '#8B5CF6',
-  CLOSED: '#6B7280',
-  CANCELLED: '#EF4444',
+// Enhanced status colors for meeting statuses
+const MEETING_STATUS_COLOR_MAP = {
+  pending: '#F59E0B',
   scheduled: '#3B82F6',
-  ongoing: '#F59E0B',
+  started: '#10B981',
+  ongoing: '#3B82F6',
   in_progress: '#3B82F6',
+  ended: '#6B7280',
   completed: '#10B981',
+  awaiting: '#8B5CF6',
+  closed: '#6B7280',
   cancelled: '#EF4444',
-  postponed: '#8B5CF6',
+};
+
+// Enhanced status colors for action statuses
+const ACTION_STATUS_COLOR_MAP = {
+  pending: '#F59E0B',
+  started: '#3B82F6',
+  in_progress: '#3B82F6',
+  awaiting: '#8B5CF6',
+  awaiting_approval: '#8B5CF6',
+  in_review: '#A78BFA',
+  on_hold: '#6B7280',
+  blocked: '#EF4444',
+  completed: '#10B981',
+  closed: '#059669',
+  cancelled: '#DC2626',
   overdue: '#EF4444',
-  blocked: '#6B7280',
-  not_started: '#9CA3AF',
+  ended: '#6B7280',
+};
+
+// Action status icons
+const ACTION_STATUS_ICONS = {
+  pending: 'HourglassEmpty',
+  started: 'PlayCircle',
+  in_progress: 'Pending',
+  awaiting: 'WatchLater',
+  awaiting_approval: 'Pending',
+  in_review: 'CheckCircleOutline',
+  on_hold: 'PauseCircle',
+  blocked: 'CancelOutlined',
+  completed: 'CheckCircle',
+  closed: 'TaskAlt',
+  cancelled: 'HighlightOff',
+  overdue: 'Error',
+  ended: 'Cancel',
 };
 
 const PRIORITY_COLORS = {
@@ -59,7 +88,8 @@ const INITIAL_STATE = {
   currentMinutes: { items: [], total: 0 },
   currentParticipants: { items: [], total: 0 },
   currentActions: { items: [], total: 0 },
-  statusOptions: [],
+  meetingStatusOptions: [],
+  actionStatusOptions: [],
   priorityOptions: [],
   filters: { ...DEFAULT_FILTERS },
   ui: {
@@ -76,7 +106,6 @@ const INITIAL_STATE = {
     attributes: null,
     timestamp: null,
   },
-  statusHistory: [],
 };
 
 // ==================== Helper Functions ====================
@@ -100,50 +129,54 @@ const updateMeetingInList = (items, updatedMeeting) => {
   return newItems;
 };
 
-const addMeetingToList = (items, newMeeting, maxItems = CACHE_CONFIG.MAX_ITEMS) => {
-  return [newMeeting, ...items].slice(0, maxItems);
-};
-
 const removeMeetingFromList = (items, meetingId) => {
   return items.filter(m => m.id !== meetingId);
 };
 
-const validateMeetingData = (meetingData) => {
-  const errors = [];
-  if (!meetingData.title?.trim()) errors.push('Title is required');
-  if (!meetingData.meeting_date) errors.push('Meeting date is required');
-  if (meetingData.meeting_date && new Date(meetingData.meeting_date) < new Date()) {
-    errors.push('Meeting date cannot be in the past');
-  }
-  return errors;
+// Process meeting status options from ACTION_TRACKER attribute group
+const processMeetingStatusOptions = (attributes) => {
+  const statusAttributes = attributes.filter(attr => 
+    attr.code && attr.code.includes('MEETING_STATUS_') && attr.code !== 'MEETING_STATUS'
+  );
+  
+  return statusAttributes.map(attr => ({
+    id: attr.id,
+    value: attr.short_name?.toLowerCase() || attr.code?.replace('MEETING_STATUS_', '').toLowerCase(),
+    label: attr.short_name?.charAt(0).toUpperCase() + attr.short_name?.slice(1).toLowerCase() || 
+           attr.name?.replace('Meeting Status - ', '') || 
+           attr.short_name ||
+           attr.name,
+    code: attr.code,
+    short_name: attr.short_name?.toLowerCase(),
+    shortName: attr.short_name?.toLowerCase(),
+    sortOrder: attr.sort_order,
+    color: MEETING_STATUS_COLOR_MAP[attr.short_name?.toLowerCase()] || '#6B7280',
+  })).sort((a, b) => a.sortOrder - b.sortOrder);
 };
 
-const processStatusOptions = (attributes) => {
-  const meetingStatusAttr = attributes.find(attr => attr.code === 'MEETING_STATUS');
-  if (meetingStatusAttr?.options) {
-    return meetingStatusAttr.options.map(opt => ({
-      id: opt.value,
-      value: opt.value,
-      label: opt.label,
-      code: opt.code,
-      shortName: opt.short_name,
-      sortOrder: opt.sort_order,
-      color: STATUS_COLOR_MAP[opt.value] || STATUS_COLOR_MAP[opt.code] || '#6B7280',
-    })).sort((a, b) => a.sortOrder - b.sortOrder);
-  }
+// Process action status options from ACTION_TRACKER attribute group
+const processActionStatusOptions = (attributes) => {
+  const statusAttributes = attributes.filter(attr => 
+    attr.code && attr.code.includes('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
+  );
   
-  return attributes
-    .filter(attr => attr.code?.startsWith('MEETING_STATUS_'))
-    .map(attr => ({
+  return statusAttributes.map(attr => {
+    const shortName = attr.short_name?.toLowerCase() || attr.code?.replace('ACTION_STATUS_', '').toLowerCase();
+    return {
       id: attr.id,
-      value: attr.short_name || attr.code,
-      label: attr.name?.replace('Meeting Status - ', '') || attr.name,
+      value: shortName,
+      label: attr.short_name?.charAt(0).toUpperCase() + attr.short_name?.slice(1).toLowerCase() || 
+             attr.name?.replace('Action Status - ', '') || 
+             attr.short_name ||
+             attr.name,
       code: attr.code,
-      shortName: attr.short_name,
+      short_name: shortName,
+      shortName: shortName,
       sortOrder: attr.sort_order,
-      color: STATUS_COLOR_MAP[attr.short_name] || STATUS_COLOR_MAP[attr.code] || '#6B7280',
-    }))
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+      color: ACTION_STATUS_COLOR_MAP[shortName] || '#6B7280',
+      icon: ACTION_STATUS_ICONS[shortName] || 'Schedule',
+    };
+  }).sort((a, b) => a.sortOrder - b.sortOrder);
 };
 
 const processPriorityOptions = (attributes) => {
@@ -159,8 +192,51 @@ const processPriorityOptions = (attributes) => {
   })).sort((a, b) => a.sortOrder - b.sortOrder);
 };
 
+// Normalize meeting status from API response
+const normalizeMeetingStatus = (meeting) => {
+  if (!meeting) return meeting;
+  
+  if (meeting.status) {
+    let normalizedStatus = { ...meeting.status };
+    
+    if (normalizedStatus.short_name) {
+      normalizedStatus.short_name = normalizedStatus.short_name.toLowerCase();
+    }
+    
+    if (normalizedStatus.shortName && !normalizedStatus.short_name) {
+      normalizedStatus.short_name = normalizedStatus.shortName.toLowerCase();
+      delete normalizedStatus.shortName;
+    }
+    
+    if (normalizedStatus.code && !normalizedStatus.short_name) {
+      if (normalizedStatus.code.includes('_')) {
+        const parts = normalizedStatus.code.split('_');
+        normalizedStatus.short_name = parts[parts.length - 1].toLowerCase();
+      }
+    }
+    
+    if (typeof meeting.status === 'string') {
+      let shortName = meeting.status;
+      if (shortName.includes('_')) {
+        const parts = shortName.split('_');
+        shortName = parts[parts.length - 1];
+      }
+      normalizedStatus = {
+        short_name: shortName.toLowerCase(),
+        name: meeting.status,
+        code: meeting.status
+      };
+    }
+    
+    return { ...meeting, status: normalizedStatus };
+  }
+  
+  return meeting;
+};
+
 // ==================== Async Thunks ====================
 
+// Fetch attributes from ACTION_TRACKER group (includes meeting statuses and action statuses)
 export const fetchActionTrackerAttributes = createAsyncThunk(
   'meetings/fetchActionTrackerAttributes',
   async (_, { rejectWithValue, getState }) => {
@@ -168,17 +244,28 @@ export const fetchActionTrackerAttributes = createAsyncThunk(
       const { meetings } = getState();
       const now = Date.now();
       
+      // Check cache
       if (CACHE_CONFIG.ENABLED && meetings.cache.timestamp && 
           (now - meetings.cache.timestamp) < CACHE_CONFIG.TTL) {
         return { fromCache: true };
       }
       
-      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
+      // Fetch from ACTION_TRACKER attribute group
+      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes', {
+        params: {
+          active_only: true,
+          sort_by: 'sort_order',
+          sort_order: 'asc',
+          limit: 100
+        }
+      });
+      
       const allAttributes = response.data.items || response.data.data || response.data || [];
       
       return {
         fromCache: false,
-        statusOptions: processStatusOptions(allAttributes),
+        meetingStatusOptions: processMeetingStatusOptions(allAttributes),
+        actionStatusOptions: processActionStatusOptions(allAttributes),
         priorityOptions: processPriorityOptions(allAttributes),
         timestamp: now,
       };
@@ -188,14 +275,80 @@ export const fetchActionTrackerAttributes = createAsyncThunk(
   }
 );
 
+// Fetch meeting status options specifically
 export const fetchMeetingStatusOptions = createAsyncThunk(
   'meetings/fetchMeetingStatusOptions',
-  async (_, { dispatch, rejectWithValue }) => {
+  async (_, { rejectWithValue }) => {
     try {
-      const result = await dispatch(fetchActionTrackerAttributes()).unwrap();
-      return result.statusOptions || [];
+      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes', {
+        params: {
+          active_only: true,
+          search: 'MEETING_STATUS',
+          sort_by: 'sort_order',
+          sort_order: 'asc',
+          limit: 20
+        }
+      });
+      
+      const attributes = response.data.items || [];
+      
+      const statusOptions = attributes
+        .filter(attr => attr.code && attr.code.includes('MEETING_STATUS_') && attr.code !== 'MEETING_STATUS')
+        .map(attr => ({
+          id: attr.id,
+          value: attr.short_name?.toLowerCase(),
+          label: attr.short_name || attr.name?.replace('Meeting Status - ', ''),
+          code: attr.code,
+          short_name: attr.short_name?.toLowerCase(),
+          sort_order: attr.sort_order,
+          color: MEETING_STATUS_COLOR_MAP[attr.short_name?.toLowerCase()] || '#6B7280',
+        }))
+        .sort((a, b) => a.sort_order - b.sort_order);
+      
+      return statusOptions;
     } catch (error) {
-      return rejectWithValue(error);
+      return rejectWithValue(handleApiError(error));
+    }
+  }
+);
+
+// Fetch action status options specifically
+export const fetchActionStatusOptions = createAsyncThunk(
+  'meetings/fetchActionStatusOptions',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes', {
+        params: {
+          active_only: true,
+          search: 'ACTION_STATUS',
+          sort_by: 'sort_order',
+          sort_order: 'asc',
+          limit: 50
+        }
+      });
+      
+      const attributes = response.data.items || [];
+      
+      const statusOptions = attributes
+        .filter(attr => attr.code && attr.code.includes('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS')
+        .map(attr => {
+          const shortName = attr.short_name?.toLowerCase() || attr.code?.replace('ACTION_STATUS_', '').toLowerCase();
+          return {
+            id: attr.id,
+            value: shortName,
+            label: attr.short_name || attr.name?.replace('Action Status - ', ''),
+            code: attr.code,
+            short_name: shortName,
+            sort_order: attr.sort_order,
+            color: ACTION_STATUS_COLOR_MAP[shortName] || '#6B7280',
+            icon: ACTION_STATUS_ICONS[shortName] || 'Schedule',
+          };
+        })
+        .sort((a, b) => a.sort_order - b.sort_order);
+      
+      return statusOptions;
+    } catch (error) {
+      return rejectWithValue(handleApiError(error));
     }
   }
 );
@@ -204,13 +357,10 @@ export const createMeeting = createAsyncThunk(
   'meetings/createMeeting',
   async (meetingData, { rejectWithValue }) => {
     try {
-      console.log('Creating meeting with data:', meetingData);
       const response = await api.post('/action-tracker/meetings/', meetingData);
-      console.log('Create meeting response:', response.data);
       return response.data;
     } catch (error) {
-      console.error('Create meeting error:', error.response?.data);
-      return rejectWithValue(error.response?.data?.detail || error.message);
+      return rejectWithValue(handleApiError(error));
     }
   }
 );
@@ -235,8 +385,10 @@ export const fetchMeetings = createAsyncThunk(
       
       const response = await api.get('/action-tracker/meetings/', { params: mergedParams });
       
+      const items = (response.data.items || response.data || []).map(normalizeMeetingStatus);
+      
       return {
-        items: response.data.items || response.data || [],
+        items,
         total: response.data.total || 0,
         pages: response.data.pages || 1,
         page: response.data.page || mergedParams.page,
@@ -250,11 +402,28 @@ export const fetchMeetings = createAsyncThunk(
 
 export const fetchMeetingById = createAsyncThunk(
   'meetings/fetchMeetingById',
-  async (id, { rejectWithValue }) => {
+  async (id, { rejectWithValue, getState }) => {
     try {
       if (!id) throw new Error('Meeting ID is required');
       const response = await api.get(`/action-tracker/meetings/${id}`);
-      return response.data;
+      const meeting = normalizeMeetingStatus(response.data);
+      
+      const state = getState();
+      const meetingStatusOptions = state.meetings.meetingStatusOptions;
+      
+      if (meeting.status && meetingStatusOptions && meetingStatusOptions.length > 0 && !meeting.status.short_name) {
+        const matchedStatus = meetingStatusOptions.find(opt => 
+          opt.code === meeting.status.code || 
+          opt.name === meeting.status.name ||
+          opt.value === meeting.status.code?.replace('MEETING_STATUS_', '').toLowerCase()
+        );
+        
+        if (matchedStatus) {
+          meeting.status.short_name = matchedStatus.value || matchedStatus.short_name;
+        }
+      }
+      
+      return meeting;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
     }
@@ -266,7 +435,7 @@ export const updateMeeting = createAsyncThunk(
   async ({ id, data }, { rejectWithValue }) => {
     try {
       const response = await api.put(`/action-tracker/meetings/${id}`, data);
-      return response.data;
+      return normalizeMeetingStatus(response.data);
     } catch (error) {
       return rejectWithValue(handleApiError(error));
     }
@@ -287,15 +456,36 @@ export const deleteMeeting = createAsyncThunk(
 
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateMeetingStatus',
-  async ({ id, status, comment }, { rejectWithValue }) => {
+  async ({ id, status, comment }, { rejectWithValue, getState }) => {
     try {
+      const state = getState();
+      const meetingStatusOptions = state.meetings.meetingStatusOptions;
+      
+      let statusValue = status;
+      
+      if (meetingStatusOptions && meetingStatusOptions.length > 0) {
+        const matchedStatus = meetingStatusOptions.find(opt => 
+          opt.value === status || 
+          opt.shortName === status || 
+          opt.short_name === status
+        );
+        if (matchedStatus) {
+          statusValue = matchedStatus.value || matchedStatus.short_name;
+        }
+      }
+      
+      console.log('Updating meeting status:', { id, status: statusValue, comment });
+      
       const response = await api.patch(
         `/action-tracker/meetings/${id}/status`,
         null,
-        { params: { status, comment: comment || '' } }
+        { params: { status: statusValue.toLowerCase(), comment: comment || '' } }
       );
-      return response.data;
+      
+      const normalizedData = normalizeMeetingStatus(response.data);
+      return normalizedData;
     } catch (error) {
+      console.error('Update meeting status error:', error);
       return rejectWithValue(handleApiError(error));
     }
   }
@@ -558,20 +748,22 @@ const meetingSlice = createSlice({
       }
     },
     setCurrentMeeting: (state, action) => {
-      state.currentMeeting = action.payload;
+      state.currentMeeting = normalizeMeetingStatus(action.payload);
     },
   },
   extraReducers: (builder) => {
     builder
+      // Fetch Action Tracker Attributes
       .addCase(fetchActionTrackerAttributes.pending, (state) => {
-        if (!state.statusOptions.length) {
+        if (!state.meetingStatusOptions.length && !state.actionStatusOptions.length) {
           state.ui.isLoading = true;
         }
       })
       .addCase(fetchActionTrackerAttributes.fulfilled, (state, action) => {
         state.ui.isLoading = false;
         if (!action.payload.fromCache) {
-          state.statusOptions = action.payload.statusOptions;
+          state.meetingStatusOptions = action.payload.meetingStatusOptions;
+          state.actionStatusOptions = action.payload.actionStatusOptions;
           state.priorityOptions = action.payload.priorityOptions;
           state.cache.timestamp = action.payload.timestamp;
         }
@@ -580,11 +772,28 @@ const meetingSlice = createSlice({
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
+      
+      // Fetch Meeting Status Options
       .addCase(fetchMeetingStatusOptions.fulfilled, (state, action) => {
         if (action.payload?.length) {
-          state.statusOptions = action.payload;
+          state.meetingStatusOptions = action.payload;
         }
       })
+      .addCase(fetchMeetingStatusOptions.rejected, (state, action) => {
+        console.error('Failed to fetch meeting status options:', action.payload);
+      })
+      
+      // Fetch Action Status Options
+      .addCase(fetchActionStatusOptions.fulfilled, (state, action) => {
+        if (action.payload?.length) {
+          state.actionStatusOptions = action.payload;
+        }
+      })
+      .addCase(fetchActionStatusOptions.rejected, (state, action) => {
+        console.error('Failed to fetch action status options:', action.payload);
+      })
+      
+      // Create Meeting
       .addCase(createMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
         state.ui.success = false;
@@ -593,38 +802,31 @@ const meetingSlice = createSlice({
       .addCase(createMeeting.fulfilled, (state, action) => {
         state.ui.isSubmitting = false;
         state.ui.success = true;
-        state.currentMeeting = action.payload;
-        state.ui.error = null;
-        if (action.payload) {
-          state.meetings.items = [action.payload, ...state.meetings.items];
-          state.meetings.total += 1;
-        }
-        console.log('Meeting created successfully in state:', action.payload);
+        state.currentMeeting = normalizeMeetingStatus(action.payload);
+        state.meetings.items = [normalizeMeetingStatus(action.payload), ...state.meetings.items];
+        state.meetings.total += 1;
       })
       .addCase(createMeeting.rejected, (state, action) => {
         state.ui.isSubmitting = false;
         state.ui.success = false;
         state.ui.error = action.payload;
-        console.error('Meeting creation rejected:', action.payload);
       })
+      
+      // Fetch Meetings
       .addCase(fetchMeetings.pending, (state) => {
         state.ui.isLoading = true;
         state.ui.error = null;
       })
       .addCase(fetchMeetings.fulfilled, (state, action) => {
         state.ui.isLoading = false;
-        state.meetings = {
-          items: action.payload.items,
-          total: action.payload.total,
-          pages: action.payload.pages,
-          page: action.payload.page,
-          limit: action.payload.limit,
-        };
+        state.meetings = action.payload;
       })
       .addCase(fetchMeetings.rejected, (state, action) => {
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
+      
+      // Fetch Meeting By ID
       .addCase(fetchMeetingById.pending, (state) => {
         state.ui.isLoading = true;
         state.ui.error = null;
@@ -637,6 +839,8 @@ const meetingSlice = createSlice({
         state.ui.isLoading = false;
         state.ui.error = action.payload;
       })
+      
+      // Update Meeting
       .addCase(updateMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
         state.ui.error = null;
@@ -651,6 +855,8 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
+      
+      // Delete Meeting
       .addCase(deleteMeeting.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -667,6 +873,8 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
+      
+      // Update Meeting Status
       .addCase(updateMeetingStatus.pending, (state) => {
         state.ui.isSubmitting = true;
       })
@@ -680,19 +888,8 @@ const meetingSlice = createSlice({
         state.ui.isSubmitting = false;
         state.ui.error = action.payload;
       })
-      .addCase(addMeetingMinutes.pending, (state) => {
-        state.ui.isSubmitting = true;
-      })
-      .addCase(addMeetingMinutes.fulfilled, (state, action) => {
-        state.ui.isSubmitting = false;
-        state.currentMinutes.items = [action.payload, ...state.currentMinutes.items];
-        state.currentMinutes.total += 1;
-        state.ui.success = true;
-      })
-      .addCase(addMeetingMinutes.rejected, (state, action) => {
-        state.ui.isSubmitting = false;
-        state.ui.error = action.payload;
-      })
+      
+      // Meeting Minutes
       .addCase(fetchMeetingMinutes.pending, (state) => {
         state.ui.isLoading = true;
         state.ui.minutesError = null;
@@ -704,79 +901,40 @@ const meetingSlice = createSlice({
       .addCase(fetchMeetingMinutes.rejected, (state, action) => {
         state.ui.isLoading = false;
         state.ui.minutesError = action.payload;
-        state.ui.error = action.payload;
-      })
-      .addCase(createMeetingMinutes.pending, (state) => {
-        state.ui.isSubmitting = true;
-        state.ui.minutesError = null;
       })
       .addCase(createMeetingMinutes.fulfilled, (state, action) => {
-        state.ui.isSubmitting = false;
         state.currentMinutes.items = [action.payload, ...state.currentMinutes.items];
         state.currentMinutes.total += 1;
         state.ui.success = true;
       })
-      .addCase(createMeetingMinutes.rejected, (state, action) => {
-        state.ui.isSubmitting = false;
-        state.ui.minutesError = action.payload;
-        state.ui.error = action.payload;
-      })
-      .addCase(deleteMeetingMinutes.pending, (state) => {
-        state.ui.isSubmitting = true;
-      })
       .addCase(deleteMeetingMinutes.fulfilled, (state, action) => {
-        state.ui.isSubmitting = false;
         state.currentMinutes.items = state.currentMinutes.items.filter(m => m.id !== action.payload);
         state.currentMinutes.total = Math.max(0, state.currentMinutes.total - 1);
-        state.ui.deleteSuccess = true;
-      })
-      .addCase(deleteMeetingMinutes.rejected, (state, action) => {
-        state.ui.isSubmitting = false;
-        state.ui.error = action.payload;
-      })
-      .addCase(updateMeetingMinutes.pending, (state) => {
-        state.ui.isSubmitting = true;
       })
       .addCase(updateMeetingMinutes.fulfilled, (state, action) => {
-        state.ui.isSubmitting = false;
         const index = state.currentMinutes.items.findIndex(m => m.id === action.payload.id);
         if (index !== -1) {
           state.currentMinutes.items[index] = action.payload;
         }
-        state.ui.updateSuccess = true;
       })
-      .addCase(updateMeetingMinutes.rejected, (state, action) => {
-        state.ui.isSubmitting = false;
-        state.ui.error = action.payload;
-      })
-      .addCase(fetchMeetingParticipants.pending, (state) => {
-        state.ui.isLoading = true;
-      })
+      
+      // Meeting Participants
       .addCase(fetchMeetingParticipants.fulfilled, (state, action) => {
-        state.ui.isLoading = false;
         state.currentParticipants = action.payload;
       })
-      .addCase(fetchMeetingParticipants.rejected, (state, action) => {
-        state.ui.isLoading = false;
-        state.ui.error = action.payload;
-      })
-      .addCase(fetchMeetingActions.pending, (state) => {
-        state.ui.isLoading = true;
-      })
+      
+      // Meeting Actions
       .addCase(fetchMeetingActions.fulfilled, (state, action) => {
-        state.ui.isLoading = false;
         state.currentActions = action.payload;
-      })
-      .addCase(fetchMeetingActions.rejected, (state, action) => {
-        state.ui.isLoading = false;
-        state.ui.error = action.payload;
       });
   },
 });
 
-// ==================== Memoized Selectors ====================
+// ==================== Selectors ====================
 
 // Base Selectors
+export const selectMinutesLoading = (state) => state.meetings.ui.isLoading;
+
 export const selectMeetingsState = (state) => state.meetings;
 export const selectAllMeetings = (state) => state.meetings.meetings.items;
 export const selectCurrentMeeting = (state) => state.meetings.currentMeeting;
@@ -787,9 +945,24 @@ export const selectMeetingError = (state) => state.meetings.ui.error;
 export const selectMeetingSuccess = (state) => state.meetings.ui.success;
 export const selectUpdateSuccess = (state) => state.meetings.ui.updateSuccess;
 export const selectDeleteSuccess = (state) => state.meetings.ui.deleteSuccess;
-export const selectMeetingStatusOptions = (state) => state.meetings.statusOptions;
-export const selectStatusOptions = (state) => state.meetings.statusOptions;
+
+// Meeting Status Selectors
+export const selectMeetingStatusOptions = (state) => state.meetings.meetingStatusOptions;
+export const selectMeetingStatusOptionsLoading = (state) => state.meetings.ui.isLoading && !state.meetings.meetingStatusOptions.length;
+
+// Action Status Selectors (for ActionDetail and MeetingActionsList)
+export const selectActionStatusOptions = (state) => state.meetings.actionStatusOptions;
+export const selectActionTrackerLoading = (state) => state.meetings.ui.isLoading && !state.meetings.actionStatusOptions.length;
+export const selectActionTrackerError = (state) => state.meetings.ui.error;
+
+// Alias for backward compatibility
+export const selectStatusOptions = selectActionStatusOptions;
+
+// Priority Selectors
+export const selectPriorityOptions = (state) => state.meetings.priorityOptions;
 export const selectMeetingPriorityOptions = (state) => state.meetings.priorityOptions;
+
+// Filters Selectors
 export const selectMeetingsFilters = (state) => state.meetings.filters;
 export const selectMeetingPagination = (state) => ({
   total: state.meetings.meetings.total,
@@ -797,23 +970,36 @@ export const selectMeetingPagination = (state) => ({
   page: state.meetings.meetings.page,
   limit: state.meetings.meetings.limit,
 });
-export const selectMeetingsTotal = (state) => state.meetings.meetings.total;
 
 // Minutes Selectors
 export const selectMeetingMinutes = (state) => state.meetings.currentMinutes.items;
 export const selectMeetingMinutesTotal = (state) => state.meetings.currentMinutes.total;
-export const selectMinutesLoading = (state) => state.meetings.ui.isLoading;
 export const selectMinutesError = (state) => state.meetings.ui.minutesError;
 
 // Participants Selectors
 export const selectMeetingParticipants = (state) => state.meetings.currentParticipants.items;
-export const selectMeetingParticipantsTotal = (state) => state.meetings.currentParticipants.total;
 
 // Actions Selectors
 export const selectMeetingActions = (state) => state.meetings.currentActions.items;
-export const selectMeetingActionsTotal = (state) => state.meetings.currentActions.total;
 
-// ========== MOVED selectFilteredMeetings UP before it's referenced ==========
+// Helper function to get status config by value
+export const getActionStatusConfig = (state, statusValue) => {
+  const status = state.meetings.actionStatusOptions.find(s => s.value === statusValue);
+  if (status) {
+    return {
+      label: status.label,
+      color: status.color,
+      icon: status.icon,
+    };
+  }
+  return {
+    label: 'Pending',
+    color: '#F59E0B',
+    icon: 'Schedule',
+  };
+};
+
+// Filtered Meetings Selector
 export const selectFilteredMeetings = createSelector(
   [selectAllMeetings, selectMeetingsFilters],
   (items, filters) => {
@@ -828,24 +1014,19 @@ export const selectFilteredMeetings = createSelector(
         (meeting) =>
           meeting.title?.toLowerCase().includes(searchLower) ||
           meeting.description?.toLowerCase().includes(searchLower) ||
-          meeting.location_text?.toLowerCase().includes(searchLower) ||
-          meeting.agenda?.toLowerCase().includes(searchLower)
+          meeting.location_text?.toLowerCase().includes(searchLower)
       );
     }
     
     if (status) {
       filtered = filtered.filter((meeting) => 
         meeting.status?.short_name === status || 
-        meeting.status === status ||
-        meeting.status?.code === status
+        meeting.status === status
       );
     }
     
     if (priority) {
-      filtered = filtered.filter((meeting) => 
-        meeting.priority === priority || 
-        meeting.priority_level === priority
-      );
+      filtered = filtered.filter((meeting) => meeting.priority === priority);
     }
     
     if (upcoming) {
@@ -869,12 +1050,7 @@ export const selectFilteredMeetings = createSelector(
   }
 );
 
-// Now define the alias AFTER selectFilteredMeetings is defined
-export const selectFilteredMeetingsList = selectFilteredMeetings;
-
-export const selectMeetingLoading = selectMeetingsLoading;
-export const selectMeetingSubmitting = selectMeetingsSubmitting;
-
+// Upcoming Meetings Selector
 export const selectUpcomingMeetings = createSelector(
   [selectAllMeetings],
   (items) => {
@@ -886,44 +1062,7 @@ export const selectUpcomingMeetings = createSelector(
   }
 );
 
-export const selectRecentMeetings = createSelector(
-  [selectAllMeetings, (_, days = 7) => days],
-  (items, days) => {
-    if (!items?.length) return [];
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    return items
-      .filter((meeting) => new Date(meeting.meeting_date) >= cutoffDate)
-      .sort((a, b) => new Date(b.meeting_date) - new Date(a.meeting_date));
-  }
-);
-
-export const selectMeetingsByStatus = createSelector(
-  [selectAllMeetings, (_, status) => status],
-  (items, status) => {
-    if (!items?.length) return [];
-    return items.filter(meeting => 
-      meeting.status === status || 
-      meeting.status?.short_name === status ||
-      meeting.status?.code === status
-    );
-  }
-);
-
-
-export const selectMeetingsPage = (state) => state.meetings.meetings.page;
-export const selectMeetingsPages = (state) => state.meetings.meetings.pages;
-export const selectMeetingsLimit = (state) => state.meetings.meetings.limit;
-export const selectCurrentPage = (state) => state.meetings.meetings.page;
-export const selectTotalPages = (state) => state.meetings.meetings.pages;
-export const selectTotalMeetings = (state) => state.meetings.meetings.total;
-
-export const selectMeetingById = createSelector(
-  [selectAllMeetings, (_, id) => id],
-  (items, id) => items.find(meeting => meeting.id === id)
-);
-
-// In meetingSlice.js - Update selectMeetingsStatistics
+// Meetings Statistics Selector
 export const selectMeetingsStatistics = createSelector(
   [selectAllMeetings],
   (items) => {
@@ -934,11 +1073,8 @@ export const selectMeetingsStatistics = createSelector(
         ongoing: 0,
         completed: 0,
         cancelled: 0,
-        pending: 0,
         byStatus: {},
         byMonth: {},
-        avgParticipants: 0,
-        totalParticipants: 0,
         completionRate: 0,
       };
     }
@@ -949,110 +1085,30 @@ export const selectMeetingsStatistics = createSelector(
       ongoing: 0,
       completed: 0,
       cancelled: 0,
-      pending: 0,
       byStatus: {},
       byMonth: {},
-      totalParticipants: 0,
-      avgParticipants: 0,
       completionRate: 0,
     };
     
-    let participantsSum = 0;
-    
     items.forEach((meeting) => {
       const meetingDate = new Date(meeting.meeting_date);
-      let status = 'PENDING';
-      
-      // Extract status from meeting data
-      if (meeting.status) {
-        if (typeof meeting.status === 'string') {
-          status = meeting.status;
-        } else if (meeting.status.short_name) {
-          status = meeting.status.short_name;
-        } else if (meeting.status.code) {
-          status = meeting.status.code.replace('MEETING_STATUS_', '');
-        }
-      }
+      const status = meeting.status?.short_name?.toLowerCase() || 'pending';
       
       stats.byStatus[status] = (stats.byStatus[status] || 0) + 1;
       
-      // Categorize for quick stats
-      if (status === 'STARTED' || status === 'started') {
-        stats.ongoing++;
-      } else if (status === 'ENDED' || status === 'ended') {
-        stats.completed++;
-      } else if (status === 'CANCELLED' || status === 'cancelled') {
-        stats.cancelled++;
-      } else if (status === 'SCHEDULED' || status === 'scheduled') {
-        stats.scheduled++;
-      } else {
-        stats.pending++;
-      }
-      
-      const participantCount = meeting.participants_count || 0;
-      participantsSum += participantCount;
+      if (status === 'started') stats.ongoing++;
+      else if (status === 'ended') stats.completed++;
+      else if (status === 'cancelled') stats.cancelled++;
+      else if (status === 'scheduled' || status === 'pending') stats.scheduled++;
       
       const monthKey = `${meetingDate.getFullYear()}-${String(meetingDate.getMonth() + 1).padStart(2, '0')}`;
       stats.byMonth[monthKey] = (stats.byMonth[monthKey] || 0) + 1;
     });
     
-    stats.totalParticipants = participantsSum;
-    stats.avgParticipants = stats.total > 0 ? Math.round(participantsSum / stats.total) : 0;
     stats.completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
     
     return stats;
   }
-);
-
-export const selectMeetingsHasMore = createSelector(
-  [selectMeetingPagination],
-  ({ page, pages }) => page < pages
-);
-
-export const selectIsFilterApplied = createSelector(
-  [selectMeetingsFilters],
-  (filters) => {
-    return !!(
-      filters.search ||
-      filters.status ||
-      filters.priority ||
-      filters.upcoming ||
-      filters.dateFrom ||
-      filters.dateTo
-    );
-  }
-);
-
-export const selectStatusOption = createSelector(
-  [selectMeetingStatusOptions, (_, statusCode) => statusCode],
-  (options, statusCode) => {
-    if (!options?.length) return null;
-    return options.find(opt => 
-      opt.value === statusCode || 
-      opt.code === statusCode || 
-      opt.shortName === statusCode
-    );
-  }
-);
-
-export const selectStatusColor = createSelector(
-  [selectStatusOption],
-  (option) => option?.color || '#6B7280'
-);
-
-export const selectMinutesForMeeting = createSelector(
-  [selectMeetingMinutes],
-  (minutes) => minutes || []
-);
-
-export const selectParticipantsForMeeting = createSelector(
-  [selectMeetingParticipants],
-  (participants) => participants || []
-);
-
-export const selectActionsForMeeting = createSelector(
-  [selectMeetingActions],
-  (actions) => actions || []
 );
 
 // ==================== Exports ====================

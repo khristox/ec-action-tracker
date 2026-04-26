@@ -186,14 +186,93 @@ def verify_refresh_token(refresh_token: str) -> Optional[Dict[str, Any]]:
     return decode_token(refresh_token, token_type="refresh")
 
 
-def generate_password_reset_token(email: str) -> str:
-    expire = datetime.utcnow() + timedelta(hours=24)
-    to_encode = {"sub": email, "exp": expire, "type": "reset"}
+def generate_password_reset_token(self, user_id: str, email: str) -> str:
+    """Generate JWT token for password reset"""
+    expire = datetime.utcnow() + timedelta(hours=1)  # 1 hour expiry for password reset
+    payload = {
+        "user_id": str(user_id),
+        "email": str(email),
+        "type": "password_reset",
+        "exp": expire,
+        "iat": datetime.utcnow(),
+        "sub": str(user_id)
+    }
+    token = jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
+    logger.info(f"🔐 Generated password reset token for {email}")
+    return token
+
+
+async def send_password_reset_email(
+    self,
+    to_email: str,
+    reset_link: str,
+    username: str
+) -> bool:
+    """
+    Send password reset email
+    
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    if not self.config.is_configured:
+        logger.error("Email service not configured")
+        return False
+    
     try:
-        return jwt.encode(to_encode, get_secret_key("access"), algorithm=ALGORITHM)
+        # HTML template for password reset
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
+                .content {{ padding: 20px; background-color: #f9f9f9; }}
+                .button {{ display: inline-block; padding: 12px 24px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }}
+                .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #666; }}
+                .warning {{ color: #ff9800; font-size: 14px; margin-top: 20px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h2>Password Reset Request</h2>
+                </div>
+                <div class="content">
+                    <p>Hello <strong>{username}</strong>,</p>
+                    <p>We received a request to reset your password. Click the button below to create a new password:</p>
+                    <div style="text-align: center;">
+                        <a href="{reset_link}" class="button">Reset Password</a>
+                    </div>
+                    <p>If the button doesn't work, copy and paste this link into your browser:</p>
+                    <p><a href="{reset_link}">{reset_link}</a></p>
+                    <p class="warning"><strong>⚠️ This link will expire in 1 hour for security reasons.</strong></p>
+                    <p>If you didn't request this password reset, please ignore this email or contact support.</p>
+                </div>
+                <div class="footer">
+                    <p>This is an automated message, please do not reply to this email.</p>
+                    <p>&copy; {datetime.now().year} Action Tracker. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        message = MessageSchema(
+            subject="Reset Your Password - Action Tracker",
+            recipients=[to_email],
+            body=html_content,
+            subtype=MessageType.html
+        )
+        
+        await self.fastmail.send_message(message)
+        logger.info(f"✅ Password reset email sent to {to_email}")
+        return True
+        
     except Exception as e:
-        logger.error(f"Failed to create reset token: {e}")
-        raise
+        logger.error(f"❌ Failed to send password reset email to {to_email}: {str(e)}")
+        return False
 
 
 def verify_password_reset_token(token: str) -> Optional[str]:

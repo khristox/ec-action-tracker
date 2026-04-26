@@ -6,7 +6,8 @@ import { useColorMode } from '../../context/ThemeProvider';
 import {
   AppBar, Toolbar, IconButton, Typography, Box, Avatar, Menu, MenuItem,
   Tooltip, Badge, useTheme, Divider, ListItemIcon, CircularProgress,
-  Popover, List, ListItem, ListItemText, ListItemAvatar, Chip, Button
+  Popover, List, ListItem, ListItemText, ListItemAvatar, Chip, Button,
+  Skeleton
 } from '@mui/material';
 import {
   Menu as MenuIcon, Notifications, Person, Logout,
@@ -14,7 +15,12 @@ import {
   Warning as WarningIcon, CheckCircle as CheckCircleIcon,
   Brightness4, Brightness7 
 } from '@mui/icons-material';
-import { logout, selectIsLoading } from '../../store/slices/authSlice';
+import { 
+  logout, 
+  selectIsLoading, 
+  fetchProfilePicture, 
+  selectProfilePicture 
+} from '../../store/slices/authSlice';
 import api from '../../services/api';
 
 const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
@@ -32,9 +38,22 @@ const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
   const [notifications, setNotifications] = useState([]);
   const [notificationCount, setNotificationCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [profileImageLoading, setProfileImageLoading] = useState(true);
   
   const { user } = useSelector((state) => state.auth);
+  const profilePicture = useSelector(selectProfilePicture);
   const isLoading = useSelector(selectIsLoading);
+
+  // Fetch profile picture when component mounts or user changes
+  useEffect(() => {
+    if (user?.id) {
+      dispatch(fetchProfilePicture()).finally(() => {
+        setProfileImageLoading(false);
+      });
+    } else {
+      setProfileImageLoading(false);
+    }
+  }, [dispatch, user?.id]);
 
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const showBackButton = pathSegments.length > 1 && location.pathname !== '/dashboard';
@@ -80,6 +99,26 @@ const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
   };
 
   const notificationsOpen = Boolean(notificationsAnchor);
+  
+  // Get the avatar URL - profilePicture already contains the full data URL
+  const avatarUrl = profilePicture || null;
+  
+  // Get user initials for fallback
+  const getUserInitials = () => {
+    if (user?.first_name && user?.last_name) {
+      return `${user.first_name[0]}${user.last_name[0]}`.toUpperCase();
+    }
+    if (user?.full_name) {
+      return user.full_name[0].toUpperCase();
+    }
+    if (user?.username) {
+      return user.username[0].toUpperCase();
+    }
+    if (user?.email) {
+      return user.email[0].toUpperCase();
+    }
+    return 'U';
+  };
 
   return (
     <AppBar
@@ -88,7 +127,6 @@ const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
       sx={{
         height: 48,
         zIndex: theme.zIndex.drawer + 1,
-        // Original blue color in light mode, dark background in dark mode
         bgcolor: isDarkMode ? theme.palette.background.paper : '#1976d2',
         color: isDarkMode ? theme.palette.text.primary : '#ffffff',
         borderBottom: isDarkMode ? `1px solid ${theme.palette.divider}` : 'none',
@@ -189,7 +227,11 @@ const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
             </Box>
             
             <List sx={{ p: 0, maxHeight: 300, overflow: 'auto' }}>
-              {notifications.length === 0 ? (
+              {loadingNotifications ? (
+                <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <CircularProgress size={30} />
+                </Box>
+              ) : notifications.length === 0 ? (
                 <Box sx={{ p: 4, textAlign: 'center' }}>
                   <CheckCircleIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
                   <Typography variant="body2">All caught up!</Typography>
@@ -208,7 +250,7 @@ const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
                       </Avatar>
                     </ListItemAvatar>
                     <ListItemText
-                      primary={<Typography variant="body2" fontWeight={600}>{n.title}</Typography>}
+                      primary={<Typography variant="body2" fontWeight={600} noWrap>{n.title}</Typography>}
                       secondary={<Chip size="small" label={n.is_overdue ? 'Overdue' : 'Pending'} color={n.is_overdue ? 'error' : 'warning'} sx={{ height: 16, fontSize: '0.6rem' }} />}
                     />
                   </ListItem>
@@ -232,17 +274,23 @@ const Navbar = ({ handleDrawerToggle, isMobile, sidebarWidth }) => {
               }
             }}
           >
-            <Avatar 
-              sx={{ 
-                width: 28, height: 28, 
-                bgcolor: isDarkMode ? 'primary.light' : '#ffffff', 
-                color: isDarkMode ? '#fff' : '#1976d2', 
-                fontSize: '0.75rem', 
-                fontWeight: 700 
-              }}
-            >
-              {user?.full_name?.[0] || user?.username?.[0] || 'U'}
-            </Avatar>
+            {profileImageLoading ? (
+              <Skeleton variant="circular" width={28} height={28} />
+            ) : (
+              <Avatar 
+                src={avatarUrl}
+                sx={{ 
+                  width: 28, 
+                  height: 28, 
+                  bgcolor: !avatarUrl ? (isDarkMode ? 'primary.light' : '#ffffff') : 'transparent',
+                  color: !avatarUrl ? (isDarkMode ? '#fff' : '#1976d2') : 'inherit',
+                  fontSize: '0.75rem', 
+                  fontWeight: 700 
+                }}
+              >
+                {!avatarUrl && getUserInitials()}
+              </Avatar>
+            )}
           </IconButton>
         </Box>
       </Toolbar>

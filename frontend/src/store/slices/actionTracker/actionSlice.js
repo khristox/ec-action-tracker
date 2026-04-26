@@ -156,9 +156,7 @@ export const fetchMyTasks = createAsyncThunk(
   'actions/fetchMyTasks',
   async (params = {}, { rejectWithValue }) => {
     try {
-      console.log('Fetching my tasks with params:', params);
       const response = await api.get('/action-tracker/actions/my-tasks', { params });
-      console.log('My tasks response:', response.data);
       
       // Return the data directly - the reducer will handle formatting
       return response.data;
@@ -499,7 +497,6 @@ const actionSlice = createSlice({
           currentPage: 1,
           limit: 10
         };
-        console.log('MyTasks loaded:', state.myTasks);
       })
       .addCase(fetchMyTasks.rejected, (state, action) => {
         state.loading = false;

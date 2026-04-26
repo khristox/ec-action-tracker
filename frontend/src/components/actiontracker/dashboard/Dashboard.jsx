@@ -7,7 +7,7 @@ import {
   CircularProgress, Button, List, ListItem, ListItemText, 
   Divider, LinearProgress, Alert, Stack, Chip, IconButton,
   Tooltip, useTheme, useMediaQuery, ToggleButton, ToggleButtonGroup,
-  alpha
+  alpha, Skeleton, Tab, Tabs, Badge
 } from '@mui/material';
 import {
   Event as EventIcon,
@@ -22,9 +22,12 @@ import {
   PieChart as PieChartIcon,
   Timeline as TimelineIcon,
   CheckCircle as CheckCircleIcon,
-  Warning as WarningIcon,
   Schedule as ScheduleIcon,
-  Group as GroupIcon
+  Error as ErrorIcon,
+  MeetingRoom as MeetingRoomIcon,
+  Person as PersonIcon,
+  Today as TodayIcon,
+  Upcoming as UpcomingIcon
 } from '@mui/icons-material';
 import {
   Chart as ChartJS,
@@ -37,10 +40,14 @@ import {
   ArcElement,
   PointElement,
   LineElement,
-  Filler
+  Filler,
+  BarController,
+  LineController,
+  DoughnutController,
+  PieController
 } from 'chart.js';
 import { Bar, Pie, Line, Doughnut } from 'react-chartjs-2';
-import { format, subDays, eachDayOfInterval, isValid, parseISO } from 'date-fns';
+import { format, subDays, eachDayOfInterval, isValid, parseISO, isToday, isFuture, differenceInDays } from 'date-fns';
 import api from '../../../services/api';
 
 // Register ChartJS components
@@ -54,7 +61,11 @@ ChartJS.register(
   ArcElement,
   PointElement,
   LineElement,
-  Filler
+  Filler,
+  BarController,
+  LineController,
+  DoughnutController,
+  PieController
 );
 
 // ==================== Helper Functions ====================
@@ -69,34 +80,48 @@ const safeFormatDate = (dateValue, formatStr = 'MMM dd, yyyy') => {
   }
 };
 
-const safeGetDayOfWeek = (dateValue) => {
-  if (!dateValue) return null;
-  try {
-    const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
-    if (!isValid(date)) return null;
-    return format(date, 'EEE');
-  } catch {
-    return null;
+const getMeetingStatusColor = (status) => {
+  switch (status?.toLowerCase()) {
+    case 'confirmed': return '#10b981';
+    case 'attended': return '#10b981';
+    case 'pending': return '#f59e0b';
+    case 'missed': return '#ef4444';
+    case 'excused': return '#8b5cf6';
+    default: return '#6b7280';
+  }
+};
+
+const getMeetingStatusLabel = (status) => {
+  switch (status?.toLowerCase()) {
+    case 'attended': return 'Attended';
+    case 'confirmed': return 'Confirmed';
+    case 'pending': return 'Pending';
+    case 'missed': return 'Missed';
+    case 'excused': return 'Excused';
+    default: return status || 'Unknown';
   }
 };
 
 // ==================== Stat Card Component ====================
-const StatCard = ({ title, value, icon, color, loading, trend, subtitle }) => {
+const StatCard = ({ title, value, icon, color, loading, trend, subtitle, onClick }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
   
   return (
-    <Card sx={{ 
-      borderRadius: 3, 
-      boxShadow: '0 2px 6px rgba(0,0,0,0.04)', 
-      height: '100%',
-      transition: 'transform 0.2s, box-shadow 0.2s',
-      '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
-      bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
-      border: isDarkMode ? `1px solid ${alpha(theme.palette.common.white, 0.1)}` : 'none',
-    }}>
+    <Card 
+      onClick={onClick}
+      sx={{ 
+        borderRadius: 3, 
+        boxShadow: '0 2px 6px rgba(0,0,0,0.04)', 
+        height: '100%',
+        transition: 'transform 0.2s, box-shadow 0.2s',
+        '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: onClick ? 'pointer' : 'default' },
+        bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+        border: isDarkMode ? `1px solid ${alpha(theme.palette.common.white, 0.1)}` : 'none',
+      }}
+    >
       <CardContent sx={{ p: 2 }}>
-        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1.5, alignItems: 'flex-start' }}>
           <Avatar sx={{ 
             bgcolor: isDarkMode ? alpha(color, 0.2) : `${color}12`, 
             color: color, 
@@ -106,18 +131,27 @@ const StatCard = ({ title, value, icon, color, loading, trend, subtitle }) => {
             {icon}
           </Avatar>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="caption" color="textSecondary" noWrap sx={{ 
-              fontWeight: 700, 
-              textTransform: 'uppercase', 
-              display: 'block', 
-              fontSize: '0.6rem', 
-              letterSpacing: 0.5 
-            }}>
+            <Typography 
+              variant="caption" 
+              color="textSecondary" 
+              noWrap 
+              sx={{ 
+                fontWeight: 700, 
+                textTransform: 'uppercase', 
+                display: 'block', 
+                fontSize: '0.6rem', 
+                letterSpacing: 0.5 
+              }}
+            >
               {title}
             </Typography>
-            <Typography variant="h5" fontWeight="800" sx={{ lineHeight: 1.2 }}>
-              {loading ? <CircularProgress size={16} /> : value}
-            </Typography>
+            {loading ? (
+              <Skeleton variant="text" width={60} height={32} />
+            ) : (
+              <Typography variant="h5" fontWeight="800" sx={{ lineHeight: 1.2 }}>
+                {value}
+              </Typography>
+            )}
             {trend !== undefined && !loading && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
                 {trend > 0 ? (
@@ -136,14 +170,94 @@ const StatCard = ({ title, value, icon, color, loading, trend, subtitle }) => {
               </Typography>
             )}
           </Box>
-        </Stack>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+};
+
+// ==================== Meeting Card Component ====================
+const MeetingCard = ({ meeting, onClick }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  const meetingDate = meeting.meeting_date ? parseISO(meeting.meeting_date) : null;
+  const isUpcoming = meetingDate && isFuture(meetingDate);
+  const daysUntil = meetingDate ? differenceInDays(meetingDate, new Date()) : null;
+  
+  return (
+    <Card 
+      onClick={() => onClick(meeting.id)}
+      sx={{ 
+        borderRadius: 2, 
+        boxShadow: 'none', 
+        border: '1px solid', 
+        borderColor: 'divider',
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        bgcolor: isDarkMode ? 'background.default' : '#ffffff',
+        '&:hover': { 
+          borderColor: 'primary.main', 
+          bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : 'action.hover' 
+        }
+      }}
+    >
+      <CardContent sx={{ p: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+            <Avatar sx={{ 
+              bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : alpha(theme.palette.primary.main, 0.1),
+              width: 32, 
+              height: 32 
+            }}>
+              <MeetingRoomIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+            </Avatar>
+            <Typography variant="body2" fontWeight={700} sx={{ color: isDarkMode ? '#e0e0e0' : 'inherit' }}>
+              {meeting.title}
+            </Typography>
+          </Box>
+          {isUpcoming && daysUntil !== null && daysUntil <= 3 && (
+            <Chip 
+              size="small" 
+              label={daysUntil === 0 ? "Today" : `${daysUntil} days`}
+              color="warning"
+              sx={{ height: 20, fontSize: '0.6rem' }}
+            />
+          )}
+        </Box>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <TodayIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
+            <Typography variant="caption" color="text.secondary">
+              {meeting.meeting_date ? safeFormatDate(meeting.meeting_date, 'MMM dd, yyyy') : 'Date TBD'}
+              {meeting.start_time && ` at ${format(parseISO(meeting.start_time), 'h:mm a')}`}
+            </Typography>
+          </Box>
+          <Chip 
+            size="small" 
+            label={getMeetingStatusLabel(meeting.attendance_status)}
+            sx={{ 
+              height: 20, 
+              fontSize: '0.65rem', 
+              fontWeight: 500,
+              bgcolor: alpha(getMeetingStatusColor(meeting.attendance_status), 0.1),
+              color: getMeetingStatusColor(meeting.attendance_status),
+            }}
+          />
+        </Box>
+        
+        {meeting.location && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            📍 {meeting.location}
+          </Typography>
+        )}
       </CardContent>
     </Card>
   );
 };
 
 // ==================== Chart Card Component ====================
-const ChartCard = ({ title, children, action, height = 300 }) => {
+const ChartCard = ({ title, children, action, height = 300, loading = false }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
   
@@ -158,15 +272,47 @@ const ChartCard = ({ title, children, action, height = 300 }) => {
       bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
     }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
+        <Typography 
+          variant="subtitle2" 
+          fontWeight={800} 
+          color="text.secondary" 
+          sx={{ 
+            textTransform: 'uppercase', 
+            fontSize: '0.7rem', 
+            letterSpacing: 0.5 
+          }}
+        >
           {title}
         </Typography>
         {action}
       </Box>
       <Box sx={{ height, position: 'relative' }}>
-        {children}
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+            <CircularProgress size={40} />
+          </Box>
+        ) : children}
       </Box>
     </Paper>
+  );
+};
+
+// ==================== Empty State Component ====================
+const EmptyState = ({ icon: Icon, title, message, action }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  return (
+    <Box sx={{ p: 4, textAlign: 'center' }}>
+      <Icon sx={{ fontSize: 48, color: 'text.secondary', mb: 1, opacity: 0.5 }} />
+      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+        {title}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: action ? 2 : 0 }}>
+        {message}
+      </Typography>
+      {action}
+    </Box>
   );
 };
 
@@ -180,195 +326,96 @@ const Dashboard = () => {
   
   const [stats, setStats] = useState(null);
   const [pendingTasks, setPendingTasks] = useState([]);
+  const [myMeetings, setMyMeetings] = useState({ upcoming: [], weekly_data: null });
   const [chartData, setChartData] = useState({
-    weeklyActivity: { labels: [], datasets: [] },
-    statusDistribution: { labels: [], datasets: [] },
-    monthlyTrend: { labels: [], datasets: [] },
-    priorityDistribution: { labels: [], datasets: [] }
+    weeklyActivity: null,
+    statusDistribution: null,
+    monthlyTrend: null,
+    priorityDistribution: null
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [chartType, setChartType] = useState('bar');
+  const [tabValue, setTabValue] = useState(0);
 
   // Get chart text color based on theme
   const getChartTextColor = useCallback(() => {
     return isDarkMode ? '#e0e0e0' : '#666666';
   }, [isDarkMode]);
 
-  // Get chart grid color based on theme
   const getChartGridColor = useCallback(() => {
     return isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
   }, [isDarkMode]);
 
-  // Process chart data from tasks
-  const processChartData = useCallback((tasks) => {
-    // Weekly Activity (last 7 days)
-    const last7Days = eachDayOfInterval({
-      start: subDays(new Date(), 6),
-      end: new Date()
-    });
-    
-    const weeklyLabels = last7Days.map(date => format(date, 'EEE'));
-    
-    const weeklyCompleted = last7Days.map(date => {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      return tasks.filter(t => {
-        if (!t.completed_at) return false;
-        const completedDate = safeFormatDate(t.completed_at, 'yyyy-MM-dd');
-        return completedDate === dateStr;
-      }).length;
-    });
-    
-    const weeklyCreated = last7Days.map(date => {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      return tasks.filter(t => {
-        if (!t.created_at) return false;
-        const createdDate = safeFormatDate(t.created_at, 'yyyy-MM-dd');
-        return createdDate === dateStr;
-      }).length;
-    });
-
-    // Status Distribution
-    const statusMap = {
-      'pending': { count: 0, color: '#ed6c02', label: 'Pending' },
-      'in_progress': { count: 0, color: '#1976d2', label: 'In Progress' },
-      'completed': { count: 0, color: '#2e7d32', label: 'Completed' },
-      'overdue': { count: 0, color: '#d32f2f', label: 'Overdue' },
-      'blocked': { count: 0, color: '#9c27b0', label: 'Blocked' }
-    };
-    
-    tasks.forEach(task => {
-      if (task.completed_at) {
-        statusMap.completed.count++;
-      } else if (task.is_overdue) {
-        statusMap.overdue.count++;
-      } else if (task.overall_progress_percentage > 0 && task.overall_progress_percentage < 100) {
-        statusMap.in_progress.count++;
-      } else {
-        statusMap.pending.count++;
-      }
-    });
-
-    // Priority Distribution
-    const priorityMap = {
-      1: { count: 0, color: '#d32f2f', label: 'High' },
-      2: { count: 0, color: '#ed6c02', label: 'Medium' },
-      3: { count: 0, color: '#2e7d32', label: 'Low' },
-      4: { count: 0, color: '#0288d1', label: 'Very Low' }
-    };
-    
-    tasks.forEach(task => {
-      if (task.priority && priorityMap[task.priority]) {
-        priorityMap[task.priority].count++;
-      }
-    });
-
-    // Monthly Trend (last 6 months)
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const last6Months = [];
-    for (let i = 5; i >= 0; i--) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - i);
-      last6Months.push(months[date.getMonth()]);
-    }
-    
-    const monthlyCompleted = last6Months.map((month, idx) => {
-      const monthIndex = months.indexOf(month);
-      return tasks.filter(t => {
-        if (!t.completed_at) return false;
-        const completedDate = safeFormatDate(t.completed_at);
-        if (!completedDate) return false;
-        const date = new Date(completedDate);
-        return date.getMonth() === monthIndex;
-      }).length;
-    });
-    
-    const monthlyCreated = last6Months.map((month, idx) => {
-      const monthIndex = months.indexOf(month);
-      return tasks.filter(t => {
-        if (!t.created_at) return false;
-        const createdDate = safeFormatDate(t.created_at);
-        if (!createdDate) return false;
-        const date = new Date(createdDate);
-        return date.getMonth() === monthIndex;
-      }).length;
-    });
-
-    setChartData({
-      weeklyActivity: {
-        labels: weeklyLabels,
-        datasets: [
-          {
-            label: 'Created',
-            data: weeklyCreated,
-            backgroundColor: '#1976d2',
-            borderRadius: 6,
-          },
-          {
-            label: 'Completed',
-            data: weeklyCompleted,
-            backgroundColor: '#2e7d32',
-            borderRadius: 6,
-          }
-        ]
-      },
-      statusDistribution: {
-        labels: Object.values(statusMap).map(s => s.label),
-        datasets: [{
-          data: Object.values(statusMap).map(s => s.count),
-          backgroundColor: Object.values(statusMap).map(s => s.color),
-          borderWidth: 0,
-        }]
-      },
-      monthlyTrend: {
-        labels: last6Months,
-        datasets: [
-          {
-            label: 'Tasks Created',
-            data: monthlyCreated,
-            borderColor: '#1976d2',
-            backgroundColor: 'rgba(25, 118, 210, 0.1)',
-            fill: true,
-            tension: 0.4,
-          },
-          {
-            label: 'Tasks Completed',
-            data: monthlyCompleted,
-            borderColor: '#2e7d32',
-            backgroundColor: 'rgba(46, 125, 50, 0.1)',
-            fill: true,
-            tension: 0.4,
-          }
-        ]
-      },
-      priorityDistribution: {
-        labels: Object.values(priorityMap).map(p => p.label),
-        datasets: [{
-          data: Object.values(priorityMap).map(p => p.count),
-          backgroundColor: Object.values(priorityMap).map(p => p.color),
-          borderWidth: 0,
-        }]
-      }
-    });
+  const isValidChartData = useCallback((data) => {
+    if (!data || !data.labels || !Array.isArray(data.labels) || data.labels.length === 0) return false;
+    if (!data.datasets || !Array.isArray(data.datasets) || data.datasets.length === 0) return false;
+    return true;
   }, []);
 
   const loadDashboardData = async () => {
     setLoading(true);
+    setError(null);
+    
     try {
-      const [statsRes, tasksRes] = await Promise.all([
+      
+      const [
+        statsRes,
+        tasksRes,
+        meetingsRes,
+        weeklyActivityRes,
+        statusDistributionRes,
+        monthlyTrendRes,
+        priorityDistributionRes
+      ] = await Promise.allSettled([
         api.get('/action-tracker/dashboard/dashboard/stats'),
-        api.get('/action-tracker/actions/my-tasks', { params: { limit: 100, include_completed: true } })
+        api.get('/action-tracker/actions/my-tasks', { params: { limit: 100, include_completed: true } }),
+        api.get('/meetings/my-meetings/upcoming', { params: { days: 60 } }),
+        api.get('/charts/weekly-activity', { params: { days: 7 } }),
+        api.get('/charts/status-distribution'),
+        api.get('/charts/monthly-trend', { params: { months: 6 } }),
+        api.get('/charts/priority-distribution'),
       ]);
 
-      if (statsRes.data.success) setStats(statsRes.data.data);
-      
-      const allTasks = tasksRes.data.data || tasksRes.data || [];
-      if (Array.isArray(allTasks)) {
-        const pending = allTasks.filter(t => t.overall_progress_percentage < 100);
-        setPendingTasks(pending);
-        processChartData(allTasks);
+      // Process stats
+      if (statsRes.status === 'fulfilled' && statsRes.value.data?.success) {
+        setStats(statsRes.value.data.data);
       }
+      
+      // Process tasks
+      if (tasksRes.status === 'fulfilled') {
+        const allTasks = tasksRes.value.data?.data || tasksRes.value.data || [];
+        if (Array.isArray(allTasks)) {
+          const pending = allTasks.filter(t => t.overall_progress_percentage < 100);
+          setPendingTasks(pending);
+        }
+      }
+      
+      // Process meetings
+      if (meetingsRes.status === 'fulfilled' && meetingsRes.value.data?.success) {
+        setMyMeetings({
+          upcoming: meetingsRes.value.data.data?.upcoming_meetings || [],
+          weekly_data: meetingsRes.value.data.data
+        });
+      }
+      
+      // Process charts
+      const newChartData = {};
+      if (weeklyActivityRes.status === 'fulfilled' && weeklyActivityRes.value.data?.data) {
+        newChartData.weeklyActivity = weeklyActivityRes.value.data.data;
+      }
+      if (statusDistributionRes.status === 'fulfilled' && statusDistributionRes.value.data?.data) {
+        newChartData.statusDistribution = statusDistributionRes.value.data.data;
+      }
+      if (monthlyTrendRes.status === 'fulfilled' && monthlyTrendRes.value.data?.data) {
+        newChartData.monthlyTrend = monthlyTrendRes.value.data.data;
+      }
+      if (priorityDistributionRes.status === 'fulfilled' && priorityDistributionRes.value.data?.data) {
+        newChartData.priorityDistribution = priorityDistributionRes.value.data.data;
+      }
+      setChartData(newChartData);
+      
     } catch (err) {
       console.error('Dashboard data fetch error:', err);
       setError("Failed to load dashboard data. Please check your connection.");
@@ -387,29 +434,21 @@ const Dashboard = () => {
     loadDashboardData();
   }, []);
 
-  // Memoized stats values
   const statsValues = useMemo(() => ({
     totalMeetings: stats?.meetings?.total || 0,
     thisMonthMeetings: stats?.meetings?.this_month || 0,
     pendingTasks: pendingTasks.length,
     completionRate: stats?.tasks?.completion_rate || 0,
     overdueTasks: pendingTasks.filter(t => t.is_overdue).length,
-    inProgressTasks: pendingTasks.filter(t => t.overall_progress_percentage > 0 && t.overall_progress_percentage < 100).length,
+    upcomingMeetings: myMeetings.upcoming.length,
     totalParticipants: stats?.participants?.total || 0
-  }), [stats, pendingTasks]);
+  }), [stats, pendingTasks, myMeetings]);
 
   const chartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'bottom',
-        labels: { 
-          boxWidth: 10, 
-          fontSize: 10,
-          color: getChartTextColor()
-        }
-      },
+      legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, color: getChartTextColor(), padding: 10 } },
       tooltip: {
         mode: 'index',
         intersect: false,
@@ -417,70 +456,27 @@ const Dashboard = () => {
         titleColor: isDarkMode ? '#ffffff' : '#000000',
         bodyColor: isDarkMode ? '#e0e0e0' : '#666666',
         borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-        borderWidth: 1
+        borderWidth: 1,
+        callbacks: { label: (context) => `${context.dataset.label || ''}: ${context.raw}` }
       }
     },
     scales: {
-      y: {
-        grid: {
-          color: getChartGridColor()
-        },
-        ticks: {
-          color: getChartTextColor()
-        }
-      },
-      x: {
-        grid: {
-          color: getChartGridColor()
-        },
-        ticks: {
-          color: getChartTextColor()
-        }
-      }
+      y: { beginAtZero: true, grid: { color: getChartGridColor() }, ticks: { color: getChartTextColor(), stepSize: 1 } },
+      x: { grid: { color: getChartGridColor() }, ticks: { color: getChartTextColor() } }
     }
   }), [getChartTextColor, getChartGridColor, isDarkMode]);
 
   const lineChartOptions = useMemo(() => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { 
-        position: 'bottom', 
-        labels: { 
-          boxWidth: 10, 
-          fontSize: 10,
-          color: getChartTextColor()
-        } 
-      },
-      tooltip: { 
-        mode: 'index', 
-        intersect: false,
-        backgroundColor: isDarkMode ? '#424242' : '#ffffff',
-        titleColor: isDarkMode ? '#ffffff' : '#000000',
-        bodyColor: isDarkMode ? '#e0e0e0' : '#666666',
-      }
-    },
-    scales: { 
-      y: { 
-        beginAtZero: true, 
-        grid: { 
-          display: true,
-          color: getChartGridColor()
-        },
-        ticks: {
-          color: getChartTextColor()
-        }
-      },
-      x: {
-        grid: {
-          color: getChartGridColor()
-        },
-        ticks: {
-          color: getChartTextColor()
-        }
-      }
+    ...chartOptions,
+    elements: { line: { tension: 0.4 }, point: { radius: 4, hoverRadius: 6 } }
+  }), [chartOptions]);
+
+  const renderChart = (chartData, ChartComponent, options, emptyMessage = "No data available") => {
+    if (!chartData || !isValidChartData(chartData)) {
+      return <EmptyState icon={BarChartIcon} title="No Data" message={emptyMessage} />;
     }
-  }), [getChartTextColor, getChartGridColor, isDarkMode]);
+    return <ChartComponent data={chartData} options={options} />;
+  };
 
   if (loading && !stats) {
     return (
@@ -491,16 +487,8 @@ const Dashboard = () => {
   }
 
   return (
-    <Container 
-      maxWidth="xl" 
-      sx={{ 
-        py: { xs: 2, md: 4 }, 
-        px: { xs: 2, sm: 3 },
-        pb: 10,
-        bgcolor: 'background.default',
-        minHeight: '100vh'
-      }}
-    >
+    <Container maxWidth="xl" sx={{ py: { xs: 2, md: 4 }, px: { xs: 2, sm: 3 }, pb: 10, bgcolor: 'background.default', minHeight: '100vh' }}>
+      
       {/* Header */}
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box>
@@ -512,16 +500,7 @@ const Dashboard = () => {
           </Typography>
         </Box>
         <Tooltip title="Refresh Data">
-          <IconButton 
-            onClick={handleRefresh} 
-            disabled={refreshing}
-            sx={{
-              color: isDarkMode ? 'primary.light' : 'primary.main',
-              '&:hover': {
-                bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : alpha(theme.palette.primary.main, 0.1)
-              }
-            }}
-          >
+          <IconButton onClick={handleRefresh} disabled={refreshing}>
             <RefreshIcon sx={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
           </IconButton>
         </Tooltip>
@@ -529,268 +508,139 @@ const Dashboard = () => {
 
       {/* Error Alert */}
       {error && (
-        <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
+        <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)} icon={<ErrorIcon />}>
           {error}
         </Alert>
       )}
 
       {/* Stats Grid */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
-        <StatCard 
-          title="Total Meetings" 
-          value={statsValues.totalMeetings} 
-          icon={<EventIcon fontSize="small" />} 
-          color="#1976d2" 
-          loading={loading}
-          trend={stats?.meetings?.trend}
-        />
-        <StatCard 
-          title="This Month" 
-          value={statsValues.thisMonthMeetings} 
-          icon={<CalendarIcon fontSize="small" />} 
-          color="#0288d1" 
-          loading={loading}
-        />
-        <StatCard 
-          title="My Pending" 
-          value={statsValues.pendingTasks} 
-          icon={<AssignmentIcon fontSize="small" />} 
-          color="#ed6c02" 
-          loading={loading}
-          subtitle={`${statsValues.overdueTasks} overdue`}
-        />
-        <StatCard 
-          title="Comp. Rate" 
-          value={`${statsValues.completionRate}%`} 
-          icon={<TrendingUpIcon fontSize="small" />} 
-          color="#2e7d32" 
-          loading={loading}
-        />
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
+        <StatCard title="My Meetings" value={statsValues.upcomingMeetings} icon={<MeetingRoomIcon fontSize="small" />} color="#9c27b0" loading={loading} subtitle="Upcoming meetings" onClick={() => navigate('/meetings')} />
+        <StatCard title="Total Meetings" value={statsValues.totalMeetings} icon={<EventIcon fontSize="small" />} color="#1976d2" loading={loading} trend={stats?.meetings?.trend} />
+        <StatCard title="My Pending Tasks" value={statsValues.pendingTasks} icon={<AssignmentIcon fontSize="small" />} color="#ed6c02" loading={loading} subtitle={`${statsValues.overdueTasks} overdue`} onClick={() => navigate('/actions/my-tasks')} />
+        <StatCard title="Completion Rate" value={`${statsValues.completionRate}%`} icon={<TrendingUpIcon fontSize="small" />} color="#2e7d32" loading={loading} />
       </Box>
 
-      {/* Charts Row */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
-        <ChartCard 
-          title="Weekly Activity"
-          action={
-            <ToggleButtonGroup
-              size="small"
-              value={chartType}
-              exclusive
-              onChange={(e, val) => val && setChartType(val)}
-              sx={{
-                '& .MuiToggleButton-root': {
-                  color: isDarkMode ? '#e0e0e0' : '#666666',
-                  borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
-                  '&.Mui-selected': {
-                    bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : alpha(theme.palette.primary.main, 0.1),
-                    color: isDarkMode ? theme.palette.primary.light : theme.palette.primary.main,
-                  }
-                }
-              }}
-            >
-              <ToggleButton value="bar"><BarChartIcon fontSize="small" /></ToggleButton>
-              <ToggleButton value="line"><TimelineIcon fontSize="small" /></ToggleButton>
-            </ToggleButtonGroup>
-          }
-          height={300}
-        >
-          {chartType === 'bar' ? (
-            <Bar data={chartData.weeklyActivity} options={chartOptions} />
-          ) : (
-            <Line data={chartData.weeklyActivity} options={lineChartOptions} />
-          )}
-        </ChartCard>
-
-        <ChartCard title="Task Status Distribution" height={300}>
-          <Doughnut data={chartData.statusDistribution} options={chartOptions} />
-        </ChartCard>
-      </Box>
-
-      {/* Second Row of Charts */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
-        <ChartCard title="Monthly Trend (Last 6 Months)" height={300}>
-          <Line data={chartData.monthlyTrend} options={lineChartOptions} />
-        </ChartCard>
-
-        <ChartCard title="Priority Distribution" height={300}>
-          <Pie data={chartData.priorityDistribution} options={chartOptions} />
-        </ChartCard>
-      </Box>
-
-      {/* Pending Tasks and Upcoming Meetings Row */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
-        {/* Pending Tasks */}
-        <Paper sx={{ 
-          borderRadius: 3, 
-          p: 2, 
-          border: '1px solid', 
-          borderColor: 'divider', 
-          boxShadow: 'none', 
-          height: '100%',
-          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
-        }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
-              My Pending Tasks ({pendingTasks.length})
-            </Typography>
-            <Button 
-              size="small" 
-              onClick={() => navigate('/actions/my-tasks')}
-              sx={{
-                color: isDarkMode ? 'primary.light' : 'primary.main',
-              }}
-            >
-              View All
+      {/* My Upcoming Meetings Section - COMES FIRST */}
+      <Paper sx={{ borderRadius: 3, mb: 4, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+        <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : alpha(theme.palette.primary.main, 0.05) }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <MeetingRoomIcon sx={{ color: 'primary.main' }} />
+              <Typography variant="h6" fontWeight={800}>My Upcoming Meetings</Typography>
+              <Chip label={`${myMeetings.upcoming.length} upcoming`} size="small" color="primary" />
+            </Box>
+            <Button size="small" onClick={() => navigate('/meetings')} endIcon={<ChevronRightIcon />}>
+              View All Meetings
             </Button>
           </Box>
+        </Box>
+        
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} variant="rectangular" height={100} sx={{ m: 2 }} />)
+        ) : myMeetings.upcoming.length > 0 ? (
+          <Stack spacing={1.5} sx={{ p: 2 }}>
+            {myMeetings.upcoming.slice(0, 5).map((meeting) => (
+              <MeetingCard key={meeting.id} meeting={meeting} onClick={(id) => navigate(`/meetings/${id}`)} />
+            ))}
+          </Stack>
+        ) : (
+          <EmptyState icon={CalendarIcon} title="No Upcoming Meetings" message="You have no upcoming meetings scheduled." action={
+            <Button variant="contained" size="small" onClick={() => navigate('/meetings/create')} sx={{ mt: 1 }}>
+              Schedule a Meeting
+            </Button>
+          } />
+        )}
+      </Paper>
 
-          {pendingTasks.length > 0 ? (
+      {/* Tabs for Charts and Tasks */}
+      <Box sx={{ mb: 3 }}>
+        <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tab label="Analytics" />
+          <Tab label="My Pending Tasks" />
+        </Tabs>
+      </Box>
+
+      {/* Analytics Tab */}
+      {tabValue === 0 && (
+        <>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
+            <ChartCard title="Weekly Activity" loading={loading} action={
+              <ToggleButtonGroup size="small" value={chartType} exclusive onChange={(e, val) => val && setChartType(val)}>
+                <ToggleButton value="bar"><BarChartIcon fontSize="small" /></ToggleButton>
+                <ToggleButton value="line"><TimelineIcon fontSize="small" /></ToggleButton>
+              </ToggleButtonGroup>
+            } height={300}>
+              {chartType === 'bar' 
+                ? renderChart(chartData.weeklyActivity, Bar, chartOptions, "No weekly activity data")
+                : renderChart(chartData.weeklyActivity, Line, lineChartOptions, "No weekly activity data")}
+            </ChartCard>
+
+            <ChartCard title="Task Status Distribution" loading={loading} height={300}>
+              {renderChart(chartData.statusDistribution, Doughnut, chartOptions, "No status data")}
+            </ChartCard>
+          </Box>
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
+            <ChartCard title="Monthly Trend" loading={loading} height={300}>
+              {renderChart(chartData.monthlyTrend, Line, lineChartOptions, "No monthly trend data")}
+            </ChartCard>
+
+            <ChartCard title="Priority Distribution" loading={loading} height={300}>
+              {renderChart(chartData.priorityDistribution, Pie, chartOptions, "No priority data")}
+            </ChartCard>
+          </Box>
+        </>
+      )}
+
+      {/* Tasks Tab */}
+      {tabValue === 1 && (
+        <Paper sx={{ borderRadius: 3, p: 2, border: '1px solid', borderColor: 'divider' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase">
+              My Pending Tasks ({pendingTasks.length})
+            </Typography>
+            <Button size="small" onClick={() => navigate('/actions/my-tasks')}>View All</Button>
+          </Box>
+
+          {loading ? (
+            Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} variant="rectangular" height={80} sx={{ mb: 2, borderRadius: 2 }} />)
+          ) : pendingTasks.length > 0 ? (
             <Stack spacing={2}>
               {pendingTasks.slice(0, 5).map((task) => {
                 const isOverdue = task.is_overdue && !task.completed_at;
                 const dueDateFormatted = task.due_date ? safeFormatDate(task.due_date) : null;
                 
                 return (
-                  <Card 
-                    key={task.id} 
-                    onClick={() => navigate(`/actions/${task.id}`)}
-                    sx={{ 
-                      borderRadius: 2, 
-                      boxShadow: 'none', 
-                      border: '1px solid', 
-                      borderColor: 'divider',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      bgcolor: isDarkMode ? 'background.default' : '#ffffff',
-                      '&:hover': { 
-                        borderColor: 'primary.main', 
-                        bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : 'action.hover' 
-                      }
-                    }}
-                  >
+                  <Card key={task.id} onClick={() => navigate(`/actions/${task.id}`)} sx={{ borderRadius: 2, boxShadow: 'none', border: '1px solid', borderColor: 'divider', cursor: 'pointer', transition: 'all 0.2s', '&:hover': { borderColor: 'primary.main' } }}>
                     <CardContent sx={{ p: 2 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                        <Typography variant="body2" fontWeight={700} sx={{ flex: 1, color: isDarkMode ? '#e0e0e0' : 'inherit' }}>
+                        <Typography variant="body2" fontWeight={700} sx={{ flex: 1 }}>
                           {task.title || task.description}
                         </Typography>
-                        {isOverdue && (
-                          <Chip size="small" label="Overdue" color="error" sx={{ height: 20, fontSize: '0.6rem', ml: 1 }} />
-                        )}
+                        {isOverdue && <Chip size="small" label="Overdue" color="error" sx={{ height: 20, fontSize: '0.6rem', ml: 1 }} />}
                       </Box>
-                      
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                        <Chip 
-                          size="small" 
-                          label={dueDateFormatted ? `Due: ${dueDateFormatted}` : 'No Due Date'}
-                          sx={{ height: 20, fontSize: '0.65rem', fontWeight: 500 }}
-                        />
-                        <Typography variant="caption" fontWeight={800} color="primary.main">
-                          {task.overall_progress_percentage}%
-                        </Typography>
+                        <Chip size="small" label={dueDateFormatted ? `Due: ${dueDateFormatted}` : 'No Due Date'} sx={{ height: 20, fontSize: '0.65rem' }} />
+                        <Typography variant="caption" fontWeight={800} color="primary.main">{task.overall_progress_percentage}%</Typography>
                       </Box>
-                      
-                      <LinearProgress 
-                        variant="determinate" 
-                        value={task.overall_progress_percentage} 
-                        sx={{ 
-                          height: 4, 
-                          borderRadius: 2,
-                          bgcolor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined,
-                        }}
-                        color={isOverdue ? 'error' : 'primary'}
-                      />
+                      <LinearProgress variant="determinate" value={task.overall_progress_percentage} sx={{ height: 4, borderRadius: 2 }} color={isOverdue ? 'error' : 'primary'} />
                     </CardContent>
                   </Card>
                 );
               })}
             </Stack>
           ) : (
-            <Box sx={{ p: 4, textAlign: 'center' }}>
-              <CheckCircleIcon sx={{ fontSize: 48, color: 'success.main', mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">All tasks completed! 🎉</Typography>
-            </Box>
+            <EmptyState icon={CheckCircleIcon} title="All Done!" message="You have no pending tasks. Great job!" />
           )}
         </Paper>
-
-        {/* Upcoming Meetings */}
-        <Paper sx={{ 
-          borderRadius: 3, 
-          p: 2, 
-          border: '1px solid', 
-          borderColor: 'divider', 
-          boxShadow: 'none', 
-          height: '100%',
-          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
-        }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase" fontSize="0.7rem" letterSpacing={0.5}>
-              Upcoming Meetings
-            </Typography>
-            <Button 
-              size="small" 
-              onClick={() => navigate('/meetings')}
-              sx={{
-                color: isDarkMode ? 'primary.light' : 'primary.main',
-              }}
-            >
-              View All
-            </Button>
-          </Box>
-
-          {stats?.meetings?.upcoming?.length > 0 ? (
-            <List disablePadding>
-              {stats.meetings.upcoming.slice(0, 5).map((meeting, index, arr) => {
-                const meetingDate = meeting.meeting_date || meeting.date;
-                const formattedDate = meetingDate ? safeFormatDate(meetingDate, 'MMM dd, h:mm a') : 'Date TBD';
-                
-                return (
-                  <React.Fragment key={meeting.id}>
-                    <ListItem 
-                      onClick={() => navigate(`/meetings/${meeting.id}`)}
-                      sx={{ 
-                        py: 1.5, 
-                        px: 0, 
-                        cursor: 'pointer',
-                        '&:hover': {
-                          bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : 'action.hover',
-                          borderRadius: 1
-                        }
-                      }}
-                    >
-                      <Avatar sx={{ 
-                        bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : 'action.hover', 
-                        mr: 2, 
-                        width: 40, 
-                        height: 40 
-                      }}>
-                        <AccessTimeIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-                      </Avatar>
-                      <ListItemText 
-                        primary={<Typography variant="body2" fontWeight={700} sx={{ color: isDarkMode ? '#e0e0e0' : 'inherit' }}>{meeting.title}</Typography>}
-                        secondary={
-                          <Typography variant="caption" color="text.secondary">
-                            {formattedDate}
-                          </Typography>
-                        }
-                      />
-                      <ChevronRightIcon fontSize="small" color="disabled" />
-                    </ListItem>
-                    {index < arr.length - 1 && <Divider sx={{ borderColor: 'divider' }} />}
-                  </React.Fragment>
-                );
-              })}
-            </List>
-          ) : (
-            <Box sx={{ p: 4, textAlign: 'center' }}>
-              <CalendarIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">No upcoming meetings scheduled</Typography>
-            </Box>
-          )}
-        </Paper>
-      </Box>
+      )}
 
       <Box sx={{ height: 40 }} />
+      
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </Container>
   );
 };

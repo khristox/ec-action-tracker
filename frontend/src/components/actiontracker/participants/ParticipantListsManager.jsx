@@ -286,7 +286,6 @@ const ParticipantListsManager = () => {
     try {
       const result = await dispatch(fetchParticipantLists()).unwrap();
       // The result might be an array or a paginated object
-      console.log('Fetched lists:', result);
     } catch (err) {
       console.error('Failed to fetch lists:', err);
       setSnackbar({ open: true, message: 'Failed to load lists', severity: 'error' });

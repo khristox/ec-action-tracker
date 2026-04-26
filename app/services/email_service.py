@@ -451,6 +451,22 @@ class EmailService:
         """Check if email service is configured"""
         return self.config.is_configured
 
+    # Add this method to your EmailService class (add it after generate_verification_token)
+
+    def generate_password_reset_token(self, user_id: str, email: str) -> str:
+        """Generate JWT token for password reset"""
+        expire = datetime.utcnow() + timedelta(hours=getattr(settings, 'PASSWORD_RESET_TOKEN_EXPIRE_HOURS', 1))
+        payload = {
+            "user_id": str(user_id),
+            "email": str(email),
+            "type": "password_reset",
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "sub": str(user_id)
+        }
+        token = jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
+        logger.info(f"🔐 Generated password reset token for {email}")
+        return token
 
 # Create singleton instance
 email_service = EmailService()

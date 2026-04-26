@@ -111,22 +111,10 @@ async def list_locations(
     """List locations with filtering and pagination (public)."""
     try:
         # Log all received parameters
-        logger.info("=" * 60)
-        logger.info("LIST_LOCATIONS CALLED WITH PARAMETERS:")
-        logger.info(f"  skip: {skip}")
-        logger.info(f"  limit: {limit}")
-        logger.info(f"  level: {level}")
-        logger.info(f"  location_type: {location_type}")
-        logger.info(f"  location_mode: {location_mode}")
-        logger.info(f"  parent_id: {parent_id}")
-        logger.info(f"  search: {search}")
-        logger.info(f"  include_inactive: {include_inactive}")
-        logger.info("=" * 60)
-        
+       
         # Validate and handle location_mode (mandatory - defaults to 'address' if not provided)
         if not location_mode:
             location_mode = "address"  # Default to address mode
-            logger.info(f"location_mode not provided, defaulting to: {location_mode}")
         
         filter_mode = None
         if location_mode.lower() != 'all':
@@ -144,7 +132,6 @@ async def list_locations(
 
         # Build query with filters
         if search:
-            logger.info(f"Executing SEARCH query with search='{search}', mode_filter={filter_mode}")
             items_orm = await location_crud.search(
                 db, query=search, limit=limit, skip=skip,
                 location_mode=filter_mode
@@ -154,50 +141,44 @@ async def list_locations(
             logger.info(f"Search returned {len(items_orm)} items")
 
         elif parent_id:
-            logger.info(f"Executing GET_CHILDREN query with parent_id={parent_id}, mode_filter={filter_mode}")
             items_orm = await location_crud.get_children(
                 db, parent_id=parent_id, skip=skip, limit=limit,
                 include_inactive=include_inactive, location_mode=filter_mode
             )
             total = await location_crud.count_children(db, parent_id, include_inactive, filter_mode)
             query_type = "children"
-            logger.info(f"Children query returned {len(items_orm)} items, total={total}")
 
         elif level:
-            logger.info(f"Executing GET_BY_LEVEL query with level={level}, mode_filter={filter_mode}")
             items_orm = await location_crud.get_by_level(
                 db, level=level, skip=skip, limit=limit,
                 include_inactive=include_inactive, location_mode=filter_mode
             )
             total = len(items_orm)
             query_type = "level"
-            logger.info(f"Level query returned {len(items_orm)} items")
 
         elif location_type:
-            logger.info(f"Executing GET_BY_LOCATION_TYPE query with location_type={location_type}, mode_filter={filter_mode}")
             items_orm = await location_crud.get_by_location_type(
                 db, location_type=location_type, skip=skip, limit=limit,
                 location_mode=filter_mode
             )
             total = len(items_orm)
             query_type = "location_type"
-            logger.info(f"Location type query returned {len(items_orm)} items")
 
         else:
             # NO FILTERS SPECIFIED - Load first level items based on location_mode
-            logger.info(f"No filters specified. Loading first level items for mode: {filter_mode}")
+          
             
             # Determine the first level based on location_mode
             if filter_mode == "buildings":
                 first_level = 11  # First building level
-                logger.info(f"Buildings mode: fetching level {first_level} items")
+              
             elif filter_mode == "address":
                 first_level = 1  # First address level
-                logger.info(f"Address mode: fetching level {first_level} items")
+         
             else:
                 # For 'all' mode, we need to handle both - but since filter_mode is mandatory,
                 # we shouldn't hit this case. Still, let's handle gracefully.
-                logger.warning(f"Unexpected filter_mode '{filter_mode}' in else block, defaulting to address level 1")
+             
                 first_level = 1
             
             items_orm = await location_crud.get_by_level(
@@ -207,8 +188,7 @@ async def list_locations(
             total = len(items_orm)
             query_type = f"first_level_{filter_mode}"
 
-        logger.info(f"list_locations → {len(items_orm)} rows, total={total}, mode_filter={filter_mode}, query_type={query_type}")
-
+ 
         items = [_orm_to_dict(loc) for loc in items_orm]
         pages = (total + limit - 1) // limit if total > 0 else 0
 
@@ -219,9 +199,7 @@ async def list_locations(
             size=limit,
             pages=pages,
         )
-        
-        logger.info(f"Response prepared: {len(response.items)} items, total={response.total}")
-        logger.info("=" * 60)
+     
         
         return response
 

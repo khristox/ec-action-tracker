@@ -24,7 +24,8 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel
+  InputLabel,
+  useTheme
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -51,6 +52,9 @@ const platformOptions = [
 ];
 
 const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
   const [formData, setFormData] = useState({
     is_online: false,
     is_physical: false,
@@ -74,9 +78,7 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
   useEffect(() => {
     if (meeting && open) {
       setFormData({
-        // A meeting is online if it has a link or platform assigned
         is_online: !!(meeting.meeting_link || meeting.platform && meeting.platform !== 'physical'),
-        // A meeting is physical if it has location text
         is_physical: !!meeting.location_text,
         platform: meeting.platform && meeting.platform !== 'physical' ? meeting.platform : 'zoom',
         meeting_link: meeting.meeting_link || '',
@@ -174,20 +176,50 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
 
   const selectedPlatform = platformOptions.find(opt => opt.value === formData.platform);
 
+  // Style for section headers to ensure visibility in both modes
+  const sectionHeaderSx = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1,
+    mb: 2,
+    color: theme.palette.text.primary
+  };
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ pb: 1, bgcolor: '#f8fafc' }}>
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="md" 
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: 'background.paper',
+          backgroundImage: 'none'
+        }
+      }}
+    >
+      <DialogTitle sx={{ 
+        pb: 1, 
+        bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f5f5f5',
+        borderBottom: `1px solid ${theme.palette.divider}`
+      }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40 }}>
-              <VideoCallIcon />
+              <VideoCallIcon sx={{ color: '#fff' }} />
             </Avatar>
             <Box>
-              <Typography variant="h6" fontWeight={700}>Update Meeting Settings</Typography>
-              <Typography variant="caption" color="text.secondary">Configure how participants will join</Typography>
+              <Typography variant="h6" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+                Update Meeting Settings
+              </Typography>
+              <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                Configure how participants will join
+              </Typography>
             </Box>
           </Stack>
-          <IconButton onClick={onClose} disabled={loading}><CloseIcon /></IconButton>
+          <IconButton onClick={onClose} disabled={loading}>
+            <CloseIcon />
+          </IconButton>
         </Stack>
       </DialogTitle>
       
@@ -196,23 +228,39 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
           
           {/* 1. Mode Selection (Toggles) */}
           <Box>
-            <Typography variant="subtitle2" fontWeight={600} gutterBottom>Meeting Type (Select all that apply)</Typography>
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom sx={{ color: theme.palette.text.primary }}>
+              Meeting Type (Select all that apply)
+            </Typography>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
                 <Paper
                   variant="outlined"
                   onClick={() => handleToggleMode('is_online')}
                   sx={{
-                    p: 2, cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
-                    borderColor: formData.is_online ? 'primary.main' : '#e0e0e0',
-                    bgcolor: formData.is_online ? 'primary.50' : 'transparent',
+                    p: 2, 
+                    cursor: 'pointer', 
+                    textAlign: 'center', 
+                    transition: 'all 0.2s',
+                    borderColor: formData.is_online ? 'primary.main' : theme.palette.divider,
+                    bgcolor: formData.is_online 
+                      ? (isDarkMode ? 'rgba(25, 118, 210, 0.12)' : 'rgba(25, 118, 210, 0.08)')
+                      : 'transparent',
                     borderWidth: formData.is_online ? 2 : 1,
-                    '&:hover': { transform: 'translateY(-2px)', bgcolor: formData.is_online ? 'primary.50' : '#f8fafc' }
+                    '&:hover': { 
+                      transform: 'translateY(-2px)', 
+                      bgcolor: formData.is_online 
+                        ? (isDarkMode ? 'rgba(25, 118, 210, 0.16)' : 'rgba(25, 118, 210, 0.12)')
+                        : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#fafafa')
+                    }
                   }}
                 >
                   <VideoCallIcon color={formData.is_online ? "primary" : "disabled"} sx={{ fontSize: 32, mb: 1 }} />
-                  <Typography variant="body1" fontWeight={700}>Online Meeting</Typography>
-                  <Typography variant="caption" color="text.secondary">Zoom, Meet, Teams, etc.</Typography>
+                  <Typography variant="body1" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+                    Online Meeting
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                    Zoom, Meet, Teams, etc.
+                  </Typography>
                 </Paper>
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -220,16 +268,30 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
                   variant="outlined"
                   onClick={() => handleToggleMode('is_physical')}
                   sx={{
-                    p: 2, cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
-                    borderColor: formData.is_physical ? 'secondary.main' : '#e0e0e0',
-                    bgcolor: formData.is_physical ? '#faf5ff' : 'transparent',
+                    p: 2, 
+                    cursor: 'pointer', 
+                    textAlign: 'center', 
+                    transition: 'all 0.2s',
+                    borderColor: formData.is_physical ? 'secondary.main' : theme.palette.divider,
+                    bgcolor: formData.is_physical 
+                      ? (isDarkMode ? 'rgba(156, 39, 176, 0.12)' : 'rgba(156, 39, 176, 0.08)')
+                      : 'transparent',
                     borderWidth: formData.is_physical ? 2 : 1,
-                    '&:hover': { transform: 'translateY(-2px)', bgcolor: formData.is_physical ? '#faf5ff' : '#f8fafc' }
+                    '&:hover': { 
+                      transform: 'translateY(-2px)', 
+                      bgcolor: formData.is_physical 
+                        ? (isDarkMode ? 'rgba(156, 39, 176, 0.16)' : 'rgba(156, 39, 176, 0.12)')
+                        : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#fafafa')
+                    }
                   }}
                 >
                   <LocationIcon color={formData.is_physical ? "secondary" : "disabled"} sx={{ fontSize: 32, mb: 1 }} />
-                  <Typography variant="body1" fontWeight={700}>Physical Meeting</Typography>
-                  <Typography variant="caption" color="text.secondary">Conference Room, Office, etc.</Typography>
+                  <Typography variant="body1" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+                    Physical Meeting
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
+                    Conference Room, Office, etc.
+                  </Typography>
                 </Paper>
               </Grid>
             </Grid>
@@ -237,22 +299,32 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
 
           {/* 2. Online Section */}
           {formData.is_online && (
-            <Box sx={{ p: 2.5, border: '1px solid #e0e0e0', borderRadius: 2, bgcolor: '#fbfbff' }}>
+            <Box sx={{ 
+              p: 2.5, 
+              border: `1px solid ${theme.palette.divider}`, 
+              borderRadius: 2, 
+              bgcolor: isDarkMode ? 'rgba(25, 118, 210, 0.05)' : '#fafafa'
+            }}>
               <Stack spacing={2.5}>
-                <Typography variant="subtitle1" fontWeight={700} color="primary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <VideoCallIcon fontSize="small" /> Online Configuration
-                </Typography>
+                <Box sx={sectionHeaderSx}>
+                  <VideoCallIcon fontSize="small" color="primary" />
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+                    Online Configuration
+                  </Typography>
+                </Box>
                 
                 <FormControl fullWidth size="small">
-                  <InputLabel>Platform</InputLabel>
+                  <InputLabel sx={{ color: theme.palette.text.primary }}>Platform</InputLabel>
                   <Select
                     value={formData.platform}
                     label="Platform"
                     onChange={(e) => handleChange('platform', e.target.value)}
+                    sx={{ color: theme.palette.text.primary }}
                   >
                     {platformOptions.map(opt => (
                       <MenuItem key={opt.value} value={opt.value}>
-                        <Box component="span" sx={{ mr: 1 }}>{opt.icon}</Box> {opt.label}
+                        <Box component="span" sx={{ mr: 1 }}>{opt.icon}</Box> 
+                        <span style={{ color: theme.palette.text.primary }}>{opt.label}</span>
                       </MenuItem>
                     ))}
                   </Select>
@@ -278,14 +350,18 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
                 <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <TextField 
-                      fullWidth label="Meeting ID" size="small" 
+                      fullWidth 
+                      label="Meeting ID" 
+                      size="small" 
                       value={formData.meeting_id} 
                       onChange={(e) => handleChange('meeting_id', e.target.value)} 
                     />
                   </Grid>
                   <Grid item xs={6}>
                     <TextField 
-                      fullWidth label="Passcode" size="small" 
+                      fullWidth 
+                      label="Passcode" 
+                      size="small" 
                       value={formData.passcode} 
                       onChange={(e) => handleChange('passcode', e.target.value)} 
                     />
@@ -293,18 +369,29 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
                 </Grid>
 
                 <Box>
-                  <Typography variant="caption" fontWeight={600} color="text.secondary" gutterBottom>Dial-in Numbers</Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  <Typography variant="caption" fontWeight={600} gutterBottom sx={{ color: theme.palette.text.secondary, display: 'block', mb: 1 }}>
+                    Dial-in Numbers
+                  </Typography>
+                  <Stack direction="row" spacing={1}>
                     <TextField 
-                      size="small" placeholder="Number" sx={{ flex: 1 }} 
+                      size="small" 
+                      placeholder="Number" 
+                      sx={{ flex: 1 }} 
                       value={newDialIn.number} 
                       onChange={(e) => setNewDialIn({...newDialIn, number: e.target.value})}
                     />
-                    <Button variant="outlined" size="small" onClick={handleAddDialInNumber} startIcon={<AddIcon />}>Add</Button>
+                    <Button variant="outlined" size="small" onClick={handleAddDialInNumber} startIcon={<AddIcon />}>
+                      Add
+                    </Button>
                   </Stack>
                   <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1.5 }}>
                     {formData.dial_in_numbers.map((dial, idx) => (
-                      <Chip key={idx} label={dial.number} size="small" onDelete={() => handleRemoveDialInNumber(idx)} />
+                      <Chip 
+                        key={idx} 
+                        label={dial.number} 
+                        size="small" 
+                        onDelete={() => handleRemoveDialInNumber(idx)} 
+                      />
                     ))}
                   </Stack>
                 </Box>
@@ -314,11 +401,19 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
 
           {/* 3. Physical Section */}
           {formData.is_physical && (
-            <Box sx={{ p: 2.5, border: '1px solid #e0e0e0', borderRadius: 2, bgcolor: '#fdfbff' }}>
+            <Box sx={{ 
+              p: 2.5, 
+              border: `1px solid ${theme.palette.divider}`, 
+              borderRadius: 2, 
+              bgcolor: isDarkMode ? 'rgba(156, 39, 176, 0.05)' : '#fafafa'
+            }}>
               <Stack spacing={2}>
-                <Typography variant="subtitle1" fontWeight={700} color="secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <LocationIcon fontSize="small" /> Physical Location
-                </Typography>
+                <Box sx={sectionHeaderSx}>
+                  <LocationIcon fontSize="small" color="secondary" />
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+                    Physical Location
+                  </Typography>
+                </Box>
                 <TextField
                   fullWidth
                   label="Address / Room Name"
@@ -335,19 +430,31 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
 
           {/* 4. Global Settings */}
           <Box>
-            <Divider sx={{ mb: 2 }}><Chip label="Notifications" size="small" /></Divider>
+            <Divider sx={{ mb: 2 }}>
+              <Chip label="Notifications" size="small" />
+            </Divider>
             <FormControlLabel
-              control={<Switch checked={formData.send_reminders} onChange={(e) => handleChange('send_reminders', e.target.checked)} />}
-              label="Send automatic email reminders to participants"
+              control={
+                <Switch 
+                  checked={formData.send_reminders} 
+                  onChange={(e) => handleChange('send_reminders', e.target.checked)} 
+                />
+              }
+              label={
+                <Typography sx={{ color: theme.palette.text.primary }}>
+                  Send automatic email reminders to participants
+                </Typography>
+              }
             />
             {formData.send_reminders && (
               <Box sx={{ mt: 1, ml: 4 }}>
                 <FormControl size="small" sx={{ minWidth: 200 }}>
-                  <InputLabel>Timing</InputLabel>
+                  <InputLabel sx={{ color: theme.palette.text.primary }}>Timing</InputLabel>
                   <Select
                     value={formData.reminder_minutes_before}
                     label="Timing"
                     onChange={(e) => handleChange('reminder_minutes_before', e.target.value)}
+                    sx={{ color: theme.palette.text.primary }}
                   >
                     <MenuItem value={15}>15 minutes before</MenuItem>
                     <MenuItem value={30}>30 minutes before</MenuItem>
@@ -364,11 +471,17 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
         </Stack>
       </DialogContent>
       
-      <DialogActions sx={{ p: 2.5, bgcolor: '#f8fafc' }}>
+      <DialogActions sx={{ 
+        p: 2.5, 
+        bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f5f5f5',
+        borderTop: `1px solid ${theme.palette.divider}`
+      }}>
         <Button onClick={onClose} disabled={loading}>Cancel</Button>
         <Stack direction="row" spacing={1}>
           {formData.is_online && formData.meeting_link && (
-            <Button variant="outlined" onClick={handleTestLink} startIcon={<LinkIcon />}>Test Link</Button>
+            <Button variant="outlined" onClick={handleTestLink} startIcon={<LinkIcon />}>
+              Test Link
+            </Button>
           )}
           <Button
             variant="contained"

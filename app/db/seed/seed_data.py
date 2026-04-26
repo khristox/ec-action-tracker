@@ -19,6 +19,8 @@ import re
 import getpass
 from contextlib import asynccontextmanager
 from functools import wraps
+from seed_chart_data import seed_chart_data
+
 
 import asyncpg
 import aiomysql
@@ -168,6 +170,29 @@ else:
         settings.DATABASE_URL = original_db_url
     except:
         pass
+
+async def run_chart_seeding(force: bool = False):
+    """Run chart data seeding"""
+    logger.info("\n" + "=" * 60)
+    logger.info("📊 Running Chart Data Seeder")
+    logger.info("=" * 60)
+    
+    try:
+        results = await seed_chart_data(force=force)
+        
+        # Check if tables exist, if not, log warning
+        if "could not be found" in str(results):
+            logger.warning("⚠️ Chart data tables not found. Run migrations first.")
+            logger.info("   Run: alembic upgrade head")
+        else:
+            logger.info("✅ Chart data seeding completed")
+            
+    except Exception as e:
+        if "doesn't exist" in str(e).lower():
+            logger.warning("⚠️ Chart data tables don't exist yet. Skipping chart seeding.")
+            logger.info("   To enable chart features, run: alembic upgrade head")
+        else:
+            logger.error(f"❌ Chart seeding error: {e}")
 
 # ==================== DOCKER ENVIRONMENT DETECTION ====================
 
@@ -932,6 +957,8 @@ async def init_db(drop_existing: bool = None, base_url: str = None,
                 
                 logger.info("\n📝 Seeding users...")
                 await UserSeeder.seed(db, users)
+
+                await run_chart_seeding(force=drop_existing)
                 
                 await db.commit()
                 

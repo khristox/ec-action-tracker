@@ -27,6 +27,11 @@ print_warning() { echo -e "${YELLOW}⚠️ $1${NC}"; }
 print_header() { echo -e "${CYAN}📌 $1${NC}"; }
 print_separator() { echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 
+if ! command -v jq &> /dev/null; then
+    print_error "jq is required but not installed. Please install jq first."
+    exit 1
+fi
+
 # ==================== PARAMETER HANDLING ====================
 print_separator
 print_header "DOCUMENT TYPES ATTRIBUTE SEEDER"
@@ -77,7 +82,7 @@ fi
 
 # ==================== SERVER CONNECTION ====================
 print_info "Testing server connection..."
-if ! curl -s -f "${BASE_URL}/health" > /dev/null 2>&1; then
+if ! curl -s --connect-timeout 5 -f "${BASE_URL}/health" > /dev/null 2>&1; then
     print_error "Server not running at ${BASE_URL}"
     exit 1
 fi
@@ -87,7 +92,7 @@ print_success "Server is running"
 print_info "Authenticating..."
 
 API_URL="${BASE_URL}/api/v1"
-LOGIN_RESPONSE=$(curl -s -X POST "${API_URL}/auth/login" \
+LOGIN_RESPONSE=$(curl -s --connect-timeout 5 -X POST "${API_URL}/auth/login" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=${USERNAME}&password=${PASSWORD}")
 
@@ -123,7 +128,7 @@ EOF
 )
 
 # Check if group exists
-EXISTING_GROUP=$(curl -s -X GET "${API_URL}/attribute-groups/?code=DOCUMENT_TYPE" \
+EXISTING_GROUP=$(curl -s --connect-timeout 5 -X GET "${API_URL}/attribute-groups/?code=DOCUMENT_TYPE" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
 
 # Handle paginated response
@@ -131,7 +136,7 @@ if echo "$EXISTING_GROUP" | jq -e '.items[0].id' > /dev/null 2>&1; then
     GROUP_ID=$(echo "$EXISTING_GROUP" | jq -r '.items[0].id')
     print_warning "Document Types group already exists (ID: $GROUP_ID)"
 else
-    GROUP_RESPONSE=$(curl -s -X POST "${API_URL}/attribute-groups/" \
+    GROUP_RESPONSE=$(curl -s --connect-timeout 5 -X POST "${API_URL}/attribute-groups/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$GROUP_JSON")
@@ -175,7 +180,7 @@ for doc_type in "${DOCUMENT_TYPES[@]}"; do
     print_info "Processing: ${name} (${code})..."
     
     # Check if attribute already exists
-    EXISTING=$(curl -s -X GET "${API_URL}/attributes/?group_code=DOCUMENT_TYPE&code=${code}" \
+    EXISTING=$(curl -s --connect-timeout 5 -X GET "${API_URL}/attributes/?group_code=DOCUMENT_TYPE&code=${code}" \
         -H "Authorization: Bearer $ADMIN_TOKEN")
     
     # Handle paginated response
@@ -218,7 +223,7 @@ EOF
     # echo "  JSON Payload:" >&2
     # echo "$ATTRIBUTE_JSON" | jq '.' >&2
     
-    RESPONSE=$(curl -s -X POST "${API_URL}/attributes/" \
+    RESPONSE=$(curl -s --connect-timeout 5 -X POST "${API_URL}/attributes/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$ATTRIBUTE_JSON")
@@ -249,7 +254,7 @@ print_info "Verifying Document Types group..."
 sleep 2
 
 # Get all attributes in group
-VERIFY_RESPONSE=$(curl -s -X GET "${API_URL}/attribute-groups/DOCUMENT_TYPE/attributes" \
+VERIFY_RESPONSE=$(curl -s --connect-timeout 5 -X GET "${API_URL}/attribute-groups/DOCUMENT_TYPE/attributes" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
 
 if echo "$VERIFY_RESPONSE" | jq -e '.items' > /dev/null 2>&1; then

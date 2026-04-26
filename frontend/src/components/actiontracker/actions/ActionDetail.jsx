@@ -8,14 +8,15 @@ import {
   List, ListItem, ListItemText, Dialog, DialogTitle,
   DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Skeleton, Alert, Collapse,
-  useTheme, useMediaQuery, Tooltip
+  useTheme, useMediaQuery, Tooltip, CircularProgress
 } from '@mui/material';
 import {
   ArrowBack, Edit, Delete, Comment, History, Person, Schedule,
   Description, Send, OpenInNew, AccessTime, Event, Info,
   PriorityHigh, CheckCircle, Cancel, PlayCircle, Pending,
   ExpandMore, ExpandLess, TaskAlt, Error as ErrorIcon,
-  MoreVert
+  WatchLater, CheckCircleOutline, PauseCircle, CancelOutlined,
+  HighlightOff, HourglassEmpty
 } from '@mui/icons-material';
 
 import {
@@ -26,6 +27,12 @@ import {
   clearCurrentAction,
   clearError
 } from '../../../store/slices/actionTracker/actionSlice';
+import {
+  fetchActionTrackerAttributes,
+  selectActionStatusOptions,
+  selectActionTrackerLoading,
+  selectActionTrackerError
+} from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
 
 const PRIORITY = {
@@ -33,6 +40,101 @@ const PRIORITY = {
   2: { label: 'Medium', color: 'warning', icon: <Schedule /> },
   3: { label: 'Low', color: 'success', icon: <CheckCircle /> },
   4: { label: 'Very Low', color: 'default', icon: <Info /> },
+};
+
+// Enhanced status configuration with specific colors and icons
+const STATUS_CONFIG = {
+  pending: { 
+    label: 'Pending', 
+    color: '#F59E0B',
+    bgColor: '#F59E0B',
+    icon: <HourglassEmpty fontSize="small" />,
+    muiColor: 'warning'
+  },
+  started: { 
+    label: 'Started', 
+    color: '#3B82F6',
+    bgColor: '#3B82F6',
+    icon: <PlayCircle fontSize="small" />,
+    muiColor: 'info'
+  },
+  in_progress: { 
+    label: 'In Progress', 
+    color: '#3B82F6',
+    bgColor: '#3B82F6',
+    icon: <Pending fontSize="small" />,
+    muiColor: 'info'
+  },
+  awaiting: { 
+    label: 'Awaiting', 
+    color: '#8B5CF6',
+    bgColor: '#8B5CF6',
+    icon: <WatchLater fontSize="small" />,
+    muiColor: 'secondary'
+  },
+  awaiting_approval: { 
+    label: 'Awaiting Approval', 
+    color: '#8B5CF6',
+    bgColor: '#8B5CF6',
+    icon: <Pending fontSize="small" />,
+    muiColor: 'secondary'
+  },
+  in_review: { 
+    label: 'In Review', 
+    color: '#A78BFA',
+    bgColor: '#A78BFA',
+    icon: <CheckCircleOutline fontSize="small" />,
+    muiColor: 'secondary'
+  },
+  on_hold: { 
+    label: 'On Hold', 
+    color: '#6B7280',
+    bgColor: '#6B7280',
+    icon: <PauseCircle fontSize="small" />,
+    muiColor: 'default'
+  },
+  blocked: { 
+    label: 'Blocked', 
+    color: '#EF4444',
+    bgColor: '#EF4444',
+    icon: <CancelOutlined fontSize="small" />,
+    muiColor: 'error'
+  },
+  completed: { 
+    label: 'Completed', 
+    color: '#10B981',
+    bgColor: '#10B981',
+    icon: <CheckCircle fontSize="small" />,
+    muiColor: 'success'
+  },
+  closed: { 
+    label: 'Closed', 
+    color: '#059669',
+    bgColor: '#059669',
+    icon: <TaskAlt fontSize="small" />,
+    muiColor: 'success'
+  },
+  cancelled: { 
+    label: 'Cancelled', 
+    color: '#DC2626',
+    bgColor: '#DC2626',
+    icon: <HighlightOff fontSize="small" />,
+    muiColor: 'error'
+  },
+  overdue: { 
+    label: 'Overdue', 
+    color: '#EF4444',
+    bgColor: '#EF4444',
+    icon: <ErrorIcon fontSize="small" />,
+    muiColor: 'error'
+  },
+  ended: { 
+    label: 'Ended', 
+    color: '#6B7280',
+    bgColor: '#6B7280',
+    icon: <Cancel fontSize="small" />,
+    muiColor: 'default'
+  }
 };
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -46,16 +148,18 @@ const ActionDetail = () => {
 
   // Redux state
   const { currentAction, loading, updatingProgress, error: reduxError } = useSelector((state) => state.actions);
+  const statusOptions = useSelector(selectActionStatusOptions);
+  const loadingStatusOptions = useSelector(selectActionTrackerLoading);
+  const statusOptionsError = useSelector(selectActionTrackerError);
   const currentUser = useSelector((state) => state.auth?.user);
 
   // Local UI state
   const [comments, setComments] = useState([]);
   const [history, setHistory] = useState([]);
-  const [statusOptions, setStatusOptions] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [progress, setProgress] = useState(0);
   const [selectedStatusId, setSelectedStatusId] = useState('');
-  const [selectedStatusName, setSelectedStatusName] = useState('');
+  const [selectedStatusValue, setSelectedStatusValue] = useState('');
   const [progressRemarks, setProgressRemarks] = useState('');
   const [localError, setLocalError] = useState('');
   const [expandedSections, setExpandedSections] = useState({
@@ -86,25 +190,30 @@ const ActionDetail = () => {
     }
   }, [id, dispatch]);
 
+  // Fetch action tracker attributes (statuses) if not already loaded
+  const fetchAttributes = useCallback(() => {
+    dispatch(fetchActionTrackerAttributes());
+  }, [dispatch]);
+
   useEffect(() => {
     fetchAction();
+    fetchAttributes(); // Fetch status options if not already cached
     return () => {
       dispatch(clearCurrentAction());
       dispatch(clearError());
     };
-  }, [fetchAction, dispatch]);
+  }, [fetchAction, fetchAttributes, dispatch]);
 
-  // Fetch supplementary data (comments, history, status options)
+  // Fetch supplementary data (comments, history)
   const fetchSupplementaryData = useCallback(async () => {
     if (!id) return;
 
     try {
-      const [commentsRes, historyRes, attrRes] = await Promise.all([
+      const [commentsRes, historyRes] = await Promise.all([
         api.get(`/action-tracker/actions/${id}/comments`).catch(() => ({ data: [] })),
         api.get(`/action-tracker/actions/${id}/history`).catch(() => ({ data: [] })),
-        api.get('/attribute-groups/ACTION_TRACKER/attributes').catch(() => ({ data: { items: [] } })),
       ]);
-
+      
       const commentsData = (commentsRes.data || []).map(comment => ({
         ...comment,
         created_by_name: comment.created_by_name || comment.created_by?.username || 'System',
@@ -117,12 +226,6 @@ const ActionDetail = () => {
         created_by_name: entry.created_by_name || entry.created_by?.username || 'System'
       }));
       setHistory(historyData);
-
-      const attributes = attrRes.data?.items || attrRes.data || [];
-      const actionStatuses = attributes.filter(attr => 
-        attr.code?.startsWith('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
-      );
-      setStatusOptions(actionStatuses);
     } catch (err) {
       console.error('Failed to fetch supplementary data:', err);
     }
@@ -141,17 +244,24 @@ const ActionDetail = () => {
       setProgress(currentAction.overall_progress_percentage || 0);
       setSelectedStatusId(currentAction.overall_status_id || '');
       if (currentAction.overall_status_name) {
-        setSelectedStatusName(currentAction.overall_status_name);
+        setSelectedStatusValue(currentAction.overall_status_name);
       }
     }
   }, [currentAction]);
+
+  // Handle errors from status options fetch
+  useEffect(() => {
+    if (statusOptionsError) {
+      console.error('Failed to load status options:', statusOptionsError);
+    }
+  }, [statusOptionsError]);
 
   const handleGoBack = () => {
     window.history.back();
   };
 
   const handleUpdateProgress = async () => {
-    if (!selectedStatusId && !selectedStatusName) {
+    if (!selectedStatusId && !selectedStatusValue) {
       setLocalError('Please select a status');
       return;
     }
@@ -162,8 +272,8 @@ const ActionDetail = () => {
     try {
       const selectedOption = statusOptions.find(opt => 
         opt.id === selectedStatusId || 
-        opt.short_name === selectedStatusName ||
-        opt.code === selectedStatusName
+        opt.value === selectedStatusValue ||
+        opt.short_name === selectedStatusValue
       );
       
       const statusIdToUse = selectedOption?.id || selectedStatusId;
@@ -182,7 +292,6 @@ const ActionDetail = () => {
       await dispatch(updateActionProgress({ id, progressData: payload })).unwrap();
       setShowProgressDialog(false);
       setProgressRemarks('');
-      // Go back after successful update
       handleGoBack();
     } catch (err) {
       setLocalError(err.message || 'Failed to update progress');
@@ -194,8 +303,9 @@ const ActionDetail = () => {
   const handleMarkAsCompleted = async () => {
     const completedStatus = statusOptions.find(s =>
       s.code === 'ACTION_STATUS_COMPLETED' || 
-      s.short_name === 'COMPLETED' ||
-      s.name?.toLowerCase().includes('completed')
+      s.value === 'completed' ||
+      s.short_name === 'completed' ||
+      s.label?.toLowerCase().includes('completed')
     );
 
     if (!completedStatus) {
@@ -215,7 +325,6 @@ const ActionDetail = () => {
 
       await dispatch(updateActionProgress({ id, progressData: payload })).unwrap();
       setShowCompleteConfirm(false);
-      // Go back after successful completion
       handleGoBack();
     } catch (err) {
       setLocalError(err.message || 'Failed to mark as completed');
@@ -229,7 +338,6 @@ const ActionDetail = () => {
     try {
       await dispatch(deleteAction(id)).unwrap();
       setShowDeleteTaskDialog(false);
-      // Go back after successful deletion
       handleGoBack();
     } catch (err) {
       console.error('Failed to delete task:', err);
@@ -281,14 +389,24 @@ const ActionDetail = () => {
     [currentAction]
   );
 
-  const activePriority = PRIORITY[currentAction?.priority] || PRIORITY[2];
-  const statusLabel = isCompleted ? 'Completed' 
-    : currentAction?.is_overdue ? 'Overdue' 
-    : currentAction?.overall_progress_percentage > 0 ? 'In Progress' : 'Pending';
+  // Get status configuration for current action
+  const getCurrentStatusConfig = () => {
+    if (isCompleted) {
+      return STATUS_CONFIG.completed;
+    }
+    if (currentAction?.is_overdue) {
+      return STATUS_CONFIG.overdue;
+    }
+    
+    const statusValue = currentAction?.overall_status_name?.toLowerCase() || 
+                        currentAction?.status?.toLowerCase() || 
+                        'pending';
+    
+    return STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
+  };
 
-  const statusColor = isCompleted ? 'success' 
-    : currentAction?.is_overdue ? 'error' 
-    : currentAction?.overall_progress_percentage > 0 ? 'info' : 'warning';
+  const currentStatusConfig = getCurrentStatusConfig();
+  const activePriority = PRIORITY[currentAction?.priority] || PRIORITY[2];
 
   // Check if user can delete comment (creator or admin)
   const canDeleteComment = (comment) => {
@@ -299,6 +417,24 @@ const ActionDetail = () => {
   const canDeleteTask = () => {
     if (!currentUser || !currentAction) return false;
     return currentUser.is_admin || currentAction.created_by_id === currentUser.id;
+  };
+
+  // Helper function to get status config for history entries
+  const getStatusConfigForHistory = (statusId, statusName) => {
+    const option = statusOptions.find(opt => opt.id === statusId);
+    const statusValue = option?.value || statusName?.toLowerCase() || 'pending';
+    return STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
+  };
+
+  // Get status name from option
+  const getStatusName = (statusId) => {
+    const option = statusOptions.find(opt => opt.id === statusId);
+    return option?.label || option?.short_name || 'Unknown';
+  };
+
+  // Get status icon component
+  const getStatusIcon = (statusConfig) => {
+    return statusConfig.icon || <Schedule fontSize="small" />;
   };
 
   // Early returns
@@ -383,16 +519,32 @@ const ActionDetail = () => {
         </Typography>
 
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip icon={activePriority.icon} label={activePriority.label} color={activePriority.color} size="small" />
           <Chip 
-            icon={statusColor === 'success' ? <CheckCircle /> : statusColor === 'error' ? <Cancel /> : <PlayCircle />} 
-            label={statusLabel} 
-            color={statusColor} 
+            icon={activePriority.icon} 
+            label={activePriority.label} 
+            color={activePriority.color} 
             size="small" 
           />
+          <Chip 
+            icon={getStatusIcon(currentStatusConfig)}
+            label={currentStatusConfig.label}
+            size="small"
+            sx={{ 
+              bgcolor: currentStatusConfig.bgColor,
+              color: '#fff',
+              fontWeight: 500,
+              '& .MuiChip-icon': { color: '#fff' }
+            }}
+          />
           {currentAction.meeting_title && (
-            <Chip icon={<OpenInNew />} label={currentAction.meeting_title} variant="outlined" size="small" clickable 
-              onClick={() => navigate(`/meetings/${currentAction.minutes?.meeting_id}`)} />
+            <Chip 
+              icon={<OpenInNew />} 
+              label={currentAction.meeting_title} 
+              variant="outlined" 
+              size="small" 
+              clickable 
+              onClick={() => navigate(`/meetings/${currentAction.minutes?.meeting_id}`)} 
+            />
           )}
         </Stack>
       </Paper>
@@ -467,20 +619,8 @@ const ActionDetail = () => {
           ) : (
             <List>
               {history.map((entry, index) => {
-                const statusOption = statusOptions.find(opt => opt.id === entry.individual_status_id);
-                const statusName = statusOption?.name?.replace('Action Status - ', '') || 
-                                  statusOption?.short_name || 
-                                  entry.status_name || 
-                                  'Unknown';
-                
-                const getStatusColor = (status) => {
-                  if (status === 'COMPLETED' || status?.toLowerCase().includes('completed')) return '#10B981';
-                  if (status === 'IN_PROGRESS' || status?.toLowerCase().includes('in_progress')) return '#3B82F6';
-                  if (status === 'OVERDUE') return '#EF4444';
-                  if (status === 'BLOCKED') return '#6B7280';
-                  if (status === 'CANCELLED') return '#EF4444';
-                  return '#F59E0B';
-                };
+                const statusName = getStatusName(entry.individual_status_id);
+                const statusConfig = getStatusConfigForHistory(entry.individual_status_id, statusName);
                 
                 return (
                   <React.Fragment key={entry.id || index}>
@@ -491,10 +631,12 @@ const ActionDetail = () => {
                             <Chip 
                               label={statusName}
                               size="small"
+                              icon={statusConfig.icon}
                               sx={{ 
-                                bgcolor: getStatusColor(statusName),
+                                bgcolor: statusConfig.bgColor,
                                 color: '#fff',
-                                fontWeight: 500
+                                fontWeight: 500,
+                                '& .MuiChip-icon': { color: '#fff' }
                               }}
                             />
                             <Typography variant="caption" color="text.secondary">
@@ -656,12 +798,30 @@ const ActionDetail = () => {
                 value={selectedStatusId}
                 onChange={(e) => setSelectedStatusId(e.target.value)}
                 label="Status"
+                disabled={loadingStatusOptions}
               >
-                {statusOptions.map((opt) => (
-                  <MenuItem key={opt.id} value={opt.id}>
-                    {opt.name?.replace('Action Status - ', '') || opt.short_name}
+                {loadingStatusOptions && statusOptions.length === 0 ? (
+                  <MenuItem disabled>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <CircularProgress size={16} />
+                      <Typography variant="body2">Loading statuses...</Typography>
+                    </Stack>
                   </MenuItem>
-                ))}
+                ) : (
+                  statusOptions.map((opt) => {
+                    const statusConfig = STATUS_CONFIG[opt.value] || STATUS_CONFIG.pending;
+                    return (
+                      <MenuItem key={opt.id} value={opt.id}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          {statusConfig.icon}
+                          <Typography variant="body2">
+                            {opt.label || opt.short_name}
+                          </Typography>
+                        </Stack>
+                      </MenuItem>
+                    );
+                  })
+                )}
               </Select>
             </FormControl>
 
@@ -681,7 +841,7 @@ const ActionDetail = () => {
           <Button 
             variant="contained" 
             onClick={handleUpdateProgress} 
-            disabled={updatingProgress || !selectedStatusId || isActionInProgress}
+            disabled={updatingProgress || !selectedStatusId || isActionInProgress || loadingStatusOptions}
           >
             Save Progress
           </Button>

@@ -15,18 +15,15 @@ const normalizeError = (err) => {
   if (responseData?.detail) {
     const detail = responseData.detail;
 
-    // 1. Handle String Detail
     if (typeof detail === 'string') {
       message = detail;
     } 
-    // 2. Handle Object Detail
     else if (typeof detail === 'object' && !Array.isArray(detail) && detail !== null) {
       message = detail.message || message;
       errorCode = detail.error_code || detail.error;
       if (detail.field) {
         fieldErrors[detail.field] = message;
       }
-      // Store additional metadata for special handling
       if (detail.wait_minutes) {
         fieldErrors.wait_minutes = detail.wait_minutes;
       }
@@ -34,7 +31,6 @@ const normalizeError = (err) => {
         fieldErrors.email_sent = false;
       }
     }
-    // 3. Handle Array Detail (FastAPI validation)
     else if (Array.isArray(detail)) {
       message = detail[0]?.msg || 'Validation failed';
       detail.forEach(errItem => {
@@ -60,6 +56,7 @@ const clearAuthStorage = () => {
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
   localStorage.removeItem('user');
+  localStorage.removeItem('profile_picture');
 };
 
 const persistAuth = (data) => {
@@ -80,6 +77,12 @@ const persistAuth = (data) => {
   };
   
   localStorage.setItem('user', JSON.stringify(userToStore));
+};
+
+// Helper function to get user ID consistently
+const getCurrentUserId = () => {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  return user.id || user.user_id;
 };
 
 /* =========================
@@ -135,7 +138,7 @@ export const register = createAsyncThunk(
 
 export const checkAuth = createAsyncThunk(
   'auth/checkAuth',
-  async (_, { rejectWithValue }) => {
+  async (_, { rejectWithValue, dispatch }) => {
     const token = localStorage.getItem('access_token');
     if (!token) return rejectWithValue(null);
 
@@ -143,6 +146,10 @@ export const checkAuth = createAsyncThunk(
       const response = await apiClient.get('/auth/me');
       const user = { ...response.data, email: response.data.email };
       localStorage.setItem('user', JSON.stringify(user));
+      
+      // Fetch profile picture separately
+      await dispatch(fetchProfilePicture());
+      
       return { token, user };
     } catch (err) {
       const refreshToken = localStorage.getItem('refresh_token');
@@ -153,7 +160,10 @@ export const checkAuth = createAsyncThunk(
       try {
         const res = await apiClient.post('/auth/refresh', { refresh_token: refreshToken });
         localStorage.setItem('access_token', res.data.access_token);
-        return { token: res.data.access_token, user: JSON.parse(localStorage.getItem('user')) };
+        const userResponse = await apiClient.get('/auth/me');
+        localStorage.setItem('user', JSON.stringify(userResponse.data));
+        await dispatch(fetchProfilePicture());
+        return { token: res.data.access_token, user: userResponse.data };
       } catch (refreshErr) {
         clearAuthStorage();
         return rejectWithValue(null);
@@ -179,7 +189,121 @@ export const logout = createAsyncThunk(
 );
 
 /* =========================
-   3. Async Thunks - Email & Password
+   3. Async Thunks - Profile Picture
+========================= */
+
+export const fetchProfilePicture = createAsyncThunk(
+  'auth/fetchProfilePicture',
+  async (_, { rejectWithValue }) => {
+    try {
+      const userId = getCurrentUserId();
+      
+      if (!userId) {
+        return { has_picture: false, profile_picture: null };
+      }
+      
+      // Use the base64 endpoint to get JSON response
+      const response = await apiClient.get(`/auth/${userId}/profile-picture/base64`);
+      return response.data;
+    } catch (err) {
+      // Don't reject on 404 - just return null (no profile picture)
+      if (err.response?.status === 404) {
+        return { has_picture: false, profile_picture: null };
+      }
+      console.error('Fetch profile picture error:', err.response?.data);
+      return { has_picture: false, profile_picture: null };
+    }
+  }
+);
+
+export const uploadProfilePicture = createAsyncThunk(
+  'auth/uploadProfilePicture',
+  async (file, { rejectWithValue, dispatch }) => {
+    try {
+      const userId = getCurrentUserId();
+      
+      if (!userId) {
+        return rejectWithValue({ message: 'User ID not found' });
+      }
+      
+      // Convert file to base64 for base64 endpoint
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+      });
+      
+      // Use base64 endpoint for upload with compression
+      const response = await apiClient.patch(`/auth/${userId}/profile-picture/base64`, {
+        profile_picture: base64
+      });
+      
+      // Refresh profile picture after upload
+      await dispatch(fetchProfilePicture());
+      
+      return response.data;
+    } catch (err) {
+      console.error('Upload profile picture error:', err.response?.data);
+      return rejectWithValue(normalizeError(err));
+    }
+  }
+);
+
+export const deleteProfilePicture = createAsyncThunk(
+  'auth/deleteProfilePicture',
+  async (_, { rejectWithValue, dispatch }) => {
+    try {
+      const userId = getCurrentUserId();
+      
+      if (!userId) {
+        return rejectWithValue({ message: 'User ID not found' });
+      }
+      
+      const response = await apiClient.delete(`/auth/${userId}/profile-picture`);
+      
+      // Refresh profile picture after deletion
+      await dispatch(fetchProfilePicture());
+      
+      return response.data;
+    } catch (err) {
+      console.error('Delete profile picture error:', err.response?.data);
+      return rejectWithValue(normalizeError(err));
+    }
+  }
+);
+
+/* =========================
+   4. Async Thunks - Profile Management
+========================= */
+
+export const updateUserProfile = createAsyncThunk(
+  'auth/updateProfile',
+  async (userData, { rejectWithValue, getState }) => {
+    try {
+      // Get current user ID from localStorage
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const userId = currentUser.id || currentUser.user_id;
+      
+      if (!userId) {
+        return rejectWithValue({ message: 'User ID not found' });
+      }
+      // Use the correct endpoint with user_id
+      const response = await apiClient.patch(`/auth/${userId}`, userData);
+      
+      // Update localStorage with new user data
+      const updatedUser = { ...currentUser, ...response.data };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
+      return response.data;
+    } catch (err) {
+      console.error('Update profile error:', err.response?.data);
+      return rejectWithValue(normalizeError(err));
+    }
+  }
+);
+/* =========================
+   5. Async Thunks - Email & Password
 ========================= */
 
 export const verifyEmail = createAsyncThunk(
@@ -234,8 +358,24 @@ export const resetPassword = createAsyncThunk(
   }
 );
 
+export const changePassword = createAsyncThunk(
+  'auth/changePassword',
+  async ({ current_password, new_password }, { rejectWithValue }) => {
+    try {
+      const response = await apiClient.post('/auth/change-password', {
+        current_password,
+        new_password,
+      });
+      return response.data;
+    } catch (err) {
+      console.error('Change password error:', err.response?.data);
+      return rejectWithValue(normalizeError(err));
+    }
+  }
+);
+
 /* =========================
-   4. Async Thunks - Availability Checks
+   6. Async Thunks - Availability Checks
 ========================= */
 
 export const checkUsernameAvailability = createAsyncThunk(
@@ -263,161 +403,12 @@ export const checkEmailAvailability = createAsyncThunk(
 );
 
 /* =========================
-   5. Async Thunks - Profile Management
-========================= */
-
-export const updateUserProfile = createAsyncThunk(
-  'auth/updateProfile',
-  async (userData, { rejectWithValue }) => {
-    try {
-      console.log('🔵 updateUserProfile called with data:', userData);
-      
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        return rejectWithValue({ message: 'No authentication token found' });
-      }
-      
-      // Filter only the fields that your backend accepts
-      const allowedFields = {
-        first_name: userData.first_name,
-        last_name: userData.last_name,
-        full_name: userData.full_name,
-        phone: userData.phone,
-      };
-      
-      // Remove undefined fields
-      Object.keys(allowedFields).forEach(key => 
-        allowedFields[key] === undefined && delete allowedFields[key]
-      );
-      
-      const response = await apiClient.put('/auth/profile', allowedFields);
-      
-      // Update localStorage with new user data
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const updatedUser = { ...currentUser, ...response.data };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      return response.data;
-    } catch (err) {
-      console.error('Update profile error:', err.response?.data);
-      return rejectWithValue(normalizeError(err));
-    }
-  }
-);
-
-export const fetchProfilePicture = createAsyncThunk(
-  'auth/fetchProfilePicture',
-  async (_, { rejectWithValue }) => {
-    try {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        return rejectWithValue({ message: 'No authentication token found' });
-      }
-      
-      const response = await apiClient.get('/auth/profile-picture');
-      return response.data;
-    } catch (err) {
-      // If 404, no picture exists - that's fine
-      if (err.response?.status === 404) {
-        return { profile_picture: null };
-      }
-      console.error('Fetch profile picture error:', err.response?.data);
-      return rejectWithValue(normalizeError(err));
-    }
-  }
-);
-
-export const uploadProfilePicture = createAsyncThunk(
-  'auth/uploadProfilePicture',
-  async (file, { rejectWithValue }) => {
-    try {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        return rejectWithValue({ message: 'No authentication token found' });
-      }
-      
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await apiClient.post('/auth/profile-picture', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      
-      // Update localStorage with new profile picture
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const updatedUser = { 
-        ...currentUser, 
-        profile_picture: response.data.profile_picture,
-      };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      return response.data;
-    } catch (err) {
-      console.error('Upload profile picture error:', err.response?.data);
-      return rejectWithValue(normalizeError(err));
-    }
-  }
-);
-
-export const deleteProfilePicture = createAsyncThunk(
-  'auth/deleteProfilePicture',
-  async (_, { rejectWithValue }) => {
-    try {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        return rejectWithValue({ message: 'No authentication token found' });
-      }
-      
-      const response = await apiClient.delete('/auth/profile-picture');
-      
-      // Update localStorage
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      delete currentUser.profile_picture;
-      localStorage.setItem('user', JSON.stringify(currentUser));
-      
-      return response.data;
-    } catch (err) {
-      console.error('Delete profile picture error:', err.response?.data);
-      return rejectWithValue(normalizeError(err));
-    }
-  }
-);
-
-
-/* =========================
-   5. Async Thunks - Password Management
-========================= */
-
-export const changePassword = createAsyncThunk(
-  'auth/changePassword',
-  async ({ current_password, new_password }, { rejectWithValue }) => {
-    try {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        return rejectWithValue({ message: 'No authentication token found' });
-      }
-      
-      const response = await apiClient.post('/auth/change-password', {
-        current_password,
-        new_password,
-      });
-      
-      return response.data;
-    } catch (err) {
-      console.error('Change password error:', err.response?.data);
-      return rejectWithValue(normalizeError(err));
-    }
-  }
-);
-
-/* =========================
-   6. Initial State
+   7. Initial State
 ========================= */
 
 const initialState = {
   user: JSON.parse(localStorage.getItem('user') || 'null'),
+  profilePicture: null, // Don't store in localStorage - too large
   token: localStorage.getItem('access_token'),
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
@@ -433,7 +424,7 @@ const initialState = {
 };
 
 /* =========================
-   7. Slice Definition
+   8. Slice Definition
 ========================= */
 
 const authSlice = createSlice({
@@ -466,7 +457,8 @@ const authSlice = createSlice({
         isAuthenticated: false,
         error: null,
         fieldErrors: {},
-        errorCode: null
+        errorCode: null,
+        profilePicture: null
       };
     },
     updateUserEmail: (state, action) => {
@@ -496,6 +488,7 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
         state.user = null;
         state.token = null;
+        state.profilePicture = null;
       })
       
       // ==================== LOGIN ====================
@@ -637,22 +630,16 @@ const authSlice = createSlice({
       })
 
       // ==================== FETCH PROFILE PICTURE ====================
-      .addCase(fetchProfilePicture.pending, (state) => {
-        // Don't set loading to avoid UI disruption
-      })
       .addCase(fetchProfilePicture.fulfilled, (state, action) => {
-        if (action.payload?.profile_picture) {
-          state.user = {
-            ...state.user,
-            profile_picture: action.payload.profile_picture
-          };
-          const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-          currentUser.profile_picture = action.payload.profile_picture;
-          localStorage.setItem('user', JSON.stringify(currentUser));
+        if (action.payload?.has_picture && action.payload?.profile_picture) {
+          // Store the data URL directly (already includes data:image prefix)
+          state.profilePicture = action.payload.profile_picture;
+        } else {
+          state.profilePicture = null;
         }
       })
       .addCase(fetchProfilePicture.rejected, (state) => {
-        // Silently fail - user just doesn't have a profile picture
+        state.profilePicture = null;
       })
 
       // ==================== UPLOAD PROFILE PICTURE ====================
@@ -660,13 +647,8 @@ const authSlice = createSlice({
         state.isUploading = true;
         state.error = null;
       })
-      .addCase(uploadProfilePicture.fulfilled, (state, action) => {
+      .addCase(uploadProfilePicture.fulfilled, (state) => {
         state.isUploading = false;
-        state.user = { 
-          ...state.user, 
-          profile_picture: action.payload.profile_picture,
-        };
-        localStorage.setItem('user', JSON.stringify(state.user));
         state.error = null;
       })
       .addCase(uploadProfilePicture.rejected, (state, action) => {
@@ -681,10 +663,7 @@ const authSlice = createSlice({
       })
       .addCase(deleteProfilePicture.fulfilled, (state) => {
         state.isDeleting = false;
-        if (state.user) {
-          delete state.user.profile_picture;
-        }
-        localStorage.setItem('user', JSON.stringify(state.user));
+        state.profilePicture = null;
         state.error = null;
       })
       .addCase(deleteProfilePicture.rejected, (state, action) => {
@@ -694,6 +673,7 @@ const authSlice = createSlice({
 
       // ==================== LOGOUT ====================
       .addCase(logout.fulfilled, () => {
+        clearAuthStorage();
         return { 
           ...initialState, 
           user: null, 
@@ -701,10 +681,10 @@ const authSlice = createSlice({
           isAuthenticated: false,
           error: null,
           fieldErrors: {},
-          errorCode: null
+          errorCode: null,
+          profilePicture: null
         };
       })
-      
       
       // ==================== CHANGE PASSWORD ====================
       .addCase(changePassword.pending, (state) => {
@@ -713,27 +693,23 @@ const authSlice = createSlice({
         state.fieldErrors = {};
         state.errorCode = null;
       })
-      .addCase(changePassword.fulfilled, (state, action) => {
+      .addCase(changePassword.fulfilled, (state) => {
         state.isLoading = false;
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
-        // Optionally show success message
       })
       .addCase(changePassword.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload?.message || 'Failed to change password';
         state.fieldErrors = action.payload?.fieldErrors || {};
         state.errorCode = action.payload?.errorCode;
-      })
-      
-      
-      ;
+      });
   },
 });
 
 /* =========================
-   8. Exports & Selectors
+   9. Exports & Selectors
 ========================= */
 
 export const { 
@@ -748,6 +724,7 @@ export const {
 // Selectors
 export const selectAuth = (state) => state.auth;
 export const selectUser = (state) => state.auth.user;
+export const selectProfilePicture = (state) => state.auth.profilePicture;
 export const selectIsAuthenticated = (state) => state.auth.isAuthenticated;
 export const selectIsLoading = (state) => state.auth.isLoading;
 export const selectIsAuthChecking = (state) => state.auth.isAuthChecking;
@@ -757,7 +734,6 @@ export const selectAuthError = (state) => state.auth.error;
 export const selectFieldErrors = (state) => state.auth.fieldErrors;
 export const selectVerificationEmailSent = (state) => state.auth.verificationEmailSent;
 export const selectPendingVerificationEmail = (state) => state.auth.pendingVerificationEmail;
-export const selectProfilePicture = (state) => state.auth.user?.profile_picture;
 
 // Default export
 export default authSlice.reducer;

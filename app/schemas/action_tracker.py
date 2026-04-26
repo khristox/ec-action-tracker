@@ -173,6 +173,7 @@ class MeetingUpdate(ORMBase):
     is_active: Optional[bool] = None
     status_comment: Optional[str] = Field(None, description="Comment explaining the status change")
     status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
+    custom_participants: Optional[List[Dict[str, Any]]] = None
 
     @field_validator('platform', 'meeting_link', 'meeting_id_online', 'passcode', mode='before')
     @classmethod

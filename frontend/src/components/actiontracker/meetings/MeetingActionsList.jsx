@@ -13,8 +13,8 @@ import {
   Alert,
   CircularProgress,
   Table,
-  TableBody,
   TableCell,
+  TableBody,
   TableContainer,
   TableHead,
   TableRow,
@@ -62,7 +62,11 @@ import {
 } from '../../../store/slices/actionTracker/actionSlice';
 import { 
   fetchMeetingMinutes, 
-  selectMeetingMinutes 
+  selectMeetingMinutes,
+  fetchActionTrackerAttributes,
+  selectActionStatusOptions,
+  selectActionTrackerLoading,
+  selectActionTrackerError
 } from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
 
@@ -92,43 +96,6 @@ const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy');
 };
 
-const getStatusConfig = (action, theme) => {
-  const isDarkMode = theme?.palette?.mode === 'dark';
-  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
-  const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
-  
-  if (isCompleted) {
-    return { 
-      label: 'Completed', 
-      color: 'success', 
-      icon: <CheckCircleIcon fontSize="small" />,
-      chipSx: isDarkMode ? { bgcolor: alpha('#10B981', 0.2), color: '#34D399' } : {}
-    };
-  }
-  if (isOverdue) {
-    return { 
-      label: 'Overdue', 
-      color: 'error', 
-      icon: <WarningIcon fontSize="small" />,
-      chipSx: isDarkMode ? { bgcolor: alpha('#EF4444', 0.2), color: '#F87171' } : {}
-    };
-  }
-  if (action.overall_status_name === 'in_progress') {
-    return { 
-      label: 'In Progress', 
-      color: 'info', 
-      icon: <PendingIcon fontSize="small" />,
-      chipSx: isDarkMode ? { bgcolor: alpha('#3B82F6', 0.2), color: '#60A5FA' } : {}
-    };
-  }
-  return { 
-    label: 'Pending', 
-    color: 'warning', 
-    icon: <ScheduleIcon fontSize="small" />,
-    chipSx: isDarkMode ? { bgcolor: alpha('#F59E0B', 0.2), color: '#FBBF24' } : {}
-  };
-};
-
 const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -137,6 +104,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   
   // Redux selectors
   const minutesList = useSelector(selectMeetingMinutes);
+  const statusOptions = useSelector(selectActionStatusOptions);
+  const loadingStatusOptions = useSelector(selectActionTrackerLoading);
+  const statusOptionsError = useSelector(selectActionTrackerError);
   const { updatingProgress } = useSelector((state) => state.actions || {});
   
   const [actions, setActions] = useState([]);
@@ -150,7 +120,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const [progressValue, setProgressValue] = useState(0);
   const [progressRemarks, setProgressRemarks] = useState('');
   const [localUpdating, setLocalUpdating] = useState(false);
-  const [statusOptions, setStatusOptions] = useState([]);
   const [selectedStatusId, setSelectedStatusId] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -177,6 +146,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   }, [dispatch, meetingId]);
 
+  // Fetch action tracker attributes (statuses)
+  const fetchAttributes = useCallback(() => {
+    dispatch(fetchActionTrackerAttributes());
+  }, [dispatch]);
+
   // Extract actions from minutes
   const extractActionsFromMinutes = useCallback(() => {
     setLoading(true);
@@ -196,26 +170,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   }, [minutesList]);
 
-  // Fetch status options
-  const fetchStatusOptions = useCallback(async () => {
-    try {
-      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
-      const attributes = response.data?.items || response.data || [];
-      const actionStatuses = attributes.filter(attr => 
-        attr.code?.startsWith('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
-      );
-      setStatusOptions(actionStatuses);
-    } catch (err) {
-      console.error('Failed to fetch status options:', err);
-    }
-  }, []);
-
   useEffect(() => {
     if (meetingId) {
       fetchMinutes();
-      fetchStatusOptions();
+      fetchAttributes(); // Fetch status options once when component mounts
     }
-  }, [fetchMinutes, fetchStatusOptions, meetingId]);
+  }, [fetchMinutes, fetchAttributes, meetingId]);
 
   useEffect(() => {
     extractActionsFromMinutes();
@@ -227,6 +187,14 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
+
+  // Handle errors from status options fetch
+  useEffect(() => {
+    if (statusOptionsError) {
+      console.error('Failed to load status options:', statusOptionsError);
+      // Don't show error to user, just log it - fallback to empty array
+    }
+  }, [statusOptionsError]);
 
   const handleRefresh = () => {
     fetchMinutes();
@@ -319,6 +287,46 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     if (value >= 50) return isDarkMode ? '#FBBF24' : 'warning.main';
     if (value >= 25) return isDarkMode ? '#60A5FA' : 'primary.main';
     return isDarkMode ? '#6B7280' : 'grey.500';
+  };
+
+  const getStatusConfig = (action) => {
+    const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
+    const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
+    
+    if (isCompleted) {
+      return { 
+        label: 'Completed', 
+        color: 'success', 
+        icon: <CheckCircleIcon fontSize="small" />,
+        chipSx: isDarkMode ? { bgcolor: alpha('#10B981', 0.2), color: '#34D399' } : {}
+      };
+    }
+    if (isOverdue) {
+      return { 
+        label: 'Overdue', 
+        color: 'error', 
+        icon: <WarningIcon fontSize="small" />,
+        chipSx: isDarkMode ? { bgcolor: alpha('#EF4444', 0.2), color: '#F87171' } : {}
+      };
+    }
+    
+    // Use the fetched status if available
+    const status = statusOptions.find(s => s.id === action.overall_status_id);
+    if (status?.short_name === 'IN_PROGRESS') {
+      return { 
+        label: 'In Progress', 
+        color: 'info', 
+        icon: <PendingIcon fontSize="small" />,
+        chipSx: isDarkMode ? { bgcolor: alpha('#3B82F6', 0.2), color: '#60A5FA' } : {}
+      };
+    }
+    
+    return { 
+      label: status?.name?.replace('Action Status - ', '') || 'Pending', 
+      color: 'warning', 
+      icon: <ScheduleIcon fontSize="small" />,
+      chipSx: isDarkMode ? { bgcolor: alpha('#F59E0B', 0.2), color: '#FBBF24' } : {}
+    };
   };
 
   const isUpdating = localUpdating || updatingProgress;
@@ -470,7 +478,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
             </TableHead>
             <TableBody>
               {actions.map((action) => {
-                const statusConfig = getStatusConfig(action, theme);
+                const statusConfig = getStatusConfig(action);
                 const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
                 let assignedToName = 'Unassigned';
                 if (action.assigned_to?.full_name) {
@@ -776,6 +784,16 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                     ))}
                   </Select>
                 </FormControl>
+              )}
+
+              {/* Loading state while fetching status options */}
+              {loadingStatusOptions && statusOptions.length === 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                  <CircularProgress size={24} />
+                  <Typography variant="body2" sx={{ ml: 2, color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                    Loading status options...
+                  </Typography>
+                </Box>
               )}
 
               <TextField

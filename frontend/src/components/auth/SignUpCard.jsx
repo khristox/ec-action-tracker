@@ -41,7 +41,7 @@ import {
   LockOutlined,
   EmailOutlined,
   BadgeOutlined,
-  Business,
+  Group,
   CheckCircleOutline,
   ErrorOutline,
   InfoOutlined,
@@ -682,7 +682,7 @@ const SignUpCard = () => {
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           {/* Header */}
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Business sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+            <Group sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
             <Typography variant="h4" fontWeight={700} gutterBottom>
               Create Account
             </Typography>

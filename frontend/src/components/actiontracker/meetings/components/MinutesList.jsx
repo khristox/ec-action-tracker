@@ -325,11 +325,7 @@ const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
   // Use meetingId from props or from URL as fallback
   const meetingId = propMeetingId || urlMeetingId;
   
-  // Debug logging
-  console.log('MeetingActionsList - propMeetingId:', propMeetingId);
-  console.log('MeetingActionsList - urlMeetingId:', urlMeetingId);
-  console.log('MeetingActionsList - final meetingId:', meetingId);
-  
+
   const { updatingProgress } = useSelector((state) => state.actions || {});
   
   const [actions, setActions] = useState([]);
@@ -373,7 +369,6 @@ const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
     setError(null);
     
     try {
-      console.log('Fetching actions for meeting:', meetingId);
       
       let actionsData = [];
       
@@ -434,8 +429,6 @@ const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
   };
 
   const handleAssignAction = (action) => {
-    console.log('handleAssignAction - action:', action);
-    console.log('handleAssignAction - meetingId:', meetingId);
     setSelectedAction(action);
     setShowAssignDialog(true);
   };

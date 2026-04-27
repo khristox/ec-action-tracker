@@ -1,4 +1,4 @@
-// CreateMeeting.jsx - with Location Search and Hierarchy
+// CreateMeeting.jsx - with Location Search, Hierarchy, and System Users
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -49,7 +49,11 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Breadcrumbs,
-  Link as MuiLink
+  Link as MuiLink,
+  Tab,
+  Tabs,
+  TabContext,
+  TabPanel
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -76,7 +80,6 @@ import {
   Public as PublicIcon,
   Flag as FlagIcon,
   Terrain as TerrainIcon,
-  
   Home as HomeIcon,
   MeetingRoom as MeetingRoomIcon,
   EventSeat as EventSeatIcon,
@@ -85,7 +88,10 @@ import {
   Phone as PhoneIcon,
   Email as EmailIcon,
   Work as WorkIcon,
-  Title as TitleIcon
+  Title as TitleIcon,
+  GroupAdd as GroupAddIcon,
+  PersonSearch as PersonSearchIcon,
+  AdminPanelSettings as AdminIcon
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -475,6 +481,190 @@ const LocationSearch = ({ value, onChange, onClear, error }) => {
   );
 };
 
+// System Users Component
+const SystemUsersTab = ({ onAddUsers, existingParticipants }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState(new Set());
+  
+  // Fetch system users
+  const fetchSystemUsers = async (query = '') => {
+    setLoading(true);
+    try {
+      const params = {
+        limit: 50,
+        is_active: true
+      };
+      if (query && query.length >= 2) {
+        params.search = query;
+      }
+      const response = await api.get('/users/', { params });
+      const usersList = response.data?.items || response.data || [];
+      
+      // Filter out users already added as participants
+      const existingEmails = new Set(existingParticipants.map(p => p.email?.toLowerCase()).filter(Boolean));
+      const filteredUsers = usersList.filter(user => !existingEmails.has(user.email?.toLowerCase()));
+      
+      setUsers(filteredUsers);
+    } catch (err) {
+      console.error('Error fetching system users:', err);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    fetchSystemUsers();
+  }, []);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm && searchTerm.length >= 2) {
+        fetchSystemUsers(searchTerm);
+      } else if (!searchTerm) {
+        fetchSystemUsers();
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  
+  const handleToggleUser = (userId) => {
+    setSelectedUsers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(userId)) {
+        newSet.delete(userId);
+      } else {
+        newSet.add(userId);
+      }
+      return newSet;
+    });
+  };
+  
+ const handleAddSelected = () => {
+  const selectedUsersList = users.filter(user => selectedUsers.has(user.id));
+  const participants = selectedUsersList.map(user => ({
+    id: `system_${user.id}`,
+    name: `${user.first_name} ${user.last_name}`.trim() || user.email,
+    // Simple email masking: joh***@example.com
+    email: user.email ? user.email.replace(/(.{3}).*(@.*)/, '$1***$2') : '',
+    // Simple phone masking: +256*****789
+    telephone: user.phone || user.telephone ? 
+      (user.phone || user.telephone).replace(/(.{3})(.*)(.{3})/, '$1***$3') : '',
+    original_email: user.email,
+    original_telephone: user.phone || user.telephone,
+    title: user.title || '',
+    organization: user.organization || '',
+    is_chairperson: false,
+    is_system_user: true,
+    user_id: user.id
+  }));
+  
+  setSelectedParticipants(prev => [...prev, ...participants]);
+  setSelectedUsers(new Set());
+  setShowUserSelector(false);
+};
+    onAddUsers(participants);
+    setSelectedUsers(new Set());
+    setSnackbarMessage(`Added ${participants.length} system users`);
+  };
+  
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  
+  return (
+    <Stack spacing={2}>
+      <TextField
+        fullWidth
+        placeholder="Search system users by name or email..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        size="small"
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <PersonSearchIcon />
+            </InputAdornment>
+          ),
+          endAdornment: loading && <CircularProgress size={20} />
+        }}
+      />
+      
+      {users.length === 0 && !loading && (
+        <Alert severity="info">
+          {searchTerm ? 'No system users found' : 'No system users available to add'}
+        </Alert>
+      )}
+      
+      {users.length > 0 && (
+        <>
+          <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto' }}>
+            <List dense>
+              {users.map(user => (
+                <ListItemButton
+                  key={user.id}
+                  onClick={() => handleToggleUser(user.id)}
+                  selected={selectedUsers.has(user.id)}
+                >
+                  <ListItemAvatar>
+                    <Avatar sx={{ bgcolor: selectedUsers.has(user.id) ? 'primary.main' : 'grey.500' }}>
+                      {user.first_name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'U'}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
+                    secondary={
+                      <Stack direction="row" spacing={2} flexWrap="wrap">
+                        {user.email && (
+                          <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                            <EmailIcon sx={{ fontSize: 12 }} /> {user.email}
+                          </Typography>
+                        )}
+                        {user.phone && (
+                          <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                            <PhoneIcon sx={{ fontSize: 12 }} /> {user.phone}
+                          </Typography>
+                        )}
+                        {user.title && (
+                          <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                            <WorkIcon sx={{ fontSize: 12 }} /> {user.title}
+                          </Typography>
+                        )}
+                      </Stack>
+                    }
+                  />
+                  {selectedUsers.has(user.id) && <CheckCircleIcon color="success" />}
+                </ListItemButton>
+              ))}
+            </List>
+          </Paper>
+          
+          <Button
+            variant="contained"
+            onClick={handleAddSelected}
+            disabled={selectedUsers.size === 0}
+            startIcon={<GroupAddIcon />}
+            fullWidth
+          >
+            Add Selected Users ({selectedUsers.size})
+          </Button>
+        </>
+      )}
+      
+      {snackbarMessage && (
+        <Snackbar
+          open={!!snackbarMessage}
+          autoHideDuration={3000}
+          onClose={() => setSnackbarMessage('')}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity="success">{snackbarMessage}</Alert>
+        </Snackbar>
+      )}
+    </Stack>
+  );
+};
+
 const CreateMeeting = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -496,6 +686,7 @@ const CreateMeeting = () => {
   const [selectedParticipantList, setSelectedParticipantList] = useState(null);
   const [showGpsDetails, setShowGpsDetails] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [participantTab, setParticipantTab] = useState('custom'); // 'custom', 'lists', 'system'
 
   // Form data
   const [formData, setFormData] = useState({
@@ -691,6 +882,17 @@ const CreateMeeting = () => {
     });
   };
 
+  const handleAddSystemUsers = (users) => {
+    users.forEach(user => {
+      dispatch(addCustomParticipant(user));
+    });
+    setSnackbar({
+      open: true,
+      message: `Added ${users.length} system user${users.length > 1 ? 's' : ''}`,
+      severity: 'success',
+    });
+  };
+
   const handleRemoveParticipant = (participantId) => {
     dispatch(removeLocalMeetingParticipant(participantId));
   };
@@ -845,30 +1047,90 @@ const CreateMeeting = () => {
             {/* Step 2: Participants */}
             {activeStep === 1 && (
               <Stack spacing={3}>
+                {/* Tabs for different participant sources */}
                 <Card variant="outlined">
                   <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>📋 Add from Participant List</Typography>
-                    <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-                      <InputLabel>Select Participant List</InputLabel>
-                      <Select value={selectedParticipantList || ''} onChange={(e) => setSelectedParticipantList(e.target.value)} label="Select Participant List">
-                        {participantLists.map((list) => (
-                          <MenuItem key={list.id} value={list.id}>{list.name} ({list.participants?.length || 0})</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <Button fullWidth variant="contained" onClick={handleUseParticipantList} disabled={!selectedParticipantList}>Add Selected List</Button>
+                    <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                      <Tabs 
+                        value={participantTab} 
+                        onChange={(e, val) => setParticipantTab(val)}
+                        variant="scrollable"
+                        scrollButtons="auto"
+                      >
+                        <Tab label="Add Manually" value="custom" icon={<PersonAddIcon />} iconPosition="start" />
+                        <Tab label="Participant Lists" value="lists" icon={<PeopleIcon />} iconPosition="start" />
+                        <Tab label="System Users" value="system" icon={<AdminIcon />} iconPosition="start" />
+                      </Tabs>
+                    </Box>
+                    
+                    {/* Custom Participant Tab */}
+                    {participantTab === 'custom' && (
+                      <Stack spacing={2}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Typography variant="subtitle2" fontWeight="bold">Add Individual Participant</Typography>
+                          <Button 
+                            variant="contained" 
+                            startIcon={<PersonAddIcon />} 
+                            onClick={() => setShowAddParticipantDialog(true)}
+                            size="small"
+                          >
+                            Add
+                          </Button>
+                        </Box>
+                      </Stack>
+                    )}
+                    
+                    {/* Participant Lists Tab */}
+                    {participantTab === 'lists' && (
+                      <Stack spacing={2}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Select Participant List</InputLabel>
+                          <Select 
+                            value={selectedParticipantList || ''} 
+                            onChange={(e) => setSelectedParticipantList(e.target.value)} 
+                            label="Select Participant List"
+                          >
+                            {participantLists.map((list) => (
+                              <MenuItem key={list.id} value={list.id}>
+                                {list.name} ({list.participants?.length || 0} participants)
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <Button 
+                          fullWidth 
+                          variant="contained" 
+                          onClick={handleUseParticipantList} 
+                          disabled={!selectedParticipantList}
+                        >
+                          Add Selected List
+                        </Button>
+                      </Stack>
+                    )}
+                    
+                    {/* System Users Tab */}
+                    {participantTab === 'system' && (
+                      <SystemUsersTab 
+                        onAddUsers={handleAddSystemUsers}
+                        existingParticipants={meetingParticipants}
+                      />
+                    )}
                   </CardContent>
                 </Card>
 
+                {/* Current Participants List */}
                 <Card variant="outlined">
                   <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                      <Typography variant="subtitle1" fontWeight="bold">👤 Individual Participants</Typography>
-                      <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)}>Add Participant</Button>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        👤 Meeting Participants ({meetingParticipants.length})
+                      </Typography>
                     </Box>
 
                     {meetingParticipants.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>No participants added yet</Typography>
+                      <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                        No participants added yet. Use the tabs above to add participants.
+                      </Typography>
                     ) : (
                       <List sx={{ maxHeight: 300, overflow: 'auto' }}>
                         {meetingParticipants.map((participant) => (
@@ -887,13 +1149,14 @@ const CreateMeeting = () => {
                               </ListItemAvatar>
                               <ListItemText
                                 primary={
-                                  <Stack direction="row" alignItems="center" spacing={1}>
+                                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
                                     <Typography variant="body2" fontWeight={500}>{participant.name}</Typography>
                                     {participant.is_chairperson && <Chip label="Chairperson" size="small" color="primary" />}
+                                    {participant.is_system_user && <Chip label="System User" size="small" color="info" variant="outlined" />}
                                   </Stack>
                                 }
                                 secondary={
-                                  <Stack direction="row" spacing={2} flexWrap="wrap">
+                                  <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mt: 0.5 }}>
                                     {participant.email && (
                                       <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
                                         <EmailIcon sx={{ fontSize: 12 }} /> {participant.email}
@@ -991,6 +1254,7 @@ const CreateMeeting = () => {
                           <Typography variant="body2">
                             {p.name} {p.is_chairperson && '(Chairperson)'}
                             {p.name === formData.secretary_name && ' (Secretary)'}
+                            {p.is_system_user && ' (System User)'}
                           </Typography>
                         </li>
                       ))}
@@ -1001,7 +1265,7 @@ const CreateMeeting = () => {
                   </CardContent>
                 </Card>
                 <Button variant="contained" size="large" onClick={handleSubmit} startIcon={<SaveIcon />} disabled={apiLoading}>
-                  {apiLoading ? <CircularProgress size={24} /> : 'Create Meeting'}
+                  {apiLoading ? <CircularProgress size={24} /> : 'Create Meeting dd'}
                 </Button>
               </Stack>
             )}

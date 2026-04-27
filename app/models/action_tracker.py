@@ -100,7 +100,10 @@ class ParticipantList(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
-    
+
+
+
+
 class Meeting(Base):
     """Depends on Location, User, Attribute"""
     __tablename__ = "meetings"

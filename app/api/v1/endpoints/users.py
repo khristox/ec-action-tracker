@@ -3,6 +3,7 @@
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -16,21 +17,106 @@ from app.schemas.role import RoleResponse
 router = APIRouter()
 
 
+@router.get("/available", response_model=List[UserResponse])
+async def get_available_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Search by name, email, or username"),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),  # Not admin-only
+) -> List[UserResponse]:
+    """
+    Get available users for adding to meetings.
+    Accessible to any authenticated user.
+    """
+    # Only return active users
+    query = select(User).where(User.is_active == True)
+    
+    # Add search filter if provided
+    if search and len(search.strip()) >= 2:
+        search_term = f"%{search.strip()}%"
+        search_filter = or_(
+            User.first_name.ilike(search_term),
+            User.last_name.ilike(search_term),
+            User.email.ilike(search_term),
+            User.username.ilike(search_term),
+            User.phone.ilike(search_term),
+            func.concat(User.first_name, ' ', User.last_name).ilike(search_term)
+        )
+        query = query.where(search_filter)
+    
+    # Add pagination
+    query = query.offset(skip).limit(limit).order_by(User.first_name, User.last_name)
+    
+    result = await db.execute(query)
+    users = result.scalars().all()
+    
+    return [
+        UserResponse(
+            id=user.id,
+            email='xxxx',
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            middle_name=user.middle_name,
+            phone='xxxx',
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            created_at=user.created_at,
+            updated_at=user.updated_at
+        )
+        for user in users
+    ]
+
 @router.get("/", response_model=List[UserResponse])
 async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
-    active_only: bool = Query(True),
+    active_only: bool = Query(True, description="Filter to only active users"),
+    is_active: Optional[bool] = Query(None, description="Alias for active_only (overrides active_only if provided)"),
+    search: Optional[str] = Query(None, description="Search by name, email, or username"),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_admin),
 ) -> List[UserResponse]:
     """
     Get all users (admin only).
+    Supports searching by first_name, last_name, email, or username.
+    
+    - Use `active_only=true` to get only active users
+    - Use `active_only=false` to get all users
+    - `is_active` can be used as an alias for `active_only`
     """
-    if active_only:
-        users = await user_crud.get_active_users(db, skip=skip, limit=limit)
+    # Determine active filter - is_active takes precedence if provided
+    if is_active is not None:
+        filter_active = is_active
     else:
-        users = await user_crud.get_multi(db, skip=skip, limit=limit)
+        filter_active = active_only
+    
+    # Build the base query
+    if filter_active:
+        query = select(User).where(User.is_active == True)
+    else:
+        query = select(User)
+    
+    # Add search filter if provided
+    if search and len(search.strip()) >= 2:
+        search_term = f"%{search.strip()}%"
+        search_filter = or_(
+            User.first_name.ilike(search_term),
+            User.last_name.ilike(search_term),
+            User.email.ilike(search_term),
+            User.username.ilike(search_term),
+            User.phone.ilike(search_term),
+            # Search full name (first + last)
+            func.concat(User.first_name, ' ', User.last_name).ilike(search_term)
+        )
+        query = query.where(search_filter)
+    
+    # Add pagination
+    query = query.offset(skip).limit(limit).order_by(User.created_at.desc())
+    
+    result = await db.execute(query)
+    users = result.scalars().all()
     
     return [
         UserResponse(
@@ -48,8 +134,6 @@ async def get_users(
         )
         for user in users
     ]
-
-
 @router.get("/{user_id}", response_model=UserWithRoles)
 async def get_user(
     user_id: UUID,

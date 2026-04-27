@@ -25,7 +25,7 @@ from app.models.general.dynamic_attribute import Attribute
 from app.models.user import User
 from app.models.action_tracker import (
     Meeting, MeetingAction, MeetingDocument, MeetingParticipant, 
-    MeetingQuery, MeetingStatus, MeetingStatusHistory, MeetingMinutes
+    MeetingQuery, MeetingStatus, MeetingStatusHistory, MeetingMinutes, Participant
 )
 from app.schemas.action_tracker import (
     MeetingCreateResponse, MeetingMinutesResponse, MeetingPaginationResponse, 
@@ -33,6 +33,7 @@ from app.schemas.action_tracker import (
     MeetingStatusHistoryResponse, MeetingUpdate, MeetingResponse, 
     MeetingListResponse, NotificationRequest, ZoomMeetingCreate
 )
+from app.schemas.action_tracker_participants import ParticipantCreate
 from app.schemas.meeting_minutes.meeting_minutes import (
     MeetingActionCreate, MeetingActionResponse, MeetingMinutesCreate,
     MeetingMinutesResponse, MeetingMinutesUpdate
@@ -741,6 +742,41 @@ async def delete_meeting(
     
     await db.commit()
 
+
+
+@router.post("/{meeting_id}/members")
+async def add_participant(
+    meeting_id: UUID,
+    participant_data: ParticipantCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(deps.get_db),
+):
+    # Get the meeting object
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    meeting = result.scalar_one_or_none()
+    
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    participant = MeetingParticipant(
+        meeting_id=meeting_id,  # Use meeting_id directly
+        name=participant_data.name,
+        email=participant_data.email,
+        telephone=getattr(participant_data, 'telephone', None),
+        title=getattr(participant_data, 'title', None),
+        organization=getattr(participant_data, 'organization', None),
+        is_chairperson=getattr(participant_data, 'is_chairperson', False),
+        is_secretary=getattr(participant_data, 'is_secretary', False),
+        attendance_status=getattr(participant_data, 'attendance_status', 'pending'),
+        apology_comment=getattr(participant_data, 'apology_comment', None),
+        created_by_id=current_user.id  # Use created_by_id instead of user_id
+    )
+    
+    db.add(participant)
+    db.commit()
+    db.refresh(participant)
+    
+    return participant
 
 # ==================== MEETING MINUTES ====================
 

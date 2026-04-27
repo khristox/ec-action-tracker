@@ -106,6 +106,7 @@ const COMPONENT_IMPORTS = {
   'OverdueActions': () => import('./components/actiontracker/actions/OverdueActions'),
   'AssignAction': () => import('./components/actiontracker/actions/AssignAction'),
   'UpdateProgress': () => import('./components/actiontracker/actions/UpdateProgress'),
+  'MeetingRecorder': () => import('./components/actiontracker/meetings/MeetingRecorder'),
   
   // Action Tracker - Participants
   'ParticipantsLists': () => import('./components/actiontracker/participants/ParticipantsLists'),
@@ -300,6 +301,8 @@ const OverdueActions = createLazyComponent('OverdueActions');
 const AssignAction = createLazyComponent('AssignAction');
 const UpdateProgress = createLazyComponent('UpdateProgress');
 
+const MeetingRecorder = createLazyComponent('MeetingRecorder');
+
 // Action Tracker - Participants
 const ParticipantsLists = createLazyComponent('ParticipantsLists');
 const ParticipantListsManager = createLazyComponent('ParticipantListsManager');
@@ -474,6 +477,8 @@ const routeConfig = {
     { path: "actions/edit/:id", element: <AssignAction /> },
     { path: "actions/:id/assign", element: <AssignAction /> },
     { path: "actions/progress", element: <UpdateProgress /> },
+    { path: "meetings/:id/record", element: <MeetingRecorder /> },
+
     { path: "actions/:id/progress", element: <UpdateProgress /> },
     { path: "participants", element: <ParticipantsLists /> },
     { path: "participants/create", element: <CreateParticipant /> },

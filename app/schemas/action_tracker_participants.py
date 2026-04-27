@@ -100,7 +100,10 @@ class ParticipantBase(ORMBase):
         max_length=5000,
         description="Additional notes about the participant"
     )
-    
+    attendance_status: Optional[str] = "pending"
+    is_chairperson: bool = False
+    is_secretary: bool = False
+
     @field_validator('name')
     @classmethod
     def validate_name(cls, v: str) -> str:

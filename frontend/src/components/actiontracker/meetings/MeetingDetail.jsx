@@ -1,5 +1,4 @@
 // src/components/meetings/MeetingDetail.jsx
-
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -80,7 +79,10 @@ import {
   Apartment as ApartmentIcon,
   MeetingRoom as MeetingRoomIcon,
   EventSeat as EventSeatIcon,
-  ChevronRight as ChevronRightIcon
+  ChevronRight as ChevronRightIcon,
+  FiberManualRecord as FiberManualRecordIcon,
+  Videocam as VideocamIcon,
+  Storage as StorageIcon
 } from '@mui/icons-material';
 import { 
   fetchMeetingById, 
@@ -111,6 +113,7 @@ import {
   clearLastNotificationResult,
 } from '../../../store/slices/actionTracker/notificationSlice';
 import MeetingAudit from './MeetingAudit';
+import MeetingRecorder from './MeetingRecorder';
 import api from '../../../services/api';
 
 // ==================== Constants ====================
@@ -328,6 +331,16 @@ const HeaderBar = memo(({ onBack, onNotify, onRefresh, onEdit, onStatusMenuOpen,
             <Tooltip title="Send Notifications"><IconButton onClick={onNotify} size="small"><Badge badgeContent={participantCount} color="error"><NotificationsIcon /></Badge></IconButton></Tooltip>
             <Tooltip title="Refresh"><IconButton onClick={onRefresh} size="small"><RefreshIcon /></IconButton></Tooltip>
             <Tooltip title="Edit Meeting"><IconButton onClick={onEdit} size="small"><EditIcon /></IconButton></Tooltip>
+            {/* Record Meeting Button */}
+            <Tooltip title="Record Meeting">
+              <IconButton 
+                onClick={() => navigate(`/meetings/${id}/record`)} 
+                size="small"
+                sx={{ color: '#f44336' }}
+              >
+                <FiberManualRecordIcon />
+              </IconButton>
+            </Tooltip>
             <Tooltip title="Update Status">
               <Button variant={isDarkMode ? "outlined" : "contained"} size="small" startIcon={getStatusIcon()} onClick={onStatusMenuOpen} sx={{ textTransform: 'none' }}>
                 {getStatusDisplay()}
@@ -655,6 +668,11 @@ const MeetingDetail = () => {
   const handleSnackbarClose = () => setSnackbar(prev => ({ ...prev, open: false }));
   const handleErrorClose = () => { setLocalError(null); dispatch(clearMeetingState()); };
 
+  // Check if meeting can be recorded
+  const canRecord = normalizedMeeting?.status?.short_name === 'started' || 
+                    normalizedMeeting?.status?.short_name === 'ongoing' ||
+                    normalizedMeeting?.status?.short_name === 'in_progress';
+
   if (loading && !currentMeeting && !showNotFound) {
     return (
       <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -680,7 +698,19 @@ const MeetingDetail = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6' }}>
-      <HeaderBar onBack={handleBack} onNotify={handleNotifyClick} onRefresh={handleRefresh} onEdit={handleEdit} onStatusMenuOpen={handleStatusMenuOpen} onMoreMenuOpen={handleMoreMenuOpen} onUpdateLink={() => setUpdateLinkDialogOpen(true)} participantCount={participantCount} getStatusIcon={getStatusIcon} getStatusDisplay={getStatusDisplay} isMobile={isMobile} />
+      <HeaderBar 
+        onBack={handleBack} 
+        onNotify={handleNotifyClick} 
+        onRefresh={handleRefresh} 
+        onEdit={handleEdit} 
+        onStatusMenuOpen={handleStatusMenuOpen} 
+        onMoreMenuOpen={handleMoreMenuOpen} 
+        onUpdateLink={() => setUpdateLinkDialogOpen(true)} 
+        participantCount={participantCount} 
+        getStatusIcon={getStatusIcon} 
+        getStatusDisplay={getStatusDisplay} 
+        isMobile={isMobile} 
+      />
 
       <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
         {(error || localError) && <Alert severity="error" onClose={handleErrorClose} sx={{ mb: 3 }}>{typeof error === 'string' ? error : (localError || 'Failed to load meeting')}</Alert>}
@@ -688,13 +718,31 @@ const MeetingDetail = () => {
         <MeetingInfoCard meeting={normalizedMeeting} isMobile={isMobile} formatDate={formatDate} formatTime={formatTime} getStatusDisplay={getStatusDisplay} getStatusColor={getStatusColor} getStatusIcon={getStatusIcon} isOnlineMeeting={isOnlineMeeting} hasMeetingLink={hasMeetingLink} onUpdateLink={() => setUpdateLinkDialogOpen(true)} onJoinMeeting={handleJoinMeeting} />
 
         <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
-          <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} variant={isMobile ? "scrollable" : "standard"} scrollButtons={isMobile ? "auto" : false} sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB', '& .MuiTab-root': { py: 2, fontWeight: 600, '&.Mui-selected': { color: '#7C3AED' } }, '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 } }}>
+          <Tabs 
+            value={tabValue} 
+            onChange={(e, v) => setTabValue(v)} 
+            variant={isMobile ? "scrollable" : "standard"} 
+            scrollButtons={isMobile ? "auto" : false} 
+            sx={{ 
+              borderBottom: 1, 
+              borderColor: 'divider', 
+              bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB', 
+              '& .MuiTab-root': { py: 2, fontWeight: 600, '&.Mui-selected': { color: '#7C3AED' } }, 
+              '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 } 
+            }}
+          >
             <Tab icon={<DescriptionIcon />} iconPosition="start" label="Minutes" />
             <Tab icon={<AssignmentIcon />} iconPosition="start" label="Actions" />
             <Tab icon={<PeopleIcon />} iconPosition="start" label="Participants" />
             <Tab icon={<DescriptionIcon />} iconPosition="start" label="Documents" />
             <Tab icon={<HistoryIcon />} iconPosition="start" label="History" />
             <Tab icon={<HistoryIcon />} iconPosition="start" label="Audit" />
+            <Tab 
+              icon={canRecord ? <FiberManualRecordIcon sx={{ color: '#f44336' }} /> : <VideocamIcon />} 
+              iconPosition="start" 
+              label="Recording" 
+              sx={{ color: canRecord ? '#f44336' : 'inherit' }}
+            />
           </Tabs>
 
           <Box sx={{ p: { xs: 2, sm: 3 } }}>
@@ -704,6 +752,20 @@ const MeetingDetail = () => {
             <TabPanel value={tabValue} index={3}><MeetingDocuments meetingId={id} onRefresh={handleRefresh} /></TabPanel>
             <TabPanel value={tabValue} index={4}><MeetingHistory meetingId={id} /></TabPanel>
             <TabPanel value={tabValue} index={5}><MeetingAudit meetingId={id} /></TabPanel>
+            <TabPanel value={tabValue} index={6}>
+              {!canRecord ? (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Alert severity="info" sx={{ maxWidth: 400, mx: 'auto', mb: 2 }}>
+                    Meeting must be started before you can record.
+                  </Alert>
+                  <Button variant="contained" onClick={() => handleStatusSelect('started')}>
+                    Start Meeting First
+                  </Button>
+                </Box>
+              ) : (
+                <MeetingRecorder meetingId={id} />
+              )}
+            </TabPanel>
           </Box>
         </Paper>
       </Container>

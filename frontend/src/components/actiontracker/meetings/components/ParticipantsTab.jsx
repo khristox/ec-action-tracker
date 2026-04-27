@@ -23,7 +23,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  ListItemButton,
   TextField,
   Alert,
   CircularProgress,
@@ -41,19 +40,21 @@ import {
   FormControl,
   InputLabel,
   Select,
-  FormHelperText
+  FormHelperText,
+  Pagination,
+  InputAdornment,
+  debounce
 } from '@mui/material';
 import {
   People as PeopleIcon,
-   HourglassEmpty as HourglassEmptyIcon,  
+  HourglassEmpty as HourglassEmptyIcon,
   Check as CheckIcon,
   Cancel as CancelIcon,
-  HourglassEmpty as HourglassIcon,
   PersonAdd as PersonAddIcon,
   Email as EmailIcon,
   Phone as PhoneIcon,
   Send as SendIcon,
-  Close as CloseIcon,
+  Close as CloseIcon, 
   Message as MessageIcon,
   Lock as LockIcon,
   PlayCircle as PlayCircleIcon,
@@ -63,154 +64,100 @@ import {
   Star as StarIcon,
   AssignmentInd as SecretaryIcon,
   GroupAdd as GroupAddIcon,
-  Save as SaveIcon
+  Save as SaveIcon,
+  Delete as DeleteIcon,
+  Refresh as RefreshIcon,
+  Search as SearchIcon,
+  VisibilityOff as VisibilityOffIcon,
+  ContentCopy as ContentCopyIcon
 } from '@mui/icons-material';
 import api from '../../../../services/api';
 
-// ==================== Add Participant Dialog Component ====================
-const AddParticipantDialog = memo(({ 
+// ==================== Helper Functions ====================
+const maskEmail = (email) => {
+  if (!email) return '';
+  const [localPart, domain] = email.split('@');
+  if (localPart.length <= 3) {
+    return `${localPart[0]}***@${domain}`;
+  }
+  return `${localPart.substring(0, 3)}***${localPart.substring(localPart.length - 2)}@${domain}`;
+};
+
+const maskPhone = (phone) => {
+  if (!phone) return '';
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length <= 4) return '****';
+  const last4 = cleaned.slice(-4);
+  const firstPart = cleaned.slice(0, -4);
+  const masked = firstPart.replace(/./g, '*');
+  return `${masked}${last4}`;
+};
+
+// ==================== Stat Card Component ====================
+const StatCard = memo(({ title, value, icon, color }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  return (
+    <Zoom in={true} style={{ transitionDelay: '100ms' }}>
+      <Card variant="outlined" sx={{ 
+        height: '100%', 
+        transition: 'transform 0.2s', 
+        '&:hover': { transform: 'translateY(-4px)' },
+        bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+        borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
+      }}>
+        <CardContent>
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <Avatar sx={{ bgcolor: alpha(color, isDarkMode ? 0.2 : 0.1), color: color, width: 48, height: 48 }}>
+              {icon}
+            </Avatar>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                {title}
+              </Typography>
+              <Typography variant="h4" fontWeight={700} color={color}>
+                {value}
+              </Typography>
+            </Box>
+          </Stack>
+        </CardContent>
+      </Card>
+    </Zoom>
+  );
+});
+
+StatCard.displayName = 'StatCard';
+
+// ==================== Remove Participant Dialog Component ====================
+const RemoveParticipantDialog = memo(({ 
   open, 
   onClose, 
-  onAdd, 
-  existingParticipants = [],
+  onConfirm, 
+  participantName,
   loading 
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
-  const [participantType, setParticipantType] = useState('new');
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    telephone: '',
-    title: '',
-    organization: ''
-  });
-  const [selectedParticipant, setSelectedParticipant] = useState(null);
-  const [participantLists, setParticipantLists] = useState([]);
-  const [selectedList, setSelectedList] = useState(null);
-  const [listParticipants, setListParticipants] = useState([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  useEffect(() => {
-    if (open && participantType === 'from_list') {
-      fetchParticipantLists();
-    }
-  }, [open, participantType]);
-
-  const fetchParticipantLists = async () => {
+  const handleConfirm = async () => {
+    setIsDeleting(true);
     try {
-      const response = await api.get('/action-tracker/participant-lists');
-      setParticipantLists(response.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch participant lists:', error);
-    }
-  };
-
-  const fetchListParticipants = async (listId) => {
-    try {
-      const response = await api.get(`/action-tracker/participant-lists/${listId}/participants`);
-      setListParticipants(response.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch list participants:', error);
-    }
-  };
-
-  const handleListChange = async (listId) => {
-    setSelectedList(listId);
-    if (listId) {
-      await fetchListParticipants(listId);
-    } else {
-      setListParticipants([]);
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-    if (participantType === 'new') {
-      if (!formData.name.trim()) newErrors.name = 'Name is required';
-      if (!formData.email.trim() && !formData.telephone.trim()) {
-        newErrors.contact = 'Either email or telephone is required';
-      }
-      if (formData.email && !/\S+@\S+\.\S+/.test(formData.email)) {
-        newErrors.email = 'Invalid email format';
-      }
-    } else if (participantType === 'existing' && !selectedParticipant) {
-      newErrors.participant = 'Please select a participant';
-    } else if (participantType === 'from_list' && (!selectedList || listParticipants.length === 0)) {
-      newErrors.list = 'Please select a participant list';
-    }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async () => {
-    if (!validateForm()) return;
-    
-    setIsSubmitting(true);
-    try {
-      let participantsToAdd = [];
-      
-      if (participantType === 'new') {
-        participantsToAdd = [formData];
-      } else if (participantType === 'existing' && selectedParticipant) {
-        participantsToAdd = [{
-          name: selectedParticipant.name,
-          email: selectedParticipant.email,
-          telephone: selectedParticipant.telephone,
-          title: selectedParticipant.title,
-          organization: selectedParticipant.organization
-        }];
-      } else if (participantType === 'from_list' && selectedList) {
-        participantsToAdd = listParticipants.map(p => ({
-          name: p.name,
-          email: p.email,
-          telephone: p.telephone,
-          title: p.title,
-          organization: p.organization
-        }));
-      }
-      
-      await onAdd(participantsToAdd);
+      await onConfirm();
       onClose();
-      resetForm();
     } catch (error) {
-      console.error('Failed to add participants:', error);
+      console.error('Error removing participant:', error);
     } finally {
-      setIsSubmitting(false);
+      setIsDeleting(false);
     }
   };
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      email: '',
-      telephone: '',
-      title: '',
-      organization: ''
-    });
-    setSelectedParticipant(null);
-    setSelectedList(null);
-    setListParticipants([]);
-    setErrors({});
-    setParticipantType('new');
-  };
-
-  const handleClose = () => {
-    resetForm();
-    onClose();
-  };
-
-  // FIXED: Changed 'participants' to 'existingParticipants'
-  const availableParticipants = (existingParticipants || []).filter(
-    p => !existingParticipants.some(ep => ep.email === p.email || ep.telephone === p.telephone)
-  );
 
   return (
     <Dialog 
       open={open} 
-      onClose={handleClose} 
-      maxWidth="sm" 
+      onClose={onClose} 
+      maxWidth="xs" 
       fullWidth
       PaperProps={{
         sx: {
@@ -220,178 +167,40 @@ const AddParticipantDialog = memo(({
       }}
     >
       <DialogTitle>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1} alignItems="center">
-            <PersonAddIcon color="primary" />
-            <Typography variant="h6">Add Participants</Typography>
-          </Stack>
-          <IconButton onClick={handleClose} disabled={isSubmitting}>
-            <CloseIcon />
-          </IconButton>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <DeleteIcon color="error" />
+          <Typography variant="h6">Remove Participant</Typography>
         </Stack>
       </DialogTitle>
       
       <DialogContent>
-        <Stack spacing={3} sx={{ mt: 1 }}>
-          <FormControl fullWidth>
-            <InputLabel>Add Method</InputLabel>
-            <Select
-              value={participantType}
-              onChange={(e) => setParticipantType(e.target.value)}
-              label="Add Method"
-            >
-              <MenuItem value="new">
-                <ListItemIcon><PersonAddIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="Create New Participant" secondary="Add a brand new participant" />
-              </MenuItem>
-              <MenuItem value="existing">
-                <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="Select Existing" secondary="Choose from existing participants" />
-              </MenuItem>
-              <MenuItem value="from_list">
-                <ListItemIcon><GroupAddIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="From Participant List" secondary="Add multiple participants from a list" />
-              </MenuItem>
-            </Select>
-          </FormControl>
-
-          {participantType === 'new' && (
-            <Stack spacing={2}>
-              <TextField
-                fullWidth
-                label="Full Name *"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                error={!!errors.name}
-                helperText={errors.name}
-                required
-              />
-              <TextField
-                fullWidth
-                label="Email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                error={!!errors.email}
-                helperText={errors.email}
-              />
-              <TextField
-                fullWidth
-                label="Telephone"
-                value={formData.telephone}
-                onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
-                helperText="Either email or telephone is required"
-              />
-              <TextField
-                fullWidth
-                label="Title / Position"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              />
-              <TextField
-                fullWidth
-                label="Organization"
-                value={formData.organization}
-                onChange={(e) => setFormData({ ...formData, organization: e.target.value })}
-              />
-            </Stack>
-          )}
-
-          {participantType === 'existing' && (
-            <Autocomplete
-              options={availableParticipants}
-              getOptionLabel={(option) => `${option.name} - ${option.email || option.telephone}`}
-              value={selectedParticipant}
-              onChange={(e, newValue) => setSelectedParticipant(newValue)}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Select Participant"
-                  placeholder="Search by name, email, or phone"
-                  error={!!errors.participant}
-                  helperText={errors.participant}
-                />
-              )}
-              renderOption={(props, option) => (
-                <li {...props}>
-                  <Stack direction="row" alignItems="center" spacing={1.5}>
-                    <Avatar sx={{ width: 32, height: 32 }}>
-                      {option.name?.[0]}
-                    </Avatar>
-                    <Box>
-                      <Typography variant="body2" fontWeight={600}>{option.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {option.email} {option.telephone && `| ${option.telephone}`}
-                      </Typography>
-                    </Box>
-                  </Stack>
-                </li>
-              )}
-              isOptionEqualToValue={(option, value) => option.id === value?.id}
-            />
-          )}
-
-          {participantType === 'from_list' && (
-            <Stack spacing={2}>
-              <FormControl fullWidth>
-                <InputLabel>Select Participant List</InputLabel>
-                <Select
-                  value={selectedList || ''}
-                  onChange={(e) => handleListChange(e.target.value)}
-                  label="Select Participant List"
-                  error={!!errors.list}
-                >
-                  <MenuItem value="">None</MenuItem>
-                  {participantLists.map(list => (
-                    <MenuItem key={list.id} value={list.id}>
-                      {list.name} ({list.participant_count || list.participants?.length || 0} participants)
-                    </MenuItem>
-                  ))}
-                </Select>
-                {errors.list && <FormHelperText error>{errors.list}</FormHelperText>}
-              </FormControl>
-
-              {selectedList && listParticipants.length > 0 && (
-                <Paper variant="outlined" sx={{ p: 2, maxHeight: 300, overflow: 'auto' }}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Participants to add ({listParticipants.length}):
-                  </Typography>
-                  <Stack spacing={1}>
-                    {listParticipants.map(p => (
-                      <Box key={p.id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <PersonIcon fontSize="small" color="action" />
-                        <Typography variant="body2">{p.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {p.email || p.telephone}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Paper>
-              )}
-            </Stack>
-          )}
-        </Stack>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Are you sure you want to remove <strong>{participantName}</strong> from this meeting?
+        </Alert>
+        <Typography variant="body2" color="text.secondary">
+          This action cannot be undone. The participant will be permanently removed from the meeting.
+        </Typography>
       </DialogContent>
       
       <DialogActions sx={{ p: 2.5 }}>
-        <Button onClick={handleClose} disabled={isSubmitting}>
+        <Button onClick={onClose} disabled={isDeleting}>
           Cancel
         </Button>
         <Button
           variant="contained"
-          onClick={handleSubmit}
-          disabled={isSubmitting}
-          startIcon={isSubmitting ? <CircularProgress size={16} /> : <SaveIcon />}
+          color="error"
+          onClick={handleConfirm}
+          disabled={isDeleting}
+          startIcon={isDeleting ? <CircularProgress size={16} /> : <DeleteIcon />}
         >
-          {isSubmitting ? 'Adding...' : 'Add Participants'}
+          {isDeleting ? 'Removing...' : 'Remove Participant'}
         </Button>
       </DialogActions>
     </Dialog>
   );
 });
 
-AddParticipantDialog.displayName = 'AddParticipantDialog';
+RemoveParticipantDialog.displayName = 'RemoveParticipantDialog';
 
 // ==================== Apology Dialog Component ====================
 const ApologyDialog = memo(({ 
@@ -543,43 +352,499 @@ const ApologyDialog = memo(({
 
 ApologyDialog.displayName = 'ApologyDialog';
 
-// ==================== Stat Card Component ====================
-const StatCard = memo(({ title, value, icon, color, tooltip }) => {
+// ==================== Add Participant Dialog Component ====================
+const AddParticipantDialog = memo(({ 
+  open, 
+  onClose, 
+  onAdd, 
+  existingParticipants = [],
+  loading 
+}) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
+  const [participantType, setParticipantType] = useState('existing');
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    telephone: '',
+    title: '',
+    organization: ''
+  });
+  const [selectedParticipant, setSelectedParticipant] = useState(null);
+  const [participantLists, setParticipantLists] = useState([]);
+  const [selectedList, setSelectedList] = useState(null);
+  const [listParticipants, setListParticipants] = useState([]);
+  const [existingUsers, setExistingUsers] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
   
+  // Pagination state
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const [userTotal, setUserTotal] = useState(0);
+  const [userLoading, setUserLoading] = useState(false);
+  const [showMaskedInfo, setShowMaskedInfo] = useState(false);
+  const usersPerPage = 10;
+
+  // Debounced search
+  const debouncedSearch = useMemo(
+    () => debounce((value) => {
+      setUserSearchTerm(value);
+      setUserPage(1);
+    }, 500),
+    []
+  );
+
+  useEffect(() => {
+    if (open && participantType === 'from_list') {
+      fetchParticipantLists();
+    }
+    if (open && participantType === 'existing') {
+      fetchAvailableUsers();
+    }
+  }, [open, participantType, userPage, userSearchTerm]);
+
+  const fetchParticipantLists = async () => {
+    try {
+      const response = await api.get('/action-tracker/participant-lists/');
+      setParticipantLists(response.data.items || []);
+    } catch (error) {
+      console.error('Failed to fetch participant lists:', error);
+    }
+  };
+
+  const fetchAvailableUsers = async () => {
+    setUserLoading(true);
+    try {
+      const existingEmails = new Set((existingParticipants || []).map(p => p.email?.toLowerCase()));
+      
+      const params = {
+        skip: (userPage - 1) * usersPerPage,
+        limit: usersPerPage,
+        is_active: true
+      };
+      
+      if (userSearchTerm) {
+        params.search = userSearchTerm;
+      }
+      
+      const response = await api.get('/users/', { params });
+      const users = response.data.items || response.data || [];
+      const total = response.data.total || users.length;
+      
+      const availableUsers = users.filter(user => 
+        !existingEmails.has(user.email?.toLowerCase())
+      );
+      
+      setExistingUsers(availableUsers);
+      setUserTotal(total);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    } finally {
+      setUserLoading(false);
+    }
+  };
+
+  const fetchListParticipants = async (listId) => {
+    try {
+      const response = await api.get(`/action-tracker/participant-lists/${listId}/members`);
+      setListParticipants(response.data.items || []);
+    } catch (error) {
+      console.error('Failed to fetch list participants:', error);
+    }
+  };
+
+  const handleListChange = async (listId) => {
+    setSelectedList(listId);
+    if (listId) {
+      await fetchListParticipants(listId);
+    } else {
+      setListParticipants([]);
+    }
+  };
+
+  const handleSearchChange = (event, value) => {
+    debouncedSearch(value);
+  };
+
+  const handlePageChange = (event, value) => {
+    setUserPage(value);
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (participantType === 'new') {
+      if (!formData.name.trim()) newErrors.name = 'Name is required';
+      if (!formData.email.trim() && !formData.telephone.trim()) {
+        newErrors.contact = 'Either email or telephone is required';
+      }
+      if (formData.email && !/\S+@\S+\.\S+/.test(formData.email)) {
+        newErrors.email = 'Invalid email format';
+      }
+    } else if (participantType === 'existing' && !selectedParticipant) {
+      newErrors.participant = 'Please select a participant';
+    } else if (participantType === 'from_list' && (!selectedList || listParticipants.length === 0)) {
+      newErrors.list = 'Please select a participant list';
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (!validateForm()) return;
+    
+    setIsSubmitting(true);
+    try {
+      let participantsToAdd = [];
+      
+      if (participantType === 'new') {
+        participantsToAdd = [formData];
+      } else if (participantType === 'existing' && selectedParticipant) {
+        participantsToAdd = [{
+          name: selectedParticipant.full_name || `${selectedParticipant.first_name || ''} ${selectedParticipant.last_name || ''}`.trim() || selectedParticipant.username,
+          email: selectedParticipant.email,
+          telephone: selectedParticipant.phone || selectedParticipant.telephone,
+          title: selectedParticipant.title,
+          organization: selectedParticipant.organization,
+          user_id: selectedParticipant.id
+        }];
+      } else if (participantType === 'from_list' && selectedList) {
+        participantsToAdd = listParticipants.map(p => ({
+          name: p.name,
+          email: p.email,
+          telephone: p.telephone,
+          title: p.title,
+          organization: p.organization
+        }));
+      }
+      
+      await onAdd(participantsToAdd);
+      onClose();
+      resetForm();
+    } catch (error) {
+      console.error('Failed to add participants:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      email: '',
+      telephone: '',
+      title: '',
+      organization: ''
+    });
+    setSelectedParticipant(null);
+    setSelectedList(null);
+    setListParticipants([]);
+    setExistingUsers([]);
+    setErrors({});
+    setParticipantType('existing');
+    setUserSearchTerm('');
+    setUserPage(1);
+    setShowMaskedInfo(false);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  const getFullName = (user) => {
+    return user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || user.email;
+  };
+
+  const getDisplayEmail = (email) => {
+    if (!email) return '';
+    return showMaskedInfo ? email : maskEmail(email);
+  };
+
+  const getDisplayPhone = (phone) => {
+    if (!phone) return '';
+    return showMaskedInfo ? phone : maskPhone(phone);
+  };
+
   return (
-    <Zoom in={true} style={{ transitionDelay: '100ms' }}>
-      <Card variant="outlined" sx={{ 
-        height: '100%', 
-        transition: 'transform 0.2s', 
-        '&:hover': { transform: 'translateY(-4px)' },
-        bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
-        borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.1) : undefined
-      }}>
-        <CardContent>
-          <Stack direction="row" alignItems="center" spacing={2}>
-            <Avatar sx={{ bgcolor: alpha(color, isDarkMode ? 0.2 : 0.1), color: color, width: 48, height: 48 }}>
-              {icon}
-            </Avatar>
-            <Box>
-              <Tooltip title={tooltip}>
-                <Typography variant="caption" color="text.secondary" sx={{ cursor: 'help' }}>
-                  {title}
-                </Typography>
-              </Tooltip>
-              <Typography variant="h4" fontWeight={700} color={color}>
-                {value}
-              </Typography>
-            </Box>
+    <Dialog 
+      open={open} 
+      onClose={handleClose} 
+      maxWidth="sm" 
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: isDarkMode ? 'background.paper' : '#ffffff',
+          borderRadius: 2
+        }
+      }}
+    >
+      <DialogTitle>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" spacing={1} alignItems="center">
+            <PersonAddIcon color="primary" />
+            <Typography variant="h6">Add Participants</Typography>
           </Stack>
-        </CardContent>
-      </Card>
-    </Zoom>
+          <IconButton onClick={handleClose} disabled={isSubmitting}>
+            <CloseIcon />
+          </IconButton>
+        </Stack>
+      </DialogTitle>
+      
+      <DialogContent>
+        <Stack spacing={3} sx={{ mt: 1 }}>
+          <FormControl fullWidth>
+            <InputLabel>Add Method</InputLabel>
+            <Select
+              value={participantType}
+              onChange={(e) => setParticipantType(e.target.value)}
+              label="Add Method"
+            >
+              <MenuItem value="existing">
+                <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="Select Existing User" secondary="Choose from existing system users" />
+              </MenuItem>
+              <MenuItem value="new">
+                <ListItemIcon><PersonAddIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="Create New Participant" secondary="Add a brand new participant" />
+              </MenuItem>
+              <MenuItem value="from_list">
+                <ListItemIcon><GroupAddIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="From Participant List" secondary="Add multiple participants from a list" />
+              </MenuItem>
+            </Select>
+          </FormControl>
+
+          {participantType === 'new' && (
+            <Stack spacing={2}>
+              <TextField
+                fullWidth
+                label="Full Name *"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                error={!!errors.name}
+                helperText={errors.name}
+                required
+              />
+              <TextField
+                fullWidth
+                label="Email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                error={!!errors.email}
+                helperText={errors.email}
+              />
+              <TextField
+                fullWidth
+                label="Telephone"
+                value={formData.telephone}
+                onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
+                helperText="Either email or telephone is required"
+              />
+              <TextField
+                fullWidth
+                label="Title / Position"
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              />
+              <TextField
+                fullWidth
+                label="Organization"
+                value={formData.organization}
+                onChange={(e) => setFormData({ ...formData, organization: e.target.value })}
+              />
+            </Stack>
+          )}
+
+          {participantType === 'existing' && (
+            <Stack spacing={2}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                <Button
+                  size="small"
+                  startIcon={showMaskedInfo ? <VisibilityOffIcon /> : <InfoIcon />}
+                  onClick={() => setShowMaskedInfo(!showMaskedInfo)}
+                >
+                  {showMaskedInfo ? 'Hide Contact Info' : 'Show Contact Info'}
+                </Button>
+              </Box>
+            
+              <TextField
+                fullWidth
+                placeholder="Search by name, email, or phone..."
+                onChange={handleSearchChange}
+                size="small"
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              
+              <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+                {userLoading ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                    <CircularProgress size={30} />
+                  </Box>
+                ) : existingUsers.length === 0 ? (
+                  <Alert severity="info">No users available</Alert>
+                ) : (
+                  <Stack spacing={1}>
+                    {existingUsers.map((user) => {
+                      const fullName = getFullName(user);
+                      const displayEmail = getDisplayEmail(user.email);
+                      const displayPhone = getDisplayPhone(user.phone);
+                      const isSelected = selectedParticipant?.id === user.id;
+                      
+                      return (
+                        <Paper
+                          key={user.id}
+                          variant="outlined"
+                          sx={{
+                            p: 1.5,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            bgcolor: isSelected ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                            borderColor: isSelected ? theme.palette.primary.main : 'divider',
+                            '&:hover': {
+                              bgcolor: alpha(theme.palette.primary.main, 0.04),
+                              transform: 'translateX(4px)'
+                            }
+                          }}
+                          onClick={() => setSelectedParticipant(user)}
+                        >
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Avatar sx={{ bgcolor: theme.palette.primary.main, width: 40, height: 40 }}>
+                              {fullName[0]?.toUpperCase() || 'U'}
+                            </Avatar>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="subtitle2" fontWeight={600}>
+                                {fullName}
+                              </Typography>
+                              <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
+                                <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  <EmailIcon sx={{ fontSize: 12 }} />
+                                  {displayEmail}
+                                  {!showMaskedInfo && user.email && (
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        copyToClipboard(user.email);
+                                      }}
+                                      sx={{ p: 0.5 }}
+                                    >
+                                      <ContentCopyIcon sx={{ fontSize: 12 }} />
+                                    </IconButton>
+                                  )}
+                                </Typography>
+                                {user.phone && (
+                                  <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <PhoneIcon sx={{ fontSize: 12 }} />
+                                    {displayPhone}
+                                  </Typography>
+                                )}
+                              </Stack>
+                              {user.title && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {user.title} {user.organization && `• ${user.organization}`}
+                                </Typography>
+                              )}
+                            </Box>
+                            {isSelected && <CheckIcon color="primary" fontSize="small" />}
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Box>
+              
+              {userTotal > usersPerPage && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                  <Pagination
+                    count={Math.ceil(userTotal / usersPerPage)}
+                    page={userPage}
+                    onChange={handlePageChange}
+                    color="primary"
+                    size="small"
+                  />
+                </Box>
+              )}
+              
+              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+                Showing {Math.min((userPage - 1) * usersPerPage + 1, userTotal)} - {Math.min(userPage * usersPerPage, userTotal)} of {userTotal} users
+              </Typography>
+            </Stack>
+          )}
+
+          {participantType === 'from_list' && (
+            <Stack spacing={2}>
+              <FormControl fullWidth>
+                <InputLabel>Select Participant List</InputLabel>
+                <Select
+                  value={selectedList || ''}
+                  onChange={(e) => handleListChange(e.target.value)}
+                  label="Select Participant List"
+                  error={!!errors.list}
+                >
+                  <MenuItem value="">None</MenuItem>
+                  {participantLists.map(list => (
+                    <MenuItem key={list.id} value={list.id}>
+                      {list.name} ({list.participant_count || list.participants?.length || 0} participants)
+                    </MenuItem>
+                  ))}
+                </Select>
+                {errors.list && <FormHelperText error>{errors.list}</FormHelperText>}
+              </FormControl>
+
+              {selectedList && listParticipants.length > 0 && (
+                <Paper variant="outlined" sx={{ p: 2, maxHeight: 300, overflow: 'auto' }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Participants to add ({listParticipants.length}):
+                  </Typography>
+                  <Stack spacing={1}>
+                    {listParticipants.map(p => (
+                      <Box key={p.id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <PersonIcon fontSize="small" color="action" />
+                        <Typography variant="body2">{p.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {p.email || p.telephone}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
+            </Stack>
+          )}
+        </Stack>
+      </DialogContent>
+      
+      <DialogActions sx={{ p: 2.5 }}>
+        <Button onClick={handleClose} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleSubmit}
+          disabled={isSubmitting}
+          startIcon={isSubmitting ? <CircularProgress size={16} /> : <SaveIcon />}
+        >
+          {isSubmitting ? 'Adding...' : 'Add Participants'}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 });
 
-StatCard.displayName = 'StatCard';
+AddParticipantDialog.displayName = 'AddParticipantDialog';
 
 // ==================== Main ParticipantsTab Component ====================
 const ParticipantsTab = ({
@@ -601,15 +866,28 @@ const ParticipantsTab = ({
   const [secretaryId, setSecretaryId] = useState(currentSecretaryId || null);
   const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
   const [showApologyDialog, setShowApologyDialog] = useState(false);
+  const [showRemoveDialog, setShowRemoveDialog] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState(null);
+  const [participantToRemove, setParticipantToRemove] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [isMeetingStarted, setIsMeetingStarted] = useState(false);
   const [isMeetingEnded, setIsMeetingEnded] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(null);
+  const [showMaskedInfo, setShowMaskedInfo] = useState(false);
 
   const canEdit = useMemo(() => {
     return !isMeetingEnded && meetingStatus?.toLowerCase() !== 'ended' && meetingStatus?.toLowerCase() !== 'cancelled';
   }, [isMeetingEnded, meetingStatus]);
+
+  const getDisplayEmail = (email) => {
+    if (!email) return '';
+    return showMaskedInfo ? email : maskEmail(email);
+  };
+
+  const getDisplayPhone = (phone) => {
+    if (!phone) return '';
+    return showMaskedInfo ? phone : maskPhone(phone);
+  };
 
   const checkMeetingStatus = useCallback(() => {
     const status = meetingStatus?.toLowerCase();
@@ -676,7 +954,7 @@ const ParticipantsTab = ({
     setLoading(true);
     try {
       for (const participant of newParticipants) {
-        await api.post(`/action-tracker/meetings/${meetingId}/participants`, participant);
+        await api.post(`/action-tracker/meetings/${meetingId}/members`, participant);
       }
       
       setSnackbar({
@@ -706,16 +984,6 @@ const ParticipantsTab = ({
     
     setLoading(true);
     try {
-      const participantsResponse = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
-      const currentParticipants = participantsResponse.data;
-      const currentChairperson = currentParticipants.find(p => p.is_chairperson === true);
-      
-      await api.patch(`/action-tracker/meetings/${meetingId}/participants/${participantId}`, { is_chairperson: true });
-      
-      if (currentChairperson && currentChairperson.id !== participantId) {
-        await api.patch(`/action-tracker/meetings/${meetingId}/participants/${currentChairperson.id}`, { is_chairperson: false });
-      }
-      
       await api.patch(`/action-tracker/meetings/${meetingId}`, { chairperson_id: participantId });
       
       setChairpersonId(participantId);
@@ -738,16 +1006,6 @@ const ParticipantsTab = ({
     
     setLoading(true);
     try {
-      const participantsResponse = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
-      const currentParticipants = participantsResponse.data;
-      const currentSecretary = currentParticipants.find(p => p.is_secretary === true);
-      
-      await api.patch(`/action-tracker/meetings/${meetingId}/participants/${participantId}`, { is_secretary: true });
-      
-      if (currentSecretary && currentSecretary.id !== participantId) {
-        await api.patch(`/action-tracker/meetings/${meetingId}/participants/${currentSecretary.id}`, { is_secretary: false });
-      }
-      
       await api.patch(`/action-tracker/meetings/${meetingId}`, { secretary_id: participantId });
       
       setSecretaryId(participantId);
@@ -816,29 +1074,59 @@ const ParticipantsTab = ({
     if (!selectedParticipant) return;
     await handleAttendanceChange(selectedParticipant.id, 'absent_with_apology', message);
     
-    await api.post(`/action-tracker/meetings/${meetingId}/notify-participants`, {
-      participant_ids: [selectedParticipant.id],
-      notification_type: ['email'],
-      custom_message: `Apology Reason: ${message}`
-    });
+    try {
+      await api.post(`/action-tracker/meetings/${meetingId}/notify-participants`, {
+        participant_ids: [selectedParticipant.id],
+        notification_type: ['email'],
+        custom_message: `Apology Reason: ${message}`
+      });
+    } catch (error) {
+      console.error('Failed to send notification:', error);
+    }
   }, [selectedParticipant, handleAttendanceChange, meetingId]);
 
- const getStatusChip = useCallback((status, apologyComment = '') => {
-  switch (status) {
-    case 'attended':
-      return <Chip size="small" label="Attended" color="success" icon={<CheckIcon />} />;
-    case 'absent_with_apology':
-      return (
-        <Tooltip title={apologyComment || "Apology provided"}>
-          <Chip size="small" label="Absent (Apology)" color="warning" icon={<MessageIcon />} variant="outlined" />
-        </Tooltip>
-      );
-    case 'absent':
-      return <Chip size="small" label="Absent" color="error" icon={<CancelIcon />} />;
-    default:
-      return <Chip size="small" label="Pending" color="default" icon={<HourglassEmptyIcon />} />;  // Now this works
-  }
-}, []);
+  const handleRemoveParticipant = useCallback(async (participantId) => {
+    setLoading(true);
+    try {
+      await api.delete(`/action-tracker/meetings/${meetingId}/participants/${participantId}`);
+      
+      setSnackbar({
+        open: true,
+        message: 'Participant removed successfully',
+        severity: 'success'
+      });
+      
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error('Failed to remove participant:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.detail || 'Failed to remove participant',
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
+      setShowRemoveDialog(false);
+      setParticipantToRemove(null);
+    }
+  }, [meetingId, onRefresh]);
+
+  const getStatusChip = useCallback((status, apologyComment = '') => {
+    switch (status) {
+      case 'attended':
+        return <Chip size="small" label="Attended" color="success" icon={<CheckIcon />} />;
+      case 'absent_with_apology':
+        return (
+          <Tooltip title={apologyComment || "Apology provided"}>
+            <Chip size="small" label="Absent (Apology)" color="warning" icon={<MessageIcon />} variant="outlined" />
+          </Tooltip>
+        );
+      case 'absent':
+        return <Chip size="small" label="Absent" color="error" icon={<CancelIcon />} />;
+      default:
+        return <Chip size="small" label="Pending" color="default" icon={<HourglassEmptyIcon />} />;
+    }
+  }, []);
 
   const stats = useMemo(() => ({
     attended: Object.values(attendanceStatus).filter(s => s === 'attended').length,
@@ -861,6 +1149,17 @@ const ParticipantsTab = ({
             <Typography variant="body2">This meeting has ended. Attendance tracking and participant management are disabled.</Typography>
           </Alert>
 
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              size="small"
+              startIcon={showMaskedInfo ? <VisibilityOffIcon /> : <InfoIcon />}
+              onClick={() => setShowMaskedInfo(!showMaskedInfo)}
+            >
+              {showMaskedInfo ? 'Hide Contact Info' : 'Show Contact Info'}
+            </Button>
+          </Box>
+
+          {/* Stats Row */}
           <Grid container spacing={2}>
             <Grid size={{ xs: 6, sm: 3 }}>
               <StatCard title="Total Participants" value={stats.total} icon={<PeopleIcon />} color={theme.palette.primary.main} />
@@ -876,6 +1175,7 @@ const ParticipantsTab = ({
             </Grid>
           </Grid>
 
+          {/* Participants Table - Read Only */}
           <TableContainer component={Paper} variant="outlined">
             <Table>
               <TableHead>
@@ -888,53 +1188,56 @@ const ParticipantsTab = ({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {participants.map((participant) => (
-                  <TableRow key={participant.id} hover sx={{ opacity: 0.8 }}>
-                    <TableCell>
-                      <Stack direction="row" alignItems="center" spacing={1.5}>
-                        <Avatar sx={{ width: 36, height: 36 }}>
-                          {participant.name?.[0] || participant.full_name?.[0] || '?'}
-                        </Avatar>
-                        <Typography variant="body2" fontWeight={600}>{participant.name || participant.full_name}</Typography>
-                      </Stack>
-                    </TableCell>
-                    <TableCell>
-                      <Stack spacing={0.5}>
-                        {participant.email && (
-                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <EmailIcon fontSize="small" sx={{ fontSize: 12 }} />
-                            {participant.email}
-                          </Typography>
+                {participants.map((participant) => {
+                  const fullName = participant.name || participant.full_name || `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email;
+                  return (
+                    <TableRow key={participant.id} hover sx={{ opacity: 0.8 }}>
+                      <TableCell>
+                        <Stack direction="row" alignItems="center" spacing={1.5}>
+                          <Avatar sx={{ width: 36, height: 36, bgcolor: 'primary.main' }}>
+                            {fullName?.[0]?.toUpperCase() || '?'}
+                          </Avatar>
+                          <Typography variant="body2" fontWeight={600}>{fullName}</Typography>
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        <Stack spacing={0.5}>
+                          {participant.email && (
+                            <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <EmailIcon fontSize="small" sx={{ fontSize: 12 }} />
+                              {getDisplayEmail(participant.email)}
+                            </Typography>
+                          )}
+                          {participant.telephone && (
+                            <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <PhoneIcon fontSize="small" sx={{ fontSize: 12 }} />
+                              {getDisplayPhone(participant.telephone)}
+                            </Typography>
+                          )}
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={1}>
+                          {chairpersonId === participant.id && <Chip size="small" label="Chairperson" color="primary" variant="outlined" icon={<StarIcon />} />}
+                          {secretaryId === participant.id && <Chip size="small" label="Secretary" color="secondary" variant="outlined" icon={<SecretaryIcon />} />}
+                          {chairpersonId !== participant.id && secretaryId !== participant.id && <Chip size="small" label="Member" color="default" variant="outlined" />}
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        {getStatusChip(attendanceStatus[participant.id] || participant.attendance_status || 'pending', apologyComments[participant.id])}
+                      </TableCell>
+                      <TableCell>
+                        {(attendanceStatus[participant.id] === 'absent_with_apology' || participant.attendance_status === 'absent_with_apology') && (
+                          <Tooltip title={apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}>
+                            <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}
+                            </Typography>
+                          </Tooltip>
                         )}
-                        {participant.telephone && (
-                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <PhoneIcon fontSize="small" sx={{ fontSize: 12 }} />
-                            {participant.telephone}
-                          </Typography>
-                        )}
-                      </Stack>
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={1}>
-                        {participant.is_chairperson && <Chip size="small" label="Chairperson" color="primary" variant="outlined" icon={<StarIcon />} />}
-                        {participant.is_secretary && <Chip size="small" label="Secretary" color="secondary" variant="outlined" icon={<SecretaryIcon />} />}
-                        {!participant.is_chairperson && !participant.is_secretary && <Chip size="small" label="Member" color="default" variant="outlined" />}
-                      </Stack>
-                    </TableCell>
-                    <TableCell>
-                      {getStatusChip(attendanceStatus[participant.id] || participant.attendance_status || 'pending', apologyComments[participant.id])}
-                    </TableCell>
-                    <TableCell>
-                      {(attendanceStatus[participant.id] === 'absent_with_apology' || participant.attendance_status === 'absent_with_apology') && (
-                        <Tooltip title={apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}>
-                          <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}
-                          </Typography>
-                        </Tooltip>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>
@@ -964,14 +1267,39 @@ const ParticipantsTab = ({
           </Typography>
         </Alert>
 
-        {canEdit && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)} sx={{ borderRadius: 2 }}>
-              Add Participants
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Typography variant="subtitle1" fontWeight={600}>
+            <PeopleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+            Participants ({stats.total})
+          </Typography>
+          
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              startIcon={showMaskedInfo ? <VisibilityOffIcon /> : <InfoIcon />}
+              onClick={() => setShowMaskedInfo(!showMaskedInfo)}
+            >
+              {showMaskedInfo ? 'Hide Contact Info' : 'Show Contact Info'}
             </Button>
-          </Box>
-        )}
+            <Button 
+              variant="contained" 
+              startIcon={loading ? <CircularProgress size={20} /> : <RefreshIcon />} 
+              onClick={() => onRefresh?.()} 
+              disabled={loading}
+              sx={{ borderRadius: 2 }}
+            >
+              Refresh
+            </Button>
+          </Stack>
+        </Box>
 
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)} sx={{ borderRadius: 2 }}>
+            Add Participants
+          </Button>
+        </Box>
+
+        {/* Stats Row */}
         <Grid container spacing={2}>
           <Grid size={{ xs: 6, sm: 3 }}>
             <StatCard title="Total Participants" value={stats.total} icon={<PeopleIcon />} color={theme.palette.primary.main} />
@@ -987,6 +1315,7 @@ const ParticipantsTab = ({
           </Grid>
         </Grid>
 
+        {/* Attendance Rate */}
         <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.success.main, 0.1), borderRadius: 2 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
             <Typography variant="body2" fontWeight={600}>Attendance Rate</Typography>
@@ -998,6 +1327,7 @@ const ParticipantsTab = ({
           </Typography>
         </Paper>
 
+        {/* Participants Table */}
         <TableContainer component={Paper} variant="outlined">
           <Table>
             <TableHead>
@@ -1011,92 +1341,132 @@ const ParticipantsTab = ({
               </TableRow>
             </TableHead>
             <TableBody>
-              {participants.map((participant) => (
-                <TableRow key={participant.id} hover>
-                  <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={1.5}>
-                      <Avatar sx={{ 
-                        width: 36, height: 36, 
-                        bgcolor: participant.is_chairperson ? theme.palette.primary.main : (participant.is_secretary ? theme.palette.secondary.main : '#6366f1')
-                      }}>
-                        {participant.name?.[0] || participant.full_name?.[0] || '?'}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="body2" fontWeight={600}>{participant.name || participant.full_name}</Typography>
-                        {participant.title && <Typography variant="caption" color="text.secondary">{participant.title}</Typography>}
-                      </Box>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack spacing={0.5}>
-                      {participant.email && (
-                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <EmailIcon fontSize="small" sx={{ fontSize: 12 }} /> {participant.email}
-                        </Typography>
+              {participants.map((participant) => {
+                const fullName = participant.name || participant.full_name || `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email;
+                const isChairperson = chairpersonId === participant.id;
+                const isSecretary = secretaryId === participant.id;
+                const currentStatus = attendanceStatus[participant.id] || participant.attendance_status || 'pending';
+                
+                return (
+                  <TableRow key={participant.id} hover>
+                    <TableCell>
+                      <Stack direction="row" alignItems="center" spacing={1.5}>
+                        <Avatar sx={{ 
+                          width: 36, height: 36, 
+                          bgcolor: isChairperson ? theme.palette.primary.main : (isSecretary ? theme.palette.secondary.main : '#6366f1')
+                        }}>
+                          {fullName?.[0]?.toUpperCase() || '?'}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="body2" fontWeight={600}>{fullName}</Typography>
+                          {participant.title && <Typography variant="caption" color="text.secondary">{participant.title}</Typography>}
+                        </Box>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack spacing={0.5}>
+                        {participant.email && (
+                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <EmailIcon fontSize="small" sx={{ fontSize: 12 }} />
+                            {getDisplayEmail(participant.email)}
+                          </Typography>
+                        )}
+                        {participant.telephone && (
+                          <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <PhoneIcon fontSize="small" sx={{ fontSize: 12 }} />
+                            {getDisplayPhone(participant.telephone)}
+                          </Typography>
+                        )}
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        {isChairperson ? (
+                          <Chip size="small" label="Chairperson" color="primary" icon={<StarIcon />} />
+                        ) : (
+                          <Button size="small" variant="outlined" startIcon={<StarIcon />} onClick={() => handleSetChairperson(participant.id)} disabled={loading}>
+                            Set as Chairperson
+                          </Button>
+                        )}
+                        
+                        {isSecretary ? (
+                          <Chip size="small" label="Secretary" color="secondary" icon={<SecretaryIcon />} />
+                        ) : (
+                          <Button size="small" variant="outlined" startIcon={<SecretaryIcon />} onClick={() => handleSetSecretary(participant.id)} disabled={loading}>
+                            Set as Secretary
+                          </Button>
+                        )}
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      {getStatusChip(currentStatus, apologyComments[participant.id])}
+                    </TableCell>
+                    <TableCell>
+                      {(currentStatus === 'absent_with_apology') && (
+                        <Tooltip title={apologyComments[participant.id] || 'No comment provided'}>
+                          <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {apologyComments[participant.id] || 'No comment provided'}
+                          </Typography>
+                        </Tooltip>
                       )}
-                      {participant.telephone && (
-                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <PhoneIcon fontSize="small" sx={{ fontSize: 12 }} /> {participant.telephone}
-                        </Typography>
-                      )}
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={1} flexWrap="wrap">
-                      {chairpersonId === participant.id ? (
-                        <Chip size="small" label="Chairperson" color="primary" icon={<StarIcon />} />
-                      ) : (
-                        <Button size="small" variant="outlined" startIcon={<StarIcon />} onClick={() => handleSetChairperson(participant.id)} disabled={loading}>
-                          Set as Chairperson
-                        </Button>
-                      )}
-                      
-                      {secretaryId === participant.id ? (
-                        <Chip size="small" label="Secretary" color="secondary" icon={<SecretaryIcon />} />
-                      ) : (
-                        <Button size="small" variant="outlined" startIcon={<SecretaryIcon />} onClick={() => handleSetSecretary(participant.id)} disabled={loading}>
-                          Set as Secretary
-                        </Button>
-                      )}
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    {getStatusChip(attendanceStatus[participant.id] || participant.attendance_status || 'pending', apologyComments[participant.id])}
-                  </TableCell>
-                  <TableCell>
-                    {(attendanceStatus[participant.id] === 'absent_with_apology' || participant.attendance_status === 'absent_with_apology') && (
-                      <Tooltip title={apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}>
-                        <Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {apologyComments[participant.id] || participant.apology_comment || 'No comment provided'}
-                        </Typography>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  <TableCell align="center">
-                    <Stack direction="row" spacing={1} justifyContent="center">
-                      <Tooltip title="Mark Attended">
-                        <IconButton size="small" color="success" onClick={() => handleAttendanceChange(participant.id, 'attended')} disabled={attendanceStatus[participant.id] === 'attended' || loading}>
-                          <CheckIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Mark Absent">
-                        <IconButton size="small" color="error" onClick={() => handleAttendanceChange(participant.id, 'absent')} disabled={attendanceStatus[participant.id] === 'absent' || loading}>
-                          <CancelIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Mark Absent with Apology">
-                        <IconButton size="small" color="warning" onClick={() => handleOpenApologyDialog(participant)} disabled={attendanceStatus[participant.id] === 'absent_with_apology' || loading}>
-                          <MessageIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack direction="row" spacing={1} justifyContent="center">
+                        <Tooltip title="Mark Attended">
+                          <IconButton 
+                            size="small" 
+                            color="success" 
+                            onClick={() => handleAttendanceChange(participant.id, 'attended')} 
+                            disabled={currentStatus === 'attended' || loading || !isMeetingStarted}
+                          >
+                            <CheckIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Mark Absent">
+                          <IconButton 
+                            size="small" 
+                            color="error" 
+                            onClick={() => handleAttendanceChange(participant.id, 'absent')} 
+                            disabled={currentStatus === 'absent' || loading || !isMeetingStarted}
+                          >
+                            <CancelIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Mark Absent with Apology">
+                          <IconButton 
+                            size="small" 
+                            color="warning" 
+                            onClick={() => handleOpenApologyDialog(participant)} 
+                            disabled={currentStatus === 'absent_with_apology' || loading || !isMeetingStarted}
+                          >
+                            <MessageIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {!isChairperson && !isSecretary && (
+                          <Tooltip title="Remove Participant">
+                            <IconButton 
+                              size="small" 
+                              color="error" 
+                              onClick={() => {
+                                setParticipantToRemove(participant);
+                                setShowRemoveDialog(true);
+                              }} 
+                              disabled={loading || !isMeetingStarted}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>
 
+        {/* Dialogs */}
         <AddParticipantDialog
           open={showAddParticipantDialog}
           onClose={() => setShowAddParticipantDialog(false)}
@@ -1114,12 +1484,25 @@ const ParticipantsTab = ({
           loading={loading}
         />
 
+        <RemoveParticipantDialog
+          open={showRemoveDialog}
+          onClose={() => {
+            setShowRemoveDialog(false);
+            setParticipantToRemove(null);
+          }}
+          onConfirm={() => handleRemoveParticipant(participantToRemove?.id)}
+          participantName={participantToRemove?.name || participantToRemove?.full_name || ''}
+          loading={loading}
+        />
+
+        {/* Loading Indicator */}
         {loading && (
           <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000 }}>
             <CircularProgress size={24} />
           </Box>
         )}
 
+        {/* Snackbar */}
         <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
           <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
             {snackbar.message}
@@ -1130,4 +1513,6 @@ const ParticipantsTab = ({
   );
 };
 
+// Export components
+export { AddParticipantDialog, ApologyDialog, RemoveParticipantDialog, StatCard };
 export default ParticipantsTab;

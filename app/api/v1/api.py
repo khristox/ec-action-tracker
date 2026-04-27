@@ -20,6 +20,7 @@ try:
     from app.api.v1.endpoints.menus import router as menus_router
     from app.api.v1.endpoints.chart_data import router as chart_data
     from app.api.v1.endpoints.meeting_participants import router as meeting_participants_router
+    from app.api.v1.endpoints.action_tracker.recordings import router as recordings_router
 
 
     
@@ -50,6 +51,15 @@ api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
 
 api_router.include_router(chart_data, prefix="/charts", tags=["charts"])
+
+
+#recordings_router.include_router(recordings_router, prefix="/meetings/{meeting_id}/recordings", tags=["meeting-recordings"])
+
+api_router.include_router(
+    recordings_router,
+    prefix="/meetings",
+    tags=["meeting-recordings"]
+)
 
 
 # Action Tracker (this already includes all sub-routers)

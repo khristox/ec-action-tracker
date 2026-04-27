@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box, Paper, Typography, TextField, Button, Grid, Avatar, Alert,
   CircularProgress, Divider, IconButton, Snackbar, Chip, Stack,
@@ -18,7 +18,8 @@ import {
   EventSeat as EventSeatIcon, ExpandMore as ExpandMoreIcon, ExpandLess as ExpandLessIcon,
   LocationCity as LocationCityIcon, DomainOutlined as StructureIcon,
   AccountTree as BrowseIcon, Search as SearchTabIcon, Lock as LockIcon,
-  Business as BusinessIcon, Home as HomeIcon
+  Business as BusinessIcon, Home as HomeIcon, CameraAlt as CameraIcon,
+  FlipCameraAndroid as FlipCameraIcon, Stop as StopIcon, Photo as PhotoIcon,RefreshOutlined
 } from '@mui/icons-material';
 
 import { useDispatch, useSelector } from 'react-redux';
@@ -33,6 +34,8 @@ import {
 } from '../../store/slices/authSlice';
 import { format } from 'date-fns';
 import api from '../../services/api';
+
+import CameraDialog from './CameraDialog'
 
 // Constants
 const ADDRESS_LEVELS = [
@@ -345,6 +348,7 @@ const LocationSearch = React.memo(({ value, onChange, onClear }) => {
           
           <ToggleButtonGroup value={locationMode} exclusive onChange={(_, val) => { if (val) { setLocationMode(val); setSearchTerm(''); setSearchResults([]); } }} size="small" fullWidth>
             <ToggleButton value="address"><PublicIcon sx={{ mr: 0.75, fontSize: 18 }} /> Address</ToggleButton>
+            <ToggleButton value="structure"><StructureIcon sx={{ mr: 0.75, fontSize: 18 }} /> Structure</ToggleButton>
           </ToggleButtonGroup>
           
           <Tabs value={activeTab} onChange={(_, newValue) => setActiveTab(newValue)} variant="fullWidth" sx={{ minHeight: 36 }}>
@@ -497,6 +501,10 @@ const AddressHierarchyDisplay = ({ location }) => {
   );
 };
 
+// Camera Dialog Component
+// Camera Dialog Component - Fixed for stable video
+
+
 // Main ProfileSettings Component
 const ProfileSettings = () => {
   const dispatch = useDispatch();
@@ -511,6 +519,7 @@ const ProfileSettings = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   
@@ -669,6 +678,17 @@ const ProfileSettings = () => {
     }
   };
 
+  const handleCameraCapture = async (file) => {
+    try {
+      const compressed = await compressImage(file);
+      setSelectedFile(compressed);
+      setPreviewUrl(URL.createObjectURL(compressed));
+      setUploadDialogOpen(true);
+    } catch {
+      setSnackbar({ open: true, message: 'Image processing failed', severity: 'error' });
+    }
+  };
+
   const handleUpload = async () => {
     if (!selectedFile) return;
     try {
@@ -752,14 +772,34 @@ const ProfileSettings = () => {
                       {user?.first_name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
                     </Avatar>
                     <Tooltip title="Change photo">
-                      <IconButton component="label" size="small" disabled={isUploading} sx={{ position: 'absolute', bottom: 0, right: 0, bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' }, width: 32, height: 32 }}>
+                      <IconButton 
+                        component="label" 
+                        size="small" 
+                        disabled={isUploading} 
+                        sx={{ position: 'absolute', bottom: 0, right: 0, bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' }, width: 32, height: 32 }}
+                      >
                         <input hidden accept="image/*" type="file" onChange={handleFileSelect} />
                         {isUploading ? <CircularProgress size={16} color="inherit" /> : <PhotoCamera sx={{ fontSize: 16 }} />}
                       </IconButton>
                     </Tooltip>
+                    <Tooltip title="Take photo with camera">
+                      <IconButton 
+                        size="small" 
+                        onClick={() => setCameraDialogOpen(true)} 
+                        disabled={isUploading}
+                        sx={{ position: 'absolute', bottom: 0, right: -32, bgcolor: 'secondary.main', color: 'white', '&:hover': { bgcolor: 'secondary.dark' }, width: 32, height: 32 }}
+                      >
+                        <CameraIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
                     {avatarUrl && !isDeleting && (
                       <Tooltip title="Remove photo">
-                        <IconButton size="small" onClick={handleDeletePicture} disabled={isDeleting} sx={{ position: 'absolute', bottom: 0, left: 0, bgcolor: 'error.main', color: 'white', '&:hover': { bgcolor: 'error.dark' }, width: 32, height: 32 }}>
+                        <IconButton 
+                          size="small" 
+                          onClick={handleDeletePicture} 
+                          disabled={isDeleting}
+                          sx={{ position: 'absolute', bottom: 0, left: 0, bgcolor: 'error.main', color: 'white', '&:hover': { bgcolor: 'error.dark' }, width: 32, height: 32 }}
+                        >
                           {isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteOutline sx={{ fontSize: 16 }} />}
                         </IconButton>
                       </Tooltip>
@@ -902,6 +942,13 @@ const ProfileSettings = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Camera Dialog */}
+      <CameraDialog 
+        open={cameraDialogOpen} 
+        onClose={() => setCameraDialogOpen(false)} 
+        onCapture={handleCameraCapture} 
+      />
 
       {/* Snackbar */}
       <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>

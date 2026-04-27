@@ -171,7 +171,8 @@ async def get_participant_list(
         )
     
     # Check access
-    if not list_obj.is_global and list_obj.created_by_id != current_user.id:
+    print(list_obj['created_by_id'])
+    if not list_obj['is_global'] and str(list_obj['created_by_id']) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied to this list"
@@ -412,58 +413,4 @@ async def remove_member_from_list(
             detail=f"Failed to remove member: {str(e)}"
         )
     
-    
-@router.get("/{list_id}/members", response_model=PaginatedParticipantResponse)
-async def get_list_members(
-    list_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-):
-    """Get all members of a participant list"""
-    try:
-        # First check if list exists and user has access
-        list_obj = await participant_list.get(db, list_id)
-        if not list_obj:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Participant list not found"
-            )
-        
-        # Check access
-        if not list_obj.is_global and list_obj.created_by_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied to this list"
-            )
-        
-        # Get members with pagination
-        members = await participant_list.get_list_participants(db, list_id, skip, limit)
-        
-        # Get total count
-        from sqlalchemy import func
-        from app.models.action_tracker import participant_list_members
-        
-        total_result = await db.execute(
-            select(func.count()).select_from(participant_list_members).where(
-                participant_list_members.c.participant_list_id == list_id
-            )
-        )
-        total = total_result.scalar() or 0
-        
-        return {
-            "items": members,
-            "total": total,
-            "page": skip // limit + 1 if limit > 0 else 1,
-            "size": limit,
-            "pages": (total + limit - 1) // limit if limit > 0 else 1
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting list members: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get list members: {str(e)}"
-        )
+ 

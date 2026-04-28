@@ -1090,3 +1090,5 @@ for model in [Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
               MeetingDocument, MeetingStatusHistory, ActionStatusHistory, 
               ActionComment, Participant, ParticipantList]:
     model.__allow_unmapped__ = True
+
+

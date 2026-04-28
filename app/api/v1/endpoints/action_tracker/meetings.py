@@ -22,6 +22,7 @@ from app.crud.action_tracker import meeting_crud, meeting_action, meeting_minute
 from app.db.session import get_db
 from app.models.audit import AuditLog
 from app.models.general.dynamic_attribute import Attribute
+from app.models.role import Role
 from app.models.user import User
 from app.models.action_tracker import (
     Meeting, MeetingAction, MeetingDocument, MeetingParticipant, 
@@ -38,6 +39,7 @@ from app.schemas.meeting_minutes.meeting_minutes import (
     MeetingActionCreate, MeetingActionResponse, MeetingMinutesCreate,
     MeetingMinutesResponse, MeetingMinutesUpdate
 )
+from app.schemas.meetings import ParticipantMeetingSummarySchema
 
 from .status_utils import get_status_id_by_short_name, get_status_by_short_name, get_valid_status_short_names
 from .utils import build_meeting_response as utils_build_meeting_response
@@ -208,7 +210,6 @@ def build_meeting_response(meeting_obj: Meeting) -> Optional[MeetingResponse]:
             organization=p.organization,
             is_chairperson=p.is_chairperson,
             is_secretary=getattr(p, 'is_secretary', False),
-            attendance_status=p.attendance_status,
             apology_comment=p.apology_comment,
             created_by_id=p.created_by_id,
             created_by_name=p.created_by.username if p.created_by else None,
@@ -1599,3 +1600,970 @@ async def delete_document(
 
 
 
+
+
+@router.get("/participant/detailed", response_model=List[ParticipantMeetingSummarySchema])
+async def get_meetings_as_participant_detailed(
+    user_id: Optional[int] = Query(None, description="User ID to filter meetings where user is a participant"),
+    email: Optional[str] = Query(None, description="Email address to filter meetings where user is a participant"),
+    status: Optional[str] = Query(None, description="Filter by meeting status: scheduled, in_progress, completed, cancelled"),
+    upcoming_only: bool = Query(False, description="Only show upcoming meetings"),
+    past_only: bool = Query(False, description="Only show past meetings"),
+    include_actions: bool = Query(True, description="Include action items assigned to user"),
+    include_minutes: bool = Query(True, description="Include meeting minutes"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all meetings where the specified user is a participant with detailed information
+    including minutes and action items assigned to the user.
+    """
+    
+    # Determine which user to search for
+    target_user_id = None
+    target_user_email = None
+    target_user = None
+    
+    if user_id is not None:
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        target_user = user_result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        target_user_id = target_user.id
+        target_user_email = target_user.email
+        
+    elif email is not None:
+        user_result = await db.execute(select(User).where(User.email == email))
+        target_user = user_result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"User with email {email} not found")
+        target_user_id = target_user.id
+        target_user_email = target_user.email
+        
+    else:
+        target_user = current_user
+        target_user_id = current_user.id
+        target_user_email = current_user.email
+    
+    # Authorization check
+    is_admin = any(role.code == "admin" for role in current_user.roles) if hasattr(current_user, 'roles') else False
+    
+    if target_user.id != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized to view other user's action items")
+    
+    # Build base query for meetings where the target user is a participant
+    query = select(Meeting).join(
+        Meeting.participants
+    ).where(
+        Meeting.participants.any(email=target_user_email)
+    ).options(
+        selectinload(Meeting.participants),
+        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.overall_status),
+        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_to)
+    )
+    
+    # Apply status filter
+    if status:
+        valid_statuses = [s.value for s in MeetingStatus]
+        if status.lower() not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        query = query.where(Meeting.status == status.lower())
+    
+    # Apply upcoming/past filters
+    now = datetime.utcnow()
+    if upcoming_only:
+        query = query.where(Meeting.meeting_date >= now)
+    if past_only:
+        query = query.where(Meeting.meeting_date < now)
+    
+    # Order by start date - FIXED: use start_date instead of meeting_date
+    query = query.order_by(Meeting.meeting_date.asc()).offset(offset).limit(limit)
+    
+    # Execute query
+    result = await db.execute(query)
+    meetings = result.scalars().all()
+    
+    # Build detailed response
+    response = []
+    
+    for meeting in meetings:
+        # Get minutes for this meeting
+        minutes = meeting.minutes if include_minutes else []
+        
+        # Get action items assigned to the target user from all minutes of this meeting
+        user_action_items = []
+        if include_actions:
+            for minute in minutes:
+                for action in minute.actions:
+                    if action.assigned_to_id == target_user_id:
+                        # Get status name from the overall_status relationship
+                        status_name = "pending"  # default
+                        if action.overall_status:
+                            # If overall_status has shortname attribute
+                            if hasattr(action.overall_status, 'shortname'):
+                                status_name = action.overall_status.shortname
+                            elif hasattr(action.overall_status, 'name'):
+                                status_name = action.overall_status.name
+                            elif hasattr(action.overall_status, 'value'):
+                                status_name = action.overall_status.value
+                        
+                        user_action_items.append({
+                            "id": action.id,
+                            "description": action.description,
+                            "assigned_to_id": action.assigned_to_id,
+                            "assigned_to_name": action.assigned_to.full_name or action.assigned_to.name if action.assigned_to else None,
+                            "due_date": action.due_date,
+                            "status": status_name,
+                            "priority": action.priority,
+                            "remarks": action.remarks,
+                            "completed_at": action.completed_at,
+                            "overall_progress_percentage": action.overall_progress_percentage,
+                            "assigned_to": {
+                                "id": action.assigned_to.id,
+                                "full_name": action.assigned_to.full_name,
+                                "name": action.assigned_to.name,
+                                "email": action.assigned_to.email
+                            } if action.assigned_to else None
+                        })
+        
+        # Format minutes with their actions
+        formatted_minutes = []
+        for minute in minutes:
+            minute_actions = []
+            for action in minute.actions:
+                # Get status name for action
+                action_status = "pending"
+                if action.overall_status:
+                    if hasattr(action.overall_status, 'shortname'):
+                        action_status = action.overall_status.shortname
+                    elif hasattr(action.overall_status, 'name'):
+                        action_status = action.overall_status.name
+                
+                minute_actions.append({
+                    "id": action.id,
+                    "description": action.description,
+                    "assigned_to_id": action.assigned_to_id,
+                    "assigned_to_name": action.assigned_to.full_name or action.assigned_to.name if action.assigned_to else None,
+                    "due_date": action.due_date,
+                    "status": action_status,
+                    "priority": action.priority,
+                    "remarks": action.remarks,
+                    "completed_at": action.completed_at,
+                    "overall_progress_percentage": action.overall_progress_percentage
+                })
+            
+            formatted_minutes.append({
+                "id": minute.id,
+                "topic": minute.topic,
+                "discussion": minute.discussion,
+                "decisions": minute.decisions,
+                "created_at": minute.created_at,
+                "actions": minute_actions
+            })
+        
+        # Format participants
+        participants = []
+        for participant in meeting.participants:
+            is_target_user = participant.email == target_user_email
+            participants.append({
+                "id": participant.id,
+           
+                "name": participant.name,
+                "email": participant.email,
+                "is_current_user": is_target_user
+            })
+        
+        # Calculate action item statistics for the target user
+        action_items_count = len(user_action_items)
+        pending_actions = [a for a in user_action_items if a.get("status") == "pending"]
+        in_progress_actions = [a for a in user_action_items if a.get("status") == "in_progress"]
+        completed_actions = [a for a in user_action_items if a.get("status") == "completed"]
+        overdue_actions = [
+            a for a in user_action_items 
+            if a.get("due_date") and a.get("due_date") < now and a.get("status") != "completed"
+        ]
+        
+        response.append({
+            "meeting": {
+                "id": meeting.id,
+                "title": meeting.title,
+              
+                "description": meeting.description,
+                "start_date": meeting.meeting_date,
+                "end_date": meeting.meeting_date,
+                "location": meeting.location,
+                "meeting_link": 'meeting.meeting_link',
+                "status": 'meeting.status.value if meeting.status else "scheduled"',
+                "is_virtual": 'meeting.is_virtual',
+                "created_by": meeting.created_by,
+                "created_at": meeting.created_at,
+                "updated_at": meeting.updated_at,
+                "participants": participants,
+                "minutes": formatted_minutes if include_minutes else []
+            },
+            "user_info": {
+                "id": target_user_id,
+                "email": target_user_email,
+                "name": target_user.full_name or target_user.name if target_user else None
+            },
+            "user_action_items": user_action_items,
+            "minutes_count": len(minutes),
+            "action_items_count": action_items_count,
+            "pending_actions_count": len(pending_actions),
+            "in_progress_actions_count": len(in_progress_actions),
+            "completed_actions_count": len(completed_actions),
+            "overdue_actions_count": len(overdue_actions)
+        })
+    
+    return response
+
+@router.get("/participant/check")
+async def check_if_participant(
+    meeting_id: int = Query(..., description="Meeting ID to check"),
+    user_id: Optional[int] = Query(None, description="User ID to check"),
+    email: Optional[str] = Query(None, description="User email to check"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check if a user is a participant in a specific meeting.
+    If no user_id or email provided, checks the currently logged-in user.
+    """
+    
+    # Determine which user to check
+    target_email = None
+    
+    if user_id is not None:
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        target_email = user.email
+    elif email is not None:
+        target_email = email
+    else:
+        target_email = current_user.email
+    
+    # Check if meeting exists
+    meeting_result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    meeting = meeting_result.scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail=f"Meeting with ID {meeting_id} not found")
+    
+    # Check if user is a participant
+    is_participant = any(p.email == target_email for p in meeting.participants)
+    
+    return {
+        "meeting_id": meeting_id,
+        "user_email": target_email,
+        "is_participant": is_participant,
+        "meeting_title": meeting.title,
+        "meeting_status": meeting.status.value if meeting.status else "scheduled"
+    }
+
+
+@router.get("/participant/meetings/summary")
+async def get_participant_meetings_summary(
+    user_id: Optional[int] = Query(None),
+    email: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a summary of meetings for a participant including counts by status.
+    """
+    
+    # Determine target user
+    target_email = None
+    target_user = None
+    
+    if user_id is not None:
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        target_user = user_result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail=f"User not found")
+        target_email = target_user.email
+    elif email is not None:
+        target_email = email
+        user_result = await db.execute(select(User).where(User.email == email))
+        target_user = user_result.scalar_one_or_none()
+    else:
+        target_email = current_user.email
+        target_user = current_user
+    
+    # Get all meetings where user is participant
+    query = select(Meeting).join(
+        Meeting.participants
+    ).where(
+        Meeting.participants.any(email=target_email)
+    )
+    
+    result = await db.execute(query)
+    meetings = result.scalars().all()
+    
+    now = datetime.utcnow()
+    
+    # Calculate statistics
+    stats = {
+        "user": {
+            "id": target_user.id if target_user else None,
+            "email": target_email,
+            "name": target_user.full_name or target_user.name if target_user else None
+        },
+        "total_meetings": len(meetings),
+        "by_status": {
+            "scheduled": len([m for m in meetings if m.status == "scheduled"]),
+            "in_progress": len([m for m in meetings if m.status == "in_progress"]),
+            "completed": len([m for m in meetings if m.status == "completed"]),
+            "cancelled": len([m for m in meetings if m.status == "cancelled"])
+        },
+        "upcoming_meetings": len([m for m in meetings if m.start_date >= now and m.status != "completed"]),
+        "past_meetings": len([m for m in meetings if m.start_date < now]),
+        "meetings_this_month": len([
+            m for m in meetings 
+            if m.start_date.year == now.year and m.start_date.month == now.month
+        ])
+    }
+    
+    return stats
+
+
+@router.get("/participant/action-items")
+async def get_user_action_items_from_meetings(
+    user_id: Optional[UUID] = Query(None, description="User ID to get action items for"),
+    email: Optional[str] = Query(None, description="User email to get action items for"),
+    phone: Optional[str] = Query(None, description="User phone number to get action items for"),
+    status: Optional[str] = Query(None, description="Filter by status: pending, in_progress, completed, blocked"),
+    priority: Optional[str] = Query(None, description="Filter by priority: low, medium, high, urgent"),
+    upcoming_only: bool = Query(False, description="Only show action items from upcoming meetings"),
+    overdue_only: bool = Query(False, description="Only show overdue action items"),
+    due_within_days: Optional[int] = Query(None, description="Show action items due within X days"),
+    meeting_id: Optional[int] = Query(None, description="Filter by specific meeting ID"),
+    include_completed: bool = Query(True, description="Include completed action items"),
+    sort_by: str = Query("due_date", description="Sort by: due_date, priority, status, created_at"),
+    sort_order: str = Query("asc", description="Sort order: asc or desc"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all action items assigned to a user across their participant meetings.
+    
+    The action items are matched by comparing the target user's email or phone
+    with the assigned_to_name field in the meeting_actions table.   
+    """
+    
+    # Determine target user
+    target_user = await _resolve_target_user(user_id, email, phone, current_user, db)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Authorization check
+    is_admin = any(role.code == "admin" for role in current_user.roles) if hasattr(current_user, 'roles') else False
+    
+    if target_user.id != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized to view other user's action items")
+    
+    target_email = target_user.email
+    target_phone = phone or getattr(target_user, 'phone', None)
+    target_name = target_user.full_name or target_user.name
+    
+    # Build query for meetings where user is participant
+    meetings_query = select(Meeting).join(
+        Meeting.participants
+    ).where(
+        Meeting.participants.any(email=target_email)
+    ).options(
+        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions)
+    )
+    
+    if upcoming_only:
+        meetings_query = meetings_query.where(Meeting.start_date >= datetime.utcnow())
+    
+    if meeting_id:
+        meetings_query = meetings_query.where(Meeting.id == meeting_id)
+    
+    result = await db.execute(meetings_query)
+    meetings = result.scalars().all()
+    
+    if not meetings:
+        return {
+            "total": 0,
+            "action_items": [],
+            "summary": _get_empty_summary()
+        }
+    
+    # Helper function to extract string from assigned_to_name (handles dict or string)
+    def extract_assigned_to_string(assigned_to):
+        """Extract string value from assigned_to_name whether it's a string, dict, or list"""
+        if assigned_to is None:
+            return ''
+        if isinstance(assigned_to, str):
+            return assigned_to
+        if isinstance(assigned_to, dict):
+            return assigned_to.get('name', assigned_to.get('email', assigned_to.get('full_name', str(assigned_to))))
+        if isinstance(assigned_to, list):
+            return ' '.join(str(item) for item in assigned_to)
+        return str(assigned_to)
+    
+    # Helper to get action status (handles different field names)
+    def get_action_status(action):
+        """Get status from action, handling different possible field names"""
+        # Try common field names
+        if hasattr(action, 'status'):
+            status_value = action.status
+            if hasattr(status_value, 'value'):
+                return status_value.value
+            return str(status_value) if status_value else "pending"
+        if hasattr(action, 'action_status'):
+            return action.action_status
+        if hasattr(action, 'state'):
+            return action.state
+        # Default
+        return "pending"
+    
+    # Helper to get action priority
+    def get_action_priority(action):
+        """Get priority from action"""
+        if hasattr(action, 'priority'):
+            return action.priority
+        if hasattr(action, 'action_priority'):
+            return action.action_priority
+        return "medium"
+    
+    # Collect action items where assigned_to_name matches user
+    action_items = []
+    
+    for meeting in meetings:
+        for minute in meeting.minutes:
+            for action in minute.actions:
+                # Extract string from assigned_to_name
+                assigned_to_raw = extract_assigned_to_string(action.assigned_to_name)
+                assigned_to_name_lower = assigned_to_raw.lower()
+                
+                # Match by email, phone, or name
+                is_match = False
+                
+                if target_email and target_email.lower() in assigned_to_name_lower:
+                    is_match = True
+                elif target_phone and target_phone in assigned_to_name_lower:
+                    is_match = True
+                elif target_name and target_name.lower() in assigned_to_name_lower:
+                    is_match = True
+                
+                if is_match:
+                    action_status = get_action_status(action)
+                    action_priority = get_action_priority(action)
+                    
+                    action_items.append({
+                        "id": action.id,
+                        "description": action.description,
+                        "assigned_to_name": assigned_to_raw,
+                        "due_date": action.due_date,
+                        "status": action_status,
+                        "priority": action_priority,
+                        "remarks": getattr(action, 'remarks', None),
+                        "completed_at": getattr(action, 'completed_at', None),
+                        "created_at": getattr(action, 'created_at', None),
+                        "updated_at": getattr(action, 'updated_at', None),
+                        "overall_progress_percentage": getattr(action, 'overall_progress_percentage', 0),
+                        "meeting": {
+                            "id": meeting.id,
+                            "title": meeting.title,
+                            "start_date": meeting.meeting_date,
+                            "status": getattr(meeting, 'status', 'scheduled')
+                        },
+                        "minute": {
+                            "id": minute.id,
+                            "topic": minute.topic
+                        }
+                    })
+    
+    # Apply filters
+    filtered_items = _apply_action_filters(
+        action_items, 
+        status=status,
+        priority=priority,
+        overdue_only=overdue_only,
+        due_within_days=due_within_days,
+        include_completed=include_completed
+    )
+    
+    # Apply sorting
+    filtered_items = _apply_action_sorting(filtered_items, sort_by, sort_order)
+    
+    total = len(filtered_items)
+    paginated_items = filtered_items[offset:offset + limit]
+    summary = _generate_action_summary(filtered_items, target_user)
+    
+    return {
+        "user": {
+            "id": str(target_user.id),
+            "email": target_email,
+            "phone": target_phone,
+            "name": target_name
+        },
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "action_items": paginated_items,
+        "summary": summary,
+        "filters_applied": {
+            "status": status,
+            "priority": priority,
+            "upcoming_only": upcoming_only,
+            "overdue_only": overdue_only,
+            "due_within_days": due_within_days,
+            "meeting_id": meeting_id
+        }
+    }
+
+
+async def _resolve_target_user(
+    user_id: Optional[UUID], 
+    email: Optional[str], 
+    phone: Optional[str],
+    current_user: User, 
+    db: AsyncSession
+) -> Optional[User]:
+    """Resolve target user from user_id, email, phone, or default to current user"""
+    
+    if user_id is not None:
+        result = await db.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+    elif email is not None:
+        result = await db.execute(select(User).where(User.email == email))
+        return result.scalar_one_or_none()
+    elif phone is not None:
+        result = await db.execute(select(User).where(User.phone == phone))
+        return result.scalar_one_or_none()
+    else:
+        return current_user
+
+
+def _apply_action_filters(items, status=None, priority=None, overdue_only=False, due_within_days=None, include_completed=True):
+    """Apply filters to action items"""
+    from datetime import datetime, timedelta
+    
+    now = datetime.utcnow()
+    filtered = items
+    
+    if not include_completed:
+        filtered = [i for i in filtered if i.get("status") != "completed"]
+    
+    if status:
+        filtered = [i for i in filtered if i.get("status") == status]
+    
+    if priority:
+        filtered = [i for i in filtered if i.get("priority") == priority]
+    
+    if overdue_only:
+        filtered = [i for i in filtered if i.get("due_date") and i["due_date"] < now and i.get("status") != "completed"]
+    
+    if due_within_days:
+        cutoff_date = now + timedelta(days=due_within_days)
+        filtered = [i for i in filtered if i.get("due_date") and i["due_date"] <= cutoff_date]
+    
+    return filtered
+
+
+def _apply_action_sorting(items, sort_by, sort_order):
+    """Apply sorting to action items"""
+    from datetime import datetime
+    
+    reverse = sort_order.lower() == "desc"
+    
+    sort_keys = {
+        "due_date": lambda x: x.get("due_date") or datetime.max,
+        "priority": lambda x: {"urgent": 0, "high": 1, "medium": 2, "low": 3}.get(x.get("priority", "medium"), 2),
+        "status": lambda x: {"pending": 0, "in_progress": 1, "completed": 2}.get(x.get("status"), 0),
+        "created_at": lambda x: x.get("created_at") or datetime.min,
+        "progress": lambda x: x.get("overall_progress_percentage", 0)
+    }
+    
+    key_func = sort_keys.get(sort_by, sort_keys["due_date"])
+    return sorted(items, key=key_func, reverse=reverse)
+
+
+def _get_empty_summary():
+    """Return empty summary structure"""
+    return {
+        "total_actions": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "completed": 0,
+        "overdue": 0,
+        "completion_rate": 0
+    }
+
+
+def _generate_action_summary(action_items, target_user):
+    """Generate summary statistics for action items"""
+    from datetime import datetime
+    
+    if not action_items:
+        return _get_empty_summary()
+    
+    now = datetime.utcnow()
+    
+    return {
+        "total_actions": len(action_items),
+        "pending": len([a for a in action_items if a.get("status") == "pending"]),
+        "in_progress": len([a for a in action_items if a.get("status") == "in_progress"]),
+        "completed": len([a for a in action_items if a.get("status") == "completed"]),
+        "blocked": len([a for a in action_items if a.get("status") == "blocked"]),
+        "overdue": len([a for a in action_items if a.get("due_date") and a["due_date"] < now and a.get("status") != "completed"]),
+        "high_priority": len([a for a in action_items if a.get("priority") == "high"]),
+        "urgent_priority": len([a for a in action_items if a.get("priority") == "urgent"]),
+        "completion_rate": round(len([a for a in action_items if a.get("status") == "completed"]) / len(action_items) * 100, 1),
+        "average_progress": round(sum(a.get("overall_progress_percentage", 0) for a in action_items) / len(action_items), 1)
+    }
+
+
+async def _resolve_target_user(
+    user_id: Optional[UUID], 
+    email: Optional[str], 
+    phone: Optional[str],
+    current_user: User, 
+    db: AsyncSession
+) -> Optional[User]:
+    """Resolve target user from user_id, email, phone, or default to current user"""
+    
+    if user_id is not None:
+        result = await db.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+    elif email is not None:
+        result = await db.execute(select(User).where(User.email == email))
+        return result.scalar_one_or_none()
+    elif phone is not None:
+        result = await db.execute(select(User).where(User.phone == phone))
+        return result.scalar_one_or_none()
+    else:
+        return current_user
+
+async def _resolve_target_user_simple(user_id, email, current_user, db):
+    """Simple user resolution"""
+    if user_id:
+        result = await db.execute(select(User).where(User.id == user_id))
+        return result.scalar_one_or_none()
+    elif email:
+        result = await db.execute(select(User).where(User.email == email))
+        return result.scalar_one_or_none()
+    return current_user
+
+@router.get("/participant/stats")
+async def get_participant_meeting_stats(
+    user_id: Optional[UUID] = Query(None, description="User ID to get stats for"),
+    email: Optional[str] = Query(None, description="User email to get stats for"),
+    include_trends: bool = Query(True, description="Include monthly trend data"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get comprehensive statistics about user's meetings and action items.
+    Includes meeting stats, action item stats, productivity metrics, and trends.
+    """
+    
+
+
+
+    
+    # Determine target user
+    target_user = await _resolve_target_user(user_id=user_id, email=email,phone='', current_user=current_user, db=db)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Authorization check  any(role.code == "admin" for role in current_user.roles) 
+    is_admin = any(role.code == "admin" for role in current_user.roles) if hasattr(current_user, 'roles') else False
+    
+    if target_user.id != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized to view other user's action items")
+    
+    # Get all meetings where user is participant
+    meetings_query = select(Meeting).join(
+        Meeting.participants
+    ).where(
+        Meeting.participants.any(id=target_user.id)
+    ).options(
+        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions)
+    )
+    
+    result = await db.execute(meetings_query)
+    meetings = result.scalars().all()
+    
+    now = datetime.utcnow()
+    current_month = now.month
+    current_year = now.year
+    
+    # Collect all action items assigned to user
+    action_items = []
+    for meeting in meetings:
+        for minute in meeting.minutes:
+            for action in minute.actions:
+                if action.assigned_to_id == target_user.id:
+                    action_items.append({
+                        "action": action,
+                        "meeting": meeting,
+                        "minute": minute
+                    })
+    
+    # Calculate meeting stats
+    meeting_stats = _calculate_meeting_stats(meetings, now)
+    
+    # Calculate action item stats
+    action_stats = _calculate_action_stats(action_items, now)
+    
+    # Calculate productivity metrics
+    productivity_metrics = _calculate_productivity_metrics(action_items, now)
+    
+    # Calculate monthly trends (if requested)
+    trends = _calculate_monthly_trends(meetings, action_items, current_year) if include_trends else None
+    
+    # Calculate upcoming deadlines
+    upcoming_deadlines = _get_upcoming_deadlines(action_items, now, days_ahead=14)
+    
+    # Calculate completion rate by priority
+    completion_by_priority = _calculate_completion_by_priority(action_items)
+    
+    return {
+        "user": {
+            "id": str(target_user.id),
+            "email": target_user.email,
+            "name": target_user.full_name or target_user.name
+        },
+        "generated_at": now.isoformat(),
+        "meetings": meeting_stats,
+        "action_items": action_stats,
+        "productivity": productivity_metrics,
+        "upcoming_deadlines": upcoming_deadlines,
+        "completion_by_priority": completion_by_priority,
+        "trends": trends
+    }
+
+
+# ==================== Helper Functions ====================
+
+
+
+def _apply_action_filters(items, status=None, priority=None, overdue_only=False, due_within_days=None, include_completed=True):
+    """Apply multiple filters to action items"""
+    now = datetime.utcnow()
+    filtered = items
+    
+    if not include_completed:
+        filtered = [i for i in filtered if i.get("status") != "completed"]
+    
+    if status:
+        filtered = [i for i in filtered if i.get("status") == status]
+    
+    if priority:
+        filtered = [i for i in filtered if i.get("priority") == priority]
+    
+    if overdue_only:
+        filtered = [i for i in filtered if i.get("due_date") and i.get("due_date") < now and i.get("status") != "completed"]
+    
+    if due_within_days:
+        cutoff_date = now + timedelta(days=due_within_days)
+        filtered = [i for i in filtered if i.get("due_date") and i.get("due_date") <= cutoff_date]
+    
+    return filtered
+
+
+def _apply_action_sorting(items, sort_by, sort_order):
+    """Apply sorting to action items"""
+    reverse = sort_order.lower() == "desc"
+    
+    sort_keys = {
+        "due_date": lambda x: x.get("due_date") or datetime.max,
+        "priority": lambda x: {"urgent": 0, "high": 1, "medium": 2, "low": 3}.get(x.get("priority", "medium"), 2),
+        "status": lambda x: {"pending": 0, "in_progress": 1, "completed": 2}.get(x.get("status"), 0),
+        "created_at": lambda x: x.get("created_at") or datetime.min,
+        "progress": lambda x: x.get("overall_progress_percentage", 0)
+    }
+    
+    key_func = sort_keys.get(sort_by, sort_keys["due_date"])
+    return sorted(items, key=key_func, reverse=reverse)
+
+
+def _calculate_meeting_stats(meetings, now):
+    """Calculate meeting statistics"""
+    return {
+        "total": len(meetings),
+        "upcoming": len([m for m in meetings if m.start_date >= now and m.status != "completed"]),
+        "completed": len([m for m in meetings if m.status == "completed"]),
+        "in_progress": len([m for m in meetings if m.status == "in_progress"]),
+        "cancelled": len([m for m in meetings if m.status == "cancelled"]),
+        "scheduled": len([m for m in meetings if m.status == "scheduled"]),
+        "completed_percentage": round(len([m for m in meetings if m.status == "completed"]) / len(meetings) * 100, 1) if meetings else 0,
+        "this_month": len([m for m in meetings if m.start_date.year == now.year and m.start_date.month == now.month]),
+        "last_month": len([m for m in meetings if m.start_date.year == (now - timedelta(days=30)).year and m.start_date.month == (now - timedelta(days=30)).month]) if len(meetings) > 0 else 0
+    }
+
+
+def _calculate_action_stats(action_items, now):
+    """Calculate action item statistics"""
+    if not action_items:
+        return {
+            "total": 0,
+            "pending": 0,
+            "in_progress": 0,
+            "completed": 0,
+            "blocked": 0,
+            "overdue": 0,
+            "completion_rate": 0,
+            "average_progress": 0
+        }
+    
+    pending = len([a for a in action_items if a["action"].status.value == "pending"])
+    in_progress = len([a for a in action_items if a["action"].status.value == "in_progress"])
+    completed = len([a for a in action_items if a["action"].status.value == "completed"])
+    blocked = len([a for a in action_items if a["action"].status.value == "blocked"])
+    overdue = len([a for a in action_items if a["action"].due_date and a["action"].due_date < now and a["action"].status.value != "completed"])
+    
+    return {
+        "total": len(action_items),
+        "pending": pending,
+        "in_progress": in_progress,
+        "completed": completed,
+        "blocked": blocked,
+        "overdue": overdue,
+        "completion_rate": round(completed / len(action_items) * 100, 1),
+        "average_progress": round(sum(a["action"].overall_progress_percentage for a in action_items) / len(action_items), 1)
+    }
+
+
+def _calculate_productivity_metrics(action_items, now):
+    """Calculate productivity metrics"""
+    if not action_items:
+        return {
+            "on_time_completion_rate": 0,
+            "average_completion_time_days": 0,
+            "tasks_completed_this_month": 0,
+            "tasks_overdue_percentage": 0
+        }
+    
+    completed_actions = [a for a in action_items if a["action"].completed_at]
+    on_time = 0
+    total_completion_days = 0
+    
+    for action in completed_actions:
+        due_date = action["action"].due_date
+        completed_at = action["action"].completed_at
+        
+        if due_date and completed_at <= due_date:
+            on_time += 1
+        
+        if completed_at and action["action"].created_at:
+            completion_days = (completed_at - action["action"].created_at).days
+            total_completion_days += completion_days
+    
+    this_month_completed = len([
+        a for a in completed_actions 
+        if a["action"].completed_at.year == now.year and a["action"].completed_at.month == now.month
+    ])
+    
+    overdue_action_count = len([a for a in action_items if a["action"].due_date and a["action"].due_date < now and a["action"].status.value != "completed"])
+    
+    return {
+        "on_time_completion_rate": round(on_time / len(completed_actions) * 100, 1) if completed_actions else 0,
+        "average_completion_time_days": round(total_completion_days / len(completed_actions), 1) if completed_actions else 0,
+        "tasks_completed_this_month": this_month_completed,
+        "tasks_overdue_percentage": round(overdue_action_count / len(action_items) * 100, 1) if action_items else 0
+    }
+
+
+def _calculate_monthly_trends(meetings, action_items, current_year):
+    """Calculate monthly trends for meetings and completed actions"""
+    monthly_meetings = {}
+    monthly_completed_actions = {}
+    
+    for month in range(1, 13):
+        monthly_meetings[month] = len([
+            m for m in meetings 
+            if m.created_at.year == current_year and m.created_at.month == month
+        ])
+        monthly_completed_actions[month] = len([
+            a for a in action_items 
+            if a["action"].completed_at and a["action"].completed_at.year == current_year and a["action"].completed_at.month == month
+        ])
+    
+    return {
+        "year": current_year,
+        "meetings_per_month": monthly_meetings,
+        "completed_actions_per_month": monthly_completed_actions
+    }
+
+
+def _get_upcoming_deadlines(action_items, now, days_ahead=14):
+    """Get upcoming deadlines for the next N days"""
+    cutoff = now + timedelta(days=days_ahead)
+    
+    upcoming = []
+    for item in action_items:
+        due_date = item["action"].due_date
+        if due_date and now <= due_date <= cutoff and item["action"].status.value != "completed":
+            upcoming.append({
+                "id": item["action"].id,
+                "description": item["action"].description,
+                "due_date": due_date.isoformat(),
+                "days_remaining": (due_date - now).days,
+                "priority": item["action"].priority,
+                "meeting_title": item["meeting"].title
+            })
+    
+    return sorted(upcoming, key=lambda x: x["days_remaining"])[:10]
+
+
+def _calculate_completion_by_priority(action_items):
+    """Calculate completion rate by priority level"""
+    priority_groups = {"urgent": [], "high": [], "medium": [], "low": []}
+    
+    for item in action_items:
+        priority = item["action"].priority.lower()
+        if priority in priority_groups:
+            priority_groups[priority].append(item)
+    
+    return {
+        priority: {
+            "total": len(items),
+            "completed": len([i for i in items if i["action"].status.value == "completed"]),
+            "completion_rate": round(len([i for i in items if i["action"].status.value == "completed"]) / len(items) * 100, 1) if items else 0
+        }
+        for priority, items in priority_groups.items()
+    }
+
+
+def _get_empty_summary():
+    """Return empty summary structure"""
+    return {
+        "total_actions": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "completed": 0,
+        "overdue": 0,
+        "completion_rate": 0
+    }
+
+
+def _generate_action_summary(action_items, target_user):
+    """Generate summary statistics for action items"""
+    if not action_items:
+        return _get_empty_summary()
+    
+    now = datetime.utcnow()
+    
+    return {
+        "total_actions": len(action_items),
+        "pending": len([a for a in action_items if a.get("status") == "pending"]),
+        "in_progress": len([a for a in action_items if a.get("status") == "in_progress"]),
+        "completed": len([a for a in action_items if a.get("status") == "completed"]),
+        "blocked": len([a for a in action_items if a.get("status") == "blocked"]),
+        "overdue": len([a for a in action_items if a.get("due_date") and a.get("due_date") < now and a.get("status") != "completed"]),
+        "high_priority": len([a for a in action_items if a.get("priority") == "high"]),
+        "urgent_priority": len([a for a in action_items if a.get("priority") == "urgent"]),
+        "completion_rate": round(len([a for a in action_items if a.get("status") == "completed"]) / len(action_items) * 100, 1),
+        "average_progress": round(sum(a.get("overall_progress_percentage", 0) for a in action_items) / len(action_items), 1)
+    }

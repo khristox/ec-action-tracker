@@ -253,7 +253,6 @@ class LocationBase(BaseModel):
                 raise ValueError(f'Invalid GPS coordinates: {str(e)}')
         return v
     
-    @model_validator(mode='after')
     def validate_hierarchy_consistency(self) -> 'LocationBase':
         """Validate hierarchy consistency based on mode"""
         # Level validation based on mode

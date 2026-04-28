@@ -1,5 +1,3 @@
-
-# Dockerfile
 FROM python:3.11-slim
 
 # Set environment variables
@@ -28,22 +26,20 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy the entire application - use a single COPY command
 COPY . .
 
+# Copy .env file if it exists (use RUN with shell conditional)
+RUN if [ -f .env ]; then cp .env /app/.env; fi
+RUN if [ -f .env.example ]; then cp .env.example /app/.env.example; fi
+
 # Create necessary directories
-RUN mkdir -p /app/static /app/logs /app/uploads
+RUN mkdir -p /app/static && \
+    chmod -R 755 /app/static
 
-# Copy static files if they exist in a separate directory
-# Option 1: If static files are in a 'static' folder at project root
-COPY static/ /app/static/
-
-# Option 2: If using frontend build output
-# COPY ./frontend/build /app/static
-
-# Option 3: If static files are in 'app/static'
-#COPY ./app/static /app/static/
-#COPY app/static /app/static/
+# List files for debugging (optional - remove in production)
+RUN ls -la /app/ && ls -la /app/app/ 2>/dev/null || echo "app directory check" && \
+    ls -la /app/static/ 2>/dev/null || echo "Static directory not found"
 
 # Create a non-root user
 RUN addgroup --system app && \
@@ -60,5 +56,5 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8001/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Run the application using python -m for reliability
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

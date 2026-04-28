@@ -80,7 +80,8 @@ import {
   Person as PersonIcon,
   DateRange as DateRangeIcon,
   Comment as CommentIcon,
-  PlaylistAddCheck as PlaylistAddCheckIcon
+  PlaylistAddCheck as PlaylistAddCheckIcon,
+  CloudUpload as CloudUploadIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import api from '../../../services/api';
@@ -97,6 +98,7 @@ import AddActionDialog from './components/AddActionDialog';
 import EditActionDialog from './components/EditActionDialog';
 import EditMinuteDialog from './components/EditMinuteDialog';
 import RichTextEditor from './components/RichTextEditor';
+import { parseWordDocument } from '../../../utils/documentParser';
 
 // ==================== Helper Functions ====================
 
@@ -667,6 +669,12 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
 
+  // Upload states
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState(null);
+  const [uploadFile, setUploadFile] = useState(null);
+
   const canEdit = canEditMinutes(meetingStatus);
   
   const getStatusMessage = () => {
@@ -784,6 +792,84 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     setExpandedMinute(expandedMinute === minuteId ? null : minuteId);
   };
 
+  // Handle file selection and parsing
+  const handleFileSelect = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    if (!file.name.match(/\.(doc|docx)$/i)) {
+      setSnackbar({ 
+        open: true, 
+        message: 'Please upload a Word document (.doc or .docx)', 
+        severity: 'warning' 
+      });
+      return;
+    }
+    
+    setUploading(true);
+    setUploadFile(file);
+    
+    try {
+      const parsed = await parseWordDocument(file);
+      setUploadPreview(parsed);
+      setUploadDialogOpen(true);
+    } catch (error) {
+      setSnackbar({ 
+        open: true, 
+        message: 'Failed to parse document. Please check the format.', 
+        severity: 'error' 
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Handle import of parsed minutes
+  const handleImportMinutes = async () => {
+    if (!uploadPreview) return;
+    
+    setSubmitting(true);
+    try {
+      await dispatch(createMeetingMinutes({ 
+        meetingId, 
+        data: {
+          topic: uploadPreview.topic,
+          discussion: uploadPreview.discussion,
+          decisions: uploadPreview.decisions
+        }
+      })).unwrap();
+      
+      setUploadDialogOpen(false);
+      setUploadPreview(null);
+      setUploadFile(null);
+      fetchMinutes();
+      
+      setSnackbar({ 
+        open: true, 
+        message: 'Minutes imported successfully!', 
+        severity: 'success' 
+      });
+      
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setSnackbar({ 
+        open: true, 
+        message: err.message || 'Failed to import minutes', 
+        severity: 'error' 
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Update preview data when user edits
+  const handlePreviewChange = (field, value) => {
+    setUploadPreview({
+      ...uploadPreview,
+      [field]: value
+    });
+  };
+
   // Filter minutes based on search term
   const filteredMinutes = minutesList.filter(minute => {
     if (!searchTerm) return true;
@@ -850,6 +936,40 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
             >
               <RefreshIcon />
             </IconButton>
+          </Tooltip>
+          
+          {/* Upload Button */}
+          <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to upload minutes") : "Upload minutes from Word document"}>
+            <span>
+              <Button
+                variant="outlined"
+                startIcon={!canEdit ? <LockIcon /> : <CloudUploadIcon />}
+                component="label"
+                disabled={!canEdit || uploading}
+                sx={{
+                  borderColor: isDarkMode ? '#A78BFA' : '#7C3AED',
+                  color: isDarkMode ? '#A78BFA' : '#7C3AED',
+                  '&:hover': {
+                    borderColor: isDarkMode ? '#C4B5FD' : '#6D28D9',
+                    backgroundColor: isDarkMode ? alpha('#A78BFA', 0.1) : alpha('#7C3AED', 0.1)
+                  },
+                  '&.Mui-disabled': {
+                    borderColor: isDarkMode ? '#374151' : '#E5E7EB',
+                    color: isDarkMode ? '#6B7280' : '#9CA3AF'
+                  }
+                }}
+              >
+                <input
+                  type="file"
+                  hidden
+                  accept=".doc,.docx"
+                  onChange={handleFileSelect}
+                  disabled={!canEdit}
+                />
+                {uploading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : <CloudUploadIcon sx={{ mr: 1 }} />}
+                Upload Minutes
+              </Button>
+            </span>
           </Tooltip>
           
           <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to add minutes") : "Add meeting minutes"}>
@@ -1154,6 +1274,192 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           onSave={handleMinuteUpdated}
         />
       )}
+
+      {/* Upload Preview Dialog */}
+      <Dialog
+        open={uploadDialogOpen}
+        onClose={() => !submitting && setUploadDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+            borderRadius: isMobile ? 0 : 2,
+            backgroundImage: 'none'
+          }
+        }}
+      >
+        <DialogTitle sx={{
+          borderBottom: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+          bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF'
+        }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6" fontWeight={600} sx={{ color: isDarkMode ? '#FFFFFF' : '#111827' }}>
+              Preview Imported Minutes
+            </Typography>
+            <IconButton onClick={() => setUploadDialogOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: isMobile ? 2 : 3 }}>
+          {uploadPreview && (
+            <Stack spacing={3}>
+              <Alert 
+                severity="info" 
+                icon={<AutoAwesomeIcon />}
+                sx={{
+                  bgcolor: isDarkMode ? alpha('#3B82F6', 0.1) : undefined,
+                  color: isDarkMode ? '#60A5FA' : undefined
+                }}
+              >
+                The system has automatically extracted the following information from your document.
+                Please review and edit if needed before importing.
+              </Alert>
+
+              {/* Topic */}
+              <TextField
+                fullWidth
+                label="Topic *"
+                value={uploadPreview.topic}
+                onChange={(e) => handlePreviewChange('topic', e.target.value)}
+                disabled={submitting}
+                required
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    color: isDarkMode ? '#D1D5DB' : 'inherit',
+                    '& fieldset': {
+                      borderColor: isDarkMode ? '#4B5563' : '#E5E7EB'
+                    },
+                    '&:hover fieldset': {
+                      borderColor: isDarkMode ? '#6B7280' : '#D1D5DB'
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: isDarkMode ? '#A78BFA' : '#7C3AED'
+                    }
+                  },
+                  '& .MuiInputLabel-root': {
+                    color: isDarkMode ? '#9CA3AF' : '#6B7280',
+                    '&.Mui-focused': {
+                      color: isDarkMode ? '#A78BFA' : '#7C3AED'
+                    }
+                  }
+                }}
+              />
+
+              {/* Discussion Section */}
+              <Box>
+                <Typography variant="subtitle2" gutterBottom sx={{ color: isDarkMode ? '#D1D5DB' : '#374151' }}>
+                  Discussion
+                </Typography>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 2, 
+                    maxHeight: 250, 
+                    overflow: 'auto',
+                    bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : '#F8FAFC',
+                    borderColor: isDarkMode ? '#374151' : '#E5E7EB'
+                  }}
+                >
+                  <RichTextContent content={uploadPreview.discussion} />
+                </Paper>
+              </Box>
+
+              {/* Decisions Section */}
+              {uploadPreview.decisions && uploadPreview.decisions !== '<p></p>' && (
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom sx={{ color: isDarkMode ? '#D1D5DB' : '#374151' }}>
+                    Decisions
+                  </Typography>
+                  <Paper 
+                    variant="outlined" 
+                    sx={{ 
+                      p: 2, 
+                      maxHeight: 200, 
+                      overflow: 'auto',
+                      bgcolor: isDarkMode ? alpha('#34D399', 0.05) : '#F0FDF4',
+                      borderColor: isDarkMode ? alpha('#34D399', 0.2) : '#E5E7EB'
+                    }}
+                  >
+                    <RichTextContent content={uploadPreview.decisions} />
+                  </Paper>
+                </Box>
+              )}
+
+              {/* Actions Preview */}
+              {uploadPreview.actions && uploadPreview.actions.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom sx={{ color: isDarkMode ? '#D1D5DB' : '#374151' }}>
+                    Detected Actions ({uploadPreview.actions.length})
+                  </Typography>
+                  <TableContainer 
+                    component={Paper} 
+                    variant="outlined"
+                    sx={{
+                      borderColor: isDarkMode ? '#374151' : '#E5E7EB'
+                    }}
+                  >
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: isDarkMode ? alpha('#A78BFA', 0.1) : '#F1F5F9' }}>
+                          <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {uploadPreview.actions.map((action, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>{action.description || '-'}</TableCell>
+                            <TableCell>{action.assigned_to || '-'}</TableCell>
+                            <TableCell>{action.due_date || '-'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', mt: 1, display: 'block' }}>
+                    Note: Actions will need to be added manually after import
+                  </Typography>
+                </Box>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{
+          p: isMobile ? 2 : 3,
+          borderTop: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+          flexDirection: isMobile ? 'column-reverse' : 'row',
+          gap: isMobile ? 1 : 0
+        }}>
+          <Button 
+            onClick={() => setUploadDialogOpen(false)} 
+            disabled={submitting}
+            fullWidth={isMobile}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleImportMinutes}
+            disabled={submitting || !uploadPreview?.topic?.trim()}
+            fullWidth={isMobile}
+            startIcon={submitting ? <CircularProgress size={20} /> : <SaveIcon />}
+            sx={{
+              bgcolor: isDarkMode ? '#7C3AED' : '#7C3AED',
+              '&:hover': {
+                bgcolor: isDarkMode ? '#6D28D9' : '#6D28D9'
+              }
+            }}
+          >
+            {submitting ? 'Importing...' : 'Import Minutes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Menu for minutes actions */}
       <Menu 

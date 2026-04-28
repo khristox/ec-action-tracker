@@ -1,4 +1,4 @@
-// src/components/meetings/Meetings.jsx - Complete with all features
+// src/components/meetings/Meetings.jsx - Complete with proper status handling
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -92,7 +92,11 @@ import {
   ArrowUpward as ArrowUpwardIcon,
   ArrowDownward as ArrowDownwardIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
-  KeyboardArrowDown as KeyboardArrowDownIcon
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  HourglassEmpty as HourglassEmptyIcon,
+  Timer as TimerIcon,
+  Block as BlockIcon,
+  AccessTime as AccessTimeIcon
 } from '@mui/icons-material';
 
 import {
@@ -122,31 +126,153 @@ const COLORS = {
   infoLight: '#60A5FA',
   secondary: '#6B7280',
   secondaryLight: '#9CA3AF',
+  ended: '#9E9E9E',
+  started: '#3B82F6',
+  pending: '#F59E0B',
+  scheduled: '#8B5CF6',
+  cancelled: '#EF4444',
+  completed: '#10B981',
+  ongoing: '#3B82F6',
+  in_progress: '#3B82F6',
+  awaiting: '#F97316',
+  closed: '#6B7280',
+  postponed: '#F97316',
   gradient: {
     primary: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
   }
 };
 
-// Status options mapping
+// Comprehensive status configuration - supports both uppercase and lowercase
 const STATUS_CONFIG = {
-  STARTED: { icon: 'play_circle', color: COLORS.info, label: 'Started' },
-  ENDED: { icon: 'stop_circle', color: COLORS.success, label: 'Ended' },
-  CANCELLED: { icon: 'cancel', color: COLORS.danger, label: 'Cancelled' },
-  PENDING: { icon: 'pending', color: COLORS.warning, label: 'Pending' },
-  SCHEDULED: { icon: 'schedule', color: COLORS.primary, label: 'Scheduled' },
-  COMPLETED: { icon: 'check_circle', color: COLORS.success, label: 'Completed' }
+  // Ended states
+  'ended': { label: 'Ended', icon: <StopCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ended, bgColor: alpha(COLORS.ended, 0.1) },
+  'ENDED': { label: 'Ended', icon: <StopCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ended, bgColor: alpha(COLORS.ended, 0.1) },
+  
+  // Started/In Progress states
+  'started': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.started, bgColor: alpha(COLORS.started, 0.1) },
+  'STARTED': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.started, bgColor: alpha(COLORS.started, 0.1) },
+  'ongoing': { label: 'Ongoing', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ongoing, bgColor: alpha(COLORS.ongoing, 0.1) },
+  'ONGOING': { label: 'Ongoing', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ongoing, bgColor: alpha(COLORS.ongoing, 0.1) },
+  'in_progress': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.in_progress, bgColor: alpha(COLORS.in_progress, 0.1) },
+  'IN_PROGRESS': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.in_progress, bgColor: alpha(COLORS.in_progress, 0.1) },
+  
+  // Pending/Awaiting states
+  'pending': { label: 'Pending', icon: <HourglassEmptyIcon sx={{ fontSize: 14 }} />, color: COLORS.pending, bgColor: alpha(COLORS.pending, 0.1) },
+  'PENDING': { label: 'Pending', icon: <HourglassEmptyIcon sx={{ fontSize: 14 }} />, color: COLORS.pending, bgColor: alpha(COLORS.pending, 0.1) },
+  'awaiting': { label: 'Awaiting', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.awaiting, bgColor: alpha(COLORS.awaiting, 0.1) },
+  'AWAITING': { label: 'Awaiting', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.awaiting, bgColor: alpha(COLORS.awaiting, 0.1) },
+  
+  // Scheduled state
+  'scheduled': { label: 'Scheduled', icon: <ScheduleOutlinedIcon sx={{ fontSize: 14 }} />, color: COLORS.scheduled, bgColor: alpha(COLORS.scheduled, 0.1) },
+  'SCHEDULED': { label: 'Scheduled', icon: <ScheduleOutlinedIcon sx={{ fontSize: 14 }} />, color: COLORS.scheduled, bgColor: alpha(COLORS.scheduled, 0.1) },
+  
+  // Completed/Closed states
+  'completed': { label: 'Completed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.completed, bgColor: alpha(COLORS.completed, 0.1) },
+  'COMPLETED': { label: 'Completed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.completed, bgColor: alpha(COLORS.completed, 0.1) },
+  'closed': { label: 'Closed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.closed, bgColor: alpha(COLORS.closed, 0.1) },
+  'CLOSED': { label: 'Closed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.closed, bgColor: alpha(COLORS.closed, 0.1) },
+  
+  // Cancelled/Postponed states
+  'cancelled': { label: 'Cancelled', icon: <CancelIcon sx={{ fontSize: 14 }} />, color: COLORS.cancelled, bgColor: alpha(COLORS.cancelled, 0.1) },
+  'CANCELLED': { label: 'Cancelled', icon: <CancelIcon sx={{ fontSize: 14 }} />, color: COLORS.cancelled, bgColor: alpha(COLORS.cancelled, 0.1) },
+  'postponed': { label: 'Postponed', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.postponed, bgColor: alpha(COLORS.postponed, 0.1) },
+  'POSTPONED': { label: 'Postponed', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.postponed, bgColor: alpha(COLORS.postponed, 0.1) }
 };
 
-const getIconFromName = (iconName) => {
-  const icons = {
-    'pending': <PendingIcon sx={{ fontSize: 14 }} />,
-    'schedule': <ScheduleOutlinedIcon sx={{ fontSize: 14 }} />,
-    'play_circle': <PlayCircleIcon sx={{ fontSize: 14 }} />,
-    'stop_circle': <StopCircleIcon sx={{ fontSize: 14 }} />,
-    'check_circle': <CheckCircleIcon sx={{ fontSize: 14 }} />,
-    'cancel': <CancelIcon sx={{ fontSize: 14 }} />
+// Helper function to get status info from meeting status object
+const getStatusInfo = (status) => {
+  if (!status) {
+    return { 
+      label: 'Pending', 
+      icon: <HourglassEmptyIcon sx={{ fontSize: 14 }} />, 
+      color: COLORS.pending, 
+      bgColor: alpha(COLORS.pending, 0.1) 
+    };
+  }
+  
+  let statusCode = null;
+  
+  // Handle different status formats from API
+  if (typeof status === 'string') {
+    statusCode = status.toUpperCase();
+  } else if (status.short_name) {
+    statusCode = status.short_name.toUpperCase();
+  } else if (status.code) {
+    // Extract from code: "MEETING_STATUS_ENDED" -> "ENDED"
+    const codeParts = status.code.split('_');
+    statusCode = codeParts[codeParts.length - 1].toUpperCase();
+  } else if (status.name) {
+    // Extract from name: "Meeting Status - Ended" -> "ENDED"
+    const nameParts = status.name.split(' - ');
+    statusCode = nameParts[nameParts.length - 1].toUpperCase();
+  }
+  
+  // Lookup in config with uppercase key
+  if (statusCode && STATUS_CONFIG[statusCode]) {
+    return STATUS_CONFIG[statusCode];
+  }
+  
+  // Try lowercase lookup as fallback
+  if (statusCode && STATUS_CONFIG[statusCode.toLowerCase()]) {
+    return STATUS_CONFIG[statusCode.toLowerCase()];
+  }
+  
+  // Default return for unknown status
+  return { 
+    label: statusCode || 'Unknown', 
+    icon: <PendingIcon sx={{ fontSize: 14 }} />, 
+    color: COLORS.secondary, 
+    bgColor: alpha(COLORS.secondary, 0.1) 
   };
-  return icons[iconName] || <ScheduleOutlinedIcon sx={{ fontSize: 14 }} />;
+};
+
+// Status Stats Component - Shows distribution of meetings by status
+const StatusStats = ({ meetings }) => {
+  const stats = useMemo(() => {
+    const counts = {};
+    meetings.forEach(meeting => {
+      const statusInfo = getStatusInfo(meeting.status);
+      const label = statusInfo.label;
+      counts[label] = (counts[label] || 0) + 1;
+    });
+    return counts;
+  }, [meetings]);
+
+  // Order of status display
+  const statusOrder = ['Scheduled', 'In Progress', 'Ongoing', 'Awaiting', 'Pending', 'Ended', 'Completed', 'Closed', 'Cancelled', 'Postponed'];
+  
+  // Get status config for a label
+  const getConfigForLabel = (label) => {
+    for (const [key, value] of Object.entries(STATUS_CONFIG)) {
+      if (value.label === label) {
+        return value;
+      }
+    }
+    return null;
+  };
+  
+  return (
+    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 3 }} useFlexGap>
+      <Chip 
+        label={`Total: ${meetings.length}`} 
+        size="small" 
+        sx={{ fontWeight: 700, bgcolor: alpha(COLORS.primary, 0.1), color: COLORS.primary }} 
+      />
+      {statusOrder.filter(s => stats[s]).map(status => {
+        const config = getConfigForLabel(status);
+        if (!config) return null;
+        return (
+          <Chip 
+            key={status}
+            label={`${status}: ${stats[status]}`}
+            size="small"
+            icon={config.icon}
+            sx={{ fontWeight: 700, bgcolor: config.bgColor, color: config.color }}
+          />
+        );
+      })}
+    </Stack>
+  );
 };
 
 // Meeting Card Component
@@ -154,24 +280,11 @@ const MeetingCard = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [menuAnchor, setMenuAnchor] = useState(null);
-
-  const statusInfo = useMemo(() => {
-    let statusCode = null;
-    if (meeting.status) {
-      if (typeof meeting.status === 'string') statusCode = meeting.status;
-      else if (meeting.status.short_name) statusCode = meeting.status.short_name;
-      else if (meeting.status.code) statusCode = meeting.status.code;
-    }
-    
-    const config = STATUS_CONFIG[statusCode] || STATUS_CONFIG.PENDING;
-    return {
-      label: config.label,
-      color: config.color,
-      icon: config.icon
-    };
-  }, [meeting.status]);
+  
+  const statusInfo = getStatusInfo(meeting.status);
 
   const formatDate = (dateStr) => {
+    if (!dateStr) return 'Date TBD';
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
@@ -213,9 +326,9 @@ const MeetingCard = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
             <Chip 
               label={statusInfo.label}
               size="small"
-              icon={getIconFromName(statusInfo.icon)}
+              icon={statusInfo.icon}
               sx={{ 
-                bgcolor: alpha(statusInfo.color, 0.12), 
+                bgcolor: statusInfo.bgColor,
                 color: statusInfo.color, 
                 fontWeight: 700,
                 borderRadius: 1.5,
@@ -308,19 +421,11 @@ const MeetingCard = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
 };
 
 // Table Row Component
-const MeetingTableRow = ({ meeting, statusOptions, onView, onEdit, onNotify, isMobile }) => {
-  const statusInfo = useMemo(() => {
-    let statusCode = null;
-    if (meeting.status) {
-      if (typeof meeting.status === 'string') statusCode = meeting.status;
-      else if (meeting.status.short_name) statusCode = meeting.status.short_name;
-      else if (meeting.status.code) statusCode = meeting.status.code;
-    }
-    const config = STATUS_CONFIG[statusCode] || STATUS_CONFIG.PENDING;
-    return { label: config.label, color: config.color, icon: config.icon };
-  }, [meeting.status]);
+const MeetingTableRow = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
+  const statusInfo = getStatusInfo(meeting.status);
 
   const formatDate = (dateStr) => {
+    if (!dateStr) return 'Date TBD';
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
@@ -340,8 +445,8 @@ const MeetingTableRow = ({ meeting, statusOptions, onView, onEdit, onNotify, isM
         <Chip 
           label={statusInfo.label}
           size="small"
-          icon={getIconFromName(statusInfo.icon)}
-          sx={{ bgcolor: alpha(statusInfo.color, 0.12), color: statusInfo.color, fontWeight: 600 }}
+          icon={statusInfo.icon}
+          sx={{ bgcolor: statusInfo.bgColor, color: statusInfo.color, fontWeight: 600 }}
         />
       </TableCell>
       <TableCell>{formatDate(meeting.meeting_date)}</TableCell>
@@ -370,6 +475,7 @@ const MeetingTableRow = ({ meeting, statusOptions, onView, onEdit, onNotify, isM
   );
 };
 
+// Mobile Filter Drawer
 const MobileFilterDrawer = ({ open, onClose, statusFilter, setStatusFilter, statusOptions, searchTerm, setSearchTerm, onClearFilters }) => {
   const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
   const [localStatusFilter, setLocalStatusFilter] = useState(statusFilter);
@@ -412,15 +518,24 @@ const MobileFilterDrawer = ({ open, onClose, statusFilter, setStatusFilter, stat
         
         <Typography variant="subtitle2" fontWeight={600} gutterBottom>Status</Typography>
         <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 3 }}>
-          <Chip label="All" onClick={() => setLocalStatusFilter('all')} color={localStatusFilter === 'all' ? 'primary' : 'default'} />
-          {statusOptions?.map(opt => (
-            <Chip 
-              key={opt.value}
-              label={opt.label}
-              onClick={() => setLocalStatusFilter(opt.value)}
-              color={localStatusFilter === opt.value ? 'primary' : 'default'}
-            />
-          ))}
+          <Chip 
+            label="All" 
+            onClick={() => setLocalStatusFilter('all')} 
+            color={localStatusFilter === 'all' ? 'primary' : 'default'} 
+          />
+          {statusOptions?.map(opt => {
+            const statusInfo = getStatusInfo(opt.value);
+            return (
+              <Chip 
+                key={opt.value}
+                label={opt.label}
+                icon={statusInfo.icon}
+                onClick={() => setLocalStatusFilter(opt.value)}
+                color={localStatusFilter === opt.value ? 'primary' : 'default'}
+                sx={localStatusFilter === opt.value ? {} : { bgcolor: statusInfo.bgColor }}
+              />
+            );
+          })}
         </Stack>
         
         <Stack direction="row" spacing={2}>
@@ -432,6 +547,91 @@ const MobileFilterDrawer = ({ open, onClose, statusFilter, setStatusFilter, stat
   );
 };
 
+// Notification Dialog Component
+const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
+  const [selectedParticipants, setSelectedParticipants] = useState([]);
+  const [notificationType, setNotificationType] = useState(['email']);
+  const [customMessage, setCustomMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [selectAll, setSelectAll] = useState(false);
+
+  useEffect(() => {
+    if (open && participants) {
+      setSelectedParticipants(participants.map(p => p.id));
+      setSelectAll(true);
+    }
+  }, [open, participants]);
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await onSend({
+        participant_ids: selectedParticipants,
+        notification_type: notificationType,
+        custom_message: customMessage
+      });
+      onClose();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ bgcolor: COLORS.primary, color: 'white' }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" spacing={1} alignItems="center">
+            <NotificationsIcon />
+            <Typography variant="h6">Send Notifications</Typography>
+          </Stack>
+          <IconButton onClick={onClose} sx={{ color: 'white' }}><CloseIcon /></IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent sx={{ mt: 2 }}>
+        <Stack spacing={2}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="subtitle2" fontWeight={700}>{meeting?.title}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {meeting?.meeting_date && new Date(meeting.meeting_date).toLocaleString()}
+            </Typography>
+          </Paper>
+
+          <FormControl fullWidth size="small">
+            <InputLabel>Notification Type</InputLabel>
+            <Select 
+              multiple 
+              value={notificationType} 
+              label="Notification Type" 
+              onChange={(e) => setNotificationType(e.target.value)}
+              renderValue={(selected) => selected.join(', ')}
+            >
+              <MenuItem value="email"><EmailIcon sx={{ mr: 1 }} /> Email</MenuItem>
+              <MenuItem value="whatsapp"><WhatsAppIcon sx={{ mr: 1 }} /> WhatsApp</MenuItem>
+              <MenuItem value="sms"><SmsIcon sx={{ mr: 1 }} /> SMS</MenuItem>
+            </Select>
+          </FormControl>
+
+          <TextField 
+            label="Custom Message" 
+            multiline 
+            rows={3} 
+            value={customMessage} 
+            onChange={(e) => setCustomMessage(e.target.value)} 
+            fullWidth 
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={handleSend} disabled={sending || selectedParticipants.length === 0}>
+          {sending ? <CircularProgress size={20} /> : `Send to ${selectedParticipants.length}`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+// Main Meetings Component
 const Meetings = () => {
   const theme = useTheme();
   const navigate = useNavigate();
@@ -451,7 +651,7 @@ const Meetings = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [viewMode, setViewMode] = useState('grid'); // 'grid', 'table'
+  const [viewMode, setViewMode] = useState('grid');
   const [orderBy, setOrderBy] = useState('meeting_date');
   const [order, setOrder] = useState('desc');
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -533,15 +733,8 @@ const Meetings = () => {
     setSearchTerm('');
     setStatusFilter('all');
     setPage(1);
+    loadMeetings(1);
   };
-
-  // Statistics
-  const stats = useMemo(() => {
-    const started = meetings.filter(m => m.status?.short_name === 'STARTED' || m.status?.code?.includes('STARTED')).length;
-    const completed = meetings.filter(m => m.status?.short_name === 'ENDED' || m.status?.code?.includes('ENDED')).length;
-    const pending = meetings.filter(m => !m.status || m.status?.short_name === 'PENDING').length;
-    return { total: pagination.total || meetings.length, started, completed, pending };
-  }, [meetings, pagination.total]);
 
   const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all';
   const totalPages = Math.ceil(pagination.total / rowsPerPage);
@@ -550,7 +743,7 @@ const Meetings = () => {
     <Box sx={{ width: '100%', minHeight: '100vh', pb: isMobile ? 8 : 4, bgcolor: 'background.default' }}>
       <Box sx={{ p: isMobile ? 2 : 3 }}>
         
-        {/* Header with New Meeting Button moved to right */}
+        {/* Header with New Meeting Button */}
         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={4}>
           <Box>
             <Typography variant={isMobile ? "h5" : "h4"} fontWeight={900} sx={{ background: COLORS.gradient.primary, backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' }}>
@@ -569,24 +762,15 @@ const Meetings = () => {
               py: isMobile ? 1 : 1.2, 
               fontWeight: 700, 
               textTransform: 'none',
-              ml: 'auto',
-              position: 'sticky',
-              right: 16
+              ml: 'auto'
             }}
           >
             New Meeting
           </Button>
         </Stack>
 
-        {/* Stats */}
-        {!loading && stats.total > 0 && (
-          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 3 }} useFlexGap>
-            <Chip label={`Total: ${stats.total}`} size="small" sx={{ fontWeight: 700, bgcolor: alpha(COLORS.primary, 0.1), color: COLORS.primary }} />
-            <Chip label={`Started: ${stats.started}`} size="small" sx={{ fontWeight: 700, bgcolor: alpha(COLORS.info, 0.1), color: COLORS.info }} />
-            <Chip label={`Completed: ${stats.completed}`} size="small" sx={{ fontWeight: 700, bgcolor: alpha(COLORS.success, 0.1), color: COLORS.success }} />
-            <Chip label={`Pending: ${stats.pending}`} size="small" sx={{ fontWeight: 700, bgcolor: alpha(COLORS.warning, 0.1), color: COLORS.warning }} />
-          </Stack>
-        )}
+        {/* Stats - Shows actual status distribution */}
+        {!loading && meetings.length > 0 && <StatusStats meetings={meetings} />}
 
         {/* Filters and View Mode Toggle */}
         <Paper elevation={0} sx={{ p: isMobile ? 1.5 : 2.5, mb: 4, borderRadius: 3, border: `1px solid ${alpha(COLORS.primary, 0.12)}`, bgcolor: 'background.paper' }}>
@@ -616,14 +800,17 @@ const Meetings = () => {
                 <InputLabel>Status</InputLabel>
                 <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
                   <MenuItem value="all">All Status</MenuItem>
-                  {statusOptions?.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {getIconFromName(opt.icon)}
-                        {opt.label}
-                      </Box>
-                    </MenuItem>
-                  ))}
+                  {statusOptions?.map(opt => {
+                    const statusInfo = getStatusInfo(opt.value);
+                    return (
+                      <MenuItem key={opt.value} value={opt.value}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {statusInfo.icon}
+                          {opt.label}
+                        </Box>
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
               </FormControl>
             )}
@@ -684,7 +871,7 @@ const Meetings = () => {
               )}
             </Box>
             
-            {/* Pagination for Grid View - Scroll backwards/forwards */}
+            {/* Pagination for Grid View */}
             {!loading && pagination.total > rowsPerPage && (
               <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
                 <Pagination
@@ -768,7 +955,6 @@ const Meetings = () => {
                         onView={(id) => navigate(`/meetings/${id}`)}
                         onEdit={(id) => navigate(`/meetings/${id}/edit`)}
                         onNotify={handleNotifyClick}
-                        isMobile={isMobile}
                       />
                     ))
                   )}
@@ -822,81 +1008,15 @@ const Meetings = () => {
       />
 
       {/* Snackbar */}
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}>
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={4000} 
+        onClose={() => setSnackbar({ ...snackbar, open: false })} 
+        anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
+      >
         <Alert severity={snackbar.severity} variant="filled">{snackbar.message}</Alert>
       </Snackbar>
     </Box>
-  );
-};
-
-// Notification Dialog Component
-const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
-  const [selectedParticipants, setSelectedParticipants] = useState([]);
-  const [notificationType, setNotificationType] = useState(['email']);
-  const [customMessage, setCustomMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const [selectAll, setSelectAll] = useState(false);
-
-  useEffect(() => {
-    if (open && participants) {
-      setSelectedParticipants(participants.map(p => p.id));
-      setSelectAll(true);
-    }
-  }, [open, participants]);
-
-  const handleSend = async () => {
-    setSending(true);
-    try {
-      await onSend({
-        participant_ids: selectedParticipants,
-        notification_type: notificationType,
-        custom_message: customMessage
-      });
-      onClose();
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ bgcolor: COLORS.primary, color: 'white' }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1} alignItems="center">
-            <NotificationsIcon />
-            <Typography variant="h6">Send Notifications</Typography>
-          </Stack>
-          <IconButton onClick={onClose} sx={{ color: 'white' }}><CloseIcon /></IconButton>
-        </Stack>
-      </DialogTitle>
-      <DialogContent sx={{ mt: 2 }}>
-        <Stack spacing={2}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="subtitle2" fontWeight={700}>{meeting?.title}</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {meeting?.meeting_date && new Date(meeting.meeting_date).toLocaleString()}
-            </Typography>
-          </Paper>
-
-          <FormControl fullWidth size="small">
-            <InputLabel>Notification Type</InputLabel>
-            <Select multiple value={notificationType} label="Notification Type" onChange={(e) => setNotificationType(e.target.value)}>
-              <MenuItem value="email"><EmailIcon sx={{ mr: 1 }} /> Email</MenuItem>
-              <MenuItem value="whatsapp"><WhatsAppIcon sx={{ mr: 1 }} /> WhatsApp</MenuItem>
-              <MenuItem value="sms"><SmsIcon sx={{ mr: 1 }} /> SMS</MenuItem>
-            </Select>
-          </FormControl>
-
-          <TextField label="Custom Message" multiline rows={3} value={customMessage} onChange={(e) => setCustomMessage(e.target.value)} fullWidth />
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSend} disabled={sending || selectedParticipants.length === 0}>
-          {sending ? <CircularProgress size={20} /> : `Send to ${selectedParticipants.length}`}
-        </Button>
-      </DialogActions>
-    </Dialog>
   );
 };
 

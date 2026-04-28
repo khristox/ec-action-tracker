@@ -99,7 +99,12 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
                 existing = await self.get_by_email(db, obj_data['email'])
                 if existing:
                     raise ValueError(f"Participant with email '{obj_data['email']}' already exists")
-            
+                
+
+            obj_data.pop('attendance_status', None)  # Remove if exists
+            obj_data.pop('is_chairperson', None)  # Remove if exists
+            obj_data.pop('is_secretary', None)  # Remove if exists
+           
             db_obj = Participant(**obj_data)
             await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
             

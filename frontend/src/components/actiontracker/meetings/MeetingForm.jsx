@@ -1,1153 +1,1392 @@
-// src/components/actiontracker/meetings/MeetingRecorder.jsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+// src/components/meetings/MeetingForm.jsx
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-  Box,
-  Container,
-  Paper,
-  Typography,
-  Button,
-  IconButton,
-  Stack,
-  Alert,
-  CircularProgress,
-  Card,
-  CardContent,
-  Grid,
-  Chip,
-  Divider,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  Avatar,
-  Tooltip,
-  Snackbar,
-  useTheme,
-  useMediaQuery,
-  alpha,
-  Tabs,
-  Tab,
-  ToggleButton,
-  ToggleButtonGroup,
-  LinearProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Badge,
+  Box, Typography, Button, Paper, TextField, Stepper, Step, StepLabel,
+  Alert, CircularProgress, Snackbar, Chip, IconButton, Dialog, DialogTitle,
+  DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem,
+  List, ListItem, ListItemText, ListItemAvatar, ListItemButton, ListItemIcon,
+  Avatar, Divider, useMediaQuery,
+  useTheme, Card, CardContent, Stack, Container, AppBar, Toolbar,
+  InputAdornment, Grid, Switch, Collapse, CardActionArea, ToggleButton,
+  ToggleButtonGroup, Breadcrumbs, LinearProgress, Fade, Zoom,
+  Backdrop, Skeleton, Tooltip, Tab, Tabs
 } from '@mui/material';
 import {
-  FiberManualRecord,
-  Stop,
-  Pause,
-  PlayArrow,
-  Videocam,
-  Mic,
-  CloudUpload,
-  Download,
-  FilePresent,
-  MeetingRoom,
-  Timer,
-  Memory,
-  Storage,
-  GraphicEq,
-  ExpandMore,
-  CloudDone,
-  Warning,
-  Speed,
-  Replay,
-  Delete,
-  ArrowBack,
-  CheckCircle,
-  RadioButtonChecked,
-  VolumeUp,
+  Delete as DeleteIcon, PersonAdd as PersonAddIcon, Close as CloseIcon,
+  Cancel as CancelIcon, ArrowBack as ArrowBackIcon, ArrowForward as ArrowForwardIcon,
+  CheckCircle as CheckCircleIcon, Event as EventIcon, LocationOn as LocationIcon,
+  People as PeopleIcon, Description as DescriptionIcon, Save as SaveIcon,
+  MyLocation as MyLocationIcon, GpsFixed as GpsFixedIcon, GpsNotFixed as GpsNotFixedIcon,
+  ExpandMore as ExpandMoreIcon, ExpandLess as ExpandLessIcon, EditNote as SecretaryIcon,
+  Search as SearchIcon, Apartment as ApartmentIcon, Business as BusinessIcon,
+  Public as PublicIcon, Flag as FlagIcon, Terrain as TerrainIcon, Home as HomeIcon,
+  MeetingRoom as MeetingRoomIcon, EventSeat as EventSeatIcon, ChevronRight as ChevronRightIcon,
+  Phone as PhoneIcon, Email as EmailIcon, Work as WorkIcon, Title as TitleIcon,
+  Visibility as VisibilityIcon, Update as UpdateIcon, Refresh as RefreshIcon,
+  DomainOutlined as StructureIcon, AdminPanelSettings as AdminIcon,
+  GroupAdd as GroupAddIcon, PersonSearch as PersonSearchIcon
 } from '@mui/icons-material';
-import { format } from 'date-fns';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { TimePicker } from '@mui/x-date-pickers/TimePicker';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 import api from '../../../services/api';
-import { fetchMeetingById, selectCurrentMeeting } from '../../../store/slices/actionTracker/meetingSlice';
 
-// Recording quality presets
-const RECORDING_QUALITY = {
-  low:    { width: 640,  height: 480,  bitrate: 500000,  label: 'Low (480p)',    fileSize: '~5 MB/min' },
-  medium: { width: 1280, height: 720,  bitrate: 1000000, label: 'Medium (720p)', fileSize: '~10 MB/min' },
-  high:   { width: 1920, height: 1080, bitrate: 2500000, label: 'High (1080p)',  fileSize: '~20 MB/min' },
+// Redux imports
+import {
+  fetchParticipantLists, fetchParticipants, addCustomParticipant,
+  removeLocalMeetingParticipant, setMeetingChairperson,
+  addParticipantsFromListToMeeting, clearMeetingParticipants,
+  selectParticipantLists, selectMeetingParticipantsAll,
+  selectMeetingChairperson, selectParticipantsLoading
+} from '../../../store/slices/actionTracker/participantSlice';
+import {
+  createMeeting, updateMeeting, fetchMeetingById,
+  clearMeetingState, clearCurrentMeeting
+} from '../../../store/slices/actionTracker/meetingSlice';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const ADDRESS_LEVELS = [
+  { level: 1, name: 'Country',    icon: <PublicIcon />,    color: '#4CAF50' },
+  { level: 2, name: 'Region',     icon: <FlagIcon />,      color: '#2196F3' },
+  { level: 3, name: 'District',   icon: <TerrainIcon />,   color: '#9C27B0' },
+  { level: 4, name: 'County',     icon: <BusinessIcon />,  color: '#FF9800' },
+  { level: 5, name: 'Subcounty',  icon: <HomeIcon />,      color: '#795548' },
+  { level: 6, name: 'Parish',     icon: <LocationIcon />,  color: '#607D8B' },
+  { level: 7, name: 'Village',    icon: <HomeIcon />,      color: '#8BC34A' },
+];
+
+const BUILDING_LEVELS = [
+  { level: 11, name: 'Office',      icon: <ApartmentIcon />,   color: '#E91E63' },
+  { level: 12, name: 'Building',    icon: <BusinessIcon />,    color: '#3F51B5' },
+  { level: 13, name: 'Room',        icon: <MeetingRoomIcon />, color: '#009688' },
+  { level: 14, name: 'Conference',  icon: <EventSeatIcon />,   color: '#673AB7' },
+];
+
+const steps = [
+  { label: 'Meeting Details', icon: EventIcon,        description: 'Basic info, date, location' },
+  { label: 'Participants',    icon: PeopleIcon,        description: 'Add attendees and roles'    },
+  { label: 'Review & Submit', icon: CheckCircleIcon,  description: 'Verify all information'     },
+];
+
+const mobileModules = {
+  toolbar: [['bold', 'italic', 'underline'], [{ list: 'ordered' }, { list: 'bullet' }], ['clean']],
+};
+const desktopModules = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ list: 'ordered' }, { list: 'bullet' }],
+    ['link', 'clean'],
+  ],
+};
+const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'list', 'link'];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const hexAlpha = (color, opacity) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
+  if (result) {
+    const [r, g, b] = [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)];
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+  return color;
 };
 
-const RECORDING_FORMATS = {
-  webm: { mimeType: 'video/webm', extension: '.webm', label: 'WebM', browserSupport: 'All modern browsers' },
-  mp4:  { mimeType: 'video/mp4',  extension: '.mp4',  label: 'MP4',  browserSupport: 'Limited browser support' },
+const getLevelInfo = (location) => {
+  if (location?.location_mode === 'buildings') {
+    return BUILDING_LEVELS.find(l => l.level === location.level);
+  }
+  return ADDRESS_LEVELS.find(l => l.level === location?.level);
 };
 
-const AUDIO_FORMATS = {
-  webm: { mimeType: 'audio/webm', extension: '.webm', label: 'WebM Audio', browserSupport: 'All modern browsers' },
-  ogg:  { mimeType: 'audio/ogg',  extension: '.ogg',  label: 'OGG Audio',  browserSupport: 'All modern browsers' },
-  mp3:  { mimeType: 'audio/mp3',  extension: '.mp3',  label: 'MP3 Audio',  browserSupport: 'Limited browser support' },
-};
+// ─── HierarchyNode – lazily loads children on expand ─────────────────────────
+const HierarchyNode = React.memo(({ node, depth, locationMode, onSelect, selectedId }) => {
+  const [open, setOpen] = useState(false);
+  const [children, setChildren] = useState([]);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+  const [childrenLoaded, setChildrenLoaded] = useState(false);
 
-const RECORDING_MODE = { video: 'video', audio: 'audio' };
+  const levelInfo = getLevelInfo(node);
+  const isSelected = selectedId === node.id;
 
-const UPLOAD_STATUS = { IDLE: 'idle', UPLOADING: 'uploading', SUCCESS: 'success', ERROR: 'error' };
+  const handleToggle = useCallback(async (e) => {
+    e.stopPropagation();
+    if (!open && !childrenLoaded) {
+      setLoadingChildren(true);
+      try {
+        const params = new URLSearchParams({
+          skip: 0,
+          limit: 100,
+          location_mode: locationMode,
+          parent_id: node.id,
+          include_inactive: false,
+        });
+        const response = await api.get(`/locations/?${params.toString()}`);
+        const items = response.data?.items || response.data || [];
+        setChildren(items);
+      } catch (err) {
+        console.error('Error loading children:', err);
+      } finally {
+        setLoadingChildren(false);
+        setChildrenLoaded(true);
+      }
+    }
+    setOpen(prev => !prev);
+  }, [open, childrenLoaded, locationMode, node.id]);
 
-// ─── Animated waveform bars ──────────────────────────────────────────────────
-const AudioWaveform = ({ active, barCount = 40 }) => (
-  <Box
-    sx={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '3px',
-      height: 64,
-    }}
-  >
-    {Array.from({ length: barCount }).map((_, i) => (
-      <Box
-        key={i}
+  // We assume a node might have children if it's not a leaf level
+  // Leaf detection: buildings max level 14, address max level 7
+  const maxLevel = locationMode === 'buildings' ? 14 : 7;
+  const mightHaveChildren = node.level < maxLevel;
+
+  return (
+    <Box>
+      <ListItemButton
+        onClick={() => onSelect(node)}
+        selected={isSelected}
         sx={{
-          width: 3,
-          borderRadius: 2,
-          bgcolor: active ? 'primary.main' : 'action.disabled',
-          transition: 'background-color 0.3s',
-          height: active ? undefined : 6,
-          animation: active
-            ? `wave ${0.6 + (i % 7) * 0.1}s ease-in-out infinite alternate`
-            : 'none',
-          animationDelay: `${(i * 0.04) % 0.8}s`,
-          '@keyframes wave': {
-            from: { height: '4px' },
-            to:   { height: `${18 + (i % 5) * 9}px` },
+          borderRadius: 1,
+          mb: 0.25,
+          pl: 1 + depth * 2,
+          pr: 1,
+          minHeight: 40,
+          '&.Mui-selected': {
+            bgcolor: hexAlpha(levelInfo?.color || '#1976d2', 0.12),
+            '&:hover': { bgcolor: hexAlpha(levelInfo?.color || '#1976d2', 0.18) },
           },
         }}
+      >
+        {/* Expand toggle */}
+        {mightHaveChildren ? (
+          <IconButton
+            size="small"
+            onClick={handleToggle}
+            sx={{ mr: 0.5, p: 0.25, color: 'text.secondary' }}
+          >
+            {loadingChildren
+              ? <CircularProgress size={14} />
+              : open
+                ? <ExpandMoreIcon fontSize="small" />
+                : <ChevronRightIcon fontSize="small" />}
+          </IconButton>
+        ) : (
+          <Box sx={{ width: 28 }} />
+        )}
+
+        {/* Level icon */}
+        <Box sx={{ color: levelInfo?.color || 'text.secondary', display: 'flex', mr: 1, fontSize: 18 }}>
+          {levelInfo?.icon || <LocationIcon fontSize="small" />}
+        </Box>
+
+        {/* Label */}
+        <ListItemText
+          primary={
+            <Typography variant="body2" fontWeight={isSelected ? 700 : 400} noWrap>
+              {node.name}
+            </Typography>
+          }
+          secondary={
+            <Typography variant="caption" color="text.disabled" noWrap>
+              {node.code} · {levelInfo?.name || `Level ${node.level}`}
+            </Typography>
+          }
+        />
+
+        {/* Select chip – only shown when hovered / selected */}
+        {isSelected && (
+          <Chip label="Selected" size="small" color="success" sx={{ ml: 1, fontWeight: 600 }} />
+        )}
+      </ListItemButton>
+
+      {/* Children */}
+      {open && childrenLoaded && (
+        <Box>
+          {children.length === 0 ? (
+            <Box sx={{ pl: 1 + (depth + 1) * 2 + 3.5, py: 0.5 }}>
+              <Typography variant="caption" color="text.disabled">No sub-items</Typography>
+            </Box>
+          ) : (
+            children.map(child => (
+              <HierarchyNode
+                key={child.id}
+                node={child}
+                depth={depth + 1}
+                locationMode={locationMode}
+                onSelect={onSelect}
+                selectedId={selectedId}
+              />
+            ))
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+});
+
+// ─── LocationSearch ───────────────────────────────────────────────────────────
+const LocationSearch = React.memo(({ value, onChange, onClear }) => {
+  const theme = useTheme();
+
+  // 'address' | 'structure'   (renamed from 'buildings')
+  const [locationMode, setLocationMode] = useState('address');
+
+  const [searchTerm, setSearchTerm]         = useState('');
+  const [searchResults, setSearchResults]   = useState([]);
+  const [searchLoading, setSearchLoading]   = useState(false);
+
+  // Root nodes for each mode
+  const [addressRoots, setAddressRoots]     = useState([]);
+  const [structureRoots, setStructureRoots] = useState([]);
+  const [rootsLoading, setRootsLoading]     = useState(false);
+  const [rootsLoaded, setRootsLoaded]       = useState({ address: false, structure: false });
+
+  const [selectedLocation, setSelectedLocation] = useState(value || null);
+  const [locationHierarchy, setLocationHierarchy] = useState([]);
+
+  // ── Sync external value ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (value !== selectedLocation) setSelectedLocation(value);
+  }, [value]); // eslint-disable-line
+
+  // ── Load ancestor breadcrumb when selection changes ────────────────────────
+  useEffect(() => {
+    if (selectedLocation?.id) loadLocationHierarchy(selectedLocation.id);
+    else setLocationHierarchy([]);
+  }, [selectedLocation?.id]); // eslint-disable-line
+
+  // ── Load root nodes for current tab ───────────────────────────────────────
+  useEffect(() => {
+    const apiMode = locationMode === 'structure' ? 'buildings' : 'address';
+    const alreadyLoaded = rootsLoaded[locationMode];
+    if (alreadyLoaded) return;
+
+    const loadRoots = async () => {
+      setRootsLoading(true);
+      try {
+        const params = new URLSearchParams({
+          skip: 0, limit: 100,
+          location_mode: apiMode,
+          include_inactive: false,
+          // No parent_id → fetch top-level roots
+        });
+        const response = await api.get(`/locations/?${params.toString()}`);
+        const items = response.data?.items || response.data || [];
+        if (locationMode === 'address') setAddressRoots(items);
+        else setStructureRoots(items);
+        setRootsLoaded(prev => ({ ...prev, [locationMode]: true }));
+      } catch (err) {
+        console.error('Error loading roots:', err);
+      } finally {
+        setRootsLoading(false);
+      }
+    };
+    loadRoots();
+  }, [locationMode]); // eslint-disable-line
+
+  // ── Search ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!searchTerm || searchTerm.length < 2) { setSearchResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const apiMode = locationMode === 'structure' ? 'buildings' : 'address';
+        const params = new URLSearchParams({
+          search: searchTerm,
+          location_mode: apiMode,
+          limit: 50,
+          include_inactive: false,
+        });
+        const response = await api.get(`/locations/?${params.toString()}`);
+        setSearchResults(response.data?.items || response.data || []);
+      } catch (err) {
+        console.error('Error searching locations:', err);
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [searchTerm, locationMode]);
+
+  // ── Breadcrumb ancestors ───────────────────────────────────────────────────
+  const loadLocationHierarchy = async (locationId) => {
+    try {
+      const res = await api.get(`/locations/${locationId}/ancestors`);
+      const ancestors = res.data || [];
+      const selfRes = await api.get(`/locations/${locationId}`);
+      setLocationHierarchy(selfRes.data ? [...ancestors, selfRes.data] : ancestors);
+    } catch {
+      setLocationHierarchy(selectedLocation ? [selectedLocation] : []);
+    }
+  };
+
+  const handleSelect = (location) => {
+    setSelectedLocation(location);
+    setSearchTerm('');
+    setSearchResults([]);
+    onChange(location);
+  };
+
+  const handleClear = () => {
+    setSelectedLocation(null);
+    setLocationHierarchy([]);
+    onChange(null);
+    if (onClear) onClear();
+  };
+
+  const apiModeLabel = locationMode === 'address' ? 'address (Country, District, Village…)' : 'structure (Office, Building, Room…)';
+  const currentRoots = locationMode === 'address' ? addressRoots : structureRoots;
+  const apiMode      = locationMode === 'structure' ? 'buildings' : 'address';
+
+  return (
+    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+        <Stack spacing={2}>
+          {/* Header */}
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+            <LocationIcon sx={{ color: 'primary.main' }} />
+            <Typography variant="subtitle1" fontWeight={600}>Meeting Location</Typography>
+            {selectedLocation && (
+              <Chip
+                label="Location Selected"
+                size="small"
+                color="success"
+                onDelete={handleClear}
+              />
+            )}
+          </Stack>
+
+          {/* Mode toggle — "Address" | "Structure" */}
+          <ToggleButtonGroup
+            value={locationMode}
+            exclusive
+            onChange={(_, val) => { if (val) { setLocationMode(val); setSearchTerm(''); setSearchResults([]); } }}
+            size="small"
+            fullWidth
+          >
+            <ToggleButton value="address">
+              <PublicIcon sx={{ mr: 0.75, fontSize: 18 }} /> Address
+            </ToggleButton>
+            <ToggleButton value="structure">
+              <StructureIcon sx={{ mr: 0.75, fontSize: 18 }} /> Structure
+            </ToggleButton>
+          </ToggleButtonGroup>
+
+          {/* Search box */}
+          <TextField
+            fullWidth
+            placeholder={`Search ${apiModeLabel}…`}
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            size="small"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: searchLoading && <CircularProgress size={18} />,
+            }}
+          />
+
+          {/* Search results */}
+          {searchResults.length > 0 && (
+            <Paper variant="outlined" sx={{ maxHeight: 280, overflow: 'auto', borderRadius: 1.5 }}>
+              <List dense disablePadding>
+                {searchResults.map(result => {
+                  const li = getLevelInfo(result);
+                  return (
+                    <ListItemButton
+                      key={result.id}
+                      onClick={() => handleSelect(result)}
+                      selected={selectedLocation?.id === result.id}
+                      sx={{ py: 0.75 }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 32, color: li?.color }}>
+                        {li?.icon || <LocationIcon fontSize="small" />}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={result.name}
+                        secondary={`${result.code} · ${li?.name || `Level ${result.level}`}`}
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption' }}
+                      />
+                      {selectedLocation?.id === result.id && (
+                        <CheckCircleIcon fontSize="small" color="success" />
+                      )}
+                    </ListItemButton>
+                  );
+                })}
+              </List>
+            </Paper>
+          )}
+
+          {/* Hierarchy browser (hidden while searching) */}
+          {!searchTerm && (
+            <>
+              <Typography variant="caption" color="text.secondary">
+                Or browse the hierarchy — click an item to select it, use the arrow to expand:
+              </Typography>
+
+              <Paper
+                variant="outlined"
+                sx={{ maxHeight: 380, overflow: 'auto', borderRadius: 1.5, p: 0.5 }}
+              >
+                {rootsLoading ? (
+                  <Stack spacing={1} sx={{ p: 1.5 }}>
+                    {[1, 2, 3].map(i => <Skeleton key={i} variant="rounded" height={36} />)}
+                  </Stack>
+                ) : currentRoots.length === 0 ? (
+                  <Box sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="body2" color="text.disabled">No items found</Typography>
+                  </Box>
+                ) : (
+                  <List dense disablePadding>
+                    {currentRoots.map(node => (
+                      <HierarchyNode
+                        key={node.id}
+                        node={node}
+                        depth={0}
+                        locationMode={apiMode}
+                        onSelect={handleSelect}
+                        selectedId={selectedLocation?.id}
+                      />
+                    ))}
+                  </List>
+                )}
+              </Paper>
+            </>
+          )}
+
+          {/* Breadcrumb path */}
+          {selectedLocation && locationHierarchy.length > 0 && (
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1.5 }}>
+              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                Selected path:
+              </Typography>
+              <Breadcrumbs
+                separator={<ChevronRightIcon sx={{ fontSize: 14 }} />}
+                sx={{ flexWrap: 'wrap' }}
+              >
+                {locationHierarchy.map(item => {
+                  const li = getLevelInfo(item);
+                  return (
+                    <Chip
+                      key={item.id}
+                      label={item.name}
+                      size="small"
+                      icon={li?.icon}
+                      sx={{
+                        bgcolor: hexAlpha(li?.color || theme.palette.primary.main, 0.1),
+                        borderColor: li?.color || theme.palette.primary.main,
+                        color: li?.color || theme.palette.primary.main,
+                        border: '1px solid',
+                        fontWeight: 500,
+                      }}
+                    />
+                  );
+                })}
+              </Breadcrumbs>
+            </Paper>
+          )}
+
+          {/* Empty state */}
+          {!selectedLocation && (
+            <Alert severity="info" variant="outlined" sx={{ borderRadius: 1.5 }}>
+              Search or browse to pick a location. You can select either an address or a structure.
+            </Alert>
+          )}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+});
+
+// ─── System Users Tab Component ───────────────────────────────────────────────
+const SystemUsersTab = ({ onAddUsers, existingParticipants }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState(new Set());
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+
+  // Fetch system users
+  const fetchSystemUsers = async (query = '') => {
+    setLoading(true);
+    try {
+      const params = {
+        limit: 50,
+        is_active: true
+      };
+      if (query && query.length >= 2) {
+        params.search = query;
+      }
+      const response = await api.get('/users/', { params });
+      const usersList = response.data?.items || response.data || [];
+      
+      // Filter out users already added as participants
+      const existingEmails = new Set(existingParticipants.map(p => p.email?.toLowerCase()).filter(Boolean));
+      const filteredUsers = usersList.filter(user => !existingEmails.has(user.email?.toLowerCase()));
+      
+      setUsers(filteredUsers);
+    } catch (err) {
+      console.error('Error fetching system users:', err);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    fetchSystemUsers();
+  }, []);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm && searchTerm.length >= 2) {
+        fetchSystemUsers(searchTerm);
+      } else if (!searchTerm) {
+        fetchSystemUsers();
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  
+  const handleToggleUser = (userId) => {
+    setSelectedUsers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(userId)) {
+        newSet.delete(userId);
+      } else {
+        newSet.add(userId);
+      }
+      return newSet;
+    });
+  };
+  
+  const handleAddSelected = () => {
+    const selectedUsersList = users.filter(user => selectedUsers.has(user.id));
+    const participants = selectedUsersList.map(user => ({
+      id: `system_${user.id}_${Date.now()}`,
+      name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
+      email: user.email,
+      telephone: user.phone || user.telephone || '',
+      title: user.title || '',
+      organization: user.organization || user.department || '',
+      is_chairperson: false,
+      is_system_user: true,
+      user_id: user.id
+    }));
+    
+    onAddUsers(participants);
+    setSnackbarMessage(`Added ${participants.length} system user${participants.length > 1 ? 's' : ''}`);
+    setSelectedUsers(new Set());
+    
+    setTimeout(() => setSnackbarMessage(''), 3000);
+  };
+  
+  return (
+    <Stack spacing={2}>
+      <TextField
+        fullWidth
+        placeholder="Search system users by name or email..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        size="small"
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <PersonSearchIcon />
+            </InputAdornment>
+          ),
+          endAdornment: loading && <CircularProgress size={20} />
+        }}
       />
-    ))}
-  </Box>
-);
+      
+      {users.length === 0 && !loading && (
+        <Alert severity="info">
+          {searchTerm ? 'No system users found' : 'No system users available to add'}
+        </Alert>
+      )}
+      
+      {users.length > 0 && (
+        <>
+          <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto' }}>
+            <List dense>
+              {users.map(user => (
+                <ListItemButton
+                  key={user.id}
+                  onClick={() => handleToggleUser(user.id)}
+                  selected={selectedUsers.has(user.id)}
+                >
+                  <ListItemAvatar>
+                    <Avatar sx={{ bgcolor: selectedUsers.has(user.id) ? 'primary.main' : 'grey.500' }}>
+                      {user.first_name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || 'U'}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
+                    secondary={
+                      <Stack direction="row" spacing={2} flexWrap="wrap">
+                        {user.email && (
+                          <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                            <EmailIcon sx={{ fontSize: 12 }} /> {user.email}
+                          </Typography>
+                        )}
+                        {user.phone && (
+                          <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                            <PhoneIcon sx={{ fontSize: 12 }} /> {user.phone}
+                          </Typography>
+                        )}
+                        {user.title && (
+                          <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+                            <WorkIcon sx={{ fontSize: 12 }} /> {user.title}
+                          </Typography>
+                        )}
+                      </Stack>
+                    }
+                  />
+                  {selectedUsers.has(user.id) && <CheckCircleIcon color="success" />}
+                </ListItemButton>
+              ))}
+            </List>
+          </Paper>
+          
+          <Button
+            variant="contained"
+            onClick={handleAddSelected}
+            disabled={selectedUsers.size === 0}
+            startIcon={<GroupAddIcon />}
+            fullWidth
+          >
+            Add Selected Users ({selectedUsers.size})
+          </Button>
+        </>
+      )}
+      
+      <Snackbar
+        open={!!snackbarMessage}
+        autoHideDuration={3000}
+        onClose={() => setSnackbarMessage('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="success">{snackbarMessage}</Alert>
+      </Snackbar>
+    </Stack>
+  );
+};
 
-// ─── Recording timer chip ────────────────────────────────────────────────────
-const RecordingBadge = ({ time, isPaused }) => (
-  <Stack direction="row" alignItems="center" spacing={1}>
-    <Box
-      sx={{
-        width: 10,
-        height: 10,
-        borderRadius: '50%',
-        bgcolor: isPaused ? 'warning.main' : 'error.main',
-        animation: isPaused ? 'none' : 'pulse 1.5s infinite',
-        '@keyframes pulse': {
-          '0%,100%': { opacity: 1, transform: 'scale(1)' },
-          '50%':     { opacity: 0.5, transform: 'scale(0.85)' },
-        },
-      }}
+// ─── ParticipantItem ──────────────────────────────────────────────────────────
+const ParticipantItem = React.memo(({
+  participant, onRemove, onMakeChairperson, isChairperson, isSecretary, showActions = true,
+}) => (
+  <ListItem
+    secondaryAction={showActions && (
+      <Tooltip title="Remove participant">
+        <IconButton edge="end" onClick={() => onRemove(participant.id)}>
+          <DeleteIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+  >
+    <ListItemAvatar>
+      <Avatar sx={{ bgcolor: isChairperson ? 'primary.main' : 'success.main' }}>
+        {participant.name?.charAt(0) || 'P'}
+      </Avatar>
+    </ListItemAvatar>
+    <ListItemText
+      primary={
+        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+          <Typography variant="body2" fontWeight={500}>{participant.name}</Typography>
+          {isChairperson && <Chip label="Chairperson" size="small" color="primary" />}
+          {isSecretary   && <Chip label="Secretary"   size="small" color="secondary" />}
+          {participant.is_system_user && <Chip label="System User" size="small" color="info" variant="outlined" />}
+        </Stack>
+      }
+      secondary={
+        <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mt: 0.5 }}>
+          {participant.email && (
+            <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+              <EmailIcon sx={{ fontSize: 12 }} /> {participant.email}
+            </Typography>
+          )}
+          {participant.telephone && (
+            <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+              <PhoneIcon sx={{ fontSize: 12 }} /> {participant.telephone}
+            </Typography>
+          )}
+          {participant.title && (
+            <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+              <TitleIcon sx={{ fontSize: 12 }} /> {participant.title}
+            </Typography>
+          )}
+          {participant.organization && (
+            <Typography variant="caption" display="flex" alignItems="center" gap={0.5}>
+              <WorkIcon sx={{ fontSize: 12 }} /> {participant.organization}
+            </Typography>
+          )}
+        </Stack>
+      }
     />
-    <Typography variant="caption" fontFamily="monospace" fontWeight={700} color="text.primary">
-      {isPaused ? 'PAUSED' : 'REC'} · {formatTime(time)}
-    </Typography>
-  </Stack>
-);
+    {!isChairperson && showActions && (
+      <Button size="small" onClick={() => onMakeChairperson(participant.id)}>
+        Make Chairperson
+      </Button>
+    )}
+  </ListItem>
+));
 
-const formatTime = (seconds) => {
-  if (!seconds && seconds !== 0) return '00:00';
-  const hrs  = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  return hrs > 0
-    ? `${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`
-    : `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+// ─── LoadingOverlay ───────────────────────────────────────────────────────────
+const LoadingOverlay = ({ open, message = 'Processing...' }) => {
+  if (!open) return null;
+  return (
+    <Backdrop open={open} sx={{ zIndex: 9999, color: '#fff', flexDirection: 'column', gap: 2, backgroundColor: 'rgba(0,0,0,0.8)' }}>
+      <CircularProgress color="primary" size={60} />
+      <Typography variant="h6" sx={{ color: 'white', textAlign: 'center' }}>{message}</Typography>
+      <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
+        Please do not close this window
+      </Typography>
+      <LinearProgress sx={{ width: '200px', mt: 2, backgroundColor: 'rgba(255,255,255,0.2)', '& .MuiLinearProgress-bar': { backgroundColor: 'white' } }} />
+    </Backdrop>
+  );
 };
 
-const formatFileSize = (bytes) => {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024, sizes = ['B','KB','MB','GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-};
-
-const formatDate = (dateString) => {
-  if (!dateString) return '—';
-  try {
-    const d = new Date(dateString);
-    return isNaN(d.getTime()) ? '—' : format(d, 'MMM dd, yyyy · HH:mm');
-  } catch { return '—'; }
-};
-
-// ============================================================================
-const MeetingRecorder = () => {
-  const { id }    = useParams();
+// ─── MeetingForm (main) ───────────────────────────────────────────────────────
+const MeetingForm = () => {
   const navigate  = useNavigate();
+  const location  = useLocation();
+  const { id }    = useParams();
   const dispatch  = useDispatch();
   const theme     = useTheme();
   const isMobile  = useMediaQuery(theme.breakpoints.down('sm'));
+  const isEditMode = Boolean(id);
 
-  const currentMeeting = useSelector(selectCurrentMeeting);
+  const returnPath = location.state?.from || '/meetings';
 
-  // ── Mode (default: audio) ──────────────────────────────────────────────────
-  const [recordingMode, setRecordingMode] = useState(RECORDING_MODE.audio);
+  const initialParticipantsLoaded = useRef(false);
+  const formRef = useRef(null);
 
-  // ── Recording state ────────────────────────────────────────────────────────
-  const [isRecording,   setIsRecording]   = useState(false);
-  const [isPaused,      setIsPaused]      = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const [recordedUrl,   setRecordedUrl]   = useState(null);
-  const [recordedBlob,  setRecordedBlob]  = useState(null);
-  const [recordingSize, setRecordingSize] = useState(0);
+  const participantLists    = useSelector(selectParticipantLists);
+  const meetingParticipants = useSelector(selectMeetingParticipantsAll);
+  const chairperson         = useSelector(selectMeetingChairperson);
+  const participantsLoading = useSelector(selectParticipantsLoading);
+  const { isLoading: submitting, success, error: meetingError } = useSelector(state => state.meetings);
 
-  // ── Upload state ───────────────────────────────────────────────────────────
-  const [uploadStatus,          setUploadStatus]          = useState(UPLOAD_STATUS.IDLE);
-  const [uploadProgress,        setUploadProgress]        = useState(0);
-  const [uploadError,           setUploadError]           = useState(null);
-  const [uploadAbortController, setUploadAbortController] = useState(null);
+  const [activeStep, setActiveStep]           = useState(0);
+  const [snackbar, setSnackbar]               = useState({ open: false, message: '', severity: 'success' });
+  const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
+  const [selectedParticipantList, setSelectedParticipantList]   = useState(null);
+  const [showGpsDetails, setShowGpsDetails]   = useState(false);
+  const [formLoading, setFormLoading]         = useState(isEditMode);
+  const [gpsEnabled, setGpsEnabled]           = useState(false);
+  const [gpsLoading, setGpsLoading]           = useState(false);
+  const [gpsSupported, setGpsSupported]       = useState(true);
+  const [formDirty, setFormDirty]             = useState(false);
+  const [isSubmitting, setIsSubmitting]       = useState(false);
+  const [submitMessage, setSubmitMessage]     = useState('');
+  const [participantTab, setParticipantTab]   = useState('custom'); // 'custom', 'lists', 'system'
 
-  // ── Devices ────────────────────────────────────────────────────────────────
-  const [cameras,        setCameras]        = useState([]);
-  const [microphones,    setMicrophones]    = useState([]);
-  const [selectedCamera, setSelectedCamera] = useState('');
-  const [selectedMic,    setSelectedMic]    = useState('');
-  const [streamReady,    setStreamReady]    = useState(false);
-  const [streamError,    setStreamError]    = useState(null);
+  const [formData, setFormData] = useState({
+    title: '', description: '', meeting_date: null, start_time: null, end_time: null,
+    location_text: '', location_id: null, location_details: null, agenda: '',
+    secretary_name: '', gps_latitude: '', gps_longitude: '',
+  });
 
-  // ── Settings ───────────────────────────────────────────────────────────────
-  const [quality,    setQuality]    = useState('medium');
-  const [fileFormat, setFileFormat] = useState('webm');
+  const [newParticipant, setNewParticipant] = useState({
+    name: '', email: '', telephone: '', title: '', organization: '', is_chairperson: false,
+  });
 
-  // ── UI / metadata ──────────────────────────────────────────────────────────
-  const [recordingName,        setRecordingName]        = useState('');
-  const [recordingDescription, setRecordingDescription] = useState('');
-  const [recordingCategory,    setRecordingCategory]    = useState('meeting');
-  const [savedRecordings,      setSavedRecordings]      = useState([]);
-  const [loadingRecordings,    setLoadingRecordings]    = useState(false);
-  const [activeTab,            setActiveTab]            = useState(0);
-  const [snackbar,             setSnackbar]             = useState({ open: false, message: '', severity: 'success' });
-  const [saveDialogOpen,       setSaveDialogOpen]       = useState(false);
-  const [previewDialogOpen,    setPreviewDialogOpen]    = useState(false);
-  const [selectedRecording,    setSelectedRecording]    = useState(null);
-  const [advancedOpen,         setAdvancedOpen]         = useState(false);
+  const apiLoading      = submitting || participantsLoading || formLoading || isSubmitting;
+  const chairpersonName = useMemo(() => chairperson?.name || 'Not selected', [chairperson]);
+  const pageTitle       = isEditMode ? 'Edit Meeting' : 'Create New Meeting';
+  const pageSubtitle    = isEditMode ? 'Update meeting details' : 'Fill in the details to schedule a new meeting';
+  const isValid         = useMemo(() =>
+    formData.title.trim() && formData.meeting_date && formData.start_time,
+    [formData.title, formData.meeting_date, formData.start_time],
+  );
 
-  // ── Refs ───────────────────────────────────────────────────────────────────
-  const videoElementRef  = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const streamRef        = useRef(null);
-  const timerRef         = useRef(null);
-  const chunksRef        = useRef([]);
+  // Handle adding system users
+  const handleAddSystemUsers = useCallback((users) => {
+    users.forEach(user => {
+      dispatch(addCustomParticipant(user));
+    });
+    setSnackbar({
+      open: true,
+      message: `Added ${users.length} system user${users.length > 1 ? 's' : ''}`,
+      severity: 'success',
+    });
+    setFormDirty(true);
+  }, [dispatch]);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  const showSnack = (message, severity = 'success') =>
-    setSnackbar({ open: true, message, severity });
+  // Fetch meeting for edit
+  useEffect(() => {
+    if (isEditMode && id && !initialParticipantsLoaded.current) {
+      setFormLoading(true);
+      dispatch(fetchMeetingById(id)).unwrap()
+        .then(meeting => {
+          if (meeting) {
+            const meetingDate = new Date(meeting.meeting_date);
+            const startTime   = meeting.start_time ? new Date(meeting.start_time) : null;
+            const endTime     = meeting.end_time   ? new Date(meeting.end_time)   : null;
 
-  const getRecordingDate = (rec) => {
-    if (!rec?.created_at) return '—';
-    if (rec.created_at instanceof Date && !isNaN(rec.created_at)) return formatDate(rec.created_at);
-    return formatDate(rec.created_at);
-  };
+            setFormData({
+              title:            meeting.title || '',
+              description:      meeting.description || '',
+              meeting_date:     meetingDate,
+              start_time:       startTime,
+              end_time:         endTime,
+              location_text:    meeting.location_text || '',
+              location_id:      meeting.location_id || null,
+              location_details: meeting.location_id ? {
+                id:            meeting.location_id,
+                name:          meeting.location_text,
+                code:          meeting.location_code,
+                level:         meeting.location_level,
+                location_mode: meeting.location_mode,
+              } : null,
+              agenda:           meeting.agenda || '',
+              secretary_name:   meeting.secretary_name || '',
+              gps_latitude:     meeting.gps_coordinates?.split(',')[0] || '',
+              gps_longitude:    meeting.gps_coordinates?.split(',')[1] || '',
+            });
 
-  // ── Data loading ───────────────────────────────────────────────────────────
-  const loadRecordings = useCallback(async () => {
-    setLoadingRecordings(true);
-    try {
-      const res = await api.get(`/meetings/${id}/recordings`);
-      const raw = res.data.items || res.data || [];
-      setSavedRecordings(raw.map(r => ({
-        ...r,
-        created_at: r.created_at ? new Date(r.created_at) : null,
-        duration:   r.duration   || 0,
-        file_size:  r.file_size  || 0,
-      })));
-    } catch (err) {
-      console.error(err);
-      showSnack('Failed to load recordings', 'error');
-    } finally {
-      setLoadingRecordings(false);
-    }
-  }, [id]);
+            if (meeting.gps_coordinates) setGpsEnabled(true);
 
-  const deleteRecording = useCallback(async (recordingId) => {
-    if (!window.confirm('Delete this recording?')) return;
-    try {
-      await api.delete(`/meetings/${id}/recordings/${recordingId}`);
-      showSnack('Recording deleted');
-      loadRecordings();
-      setSelectedRecording(null);
-    } catch (err) {
-      showSnack('Failed to delete recording', 'error');
-    }
-  }, [id, loadRecordings]);
-
-  const downloadRecording = useCallback((recording) => {
-    const a = document.createElement('a');
-    a.href     = recording.url;
-    a.download = recording.file_name || `${recording.title}.${recording.format}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, []);
-
-  // ── Upload ─────────────────────────────────────────────────────────────────
-  const saveRecording = useCallback(async () => {
-    if (!recordedBlob || !currentMeeting) return;
-    setUploadStatus(UPLOAD_STATUS.UPLOADING);
-    setUploadProgress(0);
-    setUploadError(null);
-
-    const ctrl     = new AbortController();
-    setUploadAbortController(ctrl);
-
-    const isAudio  = recordingMode === RECORDING_MODE.audio;
-    const formats  = isAudio ? AUDIO_FORMATS : RECORDING_FORMATS;
-    const ext      = formats[fileFormat]?.extension || '.webm';
-    const base     = recordingName || currentMeeting.title || 'recording';
-    const fileName = `${base.replace(/[^a-z0-9]/gi,'_')}_${Date.now()}${ext}`;
-
-    const fd = new FormData();
-    fd.append('file',        recordedBlob, fileName);
-    fd.append('meeting_id',  id);
-    fd.append('title',       recordingName || `${currentMeeting.title} - Recording`);
-    fd.append('description', recordingDescription);
-    fd.append('category',    recordingCategory);
-    fd.append('duration',    recordingTime);
-    fd.append('quality',     isAudio ? 'audio' : quality);
-    fd.append('format',      fileFormat);
-    fd.append('file_size',   recordedBlob.size);
-    fd.append('mode',        recordingMode);
-
-    try {
-      const xhr = new XMLHttpRequest();
-      await new Promise((resolve, reject) => {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+            dispatch(clearMeetingParticipants());
+            if (meeting.participants?.length) {
+              meeting.participants.forEach(p => dispatch(addCustomParticipant({
+                ...p,
+                is_chairperson: p.is_chairperson || false,
+                id: p.id || `participant-${Date.now()}-${Math.random()}`,
+              })));
+              const chair = meeting.participants.find(p => p.is_chairperson === true);
+              if (chair) setTimeout(() => dispatch(setMeetingChairperson(chair.id)), 150);
+            }
+          }
+          setFormLoading(false);
+          initialParticipantsLoaded.current = true;
+        })
+        .catch(() => {
+          setSnackbar({ open: true, message: 'Failed to load meeting data', severity: 'error' });
+          setFormLoading(false);
         });
-        xhr.addEventListener('load',  () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Status ${xhr.status}`)));
-        xhr.addEventListener('error', () => reject(new Error('Network error')));
-        xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-        xhr.open('POST', `/api/v1/meetings/${id}/recordings`);
-        xhr.setRequestHeader('Accept', 'application/json');
-        const token = localStorage.getItem('access_token');
-        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-        xhr.send(fd);
-      });
-      setUploadStatus(UPLOAD_STATUS.SUCCESS);
-      showSnack('Recording saved!');
-      setSaveDialogOpen(false);
-      setRecordingName('');
-      setRecordingDescription('');
-      setTimeout(() => {
-        discardRecording();
-        loadRecordings();
-        setUploadStatus(UPLOAD_STATUS.IDLE);
-        setUploadProgress(0);
-      }, 1500);
-    } catch (err) {
-      setUploadStatus(UPLOAD_STATUS.ERROR);
-      setUploadError(err.message || 'Upload failed');
-      showSnack(err.message || 'Upload failed', 'error');
-    } finally {
-      setUploadAbortController(null);
     }
-  }, [recordedBlob, currentMeeting, id, recordingName, recordingDescription,
-      recordingCategory, recordingTime, quality, fileFormat, recordingMode, loadRecordings]);
+  }, [isEditMode, id, dispatch]);
 
-  const cancelUpload = useCallback(() => {
-    uploadAbortController?.abort();
-    setUploadStatus(UPLOAD_STATUS.IDLE);
-    setUploadProgress(0);
-    setUploadError(null);
-    showSnack('Upload cancelled', 'info');
-  }, [uploadAbortController]);
-
-  // ── Stream / recording controls ────────────────────────────────────────────
-  const startPreview = useCallback(async () => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    setStreamReady(false);
-    setStreamError(null);
-    try {
-      const isVideo = recordingMode === RECORDING_MODE.video;
-      const stream  = await navigator.mediaDevices.getUserMedia({
-        video: isVideo ? {
-          deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
-          width:  { ideal: RECORDING_QUALITY[quality].width },
-          height: { ideal: RECORDING_QUALITY[quality].height },
-        } : false,
-        audio: {
-          deviceId:        selectedMic ? { exact: selectedMic } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl:  true,
-        },
-      });
-      streamRef.current = stream;
-      if (videoElementRef.current && isVideo) videoElementRef.current.srcObject = stream;
-      setStreamReady(true);
-    } catch (err) {
-      setStreamError(err.message || 'Cannot access microphone');
-      showSnack('Failed to access microphone', 'error');
-    }
-  }, [recordingMode, selectedCamera, selectedMic, quality]);
-
-  const startRecording = useCallback(() => {
-    if (!streamRef.current) return;
-    const isAudio   = recordingMode === RECORDING_MODE.audio;
-    const formats   = isAudio ? AUDIO_FORMATS : RECORDING_FORMATS;
-    const mimeType  = formats[fileFormat]?.mimeType || (isAudio ? 'audio/webm' : 'video/webm');
-    const supported = MediaRecorder.isTypeSupported(mimeType);
-    if (!supported) showSnack(`${mimeType} not supported, using default`, 'warning');
-
-    chunksRef.current = [];
-    const recorder = new MediaRecorder(streamRef.current, supported ? { mimeType } : {});
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (e) => {
-      if (e.data?.size > 0) {
-        chunksRef.current.push(e.data);
-        setRecordingSize(chunksRef.current.reduce((a, c) => a + c.size, 0));
+  // Sync secretary
+  useEffect(() => {
+    if (formData.secretary_name && meetingParticipants.length > 0) {
+      if (!meetingParticipants.some(p => p.name === formData.secretary_name)) {
+        setFormData(prev => ({ ...prev, secretary_name: '' }));
+        setFormDirty(true);
       }
-    };
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: mimeType });
-      setRecordedUrl(URL.createObjectURL(blob));
-      setRecordedBlob(blob);
-      setRecordingSize(blob.size);
-    };
-    recorder.onerror = () => { showSnack('Recording error', 'error'); stopRecording(); };
-
-    recorder.start(1000);
-    setIsRecording(true);
-    setIsPaused(false);
-    timerRef.current = setInterval(() => setRecordingTime(p => p + 1), 1000);
-  }, [recordingMode, fileFormat]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current.stop();
-    setIsRecording(false);
-    setIsPaused(false);
-    clearInterval(timerRef.current);
-    timerRef.current = null;
-  }, []);
-
-  const pauseRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.pause();
-      setIsPaused(true);
-      clearInterval(timerRef.current);
-      timerRef.current = null;
     }
-  }, []);
+  }, [meetingParticipants, formData.secretary_name]);
 
-  const resumeRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'paused') {
-      mediaRecorderRef.current.resume();
-      setIsPaused(false);
-      timerRef.current = setInterval(() => setRecordingTime(p => p + 1), 1000);
+  useEffect(() => {
+    dispatch(fetchParticipantLists());
+    dispatch(fetchParticipants({ limit: 100 }));
+    if (!navigator.geolocation) {
+      setGpsSupported(false);
+      setSnackbar({ open: true, message: 'Geolocation is not supported by your browser', severity: 'warning' });
     }
+    return () => {
+      if (!success) dispatch(clearMeetingParticipants());
+      dispatch(clearMeetingState());
+      dispatch(clearCurrentMeeting());
+    };
+  }, [dispatch, success]);
+
+  const handleChange        = useCallback((e) => { setFormData(prev => ({ ...prev, [e.target.name]: e.target.value })); setFormDirty(true); }, []);
+  const handleDateChange    = useCallback((date) => { setFormData(prev => ({ ...prev, meeting_date: date })); setFormDirty(true); }, []);
+  const handleStartTimeChange = useCallback((time) => { setFormData(prev => ({ ...prev, start_time: time })); setFormDirty(true); }, []);
+  const handleEndTimeChange = useCallback((time) => { setFormData(prev => ({ ...prev, end_time: time })); setFormDirty(true); }, []);
+  const handleAgendaChange  = useCallback((value) => { setFormData(prev => ({ ...prev, agenda: value })); setFormDirty(true); }, []);
+
+  const handleLocationSelect = useCallback((loc) => {
+    if (loc) {
+      setFormData(prev => ({
+        ...prev,
+        location_id: loc.id,
+        location_text: loc.name,
+        location_details: { id: loc.id, name: loc.name, code: loc.code, level: loc.level, location_mode: loc.location_mode },
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, location_id: null, location_text: '', location_details: null }));
+    }
+    setFormDirty(true);
   }, []);
 
-  const discardRecording = useCallback(() => {
-    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
-    setRecordedUrl(null);
-    setRecordedBlob(null);
-    setRecordingTime(0);
-    setRecordingSize(0);
-    chunksRef.current = [];
-    setUploadStatus(UPLOAD_STATUS.IDLE);
-    setUploadProgress(0);
-    setUploadError(null);
-  }, [recordedUrl]);
+  const getCurrentLocation = useCallback(() => {
+    if (!gpsSupported) { setSnackbar({ open: true, message: 'Geolocation is not supported', severity: 'error' }); return; }
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setFormData(prev => ({ ...prev, gps_latitude: pos.coords.latitude.toFixed(6), gps_longitude: pos.coords.longitude.toFixed(6) }));
+        setGpsEnabled(true); setGpsLoading(false); setFormDirty(true);
+        setSnackbar({ open: true, message: 'Location captured successfully', severity: 'success' });
+      },
+      (err) => {
+        const msg = err.code === 1 ? 'Permission denied' : err.code === 2 ? 'Position unavailable' : 'Request timed out';
+        setSnackbar({ open: true, message: msg, severity: 'error' }); setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }, [gpsSupported]);
 
-  const handleModeChange = (_, newMode) => {
-    if (!newMode || isRecording) return;
-    setFileFormat('webm');
-    setRecordingMode(newMode);
-  };
+  const handleGpsToggle = useCallback((e) => {
+    const enabled = e.target.checked;
+    setGpsEnabled(enabled);
+    if (!enabled) setFormData(prev => ({ ...prev, gps_latitude: '', gps_longitude: '' }));
+    else if (gpsSupported && !formData.gps_latitude) getCurrentLocation();
+    setFormDirty(true);
+  }, [gpsSupported, formData.gps_latitude, getCurrentLocation]);
 
-  // ── Effects ────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-          .then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});
-        const devs  = await navigator.mediaDevices.enumerateDevices();
-        if (cancelled) return;
-        const vids  = devs.filter(d => d.kind === 'videoinput');
-        const auds  = devs.filter(d => d.kind === 'audioinput');
-        setCameras(vids);
-        setMicrophones(auds);
-        if (vids.length) setSelectedCamera(p => p || vids[0].deviceId);
-        if (auds.length) setSelectedMic(p => p || auds[0].deviceId);
-      } catch (err) { setStreamError('Cannot access media devices'); }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const handleAddCustomParticipant = useCallback(() => {
+    if (!newParticipant.name.trim()) { setSnackbar({ open: true, message: 'Participant name is required', severity: 'warning' }); return; }
+    dispatch(addCustomParticipant({ ...newParticipant, id: `temp-${Date.now()}-${Math.random()}`, is_custom: true }));
+    setNewParticipant({ name: '', email: '', telephone: '', title: '', organization: '', is_chairperson: false });
+    setShowAddParticipantDialog(false); setFormDirty(true);
+    setSnackbar({ open: true, message: 'Participant added successfully', severity: 'success' });
+  }, [dispatch, newParticipant]);
 
-  useEffect(() => {
-    if (!isRecording && !recordedUrl) startPreview();
-  }, [startPreview, isRecording, recordedUrl]);
+  const handleUseParticipantList = useCallback(() => {
+    if (selectedParticipantList) {
+      const list = participantLists.find(l => l.id === selectedParticipantList);
+      if (list?.participants) {
+        dispatch(addParticipantsFromListToMeeting({ listId: selectedParticipantList, participants: list.participants }));
+        setFormDirty(true);
+        setSnackbar({ open: true, message: `Added ${list.participants.length} participants from "${list.name}"`, severity: 'success' });
+      }
+      setSelectedParticipantList(null);
+    }
+  }, [selectedParticipantList, participantLists, dispatch]);
 
-  useEffect(() => () => {
-    uploadAbortController?.abort();
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
-  }, []);
+  const handleSetChairperson    = useCallback((pid) => { dispatch(setMeetingChairperson(pid)); setFormDirty(true); setSnackbar({ open: true, message: 'Chairperson updated', severity: 'info' }); }, [dispatch]);
+  const handleRemoveParticipant = useCallback((pid) => { dispatch(removeLocalMeetingParticipant(pid)); setFormDirty(true); setSnackbar({ open: true, message: 'Participant removed', severity: 'info' }); }, [dispatch]);
 
-  useEffect(() => {
-    if (id) { dispatch(fetchMeetingById(id)); loadRecordings(); }
-  }, [id, dispatch, loadRecordings]);
+  const handleNext = useCallback(() => {
+    if (activeStep === 0 && !isValid) { setSnackbar({ open: true, message: 'Please fill in all required fields', severity: 'warning' }); return; }
+    setActiveStep(prev => prev + 1); window.scrollTo(0, 0);
+  }, [activeStep, isValid]);
 
-  // ── Render guards ──────────────────────────────────────────────────────────
-  if (!currentMeeting) {
+  const handleBack = useCallback(() => {
+    if (activeStep === 0) navigate(returnPath); else setActiveStep(prev => prev - 1);
+  }, [activeStep, navigate, returnPath]);
+
+  const handleCancel = useCallback(() => {
+    if (formDirty) {
+      if (window.confirm('You have unsaved changes. Are you sure you want to leave?')) { dispatch(clearMeetingParticipants()); navigate(returnPath); }
+    } else { dispatch(clearMeetingParticipants()); navigate(returnPath); }
+  }, [formDirty, navigate, returnPath, dispatch]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!isValid) { setSnackbar({ open: true, message: 'Please fill in all required fields', severity: 'warning' }); setActiveStep(0); return; }
+    setIsSubmitting(true);
+    setSubmitMessage(isEditMode ? 'Updating meeting...' : 'Creating meeting...');
+    try {
+      const meetingDate = formData.meeting_date;
+      const startDateTime = new Date(meetingDate);
+      startDateTime.setHours(formData.start_time.getHours(), formData.start_time.getMinutes());
+      let endDateTime = null;
+      if (formData.end_time) { endDateTime = new Date(meetingDate); endDateTime.setHours(formData.end_time.getHours(), formData.end_time.getMinutes()); }
+
+      const chairpersonParticipant = meetingParticipants.find(p => p.is_chairperson === true);
+      const meetingPayload = {
+        title:          formData.title,
+        description:    formData.description || null,
+        meeting_date:   startDateTime.toISOString(),
+        start_time:     startDateTime.toISOString(),
+        end_time:       endDateTime?.toISOString() || null,
+        location_text:  formData.location_text || null,
+        location_id:    formData.location_id || null,
+        gps_coordinates: gpsEnabled && formData.gps_latitude && formData.gps_longitude
+          ? `${formData.gps_latitude},${formData.gps_longitude}` : null,
+        agenda:           formData.agenda || null,
+        secretary_name:   formData.secretary_name || null,
+        chairperson_name: chairpersonParticipant?.name || null,
+        custom_participants: meetingParticipants.map(p => ({
+          name:           p.name,
+          email:          p.email || null,
+          telephone:      p.telephone || null,
+          title:          p.title || null,
+          organization:   p.organization || null,
+          is_chairperson: p.is_chairperson || false,
+          is_secretary:   p.name === formData.secretary_name,
+        })),
+      };
+
+      if (isEditMode) await dispatch(updateMeeting({ id, data: meetingPayload })).unwrap();
+      else            await dispatch(createMeeting(meetingPayload)).unwrap();
+
+      setSnackbar({ open: true, message: isEditMode ? 'Meeting updated successfully!' : 'Meeting created successfully!', severity: 'success' });
+      dispatch(clearMeetingParticipants());
+      setTimeout(() => { setIsSubmitting(false); navigate(returnPath, { replace: true }); }, 1500);
+    } catch (error) {
+      setSnackbar({ open: true, message: error.message || error?.detail || `Failed to ${isEditMode ? 'update' : 'create'} meeting.`, severity: 'error' });
+      setIsSubmitting(false); setSubmitMessage('');
+    }
+  }, [formData, gpsEnabled, meetingParticipants, isEditMode, id, dispatch, isValid, navigate, returnPath]);
+
+  if (formLoading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <CircularProgress />
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress size={60} />
       </Box>
     );
   }
 
-  const canRecord = ['started','ongoing','in_progress'].includes(currentMeeting?.status?.short_name);
-
-  if (!canRecord) {
-    return (
-      <Container maxWidth="sm" sx={{ py: 6 }}>
-        <Paper sx={{ p: 5, textAlign: 'center', borderRadius: 4 }}>
-          <MeetingRoom sx={{ fontSize: 56, color: 'warning.main', mb: 2 }} />
-          <Typography variant="h5" fontWeight={700} gutterBottom>Meeting Not Started</Typography>
-          <Typography color="text.secondary" sx={{ mb: 3 }}>
-            Start the meeting before recording.
-          </Typography>
-          <Button variant="contained" startIcon={<ArrowBack />} onClick={() => navigate(`/meetings/${id}`)}>
-            Go to Meeting
-          </Button>
-        </Paper>
-      </Container>
-    );
-  }
-
-  const isAudioMode     = recordingMode === RECORDING_MODE.audio;
-  const activeFormats   = isAudioMode ? AUDIO_FORMATS : RECORDING_FORMATS;
-  const isUploading     = uploadStatus === UPLOAD_STATUS.UPLOADING;
-
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <Container maxWidth="lg" sx={{ py: 3 }}>
-      {/* ── Header ── */}
-      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 3 }}>
-        <Box>
-          <Typography variant="h5" fontWeight={700} sx={{ lineHeight: 1.2 }}>
-            Meeting Recorder
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-            {currentMeeting?.title}
-          </Typography>
-        </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<ArrowBack />}
-          onClick={() => navigate(`/meetings/${id}`)}
-        >
-          Back
-        </Button>
-      </Stack>
+    <LocalizationProvider dateAdapter={AdapterDateFns}>
+      <LoadingOverlay open={isSubmitting} message={submitMessage} />
 
-      {/* ── Tabs ── */}
-      <Tabs
-        value={activeTab}
-        onChange={(_, v) => setActiveTab(v)}
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab label="Record" />
-        <Tab
-          label={
-            <Badge badgeContent={savedRecordings.length} color="primary" max={99}>
-              <Box sx={{ pr: savedRecordings.length ? 1.5 : 0 }}>Recordings</Box>
-            </Badge>
-          }
-        />
-      </Tabs>
+      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 10, sm: 4 } }}>
+        {/* Mobile App Bar */}
+        {isMobile && (
+          <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Toolbar sx={{ px: 1.5 }}>
+              <IconButton edge="start" onClick={handleCancel}><ArrowBackIcon /></IconButton>
+              <Typography variant="h6" sx={{ flex: 1, textAlign: 'center', fontWeight: 600 }}>{pageTitle}</Typography>
+              <IconButton edge="end" onClick={handleCancel}><CloseIcon /></IconButton>
+            </Toolbar>
+          </AppBar>
+        )}
 
-      {/* ══════════════════════ RECORD TAB ══════════════════════ */}
-      {activeTab === 0 && (
-        <Grid container spacing={3}>
-
-          {/* ── Left: preview / visualizer ── */}
-          <Grid size={{ xs: 12, md: 8 }}>
-            <Paper
-              elevation={0}
-              sx={{
-                borderRadius: 3,
-                overflow: 'hidden',
-                border: `1px solid ${theme.palette.divider}`,
-                bgcolor: theme.palette.mode === 'dark' ? '#0d0d0d' : '#f9f9f9',
-              }}
-            >
-              {/* Preview area */}
-              <Box sx={{ position: 'relative', minHeight: 280 }}>
-
-                {/* Audio mode — waveform visualizer */}
-                {isAudioMode && !recordedUrl && (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minHeight: 280,
-                      p: 4,
-                      gap: 3,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        bgcolor: isRecording && !isPaused
-                          ? alpha(theme.palette.error.main, 0.12)
-                          : alpha(theme.palette.primary.main, 0.08),
-                        border: `2px solid ${isRecording && !isPaused
-                          ? theme.palette.error.main
-                          : theme.palette.primary.main}`,
-                        transition: 'all 0.3s',
-                      }}
-                    >
-                      <Mic
-                        sx={{
-                          fontSize: 36,
-                          color: isRecording && !isPaused ? 'error.main' : 'primary.main',
-                        }}
-                      />
-                    </Box>
-                    <AudioWaveform active={isRecording && !isPaused} />
-                    {isRecording && <RecordingBadge time={recordingTime} isPaused={isPaused} />}
-                    {!isRecording && !streamReady && !streamError && (
-                      <Typography variant="body2" color="text.secondary">
-                        Initialising microphone…
-                      </Typography>
-                    )}
-                    {streamReady && !isRecording && (
-                      <Typography variant="body2" color="text.secondary">
-                        Microphone ready · press Start Recording
-                      </Typography>
-                    )}
-                  </Box>
-                )}
-
-                {/* Video mode — live preview */}
-                {!isAudioMode && !recordedUrl && (
-                  <>
-                    <video
-                      ref={videoElementRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      style={{ width: '100%', display: 'block', backgroundColor: '#000', minHeight: 280 }}
-                    />
-                    {isRecording && (
-                      <Box sx={{ position: 'absolute', top: 12, left: 12, bgcolor: 'rgba(0,0,0,0.6)', borderRadius: 2, px: 1.5, py: 0.5 }}>
-                        <RecordingBadge time={recordingTime} isPaused={isPaused} />
-                      </Box>
-                    )}
-                  </>
-                )}
-
-                {/* Playback after recording */}
-                {recordedUrl && (
-                  isAudioMode ? (
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        minHeight: 280,
-                        gap: 3,
-                        p: 4,
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 80,
-                          height: 80,
-                          borderRadius: '50%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          bgcolor: alpha(theme.palette.success.main, 0.1),
-                          border: `2px solid ${theme.palette.success.main}`,
-                        }}
-                      >
-                        <CheckCircle sx={{ fontSize: 36, color: 'success.main' }} />
-                      </Box>
-                      <Typography variant="body2" fontWeight={600} color="success.main">
-                        Recording complete
-                      </Typography>
-                      <audio src={recordedUrl} controls style={{ width: '90%', maxWidth: 420 }} />
-                      <Stack direction="row" spacing={2}>
-                        <Chip icon={<Timer sx={{ fontSize: 14 }} />} label={formatTime(recordingTime)} size="small" />
-                        <Chip icon={<Storage sx={{ fontSize: 14 }} />} label={formatFileSize(recordingSize)} size="small" />
-                      </Stack>
-                    </Box>
-                  ) : (
-                    <video src={recordedUrl} controls style={{ width: '100%', display: 'block', maxHeight: 500 }} />
-                  )
-                )}
-
-                {/* Stream error overlay */}
-                {streamError && !streamReady && !isRecording && !recordedUrl && (
-                  <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
-                    <Alert
-                      severity="error"
-                      icon={<Warning />}
-                      action={<Button size="small" onClick={startPreview}>Retry</Button>}
-                    >
-                      {streamError}
-                    </Alert>
-                  </Box>
-                )}
+        <Container maxWidth="md" sx={{ px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
+          {/* Desktop header */}
+          {!isMobile && (
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+              <Box>
+                <Typography variant="h4" fontWeight={800} color="primary">{pageTitle}</Typography>
+                <Typography variant="body2" color="text.secondary">{pageSubtitle}</Typography>
               </Box>
-            </Paper>
-          </Grid>
-
-          {/* ── Right: controls ── */}
-          <Grid size={{ xs: 12, md: 4 }}>
-            <Stack spacing={2}>
-
-              {/* Mode toggle */}
-              <Card elevation={0} sx={{ border: `1px solid ${theme.palette.divider}`, borderRadius: 3 }}>
-                <CardContent sx={{ pb: '16px !important' }}>
-                  <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1 }}>
-                    Mode
-                  </Typography>
-                  <ToggleButtonGroup
-                    value={recordingMode}
-                    exclusive
-                    onChange={handleModeChange}
-                    fullWidth
-                    size="small"
-                    disabled={isRecording}
-                    sx={{ mt: 1 }}
-                  >
-                    <ToggleButton value={RECORDING_MODE.audio} sx={{ gap: 0.75, py: 1 }}>
-                      <Mic fontSize="small" />
-                      Audio
-                    </ToggleButton>
-                    <ToggleButton value={RECORDING_MODE.video} sx={{ gap: 0.75, py: 1 }}>
-                      <Videocam fontSize="small" />
-                      Video
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                </CardContent>
-              </Card>
-
-              {/* Main controls */}
-              <Card elevation={0} sx={{ border: `1px solid ${theme.palette.divider}`, borderRadius: 3 }}>
-                <CardContent sx={{ pb: '16px !important' }}>
-                  <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1 }}>
-                    Controls
-                  </Typography>
-
-                  <Box sx={{ mt: 1.5 }}>
-                    {!recordedUrl ? (
-                      !isRecording ? (
-                        <Button
-                          variant="contained"
-                          color="error"
-                          fullWidth
-                          size="large"
-                          startIcon={<RadioButtonChecked />}
-                          onClick={startRecording}
-                          disabled={!streamReady}
-                          sx={{ py: 1.5, borderRadius: 2, fontWeight: 700 }}
-                        >
-                          Start Recording
-                        </Button>
-                      ) : (
-                        <Stack spacing={1.5}>
-                          {/* Timer display */}
-                          <Box
-                            sx={{
-                              textAlign: 'center',
-                              py: 1.5,
-                              borderRadius: 2,
-                              bgcolor: isPaused
-                                ? alpha(theme.palette.warning.main, 0.08)
-                                : alpha(theme.palette.error.main, 0.06),
-                            }}
-                          >
-                            <RecordingBadge time={recordingTime} isPaused={isPaused} />
-                          </Box>
-                          <Stack direction="row" spacing={1}>
-                            <Button
-                              variant="outlined"
-                              color={isPaused ? 'primary' : 'warning'}
-                              fullWidth
-                              startIcon={isPaused ? <PlayArrow /> : <Pause />}
-                              onClick={isPaused ? resumeRecording : pauseRecording}
-                              sx={{ borderRadius: 2 }}
-                            >
-                              {isPaused ? 'Resume' : 'Pause'}
-                            </Button>
-                            <Button
-                              variant="contained"
-                              color="error"
-                              fullWidth
-                              startIcon={<Stop />}
-                              onClick={stopRecording}
-                              sx={{ borderRadius: 2 }}
-                            >
-                              Stop
-                            </Button>
-                          </Stack>
-                        </Stack>
-                      )
-                    ) : (
-                      <Stack spacing={1.5}>
-                        <Button
-                          variant="contained"
-                          fullWidth
-                          size="large"
-                          startIcon={isUploading ? <CircularProgress size={18} color="inherit" /> : <CloudUpload />}
-                          onClick={() => setSaveDialogOpen(true)}
-                          disabled={isUploading}
-                          sx={{ py: 1.5, borderRadius: 2, fontWeight: 700 }}
-                        >
-                          {isUploading ? 'Uploading…' : 'Save Recording'}
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          color="error"
-                          fullWidth
-                          startIcon={<Delete />}
-                          onClick={discardRecording}
-                          disabled={isUploading}
-                          sx={{ borderRadius: 2 }}
-                        >
-                          Discard
-                        </Button>
-                      </Stack>
-                    )}
-                  </Box>
-                </CardContent>
-              </Card>
-
-              {/* Advanced settings */}
-              <Card elevation={0} sx={{ border: `1px solid ${theme.palette.divider}`, borderRadius: 3 }}>
-                <Accordion
-                  expanded={advancedOpen}
-                  onChange={() => setAdvancedOpen(!advancedOpen)}
-                  elevation={0}
-                  sx={{ bgcolor: 'transparent', '&:before': { display: 'none' } }}
-                >
-                  <AccordionSummary expandIcon={<ExpandMore />} sx={{ px: 2, py: 0.5 }}>
-                    <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 1 }}>
-                      Advanced Settings
-                    </Typography>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ px: 2, pb: 2 }}>
-                    <Stack spacing={1.5}>
-                      {!isAudioMode && (
-                        <FormControl fullWidth size="small" disabled={isRecording}>
-                          <InputLabel>Camera</InputLabel>
-                          <Select value={selectedCamera} onChange={e => setSelectedCamera(e.target.value)} label="Camera">
-                            {cameras.map(c => (
-                              <MenuItem key={c.deviceId} value={c.deviceId}>
-                                {c.label || `Camera ${c.deviceId.slice(0,8)}`}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      )}
-                      <FormControl fullWidth size="small" disabled={isRecording}>
-                        <InputLabel>Microphone</InputLabel>
-                        <Select value={selectedMic} onChange={e => setSelectedMic(e.target.value)} label="Microphone">
-                          {microphones.map(m => (
-                            <MenuItem key={m.deviceId} value={m.deviceId}>
-                              {m.label || `Mic ${m.deviceId.slice(0,8)}`}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                      {!isAudioMode && (
-                        <FormControl fullWidth size="small" disabled={isRecording}>
-                          <InputLabel>Quality</InputLabel>
-                          <Select value={quality} onChange={e => setQuality(e.target.value)} label="Quality">
-                            {Object.entries(RECORDING_QUALITY).map(([k, v]) => (
-                              <MenuItem key={k} value={k}>
-                                <Stack>
-                                  <Typography variant="body2">{v.label}</Typography>
-                                  <Typography variant="caption" color="text.secondary">{v.fileSize}</Typography>
-                                </Stack>
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      )}
-                      <FormControl fullWidth size="small" disabled={isRecording}>
-                        <InputLabel>Format</InputLabel>
-                        <Select value={fileFormat} onChange={e => setFileFormat(e.target.value)} label="Format">
-                          {Object.entries(activeFormats).map(([k, v]) => (
-                            <MenuItem key={k} value={k}>
-                              <Stack>
-                                <Typography variant="body2">{v.label}</Typography>
-                                <Typography variant="caption" color="text.secondary">{v.browserSupport}</Typography>
-                              </Stack>
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    </Stack>
-                  </AccordionDetails>
-                </Accordion>
-              </Card>
-
-            </Stack>
-          </Grid>
-        </Grid>
-      )}
-
-      {/* ══════════════════════ RECORDINGS TAB ══════════════════════ */}
-      {activeTab === 1 && (
-        <Paper elevation={0} sx={{ borderRadius: 3, border: `1px solid ${theme.palette.divider}`, overflow: 'hidden' }}>
-          {loadingRecordings ? (
-            <Box sx={{ p: 6, textAlign: 'center' }}>
-              <CircularProgress size={36} />
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                Loading recordings…
-              </Typography>
-            </Box>
-          ) : savedRecordings.length === 0 ? (
-            <Box sx={{ p: 6, textAlign: 'center' }}>
-              <VolumeUp sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-              <Typography variant="h6" fontWeight={600} gutterBottom>No Recordings Yet</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Switch to the Record tab to capture your meeting.
-              </Typography>
-            </Box>
-          ) : (
-            <List disablePadding>
-              {savedRecordings.map((rec, i) => (
-                <React.Fragment key={rec.id}>
-                  <ListItem
-                    sx={{
-                      px: 3,
-                      py: 2,
-                      cursor: 'pointer',
-                      transition: 'background 0.15s',
-                      '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.04) },
-                    }}
-                    onClick={() => { setSelectedRecording(rec); setPreviewDialogOpen(true); }}
-                  >
-                    <ListItemAvatar>
-                      <Avatar
-                        sx={{
-                          bgcolor: rec.mode === 'audio'
-                            ? alpha(theme.palette.secondary.main, 0.12)
-                            : alpha(theme.palette.primary.main, 0.12),
-                          color: rec.mode === 'audio' ? 'secondary.main' : 'primary.main',
-                        }}
-                      >
-                        {rec.mode === 'audio' ? <Mic /> : <Videocam />}
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={
-                        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                          <Typography variant="subtitle2" fontWeight={600}>{rec.title}</Typography>
-                          {rec.mode === 'audio' && <Chip size="small" label="Audio" color="secondary" variant="outlined" />}
-                        </Stack>
-                      }
-                      secondary={
-                        <Stack direction="row" spacing={1.5} sx={{ mt: 0.5 }} flexWrap="wrap" alignItems="center">
-                          <Typography variant="caption" color="text.secondary">{getRecordingDate(rec)}</Typography>
-                          <Typography variant="caption" color="text.disabled">·</Typography>
-                          <Typography variant="caption" color="text.secondary">{formatTime(rec.duration)}</Typography>
-                          <Typography variant="caption" color="text.disabled">·</Typography>
-                          <Typography variant="caption" color="text.secondary">{formatFileSize(rec.file_size)}</Typography>
-                          {rec.quality && (
-                            <>
-                              <Typography variant="caption" color="text.disabled">·</Typography>
-                              <Typography variant="caption" color="text.secondary">{rec.quality}</Typography>
-                            </>
-                          )}
-                        </Stack>
-                      }
-                    />
-                    <Stack direction="row" spacing={0.5}>
-                      <Tooltip title="Download">
-                        <IconButton size="small" onClick={e => { e.stopPropagation(); downloadRecording(rec); }}>
-                          <Download fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton size="small" color="error" onClick={e => { e.stopPropagation(); deleteRecording(rec.id); }}>
-                          <Delete fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                  </ListItem>
-                  {i < savedRecordings.length - 1 && <Divider />}
-                </React.Fragment>
-              ))}
-            </List>
-          )}
-        </Paper>
-      )}
-
-      {/* ══════════════════════ SAVE DIALOG ══════════════════════ */}
-      <Dialog
-        open={saveDialogOpen}
-        onClose={() => !isUploading && setSaveDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>Save Recording</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 0.5 }}>
-            <TextField
-              fullWidth size="small" label="Title"
-              value={recordingName}
-              onChange={e => setRecordingName(e.target.value)}
-              placeholder={`${currentMeeting?.title} – Recording`}
-              disabled={isUploading}
-            />
-            <TextField
-              fullWidth size="small" label="Description (optional)"
-              multiline rows={2}
-              value={recordingDescription}
-              onChange={e => setRecordingDescription(e.target.value)}
-              disabled={isUploading}
-            />
-            <FormControl fullWidth size="small" disabled={isUploading}>
-              <InputLabel>Category</InputLabel>
-              <Select value={recordingCategory} onChange={e => setRecordingCategory(e.target.value)} label="Category">
-                <MenuItem value="meeting">Meeting Recording</MenuItem>
-                <MenuItem value="presentation">Presentation</MenuItem>
-                <MenuItem value="discussion">Discussion</MenuItem>
-                <MenuItem value="training">Training</MenuItem>
-                <MenuItem value="other">Other</MenuItem>
-              </Select>
-            </FormControl>
-
-            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.info.main, 0.06), border: `1px solid ${alpha(theme.palette.info.main, 0.2)}` }}>
-              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-                <Chip icon={<Timer sx={{ fontSize: 14 }} />} size="small" label={formatTime(recordingTime)} />
-                <Chip icon={<Storage sx={{ fontSize: 14 }} />} size="small" label={formatFileSize(recordingSize)} />
-                <Chip icon={isAudioMode ? <Mic sx={{ fontSize: 14 }} /> : <Videocam sx={{ fontSize: 14 }} />} size="small"
-                  label={isAudioMode ? 'Audio' : `Video · ${quality}`} />
+              <Stack direction="row" spacing={1}>
+                <Button variant="outlined" startIcon={<CancelIcon />} onClick={handleCancel} disabled={apiLoading}>Cancel</Button>
+                {isEditMode && (
+                  <Button variant="outlined" color="info" startIcon={<VisibilityIcon />} onClick={() => navigate(`/meetings/${id}`)}>View Meeting</Button>
+                )}
               </Stack>
             </Box>
-
-            {isUploading && (
-              <Box>
-                <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.75 }}>
-                  <Typography variant="caption" fontWeight={600}>Uploading…</Typography>
-                  <Typography variant="caption" fontWeight={600}>{uploadProgress}%</Typography>
-                </Stack>
-                <LinearProgress variant="determinate" value={uploadProgress} sx={{ height: 6, borderRadius: 3 }} />
-                <Button size="small" color="error" onClick={cancelUpload} sx={{ mt: 1 }}>
-                  Cancel
-                </Button>
-              </Box>
-            )}
-
-            {uploadStatus === UPLOAD_STATUS.ERROR && uploadError && (
-              <Alert severity="error" action={
-                <Button color="inherit" size="small" startIcon={<Replay />} onClick={saveRecording}>
-                  Retry
-                </Button>
-              }>
-                {uploadError}
-              </Alert>
-            )}
-
-            {uploadStatus === UPLOAD_STATUS.SUCCESS && (
-              <Alert severity="success" icon={<CloudDone />}>Recording saved!</Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setSaveDialogOpen(false)} disabled={isUploading}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={saveRecording}
-            disabled={isUploading || uploadStatus === UPLOAD_STATUS.SUCCESS}
-            startIcon={isUploading ? <CircularProgress size={18} color="inherit" /> : <CloudUpload />}
-          >
-            {isUploading ? 'Uploading…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* ══════════════════════ PREVIEW DIALOG ══════════════════════ */}
-      <Dialog
-        open={previewDialogOpen}
-        onClose={() => setPreviewDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 700 }}>{selectedRecording?.title}</DialogTitle>
-        <DialogContent sx={{ pt: 0 }}>
-          <Box sx={{ borderRadius: 2, overflow: 'hidden', bgcolor: '#000' }}>
-            {selectedRecording?.mode === 'audio' ? (
-              <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
-                <GraphicEq sx={{ fontSize: 56, color: 'primary.main' }} />
-                <audio src={selectedRecording?.url} controls style={{ width: '100%' }} />
-              </Box>
-            ) : (
-              <video src={selectedRecording?.url} controls style={{ width: '100%', maxHeight: 460 }} />
-            )}
-          </Box>
-          {selectedRecording?.description && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              {selectedRecording.description}
-            </Typography>
           )}
-          <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap">
-            <Chip size="small" label={formatTime(selectedRecording?.duration || 0)} />
-            <Chip size="small" label={formatFileSize(selectedRecording?.file_size || 0)} />
-            {selectedRecording?.quality && <Chip size="small" label={selectedRecording.quality} />}
-            {selectedRecording?.format && <Chip size="small" label={selectedRecording.format.toUpperCase()} />}
-            <Chip size="small" label={getRecordingDate(selectedRecording || {})} />
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setPreviewDialogOpen(false)}>Close</Button>
-          <Button startIcon={<Download />} onClick={() => downloadRecording(selectedRecording)}>Download</Button>
-          <Button color="error" startIcon={<Delete />} onClick={() => { deleteRecording(selectedRecording.id); setPreviewDialogOpen(false); }}>
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
 
-      {/* ── Snackbar ── */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar(p => ({ ...p, open: false }))}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert
-          severity={snackbar.severity}
-          variant="filled"
-          onClose={() => setSnackbar(p => ({ ...p, open: false }))}
+          <Paper ref={formRef} sx={{ p: { xs: 2, sm: 3, md: 4 }, borderRadius: { xs: 2, md: 3 }, position: 'relative', overflow: 'hidden' }}>
+            {/* Stepper */}
+            <Stepper activeStep={activeStep} sx={{ mb: 4, display: isMobile ? 'none' : 'flex' }}>
+              {steps.map((step, index) => (
+                <Step key={index} onClick={() => activeStep > index && setActiveStep(index)} sx={{ cursor: activeStep > index ? 'pointer' : 'default' }}>
+                  <StepLabel StepIconComponent={step.icon}>
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>{step.label}</Typography>
+                      <Typography variant="caption" color="text.secondary">{step.description}</Typography>
+                    </Box>
+                  </StepLabel>
+                </Step>
+              ))}
+            </Stepper>
+
+            {/* ── Step 1: Details ─────────────────────────────────────────────── */}
+            {activeStep === 0 && (
+              <Fade in>
+                <Stack spacing={2.5}>
+                  <TextField
+                    fullWidth label="Meeting Title *" name="title" required
+                    value={formData.title} onChange={handleChange} disabled={apiLoading}
+                    InputProps={{ startAdornment: <InputAdornment position="start"><EventIcon color="action" /></InputAdornment> }}
+                  />
+                  <TextField
+                    fullWidth label="Description" name="description" multiline rows={isMobile ? 2 : 3}
+                    value={formData.description} onChange={handleChange} disabled={apiLoading}
+                  />
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <DatePicker label="Meeting Date *" value={formData.meeting_date} onChange={handleDateChange} slotProps={{ textField: { fullWidth: true, required: true } }} />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 3 }}>
+                      <TimePicker label="Start Time *" value={formData.start_time} onChange={handleStartTimeChange} slotProps={{ textField: { fullWidth: true, required: true } }} />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 3 }}>
+                      <TimePicker label="End Time" value={formData.end_time} onChange={handleEndTimeChange} slotProps={{ textField: { fullWidth: true } }} />
+                    </Grid>
+                  </Grid>
+
+                  <LocationSearch value={formData.location_details} onChange={handleLocationSelect} onClear={() => handleLocationSelect(null)} />
+
+                  {/* GPS */}
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardActionArea onClick={() => setShowGpsDetails(!showGpsDetails)}>
+                      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          {gpsEnabled ? <GpsFixedIcon color="success" /> : <GpsNotFixedIcon color="disabled" />}
+                          <Typography variant="subtitle1" fontWeight="bold">GPS Coordinates (Optional)</Typography>
+                        </Box>
+                        <Switch checked={gpsEnabled} onChange={handleGpsToggle} onClick={e => e.stopPropagation()} />
+                      </Box>
+                    </CardActionArea>
+                    <Collapse in={showGpsDetails && gpsEnabled}>
+                      <Box sx={{ p: 2, pt: 0, borderTop: 1, borderColor: 'divider' }}>
+                        <Stack spacing={2}>
+                          <Button size="small" variant="contained" startIcon={<MyLocationIcon />} onClick={getCurrentLocation} disabled={gpsLoading}>
+                            {gpsLoading ? <CircularProgress size={20} /> : 'Get Current Location'}
+                          </Button>
+                          <TextField fullWidth label="Latitude"  value={formData.gps_latitude}  onChange={e => setFormData(prev => ({ ...prev, gps_latitude:  e.target.value }))} size="small" placeholder="e.g., 0.3136"  />
+                          <TextField fullWidth label="Longitude" value={formData.gps_longitude} onChange={e => setFormData(prev => ({ ...prev, gps_longitude: e.target.value }))} size="small" placeholder="e.g., 32.5811" />
+                        </Stack>
+                      </Box>
+                    </Collapse>
+                  </Card>
+
+                  {/* Agenda */}
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Agenda</Typography>
+                    <ReactQuill
+                      theme="snow" value={formData.agenda} onChange={handleAgendaChange}
+                      modules={isMobile ? mobileModules : desktopModules} formats={formats}
+                      style={{ height: '150px', marginBottom: '50px' }} readOnly={apiLoading}
+                    />
+                  </Box>
+                </Stack>
+              </Fade>
+            )}
+
+            {/* ── Step 2: Participants ─────────────────────────────────────────── */}
+            {activeStep === 1 && (
+              <Fade in>
+                <Stack spacing={3}>
+                  {/* Tabs for participant sources */}
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                        <Tabs 
+                          value={participantTab} 
+                          onChange={(e, val) => setParticipantTab(val)}
+                          variant="scrollable"
+                          scrollButtons="auto"
+                        >
+                          <Tab label="Add Manually" value="custom" icon={<PersonAddIcon />} iconPosition="start" />
+                          <Tab label="Participant Lists" value="lists" icon={<PeopleIcon />} iconPosition="start" />
+                          <Tab label="System Users" value="system" icon={<AdminIcon />} iconPosition="start" />
+                        </Tabs>
+                      </Box>
+                      
+                      {/* Custom Participant Tab */}
+                      {participantTab === 'custom' && (
+                        <Stack spacing={2}>
+                          <Box display="flex" justifyContent="space-between" alignItems="center">
+                            <Typography variant="subtitle2" fontWeight="bold">Add Individual Participant</Typography>
+                            <Button 
+                              variant="contained" 
+                              startIcon={<PersonAddIcon />} 
+                              onClick={() => setShowAddParticipantDialog(true)}
+                              size="small"
+                              disabled={apiLoading}
+                            >
+                              Add
+                            </Button>
+                          </Box>
+                          <Alert severity="info" variant="outlined">
+                            Click "Add" to manually enter participant details including name, email, phone, title, and organization.
+                          </Alert>
+                        </Stack>
+                      )}
+                      
+                      {/* Participant Lists Tab */}
+                      {participantTab === 'lists' && (
+                        <Stack spacing={2}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Select Participant List</InputLabel>
+                            <Select 
+                              value={selectedParticipantList || ''} 
+                              onChange={(e) => setSelectedParticipantList(e.target.value)} 
+                              label="Select Participant List"
+                              disabled={apiLoading}
+                            >
+                              {participantLists.map((list) => (
+                                <MenuItem key={list.id} value={list.id}>
+                                  {list.name} ({list.participants?.length || 0} participants)
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <Button 
+                            fullWidth 
+                            variant="contained" 
+                            onClick={handleUseParticipantList} 
+                            disabled={!selectedParticipantList || apiLoading}
+                          >
+                            Add Selected List
+                          </Button>
+                        </Stack>
+                      )}
+                      
+                      {/* System Users Tab */}
+                      {participantTab === 'system' && (
+                        <SystemUsersTab 
+                          onAddUsers={handleAddSystemUsers}
+                          existingParticipants={meetingParticipants}
+                        />
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Current Participants List */}
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                        <Typography variant="subtitle1" fontWeight="bold">
+                          👤 Meeting Participants ({meetingParticipants.length})
+                        </Typography>
+                      </Box>
+
+                      {meetingParticipants.length === 0 ? (
+                        <Alert severity="info" variant="outlined">
+                          No participants added yet. Use the tabs above to add participants.
+                        </Alert>
+                      ) : (
+                        <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+                          {meetingParticipants.map(p => (
+                            <React.Fragment key={p.id}>
+                              <ParticipantItem 
+                                participant={p} 
+                                onRemove={handleRemoveParticipant} 
+                                onMakeChairperson={handleSetChairperson} 
+                                isChairperson={p.is_chairperson} 
+                                isSecretary={p.name === formData.secretary_name} 
+                                showActions={!apiLoading} 
+                              />
+                              <Divider component="li" />
+                            </React.Fragment>
+                          ))}
+                        </List>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Secretary Selection */}
+                  <Card variant="outlined" sx={{ borderLeft: 6, borderColor: 'secondary.main' }}>
+                    <CardContent>
+                      <Stack direction="row" spacing={1} alignItems="center" mb={2}>
+                        <SecretaryIcon color="secondary" />
+                        <Typography variant="subtitle1" fontWeight="bold">Designate Secretary</Typography>
+                      </Stack>
+                      <FormControl fullWidth>
+                        <InputLabel>Select Secretary from Participants</InputLabel>
+                        <Select 
+                          name="secretary_name" 
+                          value={formData.secretary_name} 
+                          onChange={handleChange} 
+                          label="Select Secretary from Participants" 
+                          disabled={apiLoading || meetingParticipants.length === 0}
+                        >
+                          <MenuItem value=""><em>None Selected</em></MenuItem>
+                          {meetingParticipants.map(p => <MenuItem key={p.id} value={p.name}>{p.name}</MenuItem>)}
+                        </Select>
+                      </FormControl>
+                    </CardContent>
+                  </Card>
+                </Stack>
+              </Fade>
+            )}
+
+            {/* ── Step 3: Review ───────────────────────────────────────────────── */}
+            {activeStep === 2 && (
+              <Fade in>
+                <Stack spacing={2}>
+                  <Alert severity="info" icon={<CheckCircleIcon />}>
+                    {isEditMode ? 'Review meeting details before updating' : 'Review meeting details before creating'}
+                  </Alert>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Typography variant="subtitle2" color="primary" gutterBottom>Meeting Information</Typography>
+                      <Grid container spacing={1}>
+                        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="body2"><strong>Title:</strong> {formData.title}</Typography></Grid>
+                        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="body2"><strong>Chairperson:</strong> {chairpersonName}</Typography></Grid>
+                        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="body2" color="secondary.main"><strong>Secretary:</strong> {formData.secretary_name || 'Not selected'}</Typography></Grid>
+                        <Grid size={{ xs: 12, sm: 6 }}><Typography variant="body2"><strong>Location:</strong> {formData.location_text || 'Not specified'}</Typography></Grid>
+                        {formData.location_details && (
+                          <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Location Type:</strong> {formData.location_details.location_mode} – Level {formData.location_details.level}</Typography></Grid>
+                        )}
+                        {formData.meeting_date && formData.start_time && (
+                          <Grid size={{ xs: 12 }}>
+                            <Typography variant="body2">
+                              <strong>Date & Time:</strong> {formData.meeting_date?.toLocaleDateString()} at {formData.start_time?.toLocaleTimeString()}
+                              {formData.end_time && ` – ${formData.end_time?.toLocaleTimeString()}`}
+                            </Typography>
+                          </Grid>
+                        )}
+                        {gpsEnabled && formData.gps_latitude && formData.gps_longitude && (
+                          <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>GPS:</strong> {formData.gps_latitude}, {formData.gps_longitude}</Typography></Grid>
+                        )}
+                      </Grid>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="subtitle2" color="primary" gutterBottom>Agenda Preview</Typography>
+                      <Box className="ql-editor" sx={{ maxHeight: 150, overflow: 'auto', fontSize: '0.875rem', p: 1, bgcolor: 'action.hover', borderRadius: 1 }} dangerouslySetInnerHTML={{ __html: formData.agenda || 'No agenda provided' }} />
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="subtitle2" color="primary" gutterBottom>Participants ({meetingParticipants.length})</Typography>
+                      <Box component="ul" sx={{ pl: 2, mt: 1, maxHeight: 150, overflow: 'auto' }}>
+                        {meetingParticipants.slice(0, 10).map(p => (
+                          <li key={p.id}><Typography variant="body2">{p.name}{p.is_chairperson && ' (Chairperson)'}{p.name === formData.secretary_name && ' (Secretary)'}{p.is_system_user && ' (System User)'}</Typography></li>
+                        ))}
+                        {meetingParticipants.length > 10 && <li><Typography variant="body2">…and {meetingParticipants.length - 10} more</Typography></li>}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                  <Button variant="contained" size="large" onClick={handleSubmit} startIcon={isEditMode ? <UpdateIcon /> : <SaveIcon />} disabled={apiLoading} sx={{ py: 1.5 }}>
+                    {apiLoading ? <CircularProgress size={24} /> : (isEditMode ? 'Update Meeting' : 'Create Meeting')}
+                  </Button>
+                </Stack>
+              </Fade>
+            )}
+
+            {/* Navigation */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
+              <Button onClick={handleBack} startIcon={<ArrowBackIcon />} disabled={apiLoading}>
+                {activeStep === 0 ? 'Cancel' : 'Back'}
+              </Button>
+              {activeStep < 2 && (
+                <Button variant="contained" onClick={handleNext} endIcon={<ArrowForwardIcon />} disabled={apiLoading || (activeStep === 0 && !isValid)}>
+                  Next
+                </Button>
+              )}
+            </Box>
+          </Paper>
+        </Container>
+
+        {/* Add Participant Dialog */}
+        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Add New Participant</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField fullWidth label="Full Name *" value={newParticipant.name}         onChange={e => setNewParticipant(prev => ({ ...prev, name:         e.target.value }))} required size="small" autoFocus />
+              <TextField fullWidth label="Email"       value={newParticipant.email}        onChange={e => setNewParticipant(prev => ({ ...prev, email:        e.target.value }))} type="email" size="small" />
+              <TextField fullWidth label="Telephone"   value={newParticipant.telephone}    onChange={e => setNewParticipant(prev => ({ ...prev, telephone:    e.target.value }))} size="small" />
+              <TextField fullWidth label="Title"       value={newParticipant.title}        onChange={e => setNewParticipant(prev => ({ ...prev, title:        e.target.value }))} size="small" />
+              <TextField fullWidth label="Organization" value={newParticipant.organization} onChange={e => setNewParticipant(prev => ({ ...prev, organization: e.target.value }))} size="small" />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowAddParticipantDialog(false)}>Cancel</Button>
+            <Button variant="contained" onClick={handleAddCustomParticipant} disabled={!newParticipant.name.trim()}>Add Participant</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Snackbar */}
+        <Snackbar
+          open={snackbar.open} autoHideDuration={4000}
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
+          TransitionComponent={Zoom}
         >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-    </Container>
+          <Alert severity={snackbar.severity} variant="filled" onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} sx={{ width: '100%' }}>
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
+      </Box>
+    </LocalizationProvider>
   );
 };
 
-export default MeetingRecorder;
+export default React.memo(MeetingForm);

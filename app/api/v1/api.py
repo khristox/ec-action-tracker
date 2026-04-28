@@ -21,6 +21,8 @@ try:
     from app.api.v1.endpoints.chart_data import router as chart_data
     from app.api.v1.endpoints.meeting_participants import router as meeting_participants_router
     from app.api.v1.endpoints.action_tracker.recordings import router as recordings_router
+    from app.api.v1.endpoints.action_tracker.meeting_report import router as meeting_report
+    from app.api.v1.endpoints.action_tracker.meeting_minutes import router as meeting_minutes
 
 
     
@@ -51,6 +53,13 @@ api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
 
 api_router.include_router(chart_data, prefix="/charts", tags=["charts"])
+
+api_router.include_router(meeting_report,prefix="/meetings",tags=["meeting-report"])
+
+
+api_router.include_router(meeting_minutes,prefix="/meetings",tags=["Meeting Minutes"])
+
+
 
 
 #recordings_router.include_router(recordings_router, prefix="/meetings/{meeting_id}/recordings", tags=["meeting-recordings"])

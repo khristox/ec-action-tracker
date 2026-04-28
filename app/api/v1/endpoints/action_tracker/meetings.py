@@ -1596,3 +1596,6 @@ async def delete_document(
     await db.commit()
     
     return None
+
+
+

@@ -101,3 +101,25 @@ docker compose run --rm app python app/db/seed/seed_data.py http://ec_app:8001 a
   docker compose pull app
   docker compose build --no-cache app --remove-orphans
   docker compose up -d --force-recreate --no-deps app
+
+
+#Check inside image
+docker run --rm khristox/ec-action-tracker:latest ls -la /app
+
+
+docker build --no-cache -t khristox/ec-action-tracker:latest .
+ docker run -it --rm ec_app /bin/bash  # inside when not started
+docker run -it --rm --entrypoint /bin/sh khristox/ec-action-tracker:latest
+docker run -it --rm --user root --entrypoint /bin/bash khristox/ec-action-tracker:latest
+
+
+#Lastest 
+ docker build --no-cache -t khristox/ec-action-tracker:latest .
+
+#Install Script 
+  docker run -it --rm -v $(pwd):/app --entrypoint /bin/bash khristox/ec-action-tracker:latest -c "pip install -r requirements.txt && python -m uvicorn app.main:app --host 0.0.0.0 --port 8001"
+
+  docker compose pull app
+  docker compose build --no-cache app
+  docker compose up -d --force-recreate --no-deps app
+

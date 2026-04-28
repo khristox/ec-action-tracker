@@ -5,11 +5,11 @@ import {
   Card, CardContent, TextField, Button, Typography, Box,
   InputAdornment, IconButton, Alert, CircularProgress, Divider,
   Link, Snackbar, Slide, Dialog, DialogTitle, DialogContent,
-  DialogContentText, DialogActions, Paper, Stack, Fade
+  DialogContentText, DialogActions, Paper, Stack, Fade, FormControlLabel, Checkbox
 } from '@mui/material';
 import {
   Visibility, VisibilityOff, PersonOutline, LockOutlined,
-  Business, CheckCircleOutline, ErrorOutline, EmailOutlined,Group,
+  Business, CheckCircleOutline, ErrorOutline, EmailOutlined, Group,
   SendOutlined, CloseOutlined
 } from '@mui/icons-material';
 import { login, clearError, resetLoginSuccess, resendVerification } from '../../store/slices/authSlice';
@@ -23,10 +23,12 @@ const SignInCard = () => {
 
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordCheckbox, setShowPasswordCheckbox] = useState(false);
   const [touched, setTouched] = useState({});
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [resendDialogOpen, setResendDialogOpen] = useState(false);
   const [resendEmail, setResendEmail] = useState('');
+  const [capsLockOn, setCapsLockOn] = useState(false);
 
   const errorMessage = useMemo(() => 
     error?.message || (typeof error === 'string' ? error : ''), 
@@ -81,6 +83,15 @@ const SignInCard = () => {
   useEffect(() => {
     if (errorMessage && !isUnverifiedError) setSnackbarOpen(true);
   }, [errorMessage, isUnverifiedError]);
+
+  // Handle Caps Lock Detection
+  const handleKeyPress = (e) => {
+    if (e.getModifierState && e.getModifierState('CapsLock')) {
+      setCapsLockOn(true);
+    } else {
+      setCapsLockOn(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -146,22 +157,36 @@ const SignInCard = () => {
             <TextField
               fullWidth
               label="Password"
-              name="password"
-              type={showPassword ? 'text' : 'password'}
+              type={showPassword || showPasswordCheckbox ? 'text' : 'password'}
               value={formData.password}
               onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
               onBlur={() => setTouched(p => ({ ...p, password: true }))}
+              onKeyPress={handleKeyPress}
               margin="normal"
               required
               error={!!getFieldError('password')}
-              helperText={getFieldError('password')}
+              helperText={
+                <>
+                  {getFieldError('password')}
+                  {capsLockOn && getFieldError('password') && ' • '}
+                  {capsLockOn && (
+                    <Typography component="span" variant="caption" color="warning.main">
+                      Caps Lock is on
+                    </Typography>
+                  )}
+                </>
+              }
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start"><LockOutlined color="action" /></InputAdornment>
                 ),
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword(!showPassword)}>
+                    <IconButton 
+                      onClick={() => setShowPassword(!showPassword)}
+                      edge="end"
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
                       {showPassword ? <VisibilityOff /> : <Visibility />}
                     </IconButton>
                   </InputAdornment>
@@ -169,7 +194,18 @@ const SignInCard = () => {
               }}
             />
 
-            <Box sx={{ textAlign: 'right', mt: 1 }}>
+            {/* Show Password Checkbox Option */}
+            <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showPasswordCheckbox}
+                    onChange={(e) => setShowPasswordCheckbox(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label={<Typography variant="caption" color="text.secondary">Show password</Typography>}
+              />
               <Link component={RouterLink} to="/forgot-password" variant="body2" underline="hover">
                 Forgot password?
               </Link>

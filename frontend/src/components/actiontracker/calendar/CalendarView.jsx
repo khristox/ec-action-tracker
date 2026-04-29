@@ -480,6 +480,7 @@ const MeetingCalendar = ({ userId }) => {
   const isDark  = theme.palette.mode === 'dark';
   const navigate = useNavigate();
   const currentUser = useAppSelector(state => state.auth?.user);
+  const currentUserEmail = currentUser?.email;
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [meetings, setMeetings]       = useState([]);   // normalised
@@ -494,7 +495,7 @@ const MeetingCalendar = ({ userId }) => {
 
   // ── Fetch ──────────────────────────────────────────────────
   const fetchMeetings = useCallback(async (forceRefresh = false) => {
-    if (!currentUser?.email) { setLoading(false); return; }
+    if (!currentUserEmail) { setLoading(false); return; }
 
     // Serve cache immediately, still refresh in background
     if (!forceRefresh) {
@@ -513,7 +514,7 @@ const MeetingCalendar = ({ userId }) => {
     try {
       const response = await api.get('/action-tracker/meetings/participant/action-items', {
         params: {
-          email: currentUser.email,
+          email: currentUserEmail,
           upcoming_only: false,
           overdue_only: false,
           include_completed: true,

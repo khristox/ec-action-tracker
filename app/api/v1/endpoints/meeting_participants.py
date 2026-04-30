@@ -1,10 +1,11 @@
 # app/api/v1/endpoints/meeting_participants.py
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import select, and_, or_, func
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from collections import defaultdict
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.models.user import User
@@ -342,11 +343,12 @@ async def get_my_weekly_meetings_chart(
 @router.get("/my-meetings/upcoming")
 async def get_my_upcoming_meetings(
     days: int = Query(30, ge=1, le=90, description="Number of days to look ahead"),
+    include_past: bool = Query(False, description="Include past meetings"),
     current_user: User = Depends(deps.get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)  # Changed to AsyncSession
 ):
     """
-    Get upcoming meetings where the user is a participant
+    Get upcoming meetings where the user is a participant with meeting status
     """
     user_email = current_user.email
     user_telephone = getattr(current_user, 'telephone', None) or getattr(current_user, 'phone', None)
@@ -372,37 +374,54 @@ async def get_my_upcoming_meetings(
             }
         }
     
-    # Get upcoming meetings
+    # Get meetings with status and participants loaded
     now = datetime.utcnow()
     future_date = now + timedelta(days=days)
     
-    result = await db.execute(
+    # Build query with eager loading for status
+    query = (
         select(Meeting)
-        .where(
-            Meeting.id.in_(meeting_ids),
-            Meeting.meeting_date >= now
+        .options(
+            selectinload(Meeting.status),
+            selectinload(Meeting.participants)
         )
-        .order_by(Meeting.meeting_date.asc())
-        .limit(50)
+        .where(Meeting.id.in_(meeting_ids))
     )
+    
+    # Apply date filter
+    if include_past:
+        query = query.where(Meeting.meeting_date >= now - timedelta(days=7))  # Last 7 days for past
+    else:
+        query = query.where(Meeting.meeting_date >= now)
+        query = query.where(Meeting.meeting_date <= future_date)
+    
+    query = query.order_by(Meeting.meeting_date.asc()).limit(50)
+    
+    result = await db.execute(query)
     meetings = result.scalars().all()
     
     # Format response
     upcoming_meetings = []
     for meeting in meetings:
-        # Find user's participant record (need to load participants)
-        # Eager load participants or query separately
-        result_parts = await db.execute(
-            select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
-        )
-        meeting_participants = result_parts.scalars().all()
-        
+        # Find user's participant record from loaded participants
         user_participant = None
-        for p in meeting_participants:
+        for p in meeting.participants:
             if (p.email == user_email or 
                 (user_telephone and p.telephone == user_telephone)):
                 user_participant = p
                 break
+        
+        # Build status info
+        status_info = None
+        if meeting.status:
+            status_info = {
+                "id": str(meeting.status.id),
+                "code": meeting.status.code,
+                "name": meeting.status.name,
+                "short_name": meeting.status.short_name,
+                "color": getattr(meeting.status, 'color', None),
+                "description": getattr(meeting.status, 'description', None)
+            }
         
         upcoming_meetings.append({
             "id": str(meeting.id),
@@ -414,7 +433,12 @@ async def get_my_upcoming_meetings(
             "location": meeting.location_text,
             "attendance_status": user_participant.attendance_status if user_participant else "pending",
             "is_chairperson": user_participant.is_chairperson if user_participant else False,
-            "is_secretary": user_participant.is_secretary if user_participant else False
+            "is_secretary": user_participant.is_secretary if user_participant else False,
+            "status": status_info,  # Added meeting status
+            "status_code": meeting.status.code if meeting.status else None,  # Shortcut field
+            "status_name": meeting.status.name if meeting.status else None,  # Shortcut field
+            "status_color": getattr(meeting.status, 'color', None) if meeting.status else None,
+            "is_active": meeting.is_active
         })
     
     return {
@@ -424,7 +448,6 @@ async def get_my_upcoming_meetings(
             "total": len(upcoming_meetings)
         }
     }
-
 
 @router.put("/meetings/{meeting_id}/my-status")
 async def update_my_meeting_status(

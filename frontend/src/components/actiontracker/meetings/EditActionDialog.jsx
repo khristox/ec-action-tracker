@@ -50,7 +50,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
     const fetchUsers = async () => {
       setLoadingUsers(true);
       try {
-        const response = await api.get('/users/');
+        const response = await api.get('/users/available');
         const usersData = response.data?.items || response.data || [];
         setUsers(usersData);
       } catch (err) {

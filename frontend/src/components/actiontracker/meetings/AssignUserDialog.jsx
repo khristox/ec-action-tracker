@@ -37,7 +37,7 @@ const AssignUserDialog = ({ open, action, onClose, onAssign }) => {
       setLoading(true);
       setError('');
       try {
-        const response = await api.get('/users/');
+        const response = await api.get('/users/available');
         const usersData = response.data?.items || response.data || [];
         setUsers(usersData);
       } catch (err) {

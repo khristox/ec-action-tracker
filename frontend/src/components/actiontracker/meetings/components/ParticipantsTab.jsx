@@ -324,7 +324,7 @@ const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants 
       const existingEmails = new Set((existingParticipants || []).map(p => p.email?.toLowerCase()));
       const params = { skip: (userPage - 1) * usersPerPage, limit: usersPerPage, is_active: true };
       if (userSearchTerm) params.search = userSearchTerm;
-      const r = await api.get('/users/', { params });
+      const r = await api.get('/users/available', { params });
       const users = r.data.items || r.data || [];
       setExistingUsers(users.filter(u => !existingEmails.has(u.email?.toLowerCase())));
       setUserTotal(r.data.total || users.length);

@@ -7,7 +7,7 @@ import {
   CircularProgress, Button, List, ListItem, ListItemText, 
   Divider, LinearProgress, Alert, Stack, Chip, IconButton,
   Tooltip, useTheme, useMediaQuery, ToggleButton, ToggleButtonGroup,
-  alpha, Skeleton, Tab, Tabs, Badge
+  alpha, Skeleton, Tab, Tabs, Badge, Collapse
 } from '@mui/material';
 import {
   Event as EventIcon,
@@ -27,7 +27,10 @@ import {
   MeetingRoom as MeetingRoomIcon,
   Person as PersonIcon,
   Today as TodayIcon,
-  Upcoming as UpcomingIcon
+  Upcoming as UpcomingIcon,
+  Pending as PendingIcon,
+  Cancel as CancelIcon,
+  HourglassEmpty as HourglassEmptyIcon
 } from '@mui/icons-material';
 import {
   Chart as ChartJS,
@@ -69,6 +72,7 @@ ChartJS.register(
 );
 
 // ==================== Helper Functions ====================
+
 const safeFormatDate = (dateValue, formatStr = 'MMM dd, yyyy') => {
   if (!dateValue) return null;
   try {
@@ -80,26 +84,72 @@ const safeFormatDate = (dateValue, formatStr = 'MMM dd, yyyy') => {
   }
 };
 
-const getMeetingStatusColor = (status) => {
-  switch (status?.toLowerCase()) {
-    case 'confirmed': return '#10b981';
-    case 'attended': return '#10b981';
-    case 'pending': return '#f59e0b';
-    case 'missed': return '#ef4444';
-    case 'excused': return '#8b5cf6';
-    default: return '#6b7280';
+// Meeting Status (from backend status field)
+const getMeetingStatusConfig = (status) => {
+  // Handle both object and string status
+  let statusCode = '';
+  let statusShortName = '';
+  let statusName = '';
+  
+  if (typeof status === 'object' && status !== null) {
+    statusCode = status.code || '';
+    statusShortName = status.short_name || '';
+    statusName = status.name || '';
+  } else if (typeof status === 'string') {
+    statusCode = status;
+    statusShortName = status;
+    statusName = status;
   }
+  
+  const configs = {
+    'MEETING_STATUS_SCHEDULED': { label: 'Scheduled', color: '#3b82f6', bgAlpha: 0.1, icon: <ScheduleIcon sx={{ fontSize: 12 }} /> },
+    'MEETING_STATUS_STARTED': { label: 'In Progress', color: '#f59e0b', bgAlpha: 0.1, icon: <HourglassEmptyIcon sx={{ fontSize: 12 }} /> },
+    'MEETING_STATUS_COMPLETED': { label: 'Completed', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
+    'MEETING_STATUS_CANCELLED': { label: 'Cancelled', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> },
+    'MEETING_STATUS_POSTPONED': { label: 'Postponed', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> },
+    'scheduled': { label: 'Scheduled', color: '#3b82f6', bgAlpha: 0.1, icon: <ScheduleIcon sx={{ fontSize: 12 }} /> },
+    'started': { label: 'In Progress', color: '#f59e0b', bgAlpha: 0.1, icon: <HourglassEmptyIcon sx={{ fontSize: 12 }} /> },
+    'completed': { label: 'Completed', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
+    'cancelled': { label: 'Cancelled', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> },
+    'postponed': { label: 'Postponed', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> }
+  };
+  
+  // Try to match by code first
+  if (configs[statusCode]) return configs[statusCode];
+  if (configs[statusShortName]) return configs[statusShortName];
+  if (configs[statusName?.toLowerCase()]) return configs[statusName?.toLowerCase()];
+  
+  return { 
+    label: statusShortName || statusName || statusCode || 'Unknown', 
+    color: '#6b7280', 
+    bgAlpha: 0.1,
+    icon: <EventIcon sx={{ fontSize: 12 }} />
+  };
 };
 
-const getMeetingStatusLabel = (status) => {
-  switch (status?.toLowerCase()) {
-    case 'attended': return 'Attended';
-    case 'confirmed': return 'Confirmed';
-    case 'pending': return 'Pending';
-    case 'missed': return 'Missed';
-    case 'excused': return 'Excused';
-    default: return status || 'Unknown';
-  }
+
+
+// Participant Attendance Status
+const getAttendanceStatusConfig = (status) => {
+  const statusStr = status || 'pending';
+  
+  const configs = {
+    'confirmed': { label: 'Confirmed', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
+    'attended': { label: 'Attended', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
+    'pending': { label: 'Pending', color: '#f59e0b', bgAlpha: 0.1, icon: <ScheduleIcon sx={{ fontSize: 12 }} /> },
+    'absent': { label: 'Absent', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> },
+    'absent_with_apology': { label: 'Absent (Excused)', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> },
+    'excused': { label: 'Excused', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> },
+    'maybe': { label: 'Maybe', color: '#06b6d4', bgAlpha: 0.1, icon: <HourglassEmptyIcon sx={{ fontSize: 12 }} /> },
+    'declined': { label: 'Declined', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> }
+  };
+  
+  return configs[statusStr] || { 
+    label: statusStr || 'Pending', 
+    color: '#6b7280', 
+    bgAlpha: 0.1,
+    icon: <PendingIcon sx={{ fontSize: 12 }} />
+  };
 };
 
 // ==================== Stat Card Component ====================
@@ -176,13 +226,22 @@ const StatCard = ({ title, value, icon, color, loading, trend, subtitle, onClick
   );
 };
 
-// ==================== Meeting Card Component ====================
+// ==================== Meeting Card Component (Enhanced with Statuses) ====================
 const MeetingCard = ({ meeting, onClick }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
+  const [expanded, setExpanded] = useState(false);
+  
   const meetingDate = meeting.meeting_date ? parseISO(meeting.meeting_date) : null;
   const isUpcoming = meetingDate && isFuture(meetingDate);
   const daysUntil = meetingDate ? differenceInDays(meetingDate, new Date()) : null;
+  
+  // Get status configurations
+  const meetingStatus = getMeetingStatusConfig(meeting.status || meeting.status_code);
+  const attendanceStatus = getAttendanceStatusConfig(meeting.attendance_status);
+  
+  // Determine if meeting is active/ongoing
+  const isActive = meeting.status_code === 'MEETING_STATUS_STARTED' || meeting.status?.code === 'MEETING_STATUS_STARTED';
   
   return (
     <Card 
@@ -190,19 +249,45 @@ const MeetingCard = ({ meeting, onClick }) => {
       sx={{ 
         borderRadius: 2, 
         boxShadow: 'none', 
-        border: '1px solid', 
-        borderColor: 'divider',
+        border: isActive ? '2px solid' : '1px solid',
+        borderColor: isActive ? 'warning.main' : 'divider',
         cursor: 'pointer',
         transition: 'all 0.2s',
         bgcolor: isDarkMode ? 'background.default' : '#ffffff',
+        position: 'relative',
+        overflow: 'visible',
         '&:hover': { 
           borderColor: 'primary.main', 
           bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : 'action.hover' 
         }
       }}
     >
+      {/* Active indicator badge */}
+      {isActive && (
+        <Box sx={{
+          position: 'absolute',
+          top: -8,
+          right: 12,
+          bgcolor: 'warning.main',
+          color: 'white',
+          px: 1,
+          py: 0.5,
+          borderRadius: 20,
+          fontSize: '0.65rem',
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
+          zIndex: 1
+        }}>
+          <HourglassEmptyIcon sx={{ fontSize: 12 }} />
+          Live
+        </Box>
+      )}
+      
       <CardContent sx={{ p: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+        {/* Header with Title and Meeting Status */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
             <Avatar sx={{ 
               bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.2) : alpha(theme.palette.primary.main, 0.1),
@@ -215,42 +300,128 @@ const MeetingCard = ({ meeting, onClick }) => {
               {meeting.title}
             </Typography>
           </Box>
-          {isUpcoming && daysUntil !== null && daysUntil <= 3 && (
+          
+          {/* Meeting Status Chip */}
+          <Tooltip title={`Meeting Status: ${meetingStatus.label}`}>
             <Chip 
               size="small" 
-              label={daysUntil === 0 ? "Today" : `${daysUntil} days`}
+              label={meetingStatus.label}
+              icon={meetingStatus.icon}
+              sx={{ 
+                height: 24, 
+                fontSize: '0.7rem', 
+                fontWeight: 500,
+                bgcolor: alpha(meetingStatus.color, 0.1),
+                color: meetingStatus.color,
+                '& .MuiChip-icon': { color: meetingStatus.color, fontSize: 14 }
+              }}
+            />
+          </Tooltip>
+        </Box>
+        
+        {/* Date and Time */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <TodayIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
+          <Typography variant="caption" color="text.secondary">
+            {meeting.meeting_date ? safeFormatDate(meeting.meeting_date, 'MMM dd, yyyy') : 'Date TBD'}
+            {meeting.start_time && ` at ${format(parseISO(meeting.start_time), 'h:mm a')}`}
+            {meeting.end_time && ` - ${format(parseISO(meeting.end_time), 'h:mm a')}`}
+          </Typography>
+          {isUpcoming && daysUntil !== null && daysUntil <= 3 && daysUntil > 0 && (
+            <Chip 
+              size="small" 
+              label={daysUntil === 1 ? "Tomorrow" : `${daysUntil} days`}
               color="warning"
-              sx={{ height: 20, fontSize: '0.6rem' }}
+              sx={{ height: 18, fontSize: '0.6rem' }}
+            />
+          )}
+          {isUpcoming && daysUntil === 0 && (
+            <Chip 
+              size="small" 
+              label="Today"
+              color="success"
+              sx={{ height: 18, fontSize: '0.6rem' }}
             />
           )}
         </Box>
         
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TodayIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              {meeting.meeting_date ? safeFormatDate(meeting.meeting_date, 'MMM dd, yyyy') : 'Date TBD'}
-              {meeting.start_time && ` at ${format(parseISO(meeting.start_time), 'h:mm a')}`}
-            </Typography>
-          </Box>
-          <Chip 
-            size="small" 
-            label={getMeetingStatusLabel(meeting.attendance_status)}
-            sx={{ 
-              height: 20, 
-              fontSize: '0.65rem', 
-              fontWeight: 500,
-              bgcolor: alpha(getMeetingStatusColor(meeting.attendance_status), 0.1),
-              color: getMeetingStatusColor(meeting.attendance_status),
-            }}
-          />
-        </Box>
-        
+        {/* Location */}
         {meeting.location && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
             📍 {meeting.location}
           </Typography>
         )}
+        
+        {/* Participant Status and Role */}
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          mt: 1,
+          pt: 1,
+          borderTop: `1px solid ${alpha(theme.palette.divider, 0.5)}`
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <PersonIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+            <Typography variant="caption" color="text.secondary">
+              Your role: 
+              <strong>
+                {meeting.is_chairperson && ' Chairperson'}
+                {meeting.is_secretary && !meeting.is_chairperson && ' Secretary'}
+                {!meeting.is_chairperson && !meeting.is_secretary && ' Participant'}
+              </strong>
+            </Typography>
+          </Box>
+          
+          {/* Attendance Status Chip */}
+          <Tooltip title={`Attendance: ${attendanceStatus.label}`}>
+            <Chip 
+              size="small" 
+              label={attendanceStatus.label}
+              icon={attendanceStatus.icon}
+              sx={{ 
+                height: 22, 
+                fontSize: '0.65rem', 
+                fontWeight: 500,
+                bgcolor: alpha(attendanceStatus.color, 0.1),
+                color: attendanceStatus.color,
+                '& .MuiChip-icon': { color: attendanceStatus.color, fontSize: 12 }
+              }}
+            />
+          </Tooltip>
+        </Box>
+        
+        {/* Expand for more details */}
+        <Button 
+          size="small" 
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          sx={{ mt: 1, textTransform: 'none' }}
+        >
+          {expanded ? 'Show less' : 'Show details'}
+        </Button>
+        
+        <Collapse in={expanded}>
+          <Box sx={{ mt: 1.5, p: 1.5, bgcolor: alpha(theme.palette.background.default, 0.5), borderRadius: 1 }}>
+            <Typography variant="caption" fontWeight={600} display="block" gutterBottom>
+              Meeting Information
+            </Typography>
+            {meeting.description && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                📝 {meeting.description}
+              </Typography>
+            )}
+            {meeting.status?.description && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                ℹ️ Status: {meeting.status.description}
+              </Typography>
+            )}
+            {meeting.attendance_status === 'absent_with_apology' && (
+              <Typography variant="caption" color="warning.main" display="block">
+                ⚠️ You have submitted an apology for this meeting
+              </Typography>
+            )}
+          </Box>
+        </Collapse>
       </CardContent>
     </Card>
   );
@@ -359,7 +530,6 @@ const Dashboard = () => {
     setError(null);
     
     try {
-      
       const [
         statsRes,
         tasksRes,
@@ -434,6 +604,30 @@ const Dashboard = () => {
     loadDashboardData();
   }, []);
 
+  // Calculate meeting status statistics
+  const meetingStatusStats = useMemo(() => {
+    const meetings = myMeetings.upcoming;
+    const stats = {
+      scheduled: 0,
+      started: 0,
+      completed: 0,
+      cancelled: 0,
+      postponed: 0
+    };
+    
+    meetings.forEach(meeting => {
+      const statusCode = meeting.status_code || meeting.status?.code || '';
+      if (statusCode.includes('SCHEDULED')) stats.scheduled++;
+      else if (statusCode.includes('STARTED')) stats.started++;
+      else if (statusCode.includes('COMPLETED')) stats.completed++;
+      else if (statusCode.includes('CANCELLED')) stats.cancelled++;
+      else if (statusCode.includes('POSTPONED')) stats.postponed++;
+      else stats.scheduled++;
+    });
+    
+    return stats;
+  }, [myMeetings.upcoming]);
+
   const statsValues = useMemo(() => ({
     totalMeetings: stats?.meetings?.total || 0,
     thisMonthMeetings: stats?.meetings?.this_month || 0,
@@ -441,8 +635,9 @@ const Dashboard = () => {
     completionRate: stats?.tasks?.completion_rate || 0,
     overdueTasks: pendingTasks.filter(t => t.is_overdue).length,
     upcomingMeetings: myMeetings.upcoming.length,
-    totalParticipants: stats?.participants?.total || 0
-  }), [stats, pendingTasks, myMeetings]);
+    totalParticipants: stats?.participants?.total || 0,
+    activeMeetings: meetingStatusStats.started
+  }), [stats, pendingTasks, myMeetings, meetingStatusStats]);
 
   const chartOptions = useMemo(() => ({
     responsive: true,
@@ -515,20 +710,71 @@ const Dashboard = () => {
 
       {/* Stats Grid */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
-        <StatCard title="My Meetings" value={statsValues.upcomingMeetings} icon={<MeetingRoomIcon fontSize="small" />} color="#9c27b0" loading={loading} subtitle="Upcoming meetings" onClick={() => navigate('/meetings')} />
-        <StatCard title="Total Meetings" value={statsValues.totalMeetings} icon={<EventIcon fontSize="small" />} color="#1976d2" loading={loading} trend={stats?.meetings?.trend} />
-        <StatCard title="My Pending Tasks" value={statsValues.pendingTasks} icon={<AssignmentIcon fontSize="small" />} color="#ed6c02" loading={loading} subtitle={`${statsValues.overdueTasks} overdue`} onClick={() => navigate('/actions/my-tasks')} />
-        <StatCard title="Completion Rate" value={`${statsValues.completionRate}%`} icon={<TrendingUpIcon fontSize="small" />} color="#2e7d32" loading={loading} />
+        <StatCard 
+          title="My Meetings" 
+          value={statsValues.upcomingMeetings} 
+          icon={<MeetingRoomIcon fontSize="small" />} 
+          color="#9c27b0" 
+          loading={loading} 
+          subtitle={`${statsValues.activeMeetings} active, ${statsValues.upcomingMeetings - statsValues.activeMeetings} upcoming`}
+          onClick={() => navigate('/meetings')} 
+        />
+        <StatCard 
+          title="Total Meetings" 
+          value={statsValues.totalMeetings} 
+          icon={<EventIcon fontSize="small" />} 
+          color="#1976d2" 
+          loading={loading} 
+          trend={stats?.meetings?.trend} 
+        />
+        <StatCard 
+          title="My Pending Tasks" 
+          value={statsValues.pendingTasks} 
+          icon={<AssignmentIcon fontSize="small" />} 
+          color="#ed6c02" 
+          loading={loading} 
+          subtitle={`${statsValues.overdueTasks} overdue`} 
+          onClick={() => navigate('/actions/my-tasks')} 
+        />
+        <StatCard 
+          title="Completion Rate" 
+          value={`${statsValues.completionRate}%`} 
+          icon={<TrendingUpIcon fontSize="small" />} 
+          color="#2e7d32" 
+          loading={loading} 
+        />
       </Box>
 
-      {/* My Upcoming Meetings Section - COMES FIRST */}
+      {/* My Upcoming Meetings Section - Enhanced with Statuses */}
       <Paper sx={{ borderRadius: 3, mb: 4, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
         <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : alpha(theme.palette.primary.main, 0.05) }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <MeetingRoomIcon sx={{ color: 'primary.main' }} />
               <Typography variant="h6" fontWeight={800}>My Upcoming Meetings</Typography>
               <Chip label={`${myMeetings.upcoming.length} upcoming`} size="small" color="primary" />
+              
+              {/* Meeting Status Summary Chips */}
+              <Box sx={{ display: 'flex', gap: 0.5, ml: { xs: 0, sm: 2 } }}>
+                {meetingStatusStats.scheduled > 0 && (
+                  <Tooltip title="Scheduled">
+                    <Chip 
+                      size="small" 
+                      label={meetingStatusStats.scheduled} 
+                      sx={{ bgcolor: alpha('#3b82f6', 0.1), color: '#3b82f6', height: 20, fontSize: '0.65rem' }}
+                    />
+                  </Tooltip>
+                )}
+                {meetingStatusStats.started > 0 && (
+                  <Tooltip title="In Progress">
+                    <Chip 
+                      size="small" 
+                      label={meetingStatusStats.started} 
+                      sx={{ bgcolor: alpha('#f59e0b', 0.1), color: '#f59e0b', height: 20, fontSize: '0.65rem' }}
+                    />
+                  </Tooltip>
+                )}
+              </Box>
             </Box>
             <Button size="small" onClick={() => navigate('/meetings')} endIcon={<ChevronRightIcon />}>
               View All Meetings
@@ -537,7 +783,7 @@ const Dashboard = () => {
         </Box>
         
         {loading ? (
-          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} variant="rectangular" height={100} sx={{ m: 2 }} />)
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} variant="rectangular" height={180} sx={{ m: 2 }} />)
         ) : myMeetings.upcoming.length > 0 ? (
           <Stack spacing={1.5} sx={{ p: 2 }}>
             {myMeetings.upcoming.slice(0, 5).map((meeting) => (
@@ -557,7 +803,7 @@ const Dashboard = () => {
       <Box sx={{ mb: 3 }}>
         <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tab label="Analytics" />
-          <Tab label="My Pending Tasks" />
+          <Tab label={`My Pending Tasks (${pendingTasks.length})`} />
         </Tabs>
       </Box>
 

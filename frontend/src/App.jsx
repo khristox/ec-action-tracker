@@ -22,6 +22,8 @@ import { ThemeContextProvider } from './context/ThemeProvider';
 
 // Components
 import Layout from './components/common/Layout';
+import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
+
 
 // Error Boundary Component (same as before)
 // Error Boundary Component - Fixed
@@ -675,9 +677,12 @@ export default function App() {
         autoHideDuration={4000}
         preventDuplicate
       >
-        <Router basename={baseUrl}>
-          <AppContent />
-        </Router>
+        <MeetingRecorderProvider>
+          <Router basename={baseUrl}>
+            <AppContent />
+          </Router>
+        </MeetingRecorderProvider>
+        
       </SnackbarProvider>
     </ThemeContextProvider>
   );

@@ -525,7 +525,7 @@ const SystemUsersTab = ({ onAddUsers, existingParticipants }) => {
       if (query && query.length >= 2) {
         params.search = query;
       }
-      const response = await api.get('/users/', { params });
+      const response = await api.get('/users/available', { params });
       const usersList = response.data?.items || response.data || [];
       
       // Filter out users already added as participants

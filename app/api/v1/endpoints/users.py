@@ -322,3 +322,93 @@ async def remove_role_from_user(
         )
     
     return {"message": f"Role '{role.name}' removed from user '{user.username}'"}
+
+
+
+
+def mask_email(email: str) -> str:
+    if not email:
+        return None
+    parts = email.split('@')
+    if len(parts) != 2:
+        return email
+    local, domain = parts
+    if len(local) <= 3:
+        masked_local = local[0] + '***'
+    else:
+        masked_local = local[:3] + '***' + local[-2:]
+    return f"{masked_local}@{domain}"
+
+
+def mask_phone(phone: str) -> str:
+    if not phone:
+        return None
+    cleaned = ''.join(filter(str.isdigit, phone))
+    if len(cleaned) <= 4:
+        return '****'
+    return '*' * (len(cleaned) - 4) + cleaned[-4:]
+
+
+@router.get("/users/search")
+async def search_users(
+    search: str = Query(..., min_length=2, description="Search by name, email, or username"),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Search for users by name, email, or username (excludes current user)"""
+    
+    search_term = f"%{search}%"
+    
+    query = select(User).where(
+        User.id != current_user.id,
+        User.is_active == True,
+        or_(
+            User.full_name.ilike(search_term),
+            User.username.ilike(search_term),
+            User.email.ilike(search_term),
+            User.first_name.ilike(search_term),
+            User.last_name.ilike(search_term)
+        )
+    ).limit(limit)
+    
+    result = await db.execute(query)
+    users = result.scalars().all()
+    
+    return [
+        {
+            "id": str(user.id),
+            "name": user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username,
+            "email": user.email,
+            "telephone": getattr(user, 'telephone', None) or getattr(user, 'phone', None),
+            "masked_email": mask_email(user.email),
+            "masked_telephone": mask_phone(getattr(user, 'telephone', None) or getattr(user, 'phone', None)),
+            "username": user.username
+        }
+        for user in users
+    ]
+
+
+@router.get("/users/by-id/{user_id}")
+async def get_user_by_id(
+    user_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get user by ID with masked contact info"""
+    
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {
+        "id": str(user.id),
+        "name": user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username,
+        "email": user.email,
+        "telephone": getattr(user, 'telephone', None) or getattr(user, 'phone', None),
+        "masked_email": mask_email(user.email),
+        "masked_telephone": mask_phone(getattr(user, 'telephone', None) or getattr(user, 'phone', None)),
+        "username": user.username
+    }

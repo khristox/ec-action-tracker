@@ -752,6 +752,8 @@ async def add_participant(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(deps.get_db),
 ):
+    """Add a participant to a meeting - supports both existing users (by ID) and new participants"""
+    
     # Get the meeting object
     result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
     meeting = result.scalar_one_or_none()
@@ -759,25 +761,119 @@ async def add_participant(
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
     
+    # Initialize participant fields
+    name = None
+    email = None
+    telephone = None
+    title = None
+    organization = None
+    user_id = participant_data.user_id  # Store the user_id if provided
+    
+    # If user_id is provided, fetch user details from database
+    if participant_data.user_id:
+        user_result = await db.execute(
+            select(User).where(User.id == participant_data.user_id, User.is_active == True)
+        )
+        user_details = user_result.scalar_one_or_none()
+        
+        if not user_details:
+            raise HTTPException(status_code=404, detail=f"User with ID {participant_data.user_id} not found")
+        
+        # Use database values (override any frontend values)
+        name = user_details.full_name or f"{user_details.first_name or ''} {user_details.last_name or ''}".strip() or user_details.username
+        email = user_details.email
+        telephone = getattr(user_details, 'telephone', None) or getattr(user_details, 'phone', None)
+        title = getattr(user_details, 'title', None)
+        organization = getattr(user_details, 'organization', None)
+        
+        logger.info(f"Fetched user from DB: {name} | Email: {email} | Phone: {telephone} | User ID: {user_details.id}")
+    else:
+        # New participant - use provided data
+        if not participant_data.name:
+            raise HTTPException(status_code=400, detail="Participant name is required")
+        name = participant_data.name
+        email = participant_data.email
+        telephone = participant_data.telephone
+        title = participant_data.title
+        organization = participant_data.organization
+        
+        # Validate email format for new participants
+        if email:
+            import re
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                raise HTTPException(status_code=400, detail=f"Invalid email format: {email}")
+        
+        # Validate phone format for new participants
+        if telephone:
+            clean_phone = re.sub(r'\D', '', telephone)
+            if len(clean_phone) < 8 or len(clean_phone) > 15:
+                raise HTTPException(status_code=400, detail=f"Phone number must have 8-15 digits: {telephone}")
+    
+    # Check if participant already exists (by user_id, email, or name)
+    existing_conditions = []
+    #if user_id:
+    #    existing_conditions.append(MeetingParticipant.user_id == user_id)
+    if email:
+        existing_conditions.append(MeetingParticipant.email == email)
+    existing_conditions.append(MeetingParticipant.name == name)
+    
+    existing_result = await db.execute(
+        select(MeetingParticipant).where(
+            MeetingParticipant.meeting_id == meeting_id,
+            MeetingParticipant.is_active == True,
+            or_(*existing_conditions)
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+    
+    if existing:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Participant '{name}' already exists in this meeting"
+        )
+    
+    # Create participant with user_id
     participant = MeetingParticipant(
-        meeting_id=meeting_id,  # Use meeting_id directly
-        name=participant_data.name,
-        email=participant_data.email,
-        telephone=getattr(participant_data, 'telephone', None),
-        title=getattr(participant_data, 'title', None),
-        organization=getattr(participant_data, 'organization', None),
-        is_chairperson=getattr(participant_data, 'is_chairperson', False),
-        is_secretary=getattr(participant_data, 'is_secretary', False),
-        attendance_status=getattr(participant_data, 'attendance_status', 'pending'),
-        apology_comment=getattr(participant_data, 'apology_comment', None),
-        created_by_id=current_user.id  # Use created_by_id instead of user_id
+        meeting_id=meeting_id,
+        name=name,
+        email=email,
+        telephone=telephone,
+        title=title,
+        organization=organization,
+        is_chairperson=participant_data.is_chairperson,
+        is_secretary=participant_data.is_secretary,
+        attendance_status=participant_data.attendance_status or "pending",
+        apology_comment=participant_data.apology_comment,
+        
+        created_by_id=current_user.id,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+        is_active=True
     )
     
     db.add(participant)
-    db.commit()
-    db.refresh(participant)
+    await db.commit()
+    await db.refresh(participant)
     
-    return participant
+    logger.info(f"Participant created: {participant.id} - {participant.name} ")
+    
+    return {
+        "id": participant.id,
+        "meeting_id": participant.meeting_id,
+        "name": participant.name,
+        "email": participant.email,
+        "telephone": participant.telephone,
+        "title": participant.title,
+        "organization": participant.organization,
+        "is_chairperson": participant.is_chairperson,
+        "is_secretary": participant.is_secretary,
+        "attendance_status": participant.attendance_status,
+        "apology_comment": participant.apology_comment,
+        "created_at": participant.created_at,
+        "message": "Participant added successfully"
+    }
+
 
 # ==================== MEETING MINUTES ====================
 

@@ -15,6 +15,7 @@ import {
   CloudUpload, Download, Timer, Storage,
   ExpandMore, CloudDone, Delete, CheckCircle,
   RadioButtonChecked, History, PlayCircle,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import api from '../../../services/api';
@@ -47,25 +48,69 @@ const formatDate = (dateString) => {
   } catch { return '—'; }
 };
 
-// ─── Recording Badge ──────────────────────────────────────────────────────────
-const RecordingBadge = ({ time, isPaused }) => (
-  <Stack direction="row" alignItems="center" spacing={1}>
-    <Box
-      sx={{
-        width: 10, height: 10, borderRadius: '50%',
-        bgcolor: isPaused ? 'warning.main' : 'error.main',
-        animation: isPaused ? 'none' : 'pulse 1.5s infinite',
-        '@keyframes pulse': {
-          '0%,100%': { opacity: 1, transform: 'scale(1)' },
-          '50%':     { opacity: 0.5, transform: 'scale(0.85)' },
-        },
-      }}
-    />
-    <Typography variant="caption" fontFamily="monospace" fontWeight={700}>
-      {isPaused ? 'PAUSED' : 'REC'} · {formatTime(time)}
-    </Typography>
-  </Stack>
-);
+// ─── Recording Time Limit Options ─────────────────────────────────────────────
+const TIME_LIMIT_OPTIONS = [
+  { value: 1800,  label: '30 minutes',  display: '30 min' },
+  { value: 3600,  label: '1 hour',      display: '1 hr' },
+  { value: 5400,  label: '1 hour 30 minutes', display: '1 hr 30 min' },
+  { value: 7200,  label: '2 hours',     display: '2 hr' },
+  { value: 0,     label: 'No limit',    display: 'No limit' },
+];
+
+// ─── Recording Badge with Time Limit ──────────────────────────────────────────
+const RecordingBadge = ({ time, isPaused, timeLimit, timeRemaining, isNearLimit }) => {
+  const theme = useTheme();
+  const warningThreshold = 60; // 1 minute warning
+  
+  return (
+    <Stack direction="row" alignItems="center" spacing={1.5}>
+      <Box
+        sx={{
+          width: 10, height: 10, borderRadius: '50%',
+          bgcolor: isPaused ? 'warning.main' : 'error.main',
+          animation: isPaused ? 'none' : 'pulse 1.5s infinite',
+          '@keyframes pulse': {
+            '0%,100%': { opacity: 1, transform: 'scale(1)' },
+            '50%':     { opacity: 0.5, transform: 'scale(0.85)' },
+          },
+        }}
+      />
+      <Typography variant="caption" fontFamily="monospace" fontWeight={700}>
+        {isPaused ? 'PAUSED' : 'REC'} · {formatTime(time)}
+      </Typography>
+      
+      {timeLimit > 0 && (
+        <>
+          <Divider orientation="vertical" flexItem sx={{ height: 20 }} />
+          <Typography 
+            variant="caption" 
+            fontFamily="monospace" 
+            fontWeight={600}
+            sx={{ 
+              color: timeRemaining <= warningThreshold ? theme.palette.error.main : theme.palette.text.secondary,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5
+            }}
+          >
+            <Timer sx={{ fontSize: 12 }} />
+            {formatTime(timeRemaining)} left
+          </Typography>
+        </>
+      )}
+      
+      {isNearLimit && timeLimit > 0 && timeRemaining <= 30 && (
+        <Chip 
+          size="small" 
+          icon={<WarningIcon sx={{ fontSize: 12 }} />}
+          label="Time limit approaching!" 
+          color="error"
+          sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600 }}
+        />
+      )}
+    </Stack>
+  );
+};
 
 // ─── Audio Waveform ───────────────────────────────────────────────────────────
 const AudioWaveform = ({ active, barCount = 40 }) => (
@@ -88,6 +133,58 @@ const AudioWaveform = ({ active, barCount = 40 }) => (
     ))}
   </Box>
 );
+
+// ─── Time Limit Warning Dialog ────────────────────────────────────────────────
+const TimeLimitWarningDialog = ({ open, onClose, onExtend, onStop, timeLimit, timeRemaining }) => {
+  const theme = useTheme();
+  
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: alpha(theme.palette.warning.main, 0.1) }}>
+        <WarningIcon color="warning" />
+        <Typography variant="h6" fontWeight={700}>Time Limit Warning</Typography>
+      </DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 2 }}>
+          <Alert severity="warning">
+            Your recording has reached the time limit of <strong>{formatTime(timeLimit)}</strong>.
+          </Alert>
+          <Typography variant="body2" color="text.secondary">
+            Recording will automatically stop in <strong>{formatTime(timeRemaining)}</strong> if no action is taken.
+          </Typography>
+          <Box sx={{ bgcolor: alpha(theme.palette.warning.main, 0.1), p: 2, borderRadius: 2 }}>
+            <Typography variant="body2" fontWeight={600} gutterBottom>
+              What would you like to do?
+            </Typography>
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                fullWidth 
+                onClick={onExtend}
+                startIcon={<Timer />}
+              >
+                Extend Recording (Add 30 minutes)
+              </Button>
+              <Button 
+                variant="outlined" 
+                color="error" 
+                fullWidth 
+                onClick={onStop}
+                startIcon={<Stop />}
+              >
+                Stop Recording Now
+              </Button>
+            </Stack>
+          </Box>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Remind me later</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
@@ -114,31 +211,110 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
   const [snackbar,              setSnackbar]              = useState({ open: false, message: '', severity: 'success' });
   const [advancedOpen,          setAdvancedOpen]          = useState(false);
   const [streamUrl,             setStreamUrl]             = useState(null);
+  
+  // ── Time Limit State ────────────────────────────────────────────────────
+  const [timeLimit,             setTimeLimit]             = useState(3600); // Default 1 hour
+  const [timeLimitWarningOpen,  setTimeLimitWarningOpen]  = useState(false);
+  const [warningShown,          setWarningShown]          = useState(false);
+  const [autoStopTriggered,     setAutoStopTriggered]     = useState(false);
 
   // ── Derived ─────────────────────────────────────────────────────────────
   const isAudioMode   = recorder.recordingMode === RECORDING_MODE.audio;
   const activeFormats = isAudioMode ? recorder.AUDIO_FORMATS : recorder.RECORDING_FORMATS;
+  const canStart = isAudioMode ? true : (recorder.streamReady && !recorder.streamError);
+  
+  // Calculate time remaining
+  const timeRemaining = timeLimit > 0 ? Math.max(0, timeLimit - recorder.recordingTime) : 0;
+  const isNearLimit = timeLimit > 0 && timeRemaining <= 60 && timeRemaining > 0; // Last minute
+  const shouldAutoStop = timeLimit > 0 && timeRemaining <= 0 && recorder.isRecording && !autoStopTriggered;
 
-  // FIX #4: button is always enabled in audio mode; in video mode wait for stream
-  const canStart = isAudioMode
-    ? true
-    : (recorder.streamReady && !recorder.streamError);
+  // ── Auto-stop recording when time limit reached ─────────────────────────
+  useEffect(() => {
+    if (shouldAutoStop && recorder.isRecording && !autoStopTriggered) {
+      setAutoStopTriggered(true);
+      setWarningShown(false);
+      setTimeLimitWarningOpen(false);
+      
+      // Stop recording
+      recorder.stopRecording();
+      
+      // Show notification
+      setSnackbar({ 
+        open: true, 
+        message: `⏰ Recording stopped automatically after reaching the ${formatTime(timeLimit)} time limit.`, 
+        severity: 'info' 
+      });
+      
+      // Reset auto-stop flag after a delay
+      setTimeout(() => setAutoStopTriggered(false), 1000);
+    }
+  }, [shouldAutoStop, recorder.isRecording, recorder, timeLimit, autoStopTriggered]);
+
+  // ── Show warning when approaching time limit ────────────────────────────
+  useEffect(() => {
+    if (timeLimit > 0 && recorder.isRecording && !recorder.isPaused && !warningShown && timeRemaining <= 60 && timeRemaining > 0) {
+      setWarningShown(true);
+      setTimeLimitWarningOpen(true);
+    }
+    
+    // Reset warning when recording stops or limit changes
+    if (!recorder.isRecording) {
+      setWarningShown(false);
+      setTimeLimitWarningOpen(false);
+    }
+  }, [timeRemaining, recorder.isRecording, recorder.isPaused, warningShown, timeLimit]);
+
+  // ── Reset auto-stop when recording starts ───────────────────────────────
+  useEffect(() => {
+    if (recorder.isRecording) {
+      setAutoStopTriggered(false);
+      setWarningShown(false);
+      setTimeLimitWarningOpen(false);
+    }
+  }, [recorder.isRecording]);
 
   // ── Effects ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (effectiveId) recorder.setMeetingId(effectiveId);
-  }, [effectiveId]);    // eslint-disable-line react-hooks/exhaustive-deps
+  }, [effectiveId]);
 
   useEffect(() => {
     recorder.enumerateDevices();
-  }, []);              // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (effectiveId) {
       loadRecordings();
       if (!currentMeeting) dispatch(fetchMeetingById(effectiveId));
     }
-  }, [effectiveId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [effectiveId]);
+
+  // ── Handle extending recording time ─────────────────────────────────────
+  const handleExtendRecording = useCallback(() => {
+    const newTimeLimit = timeLimit + 1800; // Add 30 minutes
+    setTimeLimit(newTimeLimit);
+    setTimeLimitWarningOpen(false);
+    setWarningShown(false);
+    
+    setSnackbar({ 
+      open: true, 
+      message: `⏰ Recording extended by 30 minutes. New limit: ${formatTime(newTimeLimit)}`, 
+      severity: 'success' 
+    });
+  }, [timeLimit]);
+
+  // ── Handle stopping recording from warning dialog ───────────────────────
+  const handleStopFromWarning = useCallback(() => {
+    setTimeLimitWarningOpen(false);
+    setWarningShown(false);
+    recorder.stopRecording();
+    
+    setSnackbar({ 
+      open: true, 
+      message: 'Recording stopped manually.', 
+      severity: 'info' 
+    });
+  }, [recorder]);
 
   // ── Recordings CRUD ─────────────────────────────────────────────────────
   const loadRecordings = useCallback(async () => {
@@ -207,6 +383,7 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
     fd.append('format',      recorder.fileFormat);
     fd.append('file_size',   recorder.recordingSize);
     fd.append('mode',        recorder.recordingMode);
+    fd.append('time_limit',  timeLimit);
 
     try {
       const xhr = new XMLHttpRequest();
@@ -234,13 +411,22 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
         loadRecordings();
         setUploadStatus('idle');
         setUploadProgress(0);
+        setTimeLimit(3600); // Reset to default
       }, 1500);
     } catch (err) {
       setUploadStatus('error');
       setUploadError(err.message || 'Upload failed');
       showSnack(err.message || 'Upload failed', 'error');
     }
-  }, [recorder, currentMeeting, effectiveId, recordingName, recordingDescription, recordingCategory, loadRecordings, isAudioMode]);
+  }, [recorder, currentMeeting, effectiveId, recordingName, recordingDescription, recordingCategory, loadRecordings, isAudioMode, timeLimit]);
+
+  // ── Start recording with time limit ─────────────────────────────────────
+  const handleStartRecording = useCallback(() => {
+    recorder.startRecording();
+    setAutoStopTriggered(false);
+    setWarningShown(false);
+    setTimeLimitWarningOpen(false);
+  }, [recorder]);
 
   // ── Preview (authenticated stream) ──────────────────────────────────────
   const handleOpenPreview = useCallback(async (recording) => {
@@ -257,7 +443,7 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
       setStreamUrl(URL.createObjectURL(blob));
     } catch (err) {
       console.error('Stream fetch failed:', err);
-      setStreamUrl(recording.stream_url); // fallback to direct URL
+      setStreamUrl(recording.stream_url);
       showSnack('Using direct stream URL (auth may not apply)', 'warning');
     }
   }, []);
@@ -297,7 +483,7 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
       {/* ── Record Tab ── */}
       {activeTab === 0 && (
         <Grid container spacing={3}>
-          {/* ── Stream error banner (always visible) ── */}
+          {/* ── Stream error banner ── */}
           {recorder.streamError && (
             <Grid size={{ xs: 12 }}>
               <Alert
@@ -324,11 +510,19 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
                       <Mic sx={{ fontSize: 36, color: 'primary.main' }} />
                     </Box>
                     <AudioWaveform active={recorder.isRecording && !recorder.isPaused} />
-                    {recorder.isRecording && <RecordingBadge time={recorder.recordingTime} isPaused={recorder.isPaused} />}
+                    {recorder.isRecording && (
+                      <RecordingBadge 
+                        time={recorder.recordingTime} 
+                        isPaused={recorder.isPaused}
+                        timeLimit={timeLimit}
+                        timeRemaining={timeRemaining}
+                        isNearLimit={isNearLimit}
+                      />
+                    )}
                   </Box>
                 )}
 
-                {/* Video mode – live preview via context videoRef (FIX #5) */}
+                {/* Video mode – live preview */}
                 {!isAudioMode && !recorder.recordedUrl && (
                   <video
                     ref={recorder.videoRef}
@@ -364,22 +558,51 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
                   <Box sx={{ mt: 1.5 }}>
                     {!recorder.recordedUrl ? (
                       !recorder.isRecording ? (
-                        <Button
-                          variant="contained"
-                          color="error"
-                          fullWidth
-                          size="large"
-                          startIcon={<RadioButtonChecked />}
-                          onClick={recorder.startRecording}
-                          disabled={!canStart}
-                          sx={{ py: 1.5, borderRadius: 2, fontWeight: 700 }}
-                        >
-                          Start Recording
-                        </Button>
+                        <Stack spacing={1.5}>
+                          {/* Time Limit Selector */}
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Max Recording Time</InputLabel>
+                            <Select
+                              value={timeLimit}
+                              onChange={(e) => setTimeLimit(e.target.value)}
+                              label="Max Recording Time"
+                              disabled={recorder.isRecording}
+                              sx={{ mb: 1 }}
+                            >
+                              {TIME_LIMIT_OPTIONS.map(option => (
+                                <MenuItem key={option.value} value={option.value}>
+                                  <Stack direction="row" spacing={1} alignItems="center">
+                                    <Timer sx={{ fontSize: 16 }} />
+                                    <span>{option.label}</span>
+                                  </Stack>
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          
+                          <Button
+                            variant="contained"
+                            color="error"
+                            fullWidth
+                            size="large"
+                            startIcon={<RadioButtonChecked />}
+                            onClick={handleStartRecording}
+                            disabled={!canStart}
+                            sx={{ py: 1.5, borderRadius: 2, fontWeight: 700 }}
+                          >
+                            Start Recording
+                          </Button>
+                        </Stack>
                       ) : (
                         <Stack spacing={1.5}>
                           <Box sx={{ textAlign:'center', py: 1.5, borderRadius: 2, bgcolor: recorder.isPaused ? alpha(theme.palette.warning.main, 0.08) : alpha(theme.palette.error.main, 0.06) }}>
-                            <RecordingBadge time={recorder.recordingTime} isPaused={recorder.isPaused} />
+                            <RecordingBadge 
+                              time={recorder.recordingTime} 
+                              isPaused={recorder.isPaused}
+                              timeLimit={timeLimit}
+                              timeRemaining={timeRemaining}
+                              isNearLimit={isNearLimit}
+                            />
                           </Box>
                           <Stack direction="row" spacing={1}>
                             <Button
@@ -395,6 +618,21 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
                               Stop
                             </Button>
                           </Stack>
+                          
+                          {/* Time limit indicator during recording */}
+                          {timeLimit > 0 && (
+                            <Box sx={{ mt: 1 }}>
+                              <LinearProgress 
+                                variant="determinate" 
+                                value={(recorder.recordingTime / timeLimit) * 100} 
+                                sx={{ height: 4, borderRadius: 2 }}
+                                color={timeRemaining <= 60 ? 'error' : 'primary'}
+                              />
+                              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                                {Math.round((recorder.recordingTime / timeLimit) * 100)}% of time limit used
+                              </Typography>
+                            </Box>
+                          )}
                         </Stack>
                       )
                     ) : (
@@ -504,6 +742,12 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
                           <Typography variant="caption" color="text.secondary">{formatTime(rec.duration)}</Typography>
                           <Typography variant="caption" color="text.disabled">·</Typography>
                           <Typography variant="caption" color="text.secondary">{formatFileSize(rec.file_size)}</Typography>
+                          {rec.time_limit > 0 && (
+                            <>
+                              <Typography variant="caption" color="text.disabled">·</Typography>
+                              <Chip size="small" label={`Limit: ${formatTime(rec.time_limit)}`} sx={{ height: 18, fontSize: '0.6rem' }} />
+                            </>
+                          )}
                         </Stack>
                       }
                     />
@@ -532,6 +776,16 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
           )}
         </Paper>
       )}
+
+      {/* ── Time Limit Warning Dialog ── */}
+      <TimeLimitWarningDialog
+        open={timeLimitWarningOpen}
+        onClose={() => setTimeLimitWarningOpen(false)}
+        onExtend={handleExtendRecording}
+        onStop={handleStopFromWarning}
+        timeLimit={timeLimit}
+        timeRemaining={timeRemaining}
+      />
 
       {/* ── Save Dialog ── */}
       <Dialog
@@ -570,8 +824,11 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
 
             <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.info.main, 0.06) }}>
               <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-                <Chip icon={<Timer sx={{ fontSize: 14 }} />} size="small" label={formatTime(recorder.recordingTime)} />
-                <Chip icon={<Storage sx={{ fontSize: 14 }} />} size="small" label={formatFileSize(recorder.recordingSize)} />
+                <Chip icon={<Timer sx={{ fontSize: 14 }} />} size="small" label={`Duration: ${formatTime(recorder.recordingTime)}`} />
+                <Chip icon={<Storage sx={{ fontSize: 14 }} />} size="small" label={`Size: ${formatFileSize(recorder.recordingSize)}`} />
+                {timeLimit > 0 && (
+                  <Chip size="small" label={`Time limit: ${formatTime(timeLimit)}`} variant="outlined" />
+                )}
               </Stack>
             </Box>
 
@@ -623,6 +880,9 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
             <Chip size="small" label={formatTime(selectedRecording?.duration || 0)} />
             <Chip size="small" label={formatFileSize(selectedRecording?.file_size || 0)} />
             <Chip size="small" label={formatDate(selectedRecording?.created_at)} />
+            {selectedRecording?.time_limit > 0 && (
+              <Chip size="small" label={`Time limit: ${formatTime(selectedRecording.time_limit)}`} variant="outlined" />
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

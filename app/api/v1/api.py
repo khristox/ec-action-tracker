@@ -23,6 +23,7 @@ try:
     from app.api.v1.endpoints.action_tracker.recordings import router as recordings_router
     from app.api.v1.endpoints.action_tracker.meeting_report import router as meeting_report
     from app.api.v1.endpoints.action_tracker.meeting_minutes import router as meeting_minutes
+    from app.api.v1.endpoints.role_menu_permissions import router as role_menu_permissions
 
 
     
@@ -59,7 +60,7 @@ api_router.include_router(meeting_report,prefix="/meetings",tags=["meeting-repor
 
 api_router.include_router(meeting_minutes,prefix="/meetings",tags=["Meeting Minutes"])
 
-
+api_router.include_router(role_menu_permissions,prefix="/role-menu-permissions",tags=["Role Menu Permission"])
 
 
 #recordings_router.include_router(recordings_router, prefix="/meetings/{meeting_id}/recordings", tags=["meeting-recordings"])

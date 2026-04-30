@@ -55,6 +55,8 @@ services:
       API_BASE_URL: http://localhost:8006
     command: >
       sh -c "
+        export HOME=/tmp &&
+        pip install -r requirements.txt &&
         pip install uvicorn &&
         python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
       "
@@ -115,10 +117,14 @@ docker run -it --rm --user root --entrypoint /bin/bash khristox/ec-action-tracke
 
 #Lastest 
  docker build --no-cache -t khristox/ec-action-tracker:latest .
+ docker run -it --rm -v $(pwd):/app --entrypoint /bin/bash khristox/ec-action-tracker:latest -c "pip install -r requirements.txt && python -m uvicorn app.main:app --host 0.0.0.0 --port 8001"
+
+
+ docker run -it --rm -v $(pwd):/app --entrypoint /bin/bash khristox/ec-action-tracker:latest -c "export HOME=/tmp && pip install aiomysql"
+
 
 #Install Script 
-  docker run -it --rm -v $(pwd):/app --entrypoint /bin/bash khristox/ec-action-tracker:latest -c "pip install -r requirements.txt && python -m uvicorn app.main:app --host 0.0.0.0 --port 8001"
-
+  
   docker compose pull app
   docker compose build --no-cache app
   docker compose up -d --force-recreate --no-deps app

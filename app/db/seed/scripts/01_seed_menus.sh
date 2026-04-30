@@ -224,7 +224,7 @@ create_menu() {
 print_header "STEP 1: Creating Root Menus"
 echo ""
 
-# Reordered root menus - Dashboard first, then meetings, actions, participants, reports, settings, calendar last
+# Root menus order: Dashboard → Meetings → Actions → Participants → Reports → Settings → Calendar
 create_menu "dashboard" "Dashboard" "Dashboard" "mui" "mui" "#1976d2" "dashboard" 1 ""
 create_menu "meetings" "Meetings" "event" "material_symbols" "material-symbols-outlined" "#4caf50" "meetings" 2 ""
 create_menu "actions" "Actions" "fa-tasks" "fontawesome" "fas" "#ff9800" "actions" 3 ""
@@ -259,6 +259,7 @@ echo ""
 print_header "STEP 4: Creating Participants Submenus"
 echo ""
 
+# Participants submenus with correct sort order
 create_menu "participants_list" "All Participants" "List" "mui" "mui" "#9c27b0" "participants" 1 "participants"
 create_menu "participant_lists" "Participant Lists" "Group" "mui" "mui" "#9c27b0" "participant-lists" 2 "participants"
 create_menu "participants_create" "Add Participant" "PersonAdd" "mui" "mui" "#9c27b0" "participants/create" 3 "participants"
@@ -289,17 +290,32 @@ create_menu "preferences" "Preferences" "fa-sliders-h" "fontawesome" "fas" "#607
 # System Administration
 create_menu "users" "User Management" "fa-users" "fontawesome" "fas" "#3f51b5" "settings/users" 4 "settings"
 create_menu "roles" "Role Management" "fa-tag" "fontawesome" "fas" "#9c27b0" "settings/roles" 5 "settings"
-create_menu "audit" "Audit Logs" "fa-history" "fontawesome" "fas" "#607d8b" "settings/audit" 6 "settings"
+
+# NEW: Role Menu Assignment (Admin only)
+create_menu "role_menu_assignment" "Role Menu Assignment" "fa-key" "fontawesome" "fas" "#ff5722" "settings/role-menu-assignment" 6 "settings"
+
+create_menu "audit" "Audit Logs" "fa-history" "fontawesome" "fas" "#607d8b" "settings/audit" 7 "settings"
 
 # Locations - Single menu without tree
-create_menu "locations" "Locations" "location_on" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 7 "settings"
+create_menu "locations" "Locations" "location_on" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 8 "settings"
 
 # Admin Structures - Single menu without tree
-create_menu "admin_structures" "Admin Structures" "fa-sitemap" "fontawesome" "fas" "#607d8b" "settings/admin-structures" 8 "settings"
+create_menu "admin_structures" "Admin Structures" "fa-sitemap" "fontawesome" "fas" "#607d8b" "settings/admin-structures" 9 "settings"
 
 echo ""
 
-# ==================== STEP 7: ASSIGN PERMISSIONS ====================
+# ==================== STEP 7: CREATE ADMIN STRUCTURES SUBMENUS ====================
+print_header "STEP 7: Creating Admin Structures (Department Hierarchy)"
+echo ""
+
+# Admin Structures submenus (under Admin Structures)
+create_menu "departments" "Departments" "fa-building" "fontawesome" "fas" "#4caf50" "settings/admin-structures/departments" 1 "admin_structures"
+create_menu "positions" "Positions" "fa-user-tie" "fontawesome" "fas" "#2196f3" "settings/admin-structures/positions" 2 "admin_structures"
+create_menu "hierarchy" "Hierarchy View" "fa-tree" "fontawesome" "fas" "#ff9800" "settings/admin-structures/hierarchy" 3 "admin_structures"
+
+echo ""
+
+# ==================== STEP 8: ASSIGN PERMISSIONS ====================
 print_separator
 print_header "Assigning Menu Permissions to Roles"
 print_separator
@@ -307,33 +323,58 @@ echo ""
 
 declare -A ROLE_MENUS
 
-# Admin - Full access to everything
-ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,audit,locations,admin_structures,calendar"
-ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,audit,locations,admin_structures,calendar"
+# Admin - Full access to everything including role menu assignment
+ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
+ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
 
-# Meeting Creator
-ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,participants,participants_list,participant_lists,settings,profile,security,preferences,calendar"
+# Meeting Creator - Has participants access
+ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,participants,participants_list,participant_lists,participants_create,settings,profile,security,preferences,calendar"
 
-# Meeting Participant
-ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,actions,my_tasks,settings,profile,security,calendar"
+# Meeting Participant - Basic participants access
+ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,security,calendar"
 
-# Action Assigner
-ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,participants,participants_list,participant_lists,reports,reports_actions,settings,profile,security,preferences,calendar"
+# Action Assigner - Full participants access
+ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_actions,settings,profile,security,preferences,calendar"
 
-# Action Owner
-ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,settings,profile,security,calendar"
+# Action Owner - Basic participants access
+ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,calendar"
 
-# Action Viewer
-ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,reports,reports_actions,settings,profile,security,calendar"
+# Action Viewer - Read-only participants
+ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,participants,participants_list,reports,reports_actions,settings,profile,security,calendar"
 
-# Participant Manager
-ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,settings,profile,security,preferences,calendar"
+# Participant Manager - Full participants management
+ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,actions,my_tasks,settings,profile,security,preferences,calendar"
 
 # Report Viewer
 ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,calendar"
 
-# Basic User
-ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,settings,profile,security,calendar"
+# Basic User - Has ALL participants submenus (list, lists, create, import)
+ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,participant_lists,participants_create,participants_import,settings,profile,security,calendar"
+
+echo ""
+
+# ==================== PARTICIPANT MANAGER ROLE PERMISSIONS ====================
+# Ensure participant_manager has full CRUD access
+PARTICIPANT_MANAGER_ID="${ROLE_IDS[participant_manager]}"
+if [ -n "$PARTICIPANT_MANAGER_ID" ]; then
+    print_info "Granting full participant permissions to participant_manager role..."
+    
+    # Grant all participant-related permissions
+    for menu_code in participants_list participant_lists participants_create participants_import; do
+        MENU_ID="${MENU_IDS[$menu_code]}"
+        [ -z "$MENU_ID" ] && MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
+        [ -z "$MENU_ID" ] && continue
+        
+        PERM_JSON="{\"role_id\":\"${PARTICIPANT_MANAGER_ID}\",\"menu_id\":\"${MENU_ID}\",\"can_view\":true,\"can_access\":true,\"can_show_mb_bottom\":true}"
+        
+        curl -s -X POST "${API_URL}/menus/permissions" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PERM_JSON" > /dev/null
+    done
+    
+    print_success "  ✅ Granted full participant permissions to participant_manager"
+fi
 
 PERMISSION_SUCCESS=0
 PERMISSION_FAIL=0
@@ -363,7 +404,16 @@ for role_code in "${!ROLE_MENUS[@]}"; do
         [ -z "$MENU_ID" ] && MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
         [ -z "$MENU_ID" ] && continue
         
-        PERM_JSON="{\"role_id\":\"${ROLE_ID}\",\"menu_id\":\"${MENU_ID}\",\"can_view\":true,\"can_access\":true,\"can_show_mb_bottom\":false}"
+        # Determine if menu should show on mobile bottom navigation
+        CAN_SHOW_MB_BOTTOM=false
+        # Show on mobile bottom for dashboard, meetings, actions, participants, calendar
+        case "$menu_code" in
+            dashboard|meetings|meetings_list|actions|my_tasks|participants|participants_list|calendar)
+                CAN_SHOW_MB_BOTTOM=true
+                ;;
+        esac
+        
+        PERM_JSON="{\"role_id\":\"${ROLE_ID}\",\"menu_id\":\"${MENU_ID}\",\"can_view\":true,\"can_access\":true,\"can_show_mb_bottom\":${CAN_SHOW_MB_BOTTOM}}"
         
         curl -s -X POST "${API_URL}/menus/permissions" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -402,8 +452,25 @@ echo ""
 echo -e "${CYAN}📊 Summary:${NC}"
 echo "  • Total menus created: ${CREATE_COUNT}"
 echo "  • Root menu order: Dashboard → Meetings → Actions → Participants → Reports → Settings → Calendar"
-echo "  • Locations is a single menu under Settings"
-echo "  • Admin Structures is a single menu under Settings"
+echo "  • Participants submenus:"
+echo "    - All Participants (List view)"
+echo "    - Participant Lists (Manage lists)"
+echo "    - Add Participant (Create single)"
+echo "    - Bulk Import (Import from file)"
+echo "  • Settings submenus (NEW ORDER):"
+echo "    - Profile"
+echo "    - Security"
+echo "    - Preferences"
+echo "    - User Management"
+echo "    - Role Management"
+echo "    - ⭐ Role Menu Assignment (NEW - Admin only)"
+echo "    - Audit Logs"
+echo "    - Locations"
+echo "    - Admin Structures"
+echo "  • Admin Structures submenus (NEW):"
+echo "    - Departments"
+echo "    - Positions"
+echo "    - Hierarchy View"
 echo "  • Calendar moved to last position"
 echo ""
 
@@ -434,10 +501,28 @@ echo "  📄 Security [fa-shield-alt] (FA)"
 echo "  📄 Preferences [fa-sliders-h] (FA)"
 echo "  📄 User Management [fa-users] (FA)"
 echo "  📄 Role Management [fa-tag] (FA)"
+echo "  📄 ⭐ Role Menu Assignment [fa-key] (FA) - ADMIN ONLY"
 echo "  📄 Audit Logs [fa-history] (FA)"
 echo "  📄 Locations [location_on] (Material Symbol)"
 echo "  📄 Admin Structures [fa-sitemap] (FA)"
+echo "    📄 Departments [fa-building] (FA)"
+echo "    📄 Positions [fa-user-tie] (FA)"
+echo "    📄 Hierarchy View [fa-tree] (FA)"
 echo "📁 Calendar [calendar_month] (Material Symbol) - Sort Order: 7"
+echo ""
+
+echo -e "${CYAN}👥 Role Permissions Summary:${NC}"
+echo "  • admin / super_admin: Full access to all menus (including Role Menu Assignment)"
+echo "  • meeting_creator: Meetings + Actions + Participants (full) + Settings (profile)"
+echo "  • meeting_participant: Meetings + Actions + Participants (view) + Settings (profile)"
+echo "  • action_assigner: Actions + Participants (full) + Reports (actions) + Settings (profile)"
+echo "  • action_owner: Actions (own) + Participants (view) + Settings (profile)"
+echo "  • action_viewer: Actions (view) + Participants (view) + Reports (view) + Settings (profile)"
+echo "  • participant_manager: Participants (full) + Meetings + Actions + Settings (profile)"
+echo "  • report_viewer: Reports + Settings (profile)"
+echo "  • user: Dashboard + Meetings + Actions (own) + Participants (FULL: list, lists, create, import) + Settings (profile)"
+echo ""
+echo -e "${YELLOW}⚠️  Note: Role Menu Assignment menu is ONLY visible to admin and super_admin roles${NC}"
 echo ""
 
 print_success "Done! Refresh your browser to see the updated menu structure!"
@@ -448,4 +533,6 @@ print_info "💡 Quick Commands:"
 echo "  • Reset all menus: ./seed_menus.sh"
 echo "  • Check menu structure: curl ${API_URL}/menus/ | jq '.'"
 echo "  • Check role permissions: curl ${API_URL}/roles/ | jq '.'"
+echo "  • Check user role menus: curl -X GET \"${API_URL}/menus/\" -H \"Authorization: Bearer \$TOKEN\" | jq '.'"
+echo "  • Assign menu to role: curl -X POST \"${API_URL}/menus/permissions\" -H \"Authorization: Bearer \$TOKEN\" -H \"Content-Type: application/json\" -d '{\"role_id\":\"...\",\"menu_id\":\"...\",\"can_view\":true,\"can_access\":true}'"
 echo ""

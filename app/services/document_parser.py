@@ -1,5 +1,8 @@
 # services/document_parser.py
+import json
+
 import docx
+from openai import OpenAI
 import pdfplumber
 from typing import Dict, Any, List
 

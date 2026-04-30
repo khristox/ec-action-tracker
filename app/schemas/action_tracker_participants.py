@@ -63,8 +63,9 @@ def validate_name(v: str) -> str:
 # ==================== Participant Schemas ====================
 
 class ParticipantBase(ORMBase):
+    user_id: Optional[UUID] = None
     """Base schema for Participant with validation"""
-    name: str = Field(
+    name: Optional[str] = Field(
         ..., 
         min_length=NAME_MIN_LENGTH, 
         max_length=NAME_MAX_LENGTH,
@@ -101,6 +102,8 @@ class ParticipantBase(ORMBase):
         description="Additional notes about the participant"
     )
     attendance_status: Optional[str] = "pending"
+    apology_comment: Optional[str] = None
+    
     is_chairperson: bool = False
     is_secretary: bool = False
 
@@ -151,11 +154,11 @@ class ParticipantUpdate(ORMBase):
     is_active: Optional[bool] = None
     
     @field_validator('name')
-    @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
-        """Validate name field if provided"""
-        if v is not None:
-            return validate_name(v)
+    def validate_name(cls, v, info):
+        # Only validate name if user_id is not provided
+        user_id = info.data.get('user_id')
+        if not user_id and not v:
+            raise ValueError('Name is required when user_id is not provided')
         return v
     
     @field_validator('email')

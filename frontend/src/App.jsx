@@ -137,6 +137,7 @@ const COMPONENT_IMPORTS = {
   // Admin Components
   'UserManagement': () => import('./components/admin/UserManagement'),
   'RoleManagement': () => import('./components/admin/RoleManagement'),
+  'RoleMenuAssignment': () => import('./components/admin/RoleMenuAssignment'), 
   'AuditLogs': () => import('./components/admin/AuditLogs'),
   
   // Error Pages
@@ -251,7 +252,7 @@ const preloadCriticalComponents = async () => {
  */
 const preloadRoleBasedComponents = async (userRoles) => {
   const roleComponents = {
-    admin: ['UserManagement', 'RoleManagement', 'AuditLogs','Locations'],
+    admin: ['UserManagement', 'RoleManagement',  'RoleMenuAssignment', 'AuditLogs','Locations'],
     user: ['Profile', 'ProfileSettings'],
     manager: ['ReportsList', 'CalendarView']
   };
@@ -331,6 +332,7 @@ const PreferenceSettings = createLazyComponent('PreferenceSettings');
 // Admin Components
 const UserManagement = createLazyComponent('UserManagement');
 const RoleManagement = createLazyComponent('RoleManagement');
+const RoleMenuAssignment = createLazyComponent('RoleMenuAssignment'); // NEW
 const AuditLogs = createLazyComponent('AuditLogs');
 
 // Error Pages
@@ -508,6 +510,7 @@ const routeConfig = {
     { path: "settings/users", element: <UserManagement /> },
     { path: "settings/roles", element: <RoleManagement /> },
     { path: "settings/audit", element: <AuditLogs /> },
+    { path: "settings/role-menu-assignment", element: <RoleMenuAssignment /> },
   ],
   adminRoutes: [
     { path: "admin/users", element: <UserManagement />, roles: ['admin'] },
@@ -515,7 +518,10 @@ const routeConfig = {
     { path: "admin/audit", element: <AuditLogs />, roles: ['admin', 'auditor'] },
     { path: "settings/users", element: <UserManagement />, roles: ['admin'] },
     { path: "settings/roles", element: <RoleManagement />, roles: ['admin'] },
-    { path: "settings/audit", element: <AuditLogs />, roles: ['admin', 'auditor'] },
+     { path: "settings/role-menu-assignment", element: <RoleMenuAssignment />, roles: ['admin'] },
+
+
+  
   ],
 };
 

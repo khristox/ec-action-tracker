@@ -51,7 +51,7 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
     setLoadingSystemUsers(true);
     setError(null);
     try {
-      const response = await api.get(`/users/?skip=0&limit=100&active_only=true`);
+      const response = await api.get(`/users/available/?skip=0&limit=100&active_only=true`);
       const users = response.data?.items || response.data || [];
       setSystemUsers(users.map(u => ({
         id: u.id,

@@ -702,7 +702,7 @@ async def delete_profile_picture(
     """
 )
 async def update_user(
-    user_id: str,
+    user_id: uuid.UUID,
     user_update: UserUpdate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)

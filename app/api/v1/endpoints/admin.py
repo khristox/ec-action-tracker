@@ -16,8 +16,11 @@ from app.crud.role import role as role_crud
 from app.models.user import User
 from app.models.role import Role
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
-from app.schemas.role import RoleResponse
+from app.schemas.role import PermissionBrief, RoleResponse
 from app.schemas.auth import MessageResponse
+
+from app.models.user import user_roles 
+
 
 router = APIRouter()
 
@@ -78,6 +81,7 @@ async def get_users(
             "roles": [r.code for r in user.roles] if user.roles else [],
             "is_active": user.is_active,
             "is_verified": user.is_verified,
+            "is_superuser": user.is_superuser,
             "last_login": user.last_login.isoformat() if user.last_login else None,
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "updated_at": user.updated_at.isoformat() if user.updated_at else None,
@@ -128,7 +132,8 @@ async def create_user_by_admin(
         full_name=f"{user_in.first_name or ''} {user_in.last_name or ''}".strip() or user_in.username,
         password=user_in.password,
         roles=user_in.roles or ["user"],
-        is_verified=user_in.is_verified or False
+        is_verified=user_in.is_verified or False,
+        is_superuser=user_in.is_superuser or False
     )
     
     if not new_user:
@@ -152,6 +157,7 @@ async def create_user_by_admin(
         phone=new_user.phone or "",
         is_active=new_user.is_active,
         is_verified=new_user.is_verified,
+        is_superuser=new_user.is_superuser,
         created_at=new_user.created_at,
         updated_at=new_user.updated_at
     )
@@ -175,7 +181,7 @@ async def update_user_by_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid user ID format"
         )
-    
+
     # Get user WITHOUT filtering by active status
     # Use a direct query instead of user_crud.get if it filters inactive users
     result = await db.execute(
@@ -190,7 +196,7 @@ async def update_user_by_admin(
         )
     
     # Update user fields
-    update_data = user_in.dict(exclude_unset=True)
+    update_data = user_in.model_dump(exclude_unset=True)
     logger.info(f"Updating user {target_user.username} with data: {update_data}")
     
     for field, value in update_data.items():
@@ -213,6 +219,7 @@ async def update_user_by_admin(
         phone=target_user.phone or "",
         is_active=target_user.is_active,
         is_verified=target_user.is_verified,
+        is_superuser=target_user.is_superuser,
         created_at=target_user.created_at,
         updated_at=target_user.updated_at
     )
@@ -361,6 +368,7 @@ async def update_user_roles(
         phone=target_user.phone or "",
         is_active=target_user.is_active,
         is_verified=target_user.is_verified,
+        is_superuser=target_user.is_superuser,
         roles=[role.code for role in target_user.roles],
         created_at=target_user.created_at,
         updated_at=target_user.updated_at
@@ -403,28 +411,58 @@ async def get_user_statistics(
     }
 
 
-@router.get("/roles", response_model=List[RoleResponse])
+@router.get("/", response_model=List[RoleResponse])
 async def get_roles(
+    skip: int = 0,
+    limit: int = 100,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_admin)
-) -> Any:
-    """Get all roles. Admin only."""
-    from asyncio.log import logger
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Get all roles with their permissions.
+    """
+    # Eager load permissions to avoid N+1 queries
+    result = await db.execute(
+        select(Role)
+        .options(selectinload(Role.permissions))  # Add this line
+        .offset(skip)
+        .limit(limit)
+        .order_by(Role.name)
+    )
+    roles = result.scalars().all()
     
-    roles = await role_crud.get_multi(db)
-    
-    logger.info(f"Admin {current_user.username} fetched {len(roles)} roles")
-    
-    return [
-        RoleResponse(
-            id=role.id,
-            name=role.name,
-            code=role.code,
-            description=role.description,
-            is_system_role=role.is_system_role,
-            priority=role.priority,
-            created_at=role.created_at,
-            updated_at=role.updated_at
+    # Calculate user count for each role
+    response_roles = []
+    for role in roles:
+        # Get user count (you might want to optimize this)
+        user_count_result = await db.execute(
+            select(func.count()).select_from(user_roles).where(user_roles.c.role_id == role.id)
         )
-        for role in roles
-    ]
+        user_count = user_count_result.scalar() or 0
+        
+        response_roles.append(
+            RoleResponse(
+                id=role.id,
+                name=role.name,
+                code=role.code,
+                description=role.description,
+                is_system_role=role.is_system_role,
+                priority=role.priority,
+                created_at=role.created_at,
+                updated_at=role.updated_at,
+                user_count=user_count,
+                permissions=[  # Add permissions
+                    PermissionBrief(
+                        id=p.id,
+                        name=p.name,
+                        code=p.code,
+                        resource=p.resource,
+                        action=p.action,
+                        category=getattr(p, 'category', None)
+                    )
+                    for p in role.permissions
+                ]
+            )
+        )
+    
+    return response_roles

@@ -14,7 +14,7 @@ from app.schemas.permission import PermissionCreate, PermissionUpdate, Permissio
 router = APIRouter()
 
 
-@router.get("/permissions")
+@router.get("/")
 async def get_permissions(
     db: AsyncSession = Depends(deps.get_db),
     skip: int = 0,

@@ -64,14 +64,18 @@ export const fetchPermissions = createAsyncThunk(
   }
 );
 
+// FIXED: assignPermissions thunk - fetch full role data after assignment
 export const assignPermissions = createAsyncThunk(
   'roles/assignPermissions',
   async ({ role_id, permission_ids }, { rejectWithValue }) => {
     try {
-      const response = await api.post(`/roles/${role_id}/permissions`, {
-        permission_ids
-      });
-      return response.data;
+      // Send array of permission IDs to API
+      await api.post(`/roles/${role_id}/permissions`, permission_ids);
+      
+      // Fetch the updated role to get full permission objects
+      const response = await api.get(`/roles/${role_id}`);
+      
+      return response.data; // Return the full updated role object
     } catch (error) {
       return rejectWithValue(error.response?.data || error.message);
     }
@@ -108,6 +112,7 @@ const roleSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload;
       })
+      
       // Create role
       .addCase(createRole.pending, (state) => {
         state.isLoading = true;
@@ -121,6 +126,7 @@ const roleSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload;
       })
+      
       // Update role
       .addCase(updateRole.pending, (state) => {
         state.isLoading = true;
@@ -137,6 +143,7 @@ const roleSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload;
       })
+      
       // Delete role
       .addCase(deleteRole.pending, (state) => {
         state.isLoading = true;
@@ -150,6 +157,7 @@ const roleSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload;
       })
+      
       // Fetch permissions
       .addCase(fetchPermissions.pending, (state) => {
         state.isLoading = true;
@@ -163,16 +171,18 @@ const roleSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload;
       })
-      // Assign permissions
+      
+      // Assign permissions - FIXED: Update the role with full permission objects
       .addCase(assignPermissions.pending, (state) => {
         state.isLoading = true;
         state.error = null;
       })
       .addCase(assignPermissions.fulfilled, (state, action) => {
         state.isLoading = false;
-        const index = state.roles.findIndex(role => role.id === action.payload.role_id);
+        // Replace the entire role object with the updated one from the API
+        const index = state.roles.findIndex(role => role.id === action.payload.id);
         if (index !== -1) {
-          state.roles[index].permissions = action.payload.permissions;
+          state.roles[index] = action.payload;
         }
       })
       .addCase(assignPermissions.rejected, (state, action) => {
@@ -184,71 +194,33 @@ const roleSlice = createSlice({
 
 // ==================== SELECTORS ====================
 
-/**
- * Select all roles from state (this is the one your component is trying to import)
- */
 export const selectAllRoles = (state) => state.roles?.roles || [];
-
-/**
- * Select roles loading state
- */
 export const selectRolesLoading = (state) => state.roles?.isLoading || false;
-
-/**
- * Select roles error state
- */
 export const selectRolesError = (state) => state.roles?.error;
-
-/**
- * Select all permissions from state
- */
 export const selectAllPermissions = (state) => state.roles?.permissions || [];
-
-/**
- * Select permissions loading state
- */
 export const selectPermissionsLoading = (state) => state.roles?.isLoading || false;
 
-/**
- * Select a specific role by ID
- */
 export const selectRoleById = (state, roleId) => {
   const roles = selectAllRoles(state);
   return roles.find(role => role.id === roleId) || null;
 };
 
-/**
- * Select permissions for a specific role
- */
 export const selectRolePermissions = (state, roleId) => {
   const role = selectRoleById(state, roleId);
   return role?.permissions || [];
 };
 
-/**
- * Check if roles are being loaded (alias)
- */
 export const selectIsRolesLoading = (state) => state.roles?.isLoading || false;
-
-/**
- * Check if roles have any data
- */
 export const selectHasRoles = (state) => {
   const roles = selectAllRoles(state);
   return roles.length > 0;
 };
 
-/**
- * Get total count of roles
- */
 export const selectRolesCount = (state) => {
   const roles = selectAllRoles(state);
   return roles.length;
 };
 
-/**
- * Search roles by name or code
- */
 export const selectRolesSearch = (state, searchTerm) => {
   const roles = selectAllRoles(state);
   if (!searchTerm) return roles;
@@ -261,9 +233,6 @@ export const selectRolesSearch = (state, searchTerm) => {
   );
 };
 
-/**
- * Get paginated roles
- */
 export const selectPaginatedRoles = (state, page = 1, pageSize = 10) => {
   const roles = selectAllRoles(state);
   const start = (page - 1) * pageSize;

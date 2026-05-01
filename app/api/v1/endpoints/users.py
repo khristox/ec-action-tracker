@@ -62,6 +62,7 @@ async def get_available_users(
             phone='xxxx',
             is_active=user.is_active,
             is_verified=user.is_verified,
+            is_superuser=user.is_superuser,
             created_at=user.created_at,
             updated_at=user.updated_at
         )
@@ -129,6 +130,7 @@ async def get_users(
             phone=user.phone,
             is_active=user.is_active,
             is_verified=user.is_verified,
+            is_superuser=user.is_superuser,
             created_at=user.created_at,
             updated_at=user.updated_at
         )
@@ -163,6 +165,7 @@ async def get_user(
         phone=user.phone,
         is_active=user.is_active,
         is_verified=user.is_verified,
+        is_superuser=user.is_superuser,
         created_at=user.created_at,
         updated_at=user.updated_at,
         roles=[
@@ -218,6 +221,7 @@ async def update_user(
         phone=updated_user.phone,
         is_active=updated_user.is_active,
         is_verified=updated_user.is_verified,
+        is_superuser=updated_user.is_superuser,
         created_at=updated_user.created_at,
         updated_at=updated_user.updated_at
     )

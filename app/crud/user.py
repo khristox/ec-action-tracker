@@ -348,6 +348,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
                 password = obj_in.password
                 roles = getattr(obj_in, 'roles', None)
                 is_verified = getattr(obj_in, 'is_verified', False)
+                is_superuser = getattr(obj_in, 'is_superuser', False)
             else:
                 # New signature with individual parameters
                 email = kwargs.get('email')
@@ -356,6 +357,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
                 password = kwargs.get('password')
                 roles = kwargs.get('roles', [])
                 is_verified = kwargs.get('is_verified', False)
+                is_superuser = getattr(obj_in, 'is_superuser', False)
             
             # Validate required fields
             if not all([email, username, full_name, password]):
@@ -381,10 +383,12 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
                 last_name=last_name,
                 hashed_password=get_password_hash(password),
                 is_verified=is_verified,
+                is_superuser=is_superuser,
                 is_active=True
             )
             db.add(user)
             await db.flush()
+            print(user)
             
             # Assign roles
             if roles:

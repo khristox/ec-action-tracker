@@ -4,12 +4,13 @@ import apiClient from '../api/apiClient';
 // Fetch all users (admin only)
 export const fetchUsers = createAsyncThunk(
   'admin/fetchUsers',
-  async ({ page = 1, limit = 10, search = '', is_active = null, role = null }, { rejectWithValue }) => {
+  async ({ page = 1, limit = 10, search = '', is_active = null, role = null, is_superuser = null }, { rejectWithValue }) => {
     try {
       const params = { page, limit };
       if (search) params.search = search;
       if (is_active !== null) params.is_active = is_active;
       if (role) params.role = role;
+      if (is_superuser !== null) params.is_superuser = is_superuser; // Add this
       
       const response = await apiClient.get('/admin/users', { params });
       return response.data;
@@ -19,9 +20,7 @@ export const fetchUsers = createAsyncThunk(
   }
 );
 
-
-// Update the updateUserRoles thunk in adminSlice.js
-
+// Update the updateUserRoles thunk
 export const updateUserRoles = createAsyncThunk(
   'admin/updateUserRoles',
   async ({ id, roles }, { rejectWithValue }) => {
@@ -31,9 +30,7 @@ export const updateUserRoles = createAsyncThunk(
         return rejectWithValue({ message: 'No authentication token found' });
       }
 
-      // Send the array directly, not wrapped in an object
-      const requestData = roles;  // Just the array, not { role_names: roles }
-      
+      const requestData = roles;
       
       const response = await apiClient.put(`/admin/users/${id}/roles`, requestData);
       return response.data;
@@ -61,7 +58,6 @@ export const updateUserRoles = createAsyncThunk(
   }
 );
 
-
 // Create new user (admin only)
 export const createUser = createAsyncThunk(
   'admin/createUser',
@@ -72,7 +68,6 @@ export const createUser = createAsyncThunk(
         return rejectWithValue({ message: 'No authentication token found' });
       }
 
-      // Prepare data for backend
       const createData = {
         email: userData.email,
         username: userData.username,
@@ -83,9 +78,9 @@ export const createUser = createAsyncThunk(
         roles: userData.roles || ['user'],
         is_active: userData.is_active !== undefined ? userData.is_active : true,
         is_verified: userData.is_verified !== undefined ? userData.is_verified : false,
+        is_superuser: userData.is_superuser || false, // Add this
       };
 
-      
       const response = await apiClient.post('/admin/users', createData);
       return response.data;
     } catch (err) {
@@ -95,11 +90,7 @@ export const createUser = createAsyncThunk(
   }
 );
 
-// Update user (admin only)
-// Update the updateUser thunk in adminSlice.js
-
-// Update this function in your adminSlice.js
-
+// Update user (admin only) - FIXED to include is_superuser
 export const updateUser = createAsyncThunk(
   'admin/updateUser',
   async ({ id, ...userData }, { rejectWithValue }) => {
@@ -113,7 +104,7 @@ export const updateUser = createAsyncThunk(
       const cleanData = {};
       Object.keys(userData).forEach(key => {
         if (userData[key] !== undefined && userData[key] !== null && userData[key] !== '') {
-          if (key === 'is_active' || key === 'is_verified') {
+          if (key === 'is_active' || key === 'is_verified' || key === 'is_superuser') {
             cleanData[key] = Boolean(userData[key]);
           } else {
             cleanData[key] = userData[key];
@@ -121,9 +112,10 @@ export const updateUser = createAsyncThunk(
         }
       });
 
-
+      console.log('Update user data being sent:', cleanData);
       
       const response = await apiClient.put(`/admin/users/${id}`, cleanData);
+      console.log('Update user response:', response.data);
       return response.data;
     } catch (err) {
       console.error('Update user error - Full response:', {
@@ -135,7 +127,6 @@ export const updateUser = createAsyncThunk(
     }
   }
 );
-
 
 // Delete user (admin only)
 export const deleteUser = createAsyncThunk(

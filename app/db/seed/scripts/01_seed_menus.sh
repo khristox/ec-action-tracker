@@ -1,7 +1,6 @@
 #!/bin/bash
-# app/db/seed/scripts/seed_menus.sh
-# Seed Menu system for Action Tracker (Electoral Commission)
-# WITH NICE ICONS - Material Symbols, Font Awesome, and MUI
+# app/db/seed/scripts/seed_permissions.sh
+# Seed Fine-Grained Permissions for Action Tracker (Electoral Commission)
 
 # ==================== CONFIGURATION ====================
 DEFAULT_BASE_URL="http://localhost:8001"
@@ -24,7 +23,7 @@ print_header() { echo -e "${CYAN}📌 $1${NC}"; }
 print_separator() { echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 
 print_separator
-print_header "ACTION TRACKER MENU SYSTEM SEEDER"
+print_header "ACTION TRACKER PERMISSIONS SEEDER"
 print_separator
 echo ""
 
@@ -90,7 +89,7 @@ if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
 fi
 print_success "Authenticated"
 
-# ==================== GET ROLES FROM DATABASE ====================
+# ==================== GET ROLES ====================
 print_info "Fetching roles from database..."
 
 ROLES_RESPONSE=$(curl -s -X GET "${API_URL}/roles/?skip=0&limit=100" \
@@ -114,102 +113,86 @@ for code in "${!ROLE_IDS[@]}"; do
 done
 echo ""
 
-# ==================== GET EXISTING MENUS ====================
-print_info "Fetching existing menus..."
+# ==================== GET EXISTING PERMISSIONS ====================
+print_info "Fetching existing permissions..."
 
-EXISTING_MENUS_RESPONSE=$(curl -s -X GET "${API_URL}/menus/all" \
+EXISTING_PERMS_RESPONSE=$(curl -s -X GET "${API_URL}/permissions/?skip=0&limit=500" \
     -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null)
 
-declare -A EXISTING_MENU_IDS
+declare -A EXISTING_PERM_CODES
 while IFS= read -r line; do
     code=$(echo "$line" | jq -r '.code')
     id=$(echo "$line" | jq -r '.id')
     if [ -n "$code" ] && [ "$code" != "null" ]; then
-        EXISTING_MENU_IDS["$code"]="$id"
+        EXISTING_PERM_CODES["$code"]="$id"
     fi
-done < <(echo "$EXISTING_MENUS_RESPONSE" | jq -c '.[]' 2>/dev/null)
+done < <(echo "$EXISTING_PERMS_RESPONSE" | jq -c '.[]' 2>/dev/null)
 
-print_info "Found ${#EXISTING_MENU_IDS[@]} existing menus"
+print_info "Found ${#EXISTING_PERM_CODES[@]} existing permissions"
 echo ""
 
-# ==================== CREATE MENUS FUNCTION ====================
-declare -A MENU_IDS
+# ==================== CREATE PERMISSIONS FUNCTION ====================
+declare -A PERM_IDS
 CREATE_COUNT=0
 UPDATE_COUNT=0
 FAIL_COUNT=0
 
-delete_existing_menu() {
-    local menu_code=$1
-    local menu_id=${EXISTING_MENU_IDS["$menu_code"]}
+delete_existing_permission() {
+    local perm_code=$1
+    local perm_id=${EXISTING_PERM_CODES["$perm_code"]}
     
-    if [ -n "$menu_id" ] && [ "$menu_id" != "null" ]; then
-        print_warning "  Deleting existing: ${menu_code}"
-        curl -s -X DELETE "${API_URL}/menus/${menu_id}/permissions" \
+    if [ -n "$perm_id" ] && [ "$perm_id" != "null" ]; then
+        print_warning "  Deleting existing: ${perm_code}"
+        curl -s -X DELETE "${API_URL}/permissions/${perm_id}" \
             -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
-        curl -s -X DELETE "${API_URL}/menus/${menu_id}" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
-        unset EXISTING_MENU_IDS["$menu_code"]
+        unset EXISTING_PERM_CODES["$perm_code"]
     fi
 }
 
-create_menu() {
+create_permission() {
     local code=$1
-    local title=$2
-    local icon=$3
-    local icon_type=$4
-    local icon_library=$5
-    local icon_color=$6
-    local path=$7
-    local sort_order=$8
-    local parent_code=$9
+    local name=$2
+    local resource=$3
+    local action=$4
+    local category=$5
+    local description=$6
     
     # Delete if exists
-    if [ -n "${EXISTING_MENU_IDS[$code]}" ]; then
-        delete_existing_menu "$code"
+    if [ -n "${EXISTING_PERM_CODES[$code]}" ]; then
+        delete_existing_permission "$code"
         ((UPDATE_COUNT++))
     fi
     
-    print_info "  Creating: ${title} (${code})"
-    
-    # Get parent ID
-    PARENT_ID="null"
-    if [ -n "$parent_code" ] && [ "$parent_code" != "" ]; then
-        PARENT_ID="${MENU_IDS[$parent_code]}"
-        if [ -z "$PARENT_ID" ] || [ "$PARENT_ID" == "null" ]; then
-            PARENT_ID="${EXISTING_MENU_IDS[$parent_code]}"
-        fi
-        if [ -z "$PARENT_ID" ] || [ "$PARENT_ID" == "null" ]; then
-            print_error "    ❌ Parent '${parent_code}' not found!"
-            ((FAIL_COUNT++))
-            return 1
-        fi
-    fi
-    
-    # Handle path
-    if [ -z "$path" ] || [ "$path" == "" ]; then
-        path_value="null"
-    else
-        path="${path#/}"
-        path_value="\"${path}\""
-    fi
+    print_info "  Creating: ${name} (${code})"
     
     # Build JSON
-    if [ "$PARENT_ID" != "null" ]; then
-        JSON_PAYLOAD="{\"code\":\"${code}\",\"title\":\"${title}\",\"icon\":\"${icon}\",\"icon_type\":\"${icon_type}\",\"icon_library\":\"${icon_library}\",\"icon_color\":\"${icon_color}\",\"path\":${path_value},\"sort_order\":${sort_order},\"parent_id\":\"${PARENT_ID}\"}"
-    else
-        JSON_PAYLOAD="{\"code\":\"${code}\",\"title\":\"${title}\",\"icon\":\"${icon}\",\"icon_type\":\"${icon_type}\",\"icon_library\":\"${icon_library}\",\"icon_color\":\"${icon_color}\",\"path\":${path_value},\"sort_order\":${sort_order}}"
-    fi
+    JSON_PAYLOAD=$(jq -n \
+        --arg code "$code" \
+        --arg name "$name" \
+        --arg resource "$resource" \
+        --arg action "$action" \
+        --arg category "$category" \
+        --arg description "$description" \
+        '{
+            code: $code,
+            name: $name,
+            resource: $resource,
+            action: $action,
+            category: $category,
+            description: $description,
+            is_system: true
+        }')
     
-    RESPONSE=$(curl -s -X POST "${API_URL}/menus/" \
+    RESPONSE=$(curl -s -X POST "${API_URL}/permissions/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$JSON_PAYLOAD")
     
-    MENU_ID=$(echo "$RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+    PERM_ID=$(echo "$RESPONSE" | jq -r '.id // empty' 2>/dev/null)
     
-    if [ -n "$MENU_ID" ] && [ "$MENU_ID" != "null" ]; then
-        print_success "    ✅ Created (ID: ${MENU_ID:0:8}...)"
-        MENU_IDS["$code"]="$MENU_ID"
+    if [ -n "$PERM_ID" ] && [ "$PERM_ID" != "null" ]; then
+        print_success "    ✅ Created (ID: ${PERM_ID:0:8}...)"
+        PERM_IDS["$code"]="$PERM_ID"
         ((CREATE_COUNT++))
         return 0
     else
@@ -220,319 +203,439 @@ create_menu() {
     fi
 }
 
-# ==================== STEP 1: CREATE ROOT MENUS ====================
-print_header "STEP 1: Creating Root Menus"
+# ==================== CREATE PERMISSIONS BY CATEGORY ====================
+print_header "STEP 1: Creating Meeting Management Permissions"
 echo ""
 
-# Root menus order: Dashboard → Meetings → Actions → Participants → Reports → Settings → Calendar
-create_menu "dashboard" "Dashboard" "Dashboard" "mui" "mui" "#1976d2" "dashboard" 1 ""
-create_menu "meetings" "Meetings" "event" "material_symbols" "material-symbols-outlined" "#4caf50" "meetings" 2 ""
-create_menu "actions" "Actions" "fa-tasks" "fontawesome" "fas" "#ff9800" "actions" 3 ""
-create_menu "participants" "Participants" "People" "mui" "mui" "#9c27b0" "participants" 4 ""
-create_menu "reports" "Reports" "fa-chart-bar" "fontawesome" "fas" "#f44336" "reports" 5 ""
-create_menu "settings" "Settings" "fa-cog" "fontawesome" "fas" "#757575" "" 6 ""
-create_menu "calendar" "Calendar" "calendar_month" "material_symbols" "material-symbols-outlined" "#00bcd4" "calendar" 7 ""
-
-echo ""
-
-# ==================== STEP 2: MEETINGS SUBMENUS ====================
-print_header "STEP 2: Creating Meetings Submenus"
-echo ""
-
-create_menu "meetings_list" "All Meetings" "List" "mui" "mui" "#4caf50" "meetings" 1 "meetings"
-create_menu "meetings_create" "Create Meeting" "Add" "mui" "mui" "#4caf50" "meetings/create" 2 "meetings"
+# Meeting Management
+create_permission "meeting:create" "Create Meetings" "meeting" "create" "Meeting Management" "Ability to create new meetings"
+create_permission "meeting:view_all" "View All Meetings" "meeting" "view_all" "Meeting Management" "Ability to view all meetings regardless of participation"
+create_permission "meeting:view" "View Own Meetings" "meeting" "view" "Meeting Management" "Ability to view meetings you created or participate in"
+create_permission "meeting:status_change" "Change Meeting Status" "meeting" "status_change" "Meeting Management" "Ability to change meeting status"
+create_permission "meeting:record" "Record Meeting" "meeting" "record" "Meeting Management" "Ability to record meeting proceedings"
+create_permission "meeting:view_recorder" "View Recorder in Meetings" "meeting" "view_recorder" "Meeting Management" "Ability to view recorded meeting content"
+create_permission "meeting:update" "Update Meeting" "meeting" "update" "Meeting Management" "Ability to update meeting details"
+create_permission "meeting:delete" "Delete Meeting" "meeting" "delete" "Meeting Management" "Ability to delete meetings"
 
 echo ""
 
-# ==================== STEP 3: ACTIONS SUBMENUS ====================
-print_header "STEP 3: Creating Actions Submenus"
+print_header "STEP 2: Creating Minutes Management Permissions"
 echo ""
 
-create_menu "my_tasks" "My Tasks" "fa-tasks" "fontawesome" "fas" "#ff9800" "actions/my-tasks" 1 "actions"
-create_menu "all_actions" "All Actions" "fa-list" "fontawesome" "fas" "#ff9800" "actions/all" 2 "actions"
-create_menu "overdue_actions" "Overdue Actions" "fa-exclamation-triangle" "fontawesome" "fas" "#f44336" "actions/overdue" 3 "actions"
-create_menu "action_assign" "Assign Actions" "fa-user-plus" "fontawesome" "fas" "#ff9800" "actions/assign" 4 "actions"
-
-echo ""
-
-# ==================== STEP 4: PARTICIPANTS SUBMENUS ====================
-print_header "STEP 4: Creating Participants Submenus"
-echo ""
-
-# Participants submenus with correct sort order
-create_menu "participants_list" "All Participants" "List" "mui" "mui" "#9c27b0" "participants" 1 "participants"
-create_menu "participant_lists" "Participant Lists" "Group" "mui" "mui" "#9c27b0" "participant-lists" 2 "participants"
-create_menu "participants_create" "Add Participant" "PersonAdd" "mui" "mui" "#9c27b0" "participants/create" 3 "participants"
-create_menu "participants_import" "Bulk Import" "Upload" "mui" "mui" "#9c27b0" "participants/import" 4 "participants"
+# Minutes Management
+create_permission "minutes:add" "Add Minutes" "minutes" "add" "Minutes Management" "Ability to add minutes to meetings"
+create_permission "minutes:edit" "Edit Minutes" "minutes" "edit" "Minutes Management" "Ability to edit meeting minutes"
+create_permission "minutes:delete" "Delete Minutes" "minutes" "delete" "Minutes Management" "Ability to delete minutes"
+create_permission "minutes:view" "View Minutes" "minutes" "view" "Minutes Management" "Ability to view minutes"
+create_permission "minutes:approve" "Approve Minutes" "minutes" "approve" "Minutes Management" "Ability to approve meeting minutes"
+create_permission "minutes:export" "Export Minutes" "minutes" "export" "Minutes Management" "Ability to export minutes to PDF/Word"
+create_permission "minutes:sign" "Sign Minutes" "minutes" "sign" "Minutes Management" "Ability to digitally sign minutes"
 
 echo ""
 
-# ==================== STEP 5: REPORTS SUBMENUS ====================
-print_header "STEP 5: Creating Reports Submenus"
+print_header "STEP 3: Creating Actions Management Permissions"
 echo ""
 
-create_menu "reports_meetings" "Meeting Reports" "Event" "mui" "mui" "#f44336" "reports/meetings" 1 "reports"
-create_menu "reports_actions" "Action Reports" "Assignment" "mui" "mui" "#f44336" "reports/actions" 2 "reports"
-create_menu "reports_participants" "Participant Reports" "People" "mui" "mui" "#f44336" "reports/participants" 3 "reports"
-create_menu "reports_export" "Export Data" "Download" "mui" "mui" "#f44336" "reports/export" 4 "reports"
-
-echo ""
-
-# ==================== STEP 6: SETTINGS SUBMENUS ====================
-print_header "STEP 6: Creating Settings Submenus"
-echo ""
-
-# User Profile & Account Settings
-create_menu "profile" "Profile" "fa-user" "fontawesome" "fas" "#795548" "settings/profile" 1 "settings"
-create_menu "security" "Security" "fa-shield-alt" "fontawesome" "fas" "#dc004e" "settings/security" 2 "settings"
-create_menu "preferences" "Preferences" "fa-sliders-h" "fontawesome" "fas" "#607d8b" "settings/preferences" 3 "settings"
-
-# System Administration
-create_menu "users" "User Management" "fa-users" "fontawesome" "fas" "#3f51b5" "settings/users" 4 "settings"
-create_menu "roles" "Role Management" "fa-tag" "fontawesome" "fas" "#9c27b0" "settings/roles" 5 "settings"
-
-# NEW: Role Menu Assignment (Admin only)
-create_menu "role_menu_assignment" "Role Menu Assignment" "fa-key" "fontawesome" "fas" "#ff5722" "settings/role-menu-assignment" 6 "settings"
-
-create_menu "audit" "Audit Logs" "fa-history" "fontawesome" "fas" "#607d8b" "settings/audit" 7 "settings"
-
-# Locations - Single menu without tree
-create_menu "locations" "Locations" "location_on" "material_symbols" "material-symbols-outlined" "#795548" "settings/locations" 8 "settings"
-
-# Admin Structures - Single menu without tree
-create_menu "admin_structures" "Admin Structures" "fa-sitemap" "fontawesome" "fas" "#607d8b" "settings/admin-structures" 9 "settings"
+# Actions Management
+create_permission "action:create" "Create Actions" "action" "create" "Actions Management" "Ability to create actions from meetings"
+create_permission "action:update" "Update Actions" "action" "update" "Actions Management" "Ability to update action status and details"
+create_permission "action:delete" "Delete Actions" "action" "delete" "Actions Management" "Ability to delete actions"
+create_permission "action:view_all" "View All Actions" "action" "view_all" "Actions Management" "Ability to view all actions"
+create_permission "action:view_own" "View Own Actions" "action" "view_own" "Actions Management" "Ability to view actions assigned to user"
+create_permission "action:assign" "Assign Actions" "action" "assign" "Actions Management" "Ability to assign actions to users"
+create_permission "action:status_update" "Update Action Status" "action" "status_update" "Actions Management" "Ability to update action status"
+create_permission "action:priority_update" "Update Action Priority" "action" "priority_update" "Actions Management" "Ability to update action priority"
+create_permission "action:comment" "Comment on Actions" "action" "comment" "Actions Management" "Ability to add comments to actions"
+create_permission "action:attachment" "Add Action Attachments" "action" "attachment" "Actions Management" "Ability to add attachments to actions"
 
 echo ""
 
-# ==================== STEP 7: CREATE ADMIN STRUCTURES SUBMENUS ====================
-print_header "STEP 7: Creating Admin Structures (Department Hierarchy)"
+print_header "STEP 4: Creating Notifications Permissions"
 echo ""
 
-# Admin Structures submenus (under Admin Structures)
-create_menu "departments" "Departments" "fa-building" "fontawesome" "fas" "#4caf50" "settings/admin-structures/departments" 1 "admin_structures"
-create_menu "positions" "Positions" "fa-user-tie" "fontawesome" "fas" "#2196f3" "settings/admin-structures/positions" 2 "admin_structures"
-create_menu "hierarchy" "Hierarchy View" "fa-tree" "fontawesome" "fas" "#ff9800" "settings/admin-structures/hierarchy" 3 "admin_structures"
+# Notifications
+create_permission "notification:send" "Send Notifications" "notification" "send" "Notifications" "Ability to send notifications to meeting participants"
+create_permission "notification:email" "Send Email Notifications" "notification" "email" "Notifications" "Ability to send email notifications"
+create_permission "notification:view" "View Notifications" "notification" "view" "Notifications" "Ability to view notifications"
+create_permission "notification:manage_templates" "Manage Notification Templates" "notification" "manage_templates" "Notifications" "Ability to manage notification templates"
 
 echo ""
 
-# ==================== STEP 8: ASSIGN PERMISSIONS ====================
+print_header "STEP 5: Creating Profile Management Permissions"
+echo ""
+
+# Profile Management
+create_permission "profile:view" "View Profile" "profile" "view" "Profile Management" "Ability to view own profile"
+create_permission "profile:update" "Update Profile" "profile" "update" "Profile Management" "Ability to update profile information"
+create_permission "profile:change_password" "Change Password" "profile" "change_password" "Profile Management" "Ability to change password"
+create_permission "profile:view_others" "View Others' Profiles" "profile" "view_others" "Profile Management" "Ability to view other users' profiles"
+
+echo ""
+
+print_header "STEP 6: Creating Participants Management Permissions"
+echo ""
+
+# Participants Management
+create_permission "participant:add" "Add Participants" "participant" "add" "Participants Management" "Ability to add participants to meetings"
+create_permission "participant:remove" "Remove Participants" "participant" "remove" "Participants Management" "Ability to remove participants from meetings"
+create_permission "participant:view" "View Participants" "participant" "view" "Participants Management" "Ability to view meeting participants"
+create_permission "participant:manage_lists" "Manage Participant Lists" "participant" "manage_lists" "Participants Management" "Ability to manage participant lists"
+
+echo ""
+
+print_header "STEP 7: Creating Administrative Permissions"
+echo ""
+
+# Administrative
+create_permission "admin:manage_users" "Manage Users" "admin" "manage_users" "Administrative" "Ability to manage system users"
+create_permission "admin:manage_roles" "Manage Roles" "admin" "manage_roles" "Administrative" "Ability to manage roles and permissions"
+create_permission "admin:manage_menu_assignment" "Manage Menu Assignment" "admin" "manage_menu_assignment" "Administrative" "Ability to assign menus to roles"
+create_permission "admin:view_audit" "View Audit Logs" "admin" "view_audit" "Administrative" "Ability to view system audit logs"
+create_permission "admin:manage_locations" "Manage Locations" "admin" "manage_locations" "Administrative" "Ability to manage locations"
+create_permission "admin:manage_structures" "Manage Admin Structures" "admin" "manage_structures" "Administrative" "Ability to manage administrative structures"
+
+echo ""
+
+print_header "STEP 8: Creating Report Permissions"
+echo ""
+
+# Reports
+create_permission "report:meeting" "Meeting Reports" "report" "meeting" "Reports" "Ability to generate meeting reports"
+create_permission "report:action" "Action Reports" "report" "action" "Reports" "Ability to generate action reports"
+create_permission "report:participant" "Participant Reports" "report" "participant" "Reports" "Ability to generate participant reports"
+create_permission "report:export" "Export Reports" "report" "export" "Reports" "Ability to export reports"
+
+echo ""
+
+print_header "STEP 9: Creating Dashboard Permissions"
+echo ""
+
+# Dashboard Permissions
+create_permission "dashboard:view" "View Dashboard" "dashboard" "view" "Dashboard" "Ability to access the main dashboard"
+create_permission "dashboard:overview" "Dashboard Overview" "dashboard" "overview" "Dashboard" "View dashboard overview statistics"
+create_permission "dashboard:recent_meetings" "Recent Meetings Widget" "dashboard" "recent_meetings" "Dashboard" "View recent meetings widget"
+create_permission "dashboard:upcoming_meetings" "Upcoming Meetings Widget" "dashboard" "upcoming_meetings" "Dashboard" "View upcoming meetings widget"
+create_permission "dashboard:pending_actions" "Pending Actions Widget" "dashboard" "pending_actions" "Dashboard" "View pending actions widget"
+create_permission "dashboard:overdue_actions" "Overdue Actions Widget" "dashboard" "overdue_actions" "Dashboard" "View overdue actions widget"
+create_permission "dashboard:notifications" "Notifications Widget" "dashboard" "notifications" "Dashboard" "View notifications widget"
+create_permission "dashboard:customize" "Customize Dashboard" "dashboard" "customize" "Dashboard" "Customize dashboard layout"
+
+echo ""
+
+# ==================== ASSIGN PERMISSIONS TO ROLES ====================
 print_separator
-print_header "Assigning Menu Permissions to Roles"
+print_header "Assigning Permissions to Roles"
 print_separator
 echo ""
 
-declare -A ROLE_MENUS
-
-# Admin - Full access to everything including role menu assignment
-ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
-ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
-
-# Meeting Creator - Has participants access
-ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,participants,participants_list,participant_lists,participants_create,settings,profile,security,preferences,calendar"
-
-# Meeting Participant - Basic participants access
-ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,security,calendar"
-
-# Action Assigner - Full participants access
-ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_actions,settings,profile,security,preferences,calendar"
-
-# Action Owner - Basic participants access
-ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,calendar"
-
-# Action Viewer - Read-only participants
-ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,participants,participants_list,reports,reports_actions,settings,profile,security,calendar"
-
-# Participant Manager - Full participants management
-ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,actions,my_tasks,settings,profile,security,preferences,calendar"
-
-# Report Viewer
-ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,calendar"
-
-# Basic User - Has ALL participants submenus (list, lists, create, import)
-ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,participant_lists,participants_create,participants_import,settings,profile,security,calendar"
-
-echo ""
-
-# ==================== PARTICIPANT MANAGER ROLE PERMISSIONS ====================
-# Ensure participant_manager has full CRUD access
-PARTICIPANT_MANAGER_ID="${ROLE_IDS[participant_manager]}"
-if [ -n "$PARTICIPANT_MANAGER_ID" ]; then
-    print_info "Granting full participant permissions to participant_manager role..."
+# Function to assign permission to role
+assign_permission_to_role() {
+    local role_id=$1
+    local perm_code=$2
     
-    # Grant all participant-related permissions
-    for menu_code in participants_list participant_lists participants_create participants_import; do
-        MENU_ID="${MENU_IDS[$menu_code]}"
-        [ -z "$MENU_ID" ] && MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
-        [ -z "$MENU_ID" ] && continue
-        
-        PERM_JSON="{\"role_id\":\"${PARTICIPANT_MANAGER_ID}\",\"menu_id\":\"${MENU_ID}\",\"can_view\":true,\"can_access\":true,\"can_show_mb_bottom\":true}"
-        
-        curl -s -X POST "${API_URL}/menus/permissions" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$PERM_JSON" > /dev/null
-    done
+    local perm_id="${PERM_IDS[$perm_code]}"
+    if [ -z "$perm_id" ]; then
+        perm_id="${EXISTING_PERM_CODES[$perm_code]}"
+    fi
     
-    print_success "  ✅ Granted full participant permissions to participant_manager"
-fi
+    if [ -z "$perm_id" ] || [ "$perm_id" == "null" ]; then
+        print_warning "  ⚠️ Permission not found: ${perm_code}"
+        return 1
+    fi
+    
+    # Check if already assigned
+    local check_response=$(curl -s -X GET "${API_URL}/roles/${role_id}/permissions" \
+        -H "Authorization: Bearer $ADMIN_TOKEN")
+    
+    if echo "$check_response" | jq -e ".[] | select(.id == \"$perm_id\")" > /dev/null 2>&1; then
+        return 0
+    fi
+    
+    # Assign permission
+    local json_payload="{\"permission_id\":\"${perm_id}\"}"
+    
+    local response=$(curl -s -X POST "${API_URL}/roles/${role_id}/permissions" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload")
+    
+    local success=$(echo "$response" | jq -r '.status // "success"' 2>/dev/null)
+    if [ "$success" != "error" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
 
-PERMISSION_SUCCESS=0
-PERMISSION_FAIL=0
-
-# Clear existing permissions
-print_info "Clearing existing permissions..."
-for role_code in "${!ROLE_MENUS[@]}"; do
-    ROLE_ID="${ROLE_IDS[$role_code]}"
-    if [ -n "$ROLE_ID" ]; then
-        curl -s -X DELETE "${API_URL}/roles/${ROLE_ID}/permissions" \
+# Clear existing role permissions first
+print_info "Clearing existing role permissions..."
+for role_code in "${!ROLE_IDS[@]}"; do
+    role_id="${ROLE_IDS[$role_code]}"
+    if [ -n "$role_id" ]; then
+        curl -s -X DELETE "${API_URL}/roles/${role_id}/permissions" \
             -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
     fi
 done
-print_success "Permissions cleared"
+print_success "Role permissions cleared"
 echo ""
 
-# Assign new permissions
-for role_code in "${!ROLE_MENUS[@]}"; do
-    ROLE_ID="${ROLE_IDS[$role_code]}"
-    [ -z "$ROLE_ID" ] && continue
+# ==================== ADMIN ROLE - FULL ACCESS ====================
+admin_role_id="${ROLE_IDS[admin]}"
+if [ -n "$admin_role_id" ]; then
+    print_info "Assigning permissions to ADMIN role..."
     
-    print_info "Processing role: ${role_code}"
+    # All permissions
+    ALL_PERMISSIONS=(
+        # Dashboard
+        "dashboard:view" "dashboard:overview" "dashboard:recent_meetings"
+        "dashboard:upcoming_meetings" "dashboard:pending_actions"
+        "dashboard:overdue_actions" "dashboard:notifications" "dashboard:customize"
+        
+        # Meeting Management
+        "meeting:create" "meeting:view_all" "meeting:view" "meeting:status_change"
+        "meeting:record" "meeting:view_recorder" "meeting:update" "meeting:delete"
+        
+        # Minutes Management
+        "minutes:add" "minutes:edit" "minutes:delete" "minutes:view"
+        "minutes:approve" "minutes:export" "minutes:sign"
+        
+        # Actions Management
+        "action:create" "action:update" "action:delete" "action:view_all"
+        "action:view_own" "action:assign" "action:status_update" "action:priority_update"
+        "action:comment" "action:attachment"
+        
+        # Notifications
+        "notification:send" "notification:email" "notification:view" "notification:manage_templates"
+        
+        # Profile Management
+        "profile:view" "profile:update" "profile:change_password" "profile:view_others"
+        
+        # Participants Management
+        "participant:add" "participant:remove" "participant:view" "participant:manage_lists"
+        
+        # Administrative
+        "admin:manage_users" "admin:manage_roles" "admin:manage_menu_assignment"
+        "admin:view_audit" "admin:manage_locations" "admin:manage_structures"
+        
+        # Reports
+        "report:meeting" "report:action" "report:participant" "report:export"
+    )
     
-    IFS=',' read -ra MENU_CODES <<< "${ROLE_MENUS[$role_code]}"
-    for menu_code in "${MENU_CODES[@]}"; do
-        MENU_ID="${MENU_IDS[$menu_code]}"
-        [ -z "$MENU_ID" ] && MENU_ID="${EXISTING_MENU_IDS[$menu_code]}"
-        [ -z "$MENU_ID" ] && continue
-        
-        # Determine if menu should show on mobile bottom navigation
-        CAN_SHOW_MB_BOTTOM=false
-        # Show on mobile bottom for dashboard, meetings, actions, participants, calendar
-        case "$menu_code" in
-            dashboard|meetings|meetings_list|actions|my_tasks|participants|participants_list|calendar)
-                CAN_SHOW_MB_BOTTOM=true
-                ;;
-        esac
-        
-        PERM_JSON="{\"role_id\":\"${ROLE_ID}\",\"menu_id\":\"${MENU_ID}\",\"can_view\":true,\"can_access\":true,\"can_show_mb_bottom\":${CAN_SHOW_MB_BOTTOM}}"
-        
-        curl -s -X POST "${API_URL}/menus/permissions" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$PERM_JSON" > /dev/null
+    for perm_code in "${ALL_PERMISSIONS[@]}"; do
+        if assign_permission_to_role "$admin_role_id" "$perm_code"; then
+            echo -n "."
+        fi
     done
+    echo ""
+    print_success "✅ ADMIN role granted all permissions"
+fi
+
+# ==================== SUPER ADMIN ROLE - FULL ACCESS ====================
+super_admin_role_id="${ROLE_IDS[super_admin]}"
+if [ -n "$super_admin_role_id" ]; then
+    print_info "Assigning permissions to SUPER_ADMIN role..."
     
-    print_success "  ✅ Assigned permissions to ${role_code}"
-done
+    # Same as admin - full access
+    for perm_code in "${ALL_PERMISSIONS[@]}"; do
+        assign_permission_to_role "$super_admin_role_id" "$perm_code" > /dev/null 2>&1
+    done
+    print_success "✅ SUPER_ADMIN role granted all permissions"
+fi
 
-# ==================== VERIFICATION ====================
+# ==================== DEFAULT USER ROLE - ALL EXCEPT CREATE/RECORD MEETINGS ====================
+user_role_id="${ROLE_IDS[user]}"
+if [ -n "$user_role_id" ]; then
+    print_info "Assigning permissions to DEFAULT USER role (All except Create/Record Meetings)..."
+    
+    USER_PERMISSIONS=(
+        # Dashboard - Full dashboard access
+        "dashboard:view"
+        "dashboard:overview"
+        "dashboard:recent_meetings"
+        "dashboard:upcoming_meetings"
+        "dashboard:pending_actions"
+        "dashboard:overdue_actions"
+        "dashboard:notifications"
+        "dashboard:customize"
+        
+        # Meeting Management - All except create and record
+        "meeting:view_all"                      # View all meetings
+        "meeting:view"                          # View meetings they're part of
+        "meeting:view_recorder"                 # View recorder in meetings
+        "meeting:status_change"                 # Change meeting status (useful for participants)
+        "meeting:update"                        # Update meeting details
+        "meeting:delete"                        # Delete meetings they created
+        
+        # Minutes Management - Full minutes access except approve/sign
+        "minutes:view"                          # View minutes
+        "minutes:add"                           # Add minutes to meetings
+        "minutes:edit"                          # Edit minutes
+        "minutes:delete"                        # Delete minutes
+        "minutes:export"                        # Export minutes
+        
+        # Actions Management - Full action management
+        "action:create"                         # Create actions from meetings
+        "action:update"                         # Update actions
+        "action:delete"                         # Delete actions
+        "action:view_all"                       # View all actions
+        "action:view_own"                       # View assigned actions
+        "action:assign"                         # Assign actions to others
+        "action:status_update"                  # Update action status
+        "action:priority_update"                # Update action priority
+        "action:comment"                        # Comment on actions
+        "action:attachment"                     # Add attachments to actions
+        
+        # Notifications - Full notification access
+        "notification:send"                     # Send notifications
+        "notification:email"                    # Send email notifications
+        "notification:view"                     # View notifications
+        
+        # Profile Management - Full profile control
+        "profile:view"                          # View own profile
+        "profile:update"                        # Update own profile
+        "profile:change_password"               # Change password
+        
+        # Participants Management - Full participant management
+        "participant:add"                       # Add participants
+        "participant:remove"                    # Remove participants
+        "participant:view"                      # View participants
+        "participant:manage_lists"              # Manage participant lists
+        
+        # Reports - Full reporting
+        "report:meeting"                        # Meeting reports
+        "report:action"                         # Action reports
+        "report:participant"                    # Participant reports
+        "report:export"                         # Export reports
+    )
+    
+    for perm_code in "${USER_PERMISSIONS[@]}"; do
+        assign_permission_to_role "$user_role_id" "$perm_code" > /dev/null 2>&1
+    done
+    print_success "✅ DEFAULT USER role granted all permissions except Create/Record Meetings"
+fi
+
+# ==================== SECRETARY ROLE ====================
+secretary_role_id="${ROLE_IDS[secretary]}"
+if [ -z "$secretary_role_id" ]; then
+    # Create secretary role if it doesn't exist
+    print_info "Creating Secretary role..."
+    SECRETARY_RESPONSE=$(curl -s -X POST "${API_URL}/roles/" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "code": "secretary",
+            "name": "Secretary",
+            "description": "Meeting secretary role with minutes management permissions"
+        }')
+    
+    secretary_role_id=$(echo "$SECRETARY_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
+    if [ -n "$secretary_role_id" ] && [ "$secretary_role_id" != "null" ]; then
+        ROLE_IDS["secretary"]="$secretary_role_id"
+        print_success "✅ Secretary role created"
+    else
+        print_error "Failed to create Secretary role"
+    fi
+fi
+
+if [ -n "$secretary_role_id" ]; then
+    print_info "Assigning permissions to SECRETARY role..."
+    
+    SECRETARY_PERMISSIONS=(
+        # Full access similar to admin but focused on minutes
+        "dashboard:view" "dashboard:overview" "dashboard:recent_meetings"
+        "dashboard:upcoming_meetings" "dashboard:pending_actions"
+        "dashboard:overdue_actions" "dashboard:notifications"
+        
+        "meeting:create" "meeting:view_all" "meeting:view"
+        "meeting:status_change" "meeting:record" "meeting:view_recorder"
+        "meeting:update"
+        
+        "minutes:add" "minutes:edit" "minutes:delete" "minutes:view"
+        "minutes:approve" "minutes:export" "minutes:sign"
+        
+        "action:create" "action:update" "action:view_all" "action:assign"
+        "action:status_update" "action:priority_update" "action:comment"
+        
+        "notification:send" "notification:email" "notification:view"
+        
+        "profile:view" "profile:update" "profile:change_password"
+        
+        "participant:add" "participant:remove" "participant:view" "participant:manage_lists"
+        
+        "report:meeting" "report:action" "report:export"
+    )
+    
+    for perm_code in "${SECRETARY_PERMISSIONS[@]}"; do
+        assign_permission_to_role "$secretary_role_id" "$perm_code" > /dev/null 2>&1
+    done
+    print_success "✅ SECRETARY role granted full minutes and meeting permissions"
+fi
+
+# ==================== MEETING PARTICIPANT ROLE ====================
+participant_role_id="${ROLE_IDS[meeting_participant]}"
+if [ -n "$participant_role_id" ]; then
+    print_info "Assigning permissions to MEETING PARTICIPANT role..."
+    
+    PARTICIPANT_PERMISSIONS=(
+        "dashboard:view" "dashboard:overview"
+        "meeting:view" "meeting:view_recorder"
+        "minutes:view"
+        "action:view_own" "action:status_update" "action:comment"
+        "profile:view" "profile:update" "profile:change_password"
+        "notification:view"
+    )
+    
+    for perm_code in "${PARTICIPANT_PERMISSIONS[@]}"; do
+        assign_permission_to_role "$participant_role_id" "$perm_code" > /dev/null 2>&1
+    done
+    print_success "✅ MEETING PARTICIPANT role granted view permissions"
+fi
+
+# ==================== ACTION OWNER ROLE ====================
+action_owner_role_id="${ROLE_IDS[action_owner]}"
+if [ -n "$action_owner_role_id" ]; then
+    print_info "Assigning permissions to ACTION OWNER role..."
+    
+    ACTION_OWNER_PERMISSIONS=(
+        "dashboard:view" "dashboard:pending_actions" "dashboard:overdue_actions"
+        "meeting:view"
+        "minutes:view"
+        "action:view_own" "action:update" "action:status_update"
+        "action:comment" "action:attachment"
+        "profile:view" "profile:update" "profile:change_password"
+        "notification:view"
+    )
+    
+    for perm_code in "${ACTION_OWNER_PERMISSIONS[@]}"; do
+        assign_permission_to_role "$action_owner_role_id" "$perm_code" > /dev/null 2>&1
+    done
+    print_success "✅ ACTION OWNER role granted action update permissions"
+fi
+
+# ==================== MEETING CREATOR ROLE ====================
+meeting_creator_role_id="${ROLE_IDS[meeting_creator]}"
+if [ -n "$meeting_creator_role_id" ]; then
+    print_info "Assigning permissions to MEETING CREATOR role..."
+    
+    MEETING_CREATOR_PERMISSIONS=(
+        "dashboard:view" "dashboard:overview" "dashboard:recent_meetings"
+        "dashboard:upcoming_meetings"
+        "meeting:create" "meeting:view" "meeting:status_change"
+        "meeting:update" "meeting:record" "meeting:view_recorder"
+        "minutes:add" "minutes:edit" "minutes:view"
+        "action:create" "action:update" "action:view_own"
+        "participant:add" "participant:view"
+        "notification:send" "notification:view"
+        "profile:view" "profile:update"
+    )
+    
+    for perm_code in "${MEETING_CREATOR_PERMISSIONS[@]}"; do
+        assign_permission_to_role "$meeting_creator_role_id" "$perm_code" > /dev/null 2>&1
+    done
+    print_success "✅ MEETING CREATOR role granted meeting management permissions"
+fi
+
+# ==================== SUMMARY ====================
 echo ""
 print_separator
-print_header "Verifying Menu Hierarchy"
-print_separator
-echo ""
-
-ADMIN_MENUS=$(curl -s -X GET "${API_URL}/menus/" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
-
-echo -e "${CYAN}📋 Final Menu Structure:${NC}"
-echo "$ADMIN_MENUS" | jq -r '
-def display(level):
-    .[] | 
-    "  " * level + "📁 " + .title + 
-    (if .icon then " [" + .icon + "]" else "" end),
-    (if .children and (.children | length) > 0 then .children | display(level + 1) else empty end);
-display(0)' 2>/dev/null
-
-echo ""
-print_separator
-print_success "Seeding completed successfully!"
-print_separator
-echo ""
-
-echo -e "${CYAN}📊 Summary:${NC}"
-echo "  • Total menus created: ${CREATE_COUNT}"
-echo "  • Root menu order: Dashboard → Meetings → Actions → Participants → Reports → Settings → Calendar"
-echo "  • Participants submenus:"
-echo "    - All Participants (List view)"
-echo "    - Participant Lists (Manage lists)"
-echo "    - Add Participant (Create single)"
-echo "    - Bulk Import (Import from file)"
-echo "  • Settings submenus (NEW ORDER):"
-echo "    - Profile"
-echo "    - Security"
-echo "    - Preferences"
-echo "    - User Management"
-echo "    - Role Management"
-echo "    - ⭐ Role Menu Assignment (NEW - Admin only)"
-echo "    - Audit Logs"
-echo "    - Locations"
-echo "    - Admin Structures"
-echo "  • Admin Structures submenus (NEW):"
-echo "    - Departments"
-echo "    - Positions"
-echo "    - Hierarchy View"
-echo "  • Calendar moved to last position"
-echo ""
-
-echo -e "${CYAN}📂 Complete Menu Hierarchy (New Order):${NC}"
-echo ""
-echo "📁 Dashboard [Dashboard] (MUI) - Sort Order: 1"
-echo "📁 Meetings [event] (Material Symbol) - Sort Order: 2"
-echo "  📄 All Meetings [List] (MUI)"
-echo "  📄 Create Meeting [Add] (MUI)"
-echo "📁 Actions [fa-tasks] (Font Awesome) - Sort Order: 3"
-echo "  📄 My Tasks [fa-tasks] (FA)"
-echo "  📄 All Actions [fa-list] (FA)"
-echo "  📄 Overdue Actions [fa-exclamation-triangle] (FA)"
-echo "  📄 Assign Actions [fa-user-plus] (FA)"
-echo "📁 Participants [People] (MUI) - Sort Order: 4"
-echo "  📄 All Participants [List] (MUI)"
-echo "  📄 Participant Lists [Group] (MUI)"
-echo "  📄 Add Participant [PersonAdd] (MUI)"
-echo "  📄 Bulk Import [Upload] (MUI)"
-echo "📁 Reports [fa-chart-bar] (Font Awesome) - Sort Order: 5"
-echo "  📄 Meeting Reports [Event] (MUI)"
-echo "  📄 Action Reports [Assignment] (MUI)"
-echo "  📄 Participant Reports [People] (MUI)"
-echo "  📄 Export Data [Download] (MUI)"
-echo "📁 Settings [fa-cog] (Font Awesome) - Sort Order: 6"
-echo "  📄 Profile [fa-user] (FA)"
-echo "  📄 Security [fa-shield-alt] (FA)"
-echo "  📄 Preferences [fa-sliders-h] (FA)"
-echo "  📄 User Management [fa-users] (FA)"
-echo "  📄 Role Management [fa-tag] (FA)"
-echo "  📄 ⭐ Role Menu Assignment [fa-key] (FA) - ADMIN ONLY"
-echo "  📄 Audit Logs [fa-history] (FA)"
-echo "  📄 Locations [location_on] (Material Symbol)"
-echo "  📄 Admin Structures [fa-sitemap] (FA)"
-echo "    📄 Departments [fa-building] (FA)"
-echo "    📄 Positions [fa-user-tie] (FA)"
-echo "    📄 Hierarchy View [fa-tree] (FA)"
-echo "📁 Calendar [calendar_month] (Material Symbol) - Sort Order: 7"
-echo ""
-
-echo -e "${CYAN}👥 Role Permissions Summary:${NC}"
-echo "  • admin / super_admin: Full access to all menus (including Role Menu Assignment)"
-echo "  • meeting_creator: Meetings + Actions + Participants (full) + Settings (profile)"
-echo "  • meeting_participant: Meetings + Actions + Participants (view) + Settings (profile)"
-echo "  • action_assigner: Actions + Participants (full) + Reports (actions) + Settings (profile)"
-echo "  • action_owner: Actions (own) + Participants (view) + Settings (profile)"
-echo "  • action_viewer: Actions (view) + Participants (view) + Reports (view) + Settings (profile)"
-echo "  • participant_manager: Participants (full) + Meetings + Actions + Settings (profile)"
-echo "  • report_viewer: Reports + Settings (profile)"
-echo "  • user: Dashboard + Meetings + Actions (own) + Participants (FULL: list, lists, create, import) + Settings (profile)"
-echo ""
-echo -e "${YELLOW}⚠️  Note: Role Menu Assignment menu is ONLY visible to admin and super_admin roles${NC}"
-echo ""
-
-print_success "Done! Refresh your browser to see the updated menu structure!"
-
-# ==================== HELPER COMMANDS ====================
-echo ""
-print_info "💡 Quick Commands:"
-echo "  • Reset all menus: ./seed_menus.sh"
-echo "  • Check menu structure: curl ${API_URL}/menus/ | jq '.'"
-echo "  • Check role permissions: curl ${API_URL}/roles/ | jq '.'"
-echo "  • Check user role menus: curl -X GET \"${API_URL}/menus/\" -H \"Authorization: Bearer \$TOKEN\" | jq '.'"
-echo "  • Assign menu to role: curl -X POST \"${API_URL}/menus/permissions\" -H \"Authorization: Bearer \$TOKEN\" -H \"Content-Type: application/json\" -d '{\"role_id\":\"...\",\"menu_id\":\"...\",\"can_view\":true,\"can_access\":true}'"
-echo ""
+print_success "Permission Seeding Completed Success

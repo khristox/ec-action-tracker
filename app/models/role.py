@@ -10,7 +10,7 @@ from sqlalchemy import (
     Column, String, Boolean, DateTime, Integer, JSON, 
     ForeignKey, Table, Index, UniqueConstraint, text
 )
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.orm import relationship, Mapped, mapped_column, noload
 from sqlalchemy.sql import func
 from app.db.base import Base
 from app.db.types import UUID as CustomUUID
@@ -59,15 +59,23 @@ class Permission(Base, TimestampMixin):
     
     id = Column(CustomUUID, primary_key=True, default=uuid.uuid4)
     name = Column(String(100), unique=True, nullable=False, index=True)
-    code = Column(String(50), unique=True, nullable=False, index=True) # e.g., 'USR_CREATE'
-    resource = Column(String(50), nullable=False, index=True)          # e.g., 'user'
-    action = Column(String(50), nullable=False, index=True)            # e.g., 'create'
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    resource = Column(String(50), nullable=False, index=True)
+    action = Column(String(50), nullable=False, index=True)
     description = Column(String(255), nullable=True)
+    category = Column(String(50), default='General', nullable=True) 
     conditions = Column(JSON, nullable=True, comment="Abac conditions for dynamic filtering")
     is_system = Column(Boolean, default=False, nullable=False)
     
-    # Relationships
-    roles = relationship("Role", secondary=role_permissions, back_populates="permissions", lazy="selectin")
+    # FIXED: Changed from selectin to dynamic loading to prevent recursion
+    # This will only load relationships when explicitly requested
+    roles = relationship(
+        "Role", 
+        secondary=role_permissions, 
+        back_populates="permissions", 
+        lazy="select",  # Changed from selectin to select
+        viewonly=False
+    )
     
     def __repr__(self):
         return f"<Permission {self.code}: {self.resource}:{self.action}>"
@@ -91,27 +99,31 @@ class Role(Base, TimestampMixin):
     is_system_role = Column(Boolean, default=False, nullable=False)
     priority = Column(Integer, default=0, nullable=False, server_default=text("0"))
     
-    # Relationships
-    # Note: User relationship primaryjoin is defined explicitly to ensure clarity in complex RBAC
+    # FIXED: Changed relationship loading strategies to prevent circular references
+    # Note: User relationship with explicit loading control
     users = relationship(
         "User", 
         secondary="user_roles", 
         back_populates="roles", 
-        lazy="selectin",
+        lazy="select",  # Changed from selectin to select
         primaryjoin="Role.id == user_roles.c.role_id",
-        secondaryjoin="User.id == user_roles.c.user_id"
+        secondaryjoin="User.id == user_roles.c.user_id",
+        viewonly=False
     )
     
+    # FIXED: Changed from selectin to dynamic loading to prevent recursion
     permissions = relationship(
         "Permission", 
         secondary=role_permissions, 
         back_populates="roles", 
-        lazy="selectin"
+        lazy="select",  # Changed from selectin to select
+        viewonly=False
     )
     
     menu_permissions = relationship(
         "RoleMenuPermission", 
         back_populates="role", 
+        lazy="select",  # Changed to select
         cascade="all, delete-orphan",
         passive_deletes=True
     )
@@ -150,18 +162,16 @@ class RoleMenuPermission(Base):
         comment="Visibility on mobile bottom navigation bars"
     )
     
-    # Use server_default for efficiency and to avoid the "datetime" module error reported
     created_at = Column(
         DateTime(timezone=True), 
         nullable=False, 
         server_default=func.now()
     )
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())  # ADD THIS LINE
-
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationships
-    role = relationship("Role", back_populates="menu_permissions")
-    menu = relationship("Menu", back_populates="role_permissions")
+    # FIXED: Changed to select loading
+    role = relationship("Role", back_populates="menu_permissions", lazy="select")
+    menu = relationship("Menu", back_populates="role_permissions", lazy="select")
     
     __table_args__ = (
         UniqueConstraint('role_id', 'menu_id', name='uq_role_menu'),

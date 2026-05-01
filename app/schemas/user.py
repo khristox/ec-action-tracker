@@ -385,6 +385,8 @@ class UserUpdate(BaseModel):
     # Account Settings
     is_active: Optional[bool] = Field(None, description="Whether user account is active")
     is_verified: Optional[bool] = Field(None, description="Whether email is verified (usually only admin can change)")
+    is_superuser: Optional[bool] = Field(None, description="Whether Super User or Not")
+
     preferred_currency: Optional[str] = Field(None, min_length=3, max_length=3, description="Preferred currency code (ISO 4217)", example="KES")
     language: Optional[str] = Field(None, min_length=2, max_length=5, description="Preferred language (ISO 639-1)", example="sw")
     timezone: Optional[str] = Field(None, description="User's timezone (IANA timezone)", example="Africa/Nairobi")

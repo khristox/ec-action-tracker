@@ -39,6 +39,8 @@ import {
   ListItemText,
   Badge,
   alpha,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import {
   SearchOutlined,
@@ -55,6 +57,10 @@ import {
   RefreshOutlined,
   AdminPanelSettingsOutlined,
   OpenInNewOutlined,
+  ShieldOutlined,
+  PeopleAltOutlined,
+  FilterListOutlined,
+  CloseOutlined,
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -93,10 +99,12 @@ const UserManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [superAdminFilter, setSuperAdminFilter] = useState('all'); // NEW
+  const [showFilters, setShowFilters] = useState(false); // mobile filter toggle
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState('create');
   const [selectedUser, setSelectedUser] = useState(null);
-  const [detailUser, setDetailUser] = useState(null);          // user shown in side panel
+  const [detailUser, setDetailUser] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [expandedUser, setExpandedUser] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -110,16 +118,13 @@ const UserManagement = () => {
     roles: [],
     is_active: true,
     is_verified: false,
+    is_superuser: false,
   });
   const [passwordData, setPasswordData] = useState({ password: '', confirm_password: '' });
   const [formErrors, setFormErrors] = useState({});
 
-  // ── Fetch roles ──
-  useEffect(() => {
-    dispatch(fetchRoles());
-  }, [dispatch]);
+  useEffect(() => { dispatch(fetchRoles()); }, [dispatch]);
 
-  // ── Load users ──
   const loadUsers = useCallback(() => {
     dispatch(fetchUsers({
       page: page + 1,
@@ -127,14 +132,12 @@ const UserManagement = () => {
       search: searchTerm,
       is_active: statusFilter !== 'all' ? statusFilter === 'active' : undefined,
       role: roleFilter !== 'all' ? roleFilter : undefined,
+      is_superuser: superAdminFilter !== 'all' ? superAdminFilter === 'yes' : undefined,
     }));
-  }, [dispatch, page, rowsPerPage, searchTerm, statusFilter, roleFilter]);
+  }, [dispatch, page, rowsPerPage, searchTerm, statusFilter, roleFilter, superAdminFilter]);
 
-  useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+  useEffect(() => { loadUsers(); }, [loadUsers]);
 
-  // ── Handlers ──
   const handlePageChange = (newPage) => setPage(newPage);
   const handleRowsPerPageChange = (newSize) => { setRowsPerPage(newSize); setPage(0); };
   const handleSearch = (e) => { setSearchTerm(e.target.value); setPage(0); };
@@ -151,10 +154,9 @@ const UserManagement = () => {
     setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
   };
 
-  // ── Dialog helpers ──
   const handleOpenCreateDialog = () => {
     setDialogMode('create');
-    setFormData({ email: '', username: '', first_name: '', last_name: '', phone: '', roles: [], is_active: true, is_verified: false });
+    setFormData({ email: '', username: '', first_name: '', last_name: '', phone: '', roles: [], is_active: true, is_verified: false, is_superuser: false });
     setPasswordData({ password: '', confirm_password: '' });
     setFormErrors({});
     setDialogOpen(true);
@@ -172,26 +174,15 @@ const UserManagement = () => {
       roles: [...(user.roles || [])],
       is_active: user.is_active,
       is_verified: user.is_verified,
+      is_superuser: user.is_superuser || false,
     });
     setFormErrors({});
     setDialogOpen(true);
   };
 
-  const handleOpenDeleteDialog = (user) => {
-    setDialogMode('delete');
-    setSelectedUser(user);
-    setDialogOpen(true);
-  };
+  const handleOpenDeleteDialog = (user) => { setDialogMode('delete'); setSelectedUser(user); setDialogOpen(true); };
+  const handleOpenResetDialog = (user) => { setDialogMode('reset'); setSelectedUser(user); setPasswordData({ password: '', confirm_password: '' }); setFormErrors({}); setDialogOpen(true); };
 
-  const handleOpenResetDialog = (user) => {
-    setDialogMode('reset');
-    setSelectedUser(user);
-    setPasswordData({ password: '', confirm_password: '' });
-    setFormErrors({});
-    setDialogOpen(true);
-  };
-
-  // ── Form handlers ──
   const handleFormChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
@@ -216,7 +207,6 @@ const UserManagement = () => {
     };
   };
 
-  // ── Validation ──
   const validateCreateForm = () => {
     const errors = {};
     if (!formData.email) errors.email = 'Email is required';
@@ -249,7 +239,6 @@ const UserManagement = () => {
     return Object.keys(errors).length === 0;
   };
 
-  // ── Submit ──
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
@@ -259,7 +248,6 @@ const UserManagement = () => {
         setSnackbar({ open: true, message: 'User created successfully', severity: 'success' });
         setDialogOpen(false);
         loadUsers();
-
       } else if (dialogMode === 'edit') {
         if (!validateEditForm()) { setIsSubmitting(false); return; }
         await dispatch(updateUser({
@@ -271,6 +259,7 @@ const UserManagement = () => {
           phone: formData.phone,
           is_active: formData.is_active,
           is_verified: formData.is_verified,
+          is_superuser: formData.is_superuser,
         })).unwrap();
         const currentRoles = [...(selectedUser.roles || [])].sort();
         const newRoles = [...(formData.roles || [])].sort();
@@ -280,14 +269,12 @@ const UserManagement = () => {
         setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
         setDialogOpen(false);
         loadUsers();
-
       } else if (dialogMode === 'delete') {
         await dispatch(deleteUser(selectedUser.id)).unwrap();
         setSnackbar({ open: true, message: 'User deleted successfully', severity: 'success' });
         setDialogOpen(false);
         if (detailUser?.id === selectedUser.id) setDetailUser(null);
         loadUsers();
-
       } else if (dialogMode === 'reset') {
         if (!validateResetForm()) { setIsSubmitting(false); return; }
         await dispatch(resetUserPassword({ user_id: selectedUser.id, new_password: passwordData.password })).unwrap();
@@ -304,19 +291,19 @@ const UserManagement = () => {
   // ── DataGrid columns ──
   const columns = useMemo(() => [
     {
-      field: 'avatar', headerName: '', width: 50, sortable: false,
+      field: 'avatar', headerName: '', width: 52, sortable: false,
       renderCell: (params) => {
         const row = params?.row;
         if (!row) return null;
         return (
-          <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 13, fontWeight: 700 }}>
+          <Avatar sx={{ width: 34, height: 34, bgcolor: row.is_superuser ? 'warning.main' : 'primary.main', fontSize: 13, fontWeight: 700 }}>
             {row.first_name?.[0] || row.username?.[0] || 'U'}
           </Avatar>
         );
       },
     },
     {
-      field: 'name', headerName: 'Name', width: 190, sortable: true,
+      field: 'name', headerName: 'Name', minWidth: 180, flex: 1, sortable: true,
       valueGetter: (value, row) => [row?.first_name, row?.last_name].filter(Boolean).join(' ') || row?.username || '',
       renderCell: (params) => {
         const row = params?.row;
@@ -324,32 +311,52 @@ const UserManagement = () => {
         const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ');
         return (
           <Box>
-            <Typography variant="body2" fontWeight={600}>{fullName || row.username}</Typography>
-            <Typography variant="caption" color="text.secondary">@{row.username}</Typography>
+            <Typography variant="body2" fontWeight={600} noWrap>{fullName || row.username}</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>@{row.username}</Typography>
           </Box>
         );
       },
     },
     {
-      field: 'email', headerName: 'Email', width: 210,
+      field: 'email', headerName: 'Email', minWidth: 200, flex: 1,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-          <EmailOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
-          <Typography variant="body2">{params?.row?.email || ''}</Typography>
+          <EmailOutlined fontSize="small" sx={{ color: 'text.disabled', flexShrink: 0 }} />
+          <Typography variant="body2" noWrap>{params?.row?.email || ''}</Typography>
         </Box>
       ),
     },
     {
-      field: 'roles', headerName: 'Roles', width: 240,
+      field: 'is_superuser', headerName: 'Super Admin', width: 110, sortable: true,
+      renderCell: (params) => {
+        const isSuperAdmin = params?.row?.is_superuser;
+        return isSuperAdmin ? (
+          <Tooltip title="Full system access">
+            <Chip
+              label="Yes"
+              size="small"
+              color="warning"
+              icon={<ShieldOutlined />}
+              sx={{ fontWeight: 700 }}
+            />
+          </Tooltip>
+        ) : (
+          <Chip label="No" size="small" variant="outlined" sx={{ color: 'text.disabled' }} />
+        );
+      },
+    },
+    {
+      field: 'roles', headerName: 'Roles', minWidth: 220, flex: 1,
       renderCell: (params) => {
         const roles = params?.row?.roles || [];
         return (
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {roles.length === 0 && <Typography variant="caption" color="text.disabled">—</Typography>}
             {roles.map(roleCode => {
               const { name, color, description } = getRoleDetails(roleCode);
               return (
                 <Tooltip key={roleCode} title={description || name}>
-                  <Chip label={name} size="small" color={color} variant="outlined" icon={<AdminPanelSettingsOutlined />} sx={{ fontWeight: 600 }} />
+                  <Chip label={name} size="small" color={color} variant="outlined" sx={{ fontWeight: 600 }} />
                 </Tooltip>
               );
             })}
@@ -378,7 +385,7 @@ const UserManagement = () => {
       },
     },
     {
-      field: 'last_login', headerName: 'Last Login', width: 175,
+      field: 'last_login', headerName: 'Last Login', width: 160,
       valueGetter: (value, row) => row?.last_login ? new Date(row.last_login).toLocaleString() : 'Never',
     },
     {
@@ -389,30 +396,24 @@ const UserManagement = () => {
         return (
           <Box>
             <Tooltip title="View / Edit Details">
-              <IconButton
-                size="small"
-                color="primary"
-                onClick={() => handleOpenDetailPanel(row)}
-                sx={{
-                  bgcolor: detailUser?.id === row.id ? alpha(theme.palette.primary.main, 0.12) : 'transparent',
-                }}
-              >
+              <IconButton size="small" color="primary" onClick={(e) => { e.stopPropagation(); handleOpenDetailPanel(row); }}
+                sx={{ bgcolor: detailUser?.id === row.id ? alpha(theme.palette.primary.main, 0.12) : 'transparent' }}>
                 <OpenInNewOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
             <Tooltip title="Quick Edit">
-              <IconButton size="small" onClick={() => handleOpenEditDialog(row)}>
+              <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleOpenEditDialog(row); }}>
                 <EditOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
             <Tooltip title="Reset Password">
-              <IconButton size="small" onClick={() => handleOpenResetDialog(row)}>
+              <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleOpenResetDialog(row); }}>
                 <LockOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
-            {row.id !== currentUser?.id && (
+            {row.id !== currentUser?.id && !row.is_superuser && (
               <Tooltip title="Delete User">
-                <IconButton size="small" color="error" onClick={() => handleOpenDeleteDialog(row)}>
+                <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); handleOpenDeleteDialog(row); }}>
                   <DeleteOutlined fontSize="small" />
                 </IconButton>
               </Tooltip>
@@ -433,33 +434,62 @@ const UserManagement = () => {
       <Card
         sx={{
           mb: 1.5,
-          borderRadius: 2,
-          border: '1px solid',
-          borderColor: isSelected ? 'primary.main' : 'divider',
-          bgcolor: isSelected ? alpha(theme.palette.primary.main, 0.04) : 'background.paper',
-          transition: 'all 0.2s',
+          borderRadius: 2.5,
+          border: '1.5px solid',
+          borderColor: isSelected ? 'primary.main' : user.is_superuser ? alpha(theme.palette.warning.main, 0.4) : 'divider',
+          bgcolor: isSelected
+            ? alpha(theme.palette.primary.main, 0.04)
+            : user.is_superuser
+            ? alpha(theme.palette.warning.main, 0.03)
+            : 'background.paper',
+          boxShadow: isSelected ? `0 0 0 2px ${alpha(theme.palette.primary.main, 0.15)}` : 'none',
+          transition: 'all 0.2s ease',
         }}
       >
-        <CardContent sx={{ pb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <CardContent sx={{ pb: '8px !important', px: 2, pt: 2 }}>
+          {/* Top row */}
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
               <Badge
                 overlap="circular"
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 badgeContent={
-                  <Box sx={{ width: 9, height: 9, bgcolor: user.is_active ? 'success.main' : 'error.main', borderRadius: '50%', border: '1.5px solid', borderColor: 'background.paper' }} />
+                  <Box sx={{
+                    width: 10, height: 10,
+                    bgcolor: user.is_active ? 'success.main' : 'error.main',
+                    borderRadius: '50%', border: '2px solid',
+                    borderColor: 'background.paper',
+                  }} />
                 }
               >
-                <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40, fontWeight: 700 }}>
+                <Avatar sx={{
+                  bgcolor: user.is_superuser ? 'warning.main' : 'primary.main',
+                  width: 44, height: 44, fontWeight: 700, fontSize: 16,
+                  flexShrink: 0,
+                }}>
                   {user.first_name?.[0] || user.username?.[0] || 'U'}
                 </Avatar>
               </Badge>
-              <Box>
-                <Typography variant="subtitle2" fontWeight={700}>{fullName}</Typography>
-                <Typography variant="caption" color="text.secondary">@{user.username}</Typography>
+
+              <Box sx={{ minWidth: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                  <Typography variant="subtitle2" fontWeight={700} noWrap>{fullName}</Typography>
+                  {user.is_superuser && (
+                    <Chip
+                      label="Super Admin"
+                      size="small"
+                      color="warning"
+                      icon={<ShieldOutlined />}
+                      sx={{ fontWeight: 700, height: 20, fontSize: '0.65rem' }}
+                    />
+                  )}
+                </Box>
+                <Typography variant="caption" color="text.secondary" noWrap display="block">@{user.username}</Typography>
               </Box>
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+
+            {/* Action icons top-right */}
+            <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
               <Tooltip title="View Details">
                 <IconButton size="small" color="primary" onClick={() => handleOpenDetailPanel(user)}>
                   <OpenInNewOutlined fontSize="small" />
@@ -471,19 +501,34 @@ const UserManagement = () => {
             </Box>
           </Box>
 
-          <Stack direction="row" spacing={0.75} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
-            <Chip label={user.is_active ? 'Active' : 'Inactive'} size="small" color={user.is_active ? 'success' : 'default'} />
-            {user.is_verified && <Chip label="Verified" size="small" color="info" variant="outlined" />}
+          {/* Status chips */}
+          <Stack direction="row" spacing={0.75} sx={{ mt: 1.25, flexWrap: 'wrap', gap: 0.5 }}>
+            <Chip
+              label={user.is_active ? 'Active' : 'Inactive'}
+              size="small"
+              color={user.is_active ? 'success' : 'default'}
+              icon={user.is_active ? <LockOpenOutlined /> : <LockOutlined />}
+            />
+            {user.is_verified && (
+              <Chip label="Verified" size="small" color="info" variant="outlined" icon={<VerifiedUserOutlined />} />
+            )}
+            {(user.roles || []).slice(0, 2).map(roleCode => {
+              const { name, color } = getRoleDetails(roleCode);
+              return <Chip key={roleCode} label={name} size="small" color={color} variant="outlined" sx={{ fontWeight: 600 }} />;
+            })}
+            {(user.roles || []).length > 2 && (
+              <Chip label={`+${user.roles.length - 2}`} size="small" variant="outlined" />
+            )}
           </Stack>
         </CardContent>
 
         <Collapse in={isExpanded}>
           <Divider />
-          <CardContent>
+          <CardContent sx={{ py: 1.5 }}>
             <Stack spacing={1}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <EmailOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
-                <Typography variant="body2">{user.email}</Typography>
+                <Typography variant="body2" noWrap>{user.email}</Typography>
               </Box>
               {user.phone && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -491,36 +536,41 @@ const UserManagement = () => {
                   <Typography variant="body2">{user.phone}</Typography>
                 </Box>
               )}
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                {(user.roles || []).map(roleCode => {
-                  const { name, color } = getRoleDetails(roleCode);
-                  return <Chip key={roleCode} label={name} size="small" color={color} variant="outlined" />;
-                })}
-              </Stack>
+              {/* Super Admin detail row */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <ShieldOutlined fontSize="small" sx={{ color: user.is_superuser ? 'warning.main' : 'text.disabled' }} />
+                <Typography variant="body2" color={user.is_superuser ? 'warning.main' : 'text.secondary'} fontWeight={user.is_superuser ? 700 : 400}>
+                  {user.is_superuser ? 'Super Administrator' : 'Not Super Admin'}
+                </Typography>
+              </Box>
+              {(user.roles || []).length > 0 && (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {(user.roles || []).map(roleCode => {
+                    const { name, color } = getRoleDetails(roleCode);
+                    return <Chip key={roleCode} label={name} size="small" color={color} variant="outlined" />;
+                  })}
+                </Stack>
+              )}
               <Typography variant="caption" color="text.secondary">
                 Last Login: {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
               </Typography>
             </Stack>
           </CardContent>
           <Divider />
-          <CardActions sx={{ px: 2, py: 1 }}>
-            <Stack direction="row" spacing={1} sx={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button size="small" startIcon={<OpenInNewOutlined />} color="primary" onClick={() => handleOpenDetailPanel(user)}>
-                Details
+          {/* Mobile action bar */}
+          <Box sx={{ px: 1.5, py: 1, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+            <Button size="small" variant="outlined" startIcon={<EditOutlined />} onClick={() => handleOpenEditDialog(user)} sx={{ flex: 1, minWidth: 80 }}>
+              Edit
+            </Button>
+            <Button size="small" variant="outlined" startIcon={<LockOutlined />} onClick={() => handleOpenResetDialog(user)} sx={{ flex: 1, minWidth: 80 }}>
+              Reset PW
+            </Button>
+            {user.id !== currentUser?.id && !user.is_superuser && (
+              <Button size="small" variant="outlined" color="error" startIcon={<DeleteOutlined />} onClick={() => handleOpenDeleteDialog(user)} sx={{ flex: 1, minWidth: 80 }}>
+                Delete
               </Button>
-              <Button size="small" startIcon={<EditOutlined />} onClick={() => handleOpenEditDialog(user)}>
-                Edit
-              </Button>
-              <Button size="small" startIcon={<LockOutlined />} onClick={() => handleOpenResetDialog(user)}>
-                Reset PW
-              </Button>
-              {user.id !== currentUser?.id && (
-                <Button size="small" color="error" startIcon={<DeleteOutlined />} onClick={() => handleOpenDeleteDialog(user)}>
-                  Delete
-                </Button>
-              )}
-            </Stack>
-          </CardActions>
+            )}
+          </Box>
         </Collapse>
       </Card>
     );
@@ -532,6 +582,7 @@ const UserManagement = () => {
     active: users?.filter(u => u.is_active).length || 0,
     verified: users?.filter(u => u.is_verified).length || 0,
     admins: users?.filter(u => u.roles?.includes('admin')).length || 0,
+    superadmins: users?.filter(u => u.is_superuser).length || 0,
   }), [users, total]);
 
   if (isLoading && (!users || users.length === 0)) {
@@ -543,119 +594,181 @@ const UserManagement = () => {
   }
 
   const statCards = [
-    { label: 'Total Users', value: stats.total, color: 'text.primary' },
-    { label: 'Active', value: stats.active, color: 'success.main' },
-    { label: 'Verified', value: stats.verified, color: 'info.main' },
-    { label: 'Admins', value: stats.admins, color: 'warning.main' },
+    { label: 'Total Users', value: stats.total, color: 'text.primary', icon: <PeopleAltOutlined /> },
+    { label: 'Active', value: stats.active, color: 'success.main', icon: <LockOpenOutlined /> },
+    { label: 'Verified', value: stats.verified, color: 'info.main', icon: <VerifiedUserOutlined /> },
+    { label: 'Admins', value: stats.admins, color: 'warning.main', icon: <AdminPanelSettingsOutlined /> },
+    { label: 'Super Admins', value: stats.superadmins, color: 'error.main', icon: <ShieldOutlined /> },
   ];
 
   return (
     <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3 } }}>
       {/* ── Header ── */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: { xs: 2, sm: 3 } }}>
         <Box>
-          <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={800} gutterBottom sx={{ letterSpacing: -0.5 }}>
+          <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={800} gutterBottom sx={{ letterSpacing: -0.5, lineHeight: 1.2 }}>
             User Management
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Manage system users, roles and permissions
           </Typography>
         </Box>
-        <Tooltip title="Refresh">
-          <IconButton
-            onClick={handleRefresh}
-            sx={{
-              bgcolor: alpha(theme.palette.primary.main, 0.08),
-              '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) },
-            }}
-          >
-            <RefreshOutlined />
-          </IconButton>
-        </Tooltip>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="Refresh">
+            <IconButton
+              onClick={handleRefresh}
+              sx={{ bgcolor: alpha(theme.palette.primary.main, 0.08), '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) } }}
+            >
+              <RefreshOutlined />
+            </IconButton>
+          </Tooltip>
+          {isMobile && (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<PersonAddOutlined />}
+              onClick={handleOpenCreateDialog}
+              sx={{ borderRadius: 1.5, fontWeight: 700 }}
+            >
+              Add
+            </Button>
+          )}
+        </Box>
       </Box>
 
       {/* ── Stats ── */}
-      <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: 3 }}>
-        {statCards.map(({ label, value, color }) => (
-          <Grid key={label} size={{ xs: 6, sm: 6, md: 3 }}>
-            <Paper
-              elevation={0}
-              sx={{
-                p: { xs: 1.5, sm: 2 },
-                borderRadius: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: 'background.paper',
-              }}
-            >
-              <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.65rem' }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)', md: 'repeat(5, 1fr)' },
+          gap: { xs: 1, sm: 1.5 },
+          mb: { xs: 2, sm: 3 },
+        }}
+      >
+        {statCards.map(({ label, value, color, icon }) => (
+          <Paper
+            key={label}
+            elevation={0}
+            sx={{
+              p: { xs: 1.5, sm: 2 },
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'background.paper',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 0.5,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                fontWeight={600}
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.62rem' }}
+              >
                 {label}
               </Typography>
-              <Typography variant="h4" fontWeight={800} color={color} sx={{ mt: 0.5 }}>
-                {value}
-              </Typography>
-            </Paper>
-          </Grid>
+              <Box sx={{ color, display: 'flex', '& svg': { fontSize: 16 } }}>{icon}</Box>
+            </Box>
+            <Typography variant="h4" fontWeight={800} color={color} sx={{ lineHeight: 1 }}>
+              {value}
+            </Typography>
+          </Paper>
         ))}
-      </Grid>
+      </Box>
 
       {/* ── Filters ── */}
       <Paper
         elevation={0}
         sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}
       >
-        <Grid container spacing={1.5} alignItems="center">
-          <Grid size={{ xs: 12, sm: 12, md: 4 }}>
-            <TextField
-              fullWidth
-              placeholder="Search users…"
-              value={searchTerm}
-              onChange={handleSearch}
+        {/* Search + toggle row for mobile */}
+        <Box sx={{ display: 'flex', gap: 1, mb: isMobile ? 1 : 0 }}>
+          <TextField
+            fullWidth
+            placeholder="Search users…"
+            value={searchTerm}
+            onChange={handleSearch}
+            size="small"
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+          {isMobile && (
+            <IconButton
               size="small"
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
-                    </InputAdornment>
-                  ),
-                },
+              onClick={() => setShowFilters(v => !v)}
+              sx={{
+                border: '1px solid',
+                borderColor: showFilters ? 'primary.main' : 'divider',
+                borderRadius: 1.5,
+                color: showFilters ? 'primary.main' : 'text.secondary',
+                bgcolor: showFilters ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                px: 1.5,
               }}
-            />
-          </Grid>
-          <Grid size={{ xs: 6, sm: 6, md: 3 }}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Status</InputLabel>
-              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
-                <MenuItem value="all">All</MenuItem>
-                <MenuItem value="active">Active</MenuItem>
-                <MenuItem value="inactive">Inactive</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid size={{ xs: 6, sm: 6, md: 3 }}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Role</InputLabel>
-              <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} label="Role">
-                <MenuItem value="all">All Roles</MenuItem>
-                {rolesList?.map(role => (
-                  <MenuItem key={role.id} value={role.code}>{role.name || role.code}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 12, md: 2 }}>
-            <Button
-              fullWidth
-              variant="contained"
-              startIcon={<PersonAddOutlined />}
-              onClick={handleOpenCreateDialog}
-              sx={{ borderRadius: 1.5, fontWeight: 700 }}
             >
-              Add User
-            </Button>
+              <FilterListOutlined fontSize="small" />
+            </IconButton>
+          )}
+        </Box>
+
+        {/* Filter row — always visible on desktop, collapsible on mobile */}
+        <Collapse in={!isMobile || showFilters}>
+          <Grid container spacing={1.5} alignItems="center" sx={{ mt: { xs: 0.5, sm: isMobile ? 0 : -1 } }}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Status</InputLabel>
+                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
+                  <MenuItem value="all">All Statuses</MenuItem>
+                  <MenuItem value="active">Active</MenuItem>
+                  <MenuItem value="inactive">Inactive</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Role</InputLabel>
+                <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} label="Role">
+                  <MenuItem value="all">All Roles</MenuItem>
+                  {rolesList?.map(role => (
+                    <MenuItem key={role.id} value={role.code}>{role.name || role.code}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            {/* Super Admin filter — NEW */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Super Admin</InputLabel>
+                <Select value={superAdminFilter} onChange={(e) => setSuperAdminFilter(e.target.value)} label="Super Admin">
+                  <MenuItem value="all">All Users</MenuItem>
+                  <MenuItem value="yes">Super Admins Only</MenuItem>
+                  <MenuItem value="no">Non-Super Admins</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            {!isMobile && (
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  startIcon={<PersonAddOutlined />}
+                  onClick={handleOpenCreateDialog}
+                  sx={{ borderRadius: 1.5, fontWeight: 700 }}
+                >
+                  Add User
+                </Button>
+              </Grid>
+            )}
           </Grid>
-        </Grid>
+        </Collapse>
       </Paper>
 
       {/* ── Main layout: Table + optional side panel ── */}
@@ -685,6 +798,7 @@ const UserManagement = () => {
                   disableRowSelectionOnClick
                   getRowId={(row) => row.id}
                   onRowClick={(params) => handleOpenDetailPanel(params.row)}
+                  getRowHeight={() => 'auto'}
                   sx={{
                     border: 'none',
                     '& .MuiDataGrid-columnHeaders': {
@@ -694,13 +808,13 @@ const UserManagement = () => {
                       borderBottom: '1px solid',
                       borderColor: 'divider',
                     },
-                    '& .MuiDataGrid-columnHeaderTitle': { fontWeight: 700, fontSize: '0.75rem', letterSpacing: 0.5, color: 'text.secondary', textTransform: 'uppercase' },
+                    '& .MuiDataGrid-columnHeaderTitle': { fontWeight: 700, fontSize: '0.72rem', letterSpacing: 0.4, color: 'text.secondary', textTransform: 'uppercase' },
                     '& .MuiDataGrid-row': {
                       cursor: 'pointer',
                       '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.04) },
                       '&.Mui-selected': { bgcolor: alpha(theme.palette.primary.main, 0.08) },
                     },
-                    '& .MuiDataGrid-cell': { borderColor: 'divider' },
+                    '& .MuiDataGrid-cell': { borderColor: 'divider', py: 1 },
                     '& .MuiDataGrid-footerContainer': { borderTop: '1px solid', borderColor: 'divider' },
                   }}
                 />
@@ -719,17 +833,23 @@ const UserManagement = () => {
               )}
               {!isLoading && users?.map(user => <UserCard key={user.id} user={user} />)}
               {!isLoading && users?.length > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 2, flexWrap: 'wrap' }}>
-                  <Button variant="outlined" onClick={() => handlePageChange(page - 1)} disabled={page === 0} size="small">Previous</Button>
-                  <Typography variant="body2" sx={{ alignSelf: 'center' }}>Page {page + 1} of {Math.ceil(total / rowsPerPage)}</Typography>
-                  <Button variant="outlined" onClick={() => handlePageChange(page + 1)} disabled={(page + 1) * rowsPerPage >= total} size="small">Next</Button>
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 1.5, alignItems: 'center' }}>
+                  <Button variant="outlined" size="small" onClick={() => handlePageChange(page - 1)} disabled={page === 0} sx={{ borderRadius: 1.5 }}>
+                    Previous
+                  </Button>
+                  <Typography variant="body2" color="text.secondary">
+                    {page + 1} / {Math.ceil(total / rowsPerPage)}
+                  </Typography>
+                  <Button variant="outlined" size="small" onClick={() => handlePageChange(page + 1)} disabled={(page + 1) * rowsPerPage >= total} sx={{ borderRadius: 1.5 }}>
+                    Next
+                  </Button>
                 </Box>
               )}
             </Box>
           )}
         </Box>
 
-        {/* ── Side panel: UserDetailPanel ── */}
+        {/* ── Side panel ── */}
         {detailUser && (
           <Box
             sx={{
@@ -744,7 +864,6 @@ const UserManagement = () => {
               zIndex: isMobile ? 1200 : 1,
             }}
           >
-            {/* Mobile backdrop */}
             {isMobile && (
               <Box
                 onClick={handleCloseDetailPanel}
@@ -760,7 +879,7 @@ const UserManagement = () => {
         )}
       </Box>
 
-      {/* ── Create / Edit / Delete / Reset Dialog ── */}
+      {/* ── Dialog ── */}
       <Dialog
         open={dialogOpen}
         onClose={() => !isSubmitting && setDialogOpen(false)}
@@ -769,21 +888,27 @@ const UserManagement = () => {
         fullScreen={isMobile}
         PaperProps={{
           sx: {
-            borderRadius: isMobile ? 0 : 2,
-            border: '1px solid',
+            borderRadius: isMobile ? 0 : 2.5,
+            border: isMobile ? 'none' : '1px solid',
             borderColor: 'divider',
-            bgcolor: 'background.paper',
           },
         }}
       >
-        <DialogTitle sx={{ fontWeight: 700, borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}>
-          {dialogMode === 'create' && 'Create New User'}
-          {dialogMode === 'edit' && `Edit: ${selectedUser?.username}`}
-          {dialogMode === 'delete' && 'Confirm Delete'}
-          {dialogMode === 'reset' && `Reset Password: ${selectedUser?.username}`}
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: '1px solid', borderColor: 'divider', pb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box>
+            {dialogMode === 'create' && 'Create New User'}
+            {dialogMode === 'edit' && `Edit: ${selectedUser?.username}`}
+            {dialogMode === 'delete' && 'Confirm Delete'}
+            {dialogMode === 'reset' && `Reset Password: ${selectedUser?.username}`}
+          </Box>
+          {isMobile && (
+            <IconButton size="small" onClick={() => !isSubmitting && setDialogOpen(false)}>
+              <CloseOutlined fontSize="small" />
+            </IconButton>
+          )}
         </DialogTitle>
 
-        <DialogContent sx={{ pt: 2 }}>
+        <DialogContent sx={{ pt: 2, px: { xs: 2, sm: 3 } }}>
           {(dialogMode === 'create' || dialogMode === 'edit') && (
             <Grid container spacing={2} sx={{ mt: 0.5 }}>
               <Grid size={12}>
@@ -799,7 +924,9 @@ const UserManagement = () => {
                 <TextField fullWidth label="Last Name" name="last_name" value={formData.last_name} onChange={handleFormChange} disabled={isSubmitting} size="small" />
               </Grid>
               <Grid size={12}>
-                <TextField fullWidth label="Phone" name="phone" value={formData.phone} onChange={handleFormChange} disabled={isSubmitting} size="small" />
+                <TextField fullWidth label="Phone" name="phone" value={formData.phone} onChange={handleFormChange} disabled={isSubmitting} size="small"
+                  slotProps={{ input: { startAdornment: <InputAdornment position="start"><PhoneOutlined fontSize="small" sx={{ color: 'text.disabled' }} /></InputAdornment> } }}
+                />
               </Grid>
               <Grid size={12}>
                 <FormControl fullWidth disabled={isSubmitting} size="small">
@@ -832,18 +959,71 @@ const UserManagement = () => {
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <FormControlLabel
-                  control={<Switch checked={formData.is_active} onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))} disabled={isSubmitting} color="success" />}
-                  label="Active"
-                />
+
+              {/* ── Status toggles ── */}
+              <Grid size={12}>
+                <Paper
+                  variant="outlined"
+                  sx={{ p: 1.5, borderRadius: 2, display: 'flex', flexDirection: 'column', gap: 0.5 }}
+                >
+                  <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.62rem', mb: 0.5 }}>
+                    Account Flags
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 0, sm: 2 }, flexDirection: { xs: 'column', sm: 'row' } }}>
+                    <FormControlLabel
+                      control={<Switch checked={formData.is_active} onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))} disabled={isSubmitting} color="success" size="small" />}
+                      label={<Typography variant="body2">Active</Typography>}
+                    />
+                    <FormControlLabel
+                      control={<Switch checked={formData.is_verified} onChange={(e) => setFormData(prev => ({ ...prev, is_verified: e.target.checked }))} disabled={isSubmitting} color="info" size="small" />}
+                      label={<Typography variant="body2">Verified</Typography>}
+                    />
+                  </Box>
+                </Paper>
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <FormControlLabel
-                  control={<Switch checked={formData.is_verified} onChange={(e) => setFormData(prev => ({ ...prev, is_verified: e.target.checked }))} disabled={isSubmitting} color="info" />}
-                  label="Email Verified"
-                />
+
+              {/* ── Super Admin — dedicated section ── */}
+              <Grid size={12}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 1.5, borderRadius: 2,
+                    borderColor: formData.is_superuser ? 'warning.main' : 'divider',
+                    bgcolor: formData.is_superuser ? alpha(theme.palette.warning.main, 0.05) : 'transparent',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 1.25, alignItems: 'flex-start' }}>
+                      <ShieldOutlined sx={{ color: formData.is_superuser ? 'warning.main' : 'text.disabled', mt: 0.25, fontSize: 20 }} />
+                      <Box>
+                        <Typography variant="body2" fontWeight={700} color={formData.is_superuser ? 'warning.dark' : 'text.primary'}>
+                          Super Administrator
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Grants unrestricted access to all system resources and settings.
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Switch
+                      checked={formData.is_superuser || false}
+                      onChange={(e) => setFormData(prev => ({ ...prev, is_superuser: e.target.checked }))}
+                      disabled={isSubmitting || (dialogMode === 'edit' && selectedUser?.id === currentUser?.id && selectedUser?.is_superuser)}
+                      color="warning"
+                      size="small"
+                      sx={{ flexShrink: 0, mt: 0.25 }}
+                    />
+                  </Box>
+                </Paper>
               </Grid>
+
+              {dialogMode === 'edit' && selectedUser?.is_superuser && !formData.is_superuser && (
+                <Grid size={12}>
+                  <Alert severity="warning" icon={<AdminPanelSettingsOutlined />} sx={{ borderRadius: 1.5 }}>
+                    Removing Super Admin privileges will revoke full system access for this user.
+                  </Alert>
+                </Grid>
+              )}
 
               {dialogMode === 'create' && (
                 <>
@@ -876,7 +1056,7 @@ const UserManagement = () => {
           )}
         </DialogContent>
 
-        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, borderTop: '1px solid', borderColor: 'divider', gap: 1 }}>
           <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting} sx={{ borderRadius: 1.5 }}>
             Cancel
           </Button>
@@ -885,15 +1065,15 @@ const UserManagement = () => {
             variant="contained"
             color={dialogMode === 'delete' ? 'error' : 'primary'}
             disabled={isSubmitting}
-            sx={{ borderRadius: 1.5, minWidth: 120 }}
+            sx={{ borderRadius: 1.5, minWidth: 130 }}
           >
             {isSubmitting ? (
-              <CircularProgress size={20} />
+              <CircularProgress size={20} color="inherit" />
             ) : (
               <>
                 {dialogMode === 'create' && 'Create User'}
                 {dialogMode === 'edit' && 'Save Changes'}
-                {dialogMode === 'delete' && 'Delete'}
+                {dialogMode === 'delete' && 'Delete User'}
                 {dialogMode === 'reset' && 'Reset Password'}
               </>
             )}

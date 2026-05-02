@@ -1,8 +1,29 @@
+// store/slices/authSlice.js - IMPROVED VERSION (Fixed profile picture endpoints)
+
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import apiClient from '../api/apiClient';
 
 /* =========================
-   1. Helper Functions
+   1. Constants & Configuration
+========================= */
+
+const STORAGE_KEYS = {
+  ACCESS_TOKEN: 'access_token',
+  REFRESH_TOKEN: 'refresh_token',
+  USER: 'user',
+  PROFILE_PICTURE: 'profile_picture',
+  USER_PERMISSIONS: 'user_permissions',
+};
+
+const CACHE_CONFIG = {
+  PROFILE_PICTURE_TTL: 5 * 60 * 1000, // 5 minutes
+};
+
+// Track last user ID for cache invalidation
+let lastUserId = null;
+
+/* =========================
+   2. Helper Functions
 ========================= */
 
 const normalizeError = (err) => {
@@ -53,15 +74,14 @@ const normalizeError = (err) => {
 };
 
 const clearAuthStorage = () => {
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
-  localStorage.removeItem('user');
-  localStorage.removeItem('profile_picture');
+  Object.values(STORAGE_KEYS).forEach(key => {
+    localStorage.removeItem(key);
+  });
 };
 
 const persistAuth = (data) => {
-  localStorage.setItem('access_token', data.access_token);
-  localStorage.setItem('refresh_token', data.refresh_token);
+  localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, data.access_token);
+  localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, data.refresh_token);
   
   const userToStore = data.user || {
     id: data.user_id,
@@ -74,24 +94,70 @@ const persistAuth = (data) => {
     is_active: data.is_active,
     is_verified: data.is_verified,
     created_at: data.created_at,
+    permissions: data.permissions || [],
   };
   
-  localStorage.setItem('user', JSON.stringify(userToStore));
+  localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(userToStore));
+  
+  if (userToStore.permissions) {
+    localStorage.setItem(STORAGE_KEYS.USER_PERMISSIONS, JSON.stringify(userToStore.permissions));
+  }
 };
 
-// Helper function to get user ID consistently
 const getCurrentUserId = () => {
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const user = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || '{}');
   return user.id || user.user_id;
 };
 
+const isTokenExpired = (token) => {
+  if (!token) return true;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+};
+
+const getTokenExpiration = (token) => {
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp * 1000;
+  } catch {
+    return null;
+  }
+};
+
+const hasProfilePictureCached = () => {
+  const flag = localStorage.getItem('has_profile_picture');
+  if (!flag) return null;
+  return flag === 'true';
+};
+
+const setProfilePicturePresence = (hasPicture) => {
+  localStorage.setItem('has_profile_picture', hasPicture ? 'true' : 'false');
+};
+
+const getCachedProfilePicture = () => {
+  return localStorage.getItem(STORAGE_KEYS.PROFILE_PICTURE);
+};
+
+const cacheProfilePicture = (pictureData) => {
+  if (pictureData) {
+    localStorage.setItem(STORAGE_KEYS.PROFILE_PICTURE, pictureData);
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.PROFILE_PICTURE);
+  }
+};
+
 /* =========================
-   2. Async Thunks - Authentication
+   3. Async Thunks (FIXED Profile Picture Endpoints)
 ========================= */
 
 export const login = createAsyncThunk(
   'auth/login',
-  async (credentials, { rejectWithValue }) => {
+  async (credentials, { rejectWithValue, dispatch }) => {
     try {
       const formData = new URLSearchParams();
       formData.append('username', credentials.username);
@@ -103,9 +169,28 @@ export const login = createAsyncThunk(
       });
       
       const data = response.data;
-      if (!data.email && data.user?.email) data.email = data.user.email;
+      
+      // Fetch user permissions after login
+      try {
+        const permissionsResponse = await apiClient.get('/auth/me/permissions', {
+          headers: { Authorization: `Bearer ${data.access_token}` }
+        });
+        data.permissions = permissionsResponse.data || [];
+        if (data.user) {
+          data.user.permissions = permissionsResponse.data;
+        }
+      } catch (permError) {
+        console.warn('Could not fetch permissions:', permError);
+        data.permissions = [];
+      }
       
       persistAuth(data);
+      
+      // Clear profile picture cache on login (force refresh)
+      setProfilePicturePresence(false);
+      cacheProfilePicture(null);
+      lastUserId = null;
+      
       return data;
     } catch (err) {
       console.error('Login API error:', err.response?.data);
@@ -139,31 +224,63 @@ export const register = createAsyncThunk(
 export const checkAuth = createAsyncThunk(
   'auth/checkAuth',
   async (_, { rejectWithValue, dispatch }) => {
-    const token = localStorage.getItem('access_token');
+    const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
     if (!token) return rejectWithValue(null);
+
+    if (isTokenExpired(token)) {
+      const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+      if (!refreshToken) {
+        clearAuthStorage();
+        return rejectWithValue(null);
+      }
+    }
 
     try {
       const response = await apiClient.get('/auth/me');
       const user = { ...response.data, email: response.data.email };
-      localStorage.setItem('user', JSON.stringify(user));
       
-      // Fetch profile picture separately
+      // Fetch user permissions
+      let permissions = [];
+      try {
+        const permissionsResponse = await apiClient.get('/auth/me/permissions');
+        permissions = permissionsResponse.data || [];
+        user.permissions = permissions;
+      } catch (permError) {
+        console.warn('Could not fetch permissions:', permError);
+      }
+      
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+      localStorage.setItem(STORAGE_KEYS.USER_PERMISSIONS, JSON.stringify(permissions));
+      
+      // Fetch profile picture from the correct endpoint
       await dispatch(fetchProfilePicture());
       
-      return { token, user };
+      return { token, user, permissions };
     } catch (err) {
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
       if (!refreshToken) {
         clearAuthStorage();
         return rejectWithValue(null);
       }
       try {
         const res = await apiClient.post('/auth/refresh', { refresh_token: refreshToken });
-        localStorage.setItem('access_token', res.data.access_token);
+        localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, res.data.access_token);
         const userResponse = await apiClient.get('/auth/me');
-        localStorage.setItem('user', JSON.stringify(userResponse.data));
+        const user = userResponse.data;
+        
+        let permissions = [];
+        try {
+          const permissionsResponse = await apiClient.get('/auth/me/permissions');
+          permissions = permissionsResponse.data || [];
+          user.permissions = permissions;
+        } catch (permError) {
+          console.warn('Could not fetch permissions after refresh:', permError);
+        }
+        
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+        localStorage.setItem(STORAGE_KEYS.USER_PERMISSIONS, JSON.stringify(permissions));
         await dispatch(fetchProfilePicture());
-        return { token: res.data.access_token, user: userResponse.data };
+        return { token: res.data.access_token, user, permissions };
       } catch (refreshErr) {
         clearAuthStorage();
         return rejectWithValue(null);
@@ -176,10 +293,13 @@ export const logout = createAsyncThunk(
   'auth/logout',
   async () => {
     try {
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+      const accessToken = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
       clearAuthStorage();
       if (refreshToken) {
-        await apiClient.post('/auth/logout', { refresh_token: refreshToken });
+        await apiClient.post('/auth/logout', { refresh_token: refreshToken }, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
       }
     } catch (err) {
       console.warn('Logout API error:', err.message);
@@ -188,56 +308,80 @@ export const logout = createAsyncThunk(
   }
 );
 
-/* =========================
-   3. Async Thunks - Profile Picture
-========================= */
-
+// ✅ FIXED: Fetch CURRENT USER's profile picture (GET /auth/profile-picture)
 export const fetchProfilePicture = createAsyncThunk(
   'auth/fetchProfilePicture',
   async (_, { rejectWithValue }) => {
     try {
-      const userId = getCurrentUserId();
+      // Use the correct endpoint for current user
+      const response = await apiClient.get('/auth/profile-picture');
       
-      if (!userId) {
+      if (response.data?.has_picture && response.data?.profile_picture) {
+        setProfilePicturePresence(true);
+        cacheProfilePicture(response.data.profile_picture);
+        return response.data;
+      } else {
+        setProfilePicturePresence(false);
+        cacheProfilePicture(null);
         return { has_picture: false, profile_picture: null };
       }
-      
-      // Use the base64 endpoint to get JSON response
-      const response = await apiClient.get(`/auth/${userId}/profile-picture/base64`);
-      return response.data;
     } catch (err) {
-      // Don't reject on 404 - just return null (no profile picture)
+      // 404 means no profile picture - that's fine
       if (err.response?.status === 404) {
+        setProfilePicturePresence(false);
+        cacheProfilePicture(null);
         return { has_picture: false, profile_picture: null };
       }
       console.error('Fetch profile picture error:', err.response?.data);
-      return { has_picture: false, profile_picture: null };
+      return rejectWithValue(err.response?.data || { message: 'Failed to fetch profile picture' });
     }
   }
 );
 
+// ✅ FIXED: Fetch ANY user's profile picture by ID (GET /auth/{user_id}/profile-picture/base64)
+export const fetchUserProfilePicture = createAsyncThunk(
+  'auth/fetchUserProfilePicture',
+  async (userId, { rejectWithValue }) => {
+    try {
+      if (!userId) {
+        return { has_picture: false, profile_picture: null };
+      }
+      
+      const response = await apiClient.get(`/auth/${userId}/profile-picture/base64`);
+      
+      if (response.data?.has_picture && response.data?.profile_picture) {
+        return response.data;
+      } else {
+        return { has_picture: false, profile_picture: null };
+      }
+    } catch (err) {
+      if (err.response?.status === 404) {
+        return { has_picture: false, profile_picture: null };
+      }
+      console.error('Fetch user profile picture error:', err.response?.data);
+      return rejectWithValue(err.response?.data || { message: 'Failed to fetch profile picture' });
+    }
+  }
+);
+
+// ✅ FIXED: Upload profile picture (PATCH /auth/profile-picture)
 export const uploadProfilePicture = createAsyncThunk(
   'auth/uploadProfilePicture',
   async (file, { rejectWithValue, dispatch }) => {
     try {
-      const userId = getCurrentUserId();
+      const formData = new FormData();
+      formData.append('file', file);
       
-      if (!userId) {
-        return rejectWithValue({ message: 'User ID not found' });
-      }
-      
-      // Convert file to base64 for base64 endpoint
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error('Failed to read file'));
+      // Use the correct endpoint with multipart/form-data
+      const response = await apiClient.patch('/auth/profile-picture', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
       
-      // Use base64 endpoint for upload with compression
-      const response = await apiClient.patch(`/auth/${userId}/profile-picture/base64`, {
-        profile_picture: base64
-      });
+      // Clear cache after upload
+      setProfilePicturePresence(false);
+      cacheProfilePicture(null);
       
       // Refresh profile picture after upload
       await dispatch(fetchProfilePicture());
@@ -250,20 +394,16 @@ export const uploadProfilePicture = createAsyncThunk(
   }
 );
 
+// ✅ FIXED: Delete profile picture (DELETE /auth/profile-picture)
 export const deleteProfilePicture = createAsyncThunk(
   'auth/deleteProfilePicture',
   async (_, { rejectWithValue, dispatch }) => {
     try {
-      const userId = getCurrentUserId();
+      const response = await apiClient.delete('/auth/profile-picture');
       
-      if (!userId) {
-        return rejectWithValue({ message: 'User ID not found' });
-      }
-      
-      const response = await apiClient.delete(`/auth/${userId}/profile-picture`);
-      
-      // Refresh profile picture after deletion
-      await dispatch(fetchProfilePicture());
+      // Clear cache after deletion
+      setProfilePicturePresence(false);
+      cacheProfilePicture(null);
       
       return response.data;
     } catch (err) {
@@ -273,27 +413,21 @@ export const deleteProfilePicture = createAsyncThunk(
   }
 );
 
-/* =========================
-   4. Async Thunks - Profile Management
-========================= */
-
 export const updateUserProfile = createAsyncThunk(
   'auth/updateProfile',
-  async (userData, { rejectWithValue, getState }) => {
+  async (userData, { rejectWithValue }) => {
     try {
-      // Get current user ID from localStorage
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || '{}');
       const userId = currentUser.id || currentUser.user_id;
       
       if (!userId) {
         return rejectWithValue({ message: 'User ID not found' });
       }
-      // Use the correct endpoint with user_id
+      
       const response = await apiClient.patch(`/auth/${userId}`, userData);
       
-      // Update localStorage with new user data
       const updatedUser = { ...currentUser, ...response.data };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
       
       return response.data;
     } catch (err) {
@@ -302,9 +436,6 @@ export const updateUserProfile = createAsyncThunk(
     }
   }
 );
-/* =========================
-   5. Async Thunks - Email & Password
-========================= */
 
 export const verifyEmail = createAsyncThunk(
   'auth/verifyEmail',
@@ -374,10 +505,6 @@ export const changePassword = createAsyncThunk(
   }
 );
 
-/* =========================
-   6. Async Thunks - Availability Checks
-========================= */
-
 export const checkUsernameAvailability = createAsyncThunk(
   'auth/checkUsername',
   async (username, { rejectWithValue }) => {
@@ -403,14 +530,43 @@ export const checkEmailAvailability = createAsyncThunk(
 );
 
 /* =========================
-   7. Initial State
+   4. Permission Helper Functions
+========================= */
+
+export const hasPermission = (permissions, requiredPermission) => {
+  if (!permissions || !Array.isArray(permissions)) return false;
+  if (!requiredPermission) return true;
+  
+  return permissions.some(permission => {
+    const permissionCode = typeof permission === 'object' ? permission.code : permission;
+    return permissionCode === requiredPermission;
+  });
+};
+
+export const hasAnyPermission = (permissions, requiredPermissions) => {
+  if (!permissions || !Array.isArray(permissions)) return false;
+  if (!requiredPermissions || requiredPermissions.length === 0) return true;
+  
+  return requiredPermissions.some(required => hasPermission(permissions, required));
+};
+
+export const hasAllPermissions = (permissions, requiredPermissions) => {
+  if (!permissions || !Array.isArray(permissions)) return false;
+  if (!requiredPermissions || requiredPermissions.length === 0) return true;
+  
+  return requiredPermissions.every(required => hasPermission(permissions, required));
+};
+
+/* =========================
+   5. Initial State
 ========================= */
 
 const initialState = {
-  user: JSON.parse(localStorage.getItem('user') || 'null'),
-  profilePicture: null, // Don't store in localStorage - too large
-  token: localStorage.getItem('access_token'),
-  isAuthenticated: !!localStorage.getItem('access_token'),
+  user: JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || 'null'),
+  userPermissions: JSON.parse(localStorage.getItem(STORAGE_KEYS.USER_PERMISSIONS) || '[]'),
+  profilePicture: getCachedProfilePicture(),
+  token: localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN),
+  isAuthenticated: !!localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN),
   isLoading: false,
   isAuthChecking: false,
   isUploading: false,
@@ -421,10 +577,12 @@ const initialState = {
   error: null,
   fieldErrors: {},
   errorCode: null,
+  profilePictureChecked: false,
+  tokenExpiration: getTokenExpiration(localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN)),
 };
 
 /* =========================
-   8. Slice Definition
+   6. Slice Definition
 ========================= */
 
 const authSlice = createSlice({
@@ -458,14 +616,34 @@ const authSlice = createSlice({
         error: null,
         fieldErrors: {},
         errorCode: null,
-        profilePicture: null
+        profilePicture: null,
+        userPermissions: []
       };
     },
     updateUserEmail: (state, action) => {
       if (state.user) {
         state.user.email = action.payload;
-        localStorage.setItem('user', JSON.stringify(state.user));
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(state.user));
       }
+    },
+    setUserPermissions: (state, action) => {
+      state.userPermissions = action.payload;
+      if (state.user) {
+        state.user.permissions = action.payload;
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(state.user));
+      }
+      localStorage.setItem(STORAGE_KEYS.USER_PERMISSIONS, JSON.stringify(action.payload));
+    },
+    clearProfilePictureCache: (state) => {
+      state.profilePicture = null;
+      state.profilePictureChecked = false;
+      cacheProfilePicture(null);
+      setProfilePicturePresence(false);
+    },
+    updateToken: (state, action) => {
+      state.token = action.payload;
+      state.tokenExpiration = getTokenExpiration(action.payload);
+      localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, action.payload);
     },
   },
   extraReducers: (builder) => {
@@ -478,7 +656,9 @@ const authSlice = createSlice({
         state.isAuthChecking = false;
         state.isAuthenticated = true;
         state.user = action.payload.user;
+        state.userPermissions = action.payload.permissions || [];
         state.token = action.payload.token;
+        state.tokenExpiration = getTokenExpiration(action.payload.token);
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
@@ -489,6 +669,8 @@ const authSlice = createSlice({
         state.user = null;
         state.token = null;
         state.profilePicture = null;
+        state.userPermissions = [];
+        state.tokenExpiration = null;
       })
       
       // ==================== LOGIN ====================
@@ -502,7 +684,9 @@ const authSlice = createSlice({
         state.isLoading = false;
         state.isAuthenticated = true;
         state.token = action.payload.access_token;
+        state.tokenExpiration = getTokenExpiration(action.payload.access_token);
         state.user = action.payload.user || action.payload;
+        state.userPermissions = action.payload.permissions || [];
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
@@ -513,6 +697,7 @@ const authSlice = createSlice({
         state.error = action.payload?.message || 'Login failed';
         state.fieldErrors = action.payload?.fieldErrors || {};
         state.errorCode = action.payload?.errorCode;
+        state.userPermissions = [];
       })
       
       // ==================== REGISTER ====================
@@ -556,7 +741,7 @@ const authSlice = createSlice({
         state.error = null;
         if (state.user) {
           state.user.is_verified = true;
-          localStorage.setItem('user', JSON.stringify(state.user));
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(state.user));
         }
       })
       .addCase(verifyEmail.rejected, (state, action) => {
@@ -617,7 +802,7 @@ const authSlice = createSlice({
       .addCase(updateUserProfile.fulfilled, (state, action) => {
         state.isLoading = false;
         state.user = { ...state.user, ...action.payload };
-        localStorage.setItem('user', JSON.stringify(state.user));
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(state.user));
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
@@ -629,16 +814,20 @@ const authSlice = createSlice({
         state.errorCode = action.payload?.errorCode;
       })
 
-      // ==================== FETCH PROFILE PICTURE ====================
+      // ==================== FETCH MY PROFILE PICTURE ====================
+      .addCase(fetchProfilePicture.pending, (state) => {
+        state.profilePictureChecked = false;
+      })
       .addCase(fetchProfilePicture.fulfilled, (state, action) => {
+        state.profilePictureChecked = true;
         if (action.payload?.has_picture && action.payload?.profile_picture) {
-          // Store the data URL directly (already includes data:image prefix)
           state.profilePicture = action.payload.profile_picture;
         } else {
           state.profilePicture = null;
         }
       })
       .addCase(fetchProfilePicture.rejected, (state) => {
+        state.profilePictureChecked = true;
         state.profilePicture = null;
       })
 
@@ -682,7 +871,8 @@ const authSlice = createSlice({
           error: null,
           fieldErrors: {},
           errorCode: null,
-          profilePicture: null
+          profilePicture: null,
+          userPermissions: []
         };
       })
       
@@ -709,7 +899,7 @@ const authSlice = createSlice({
 });
 
 /* =========================
-   9. Exports & Selectors
+   7. Exports & Selectors
 ========================= */
 
 export const { 
@@ -718,13 +908,18 @@ export const {
   resetLoginSuccess,
   resetVerificationState,
   logoutLocal, 
-  updateUserEmail 
+  updateUserEmail,
+  setUserPermissions,
+  clearProfilePictureCache,
+  updateToken,
 } = authSlice.actions;
 
 // Selectors
 export const selectAuth = (state) => state.auth;
 export const selectUser = (state) => state.auth.user;
+export const selectUserPermissions = (state) => state.auth.userPermissions;
 export const selectProfilePicture = (state) => state.auth.profilePicture;
+export const selectProfilePictureChecked = (state) => state.auth.profilePictureChecked;
 export const selectIsAuthenticated = (state) => state.auth.isAuthenticated;
 export const selectIsLoading = (state) => state.auth.isLoading;
 export const selectIsAuthChecking = (state) => state.auth.isAuthChecking;
@@ -734,6 +929,10 @@ export const selectAuthError = (state) => state.auth.error;
 export const selectFieldErrors = (state) => state.auth.fieldErrors;
 export const selectVerificationEmailSent = (state) => state.auth.verificationEmailSent;
 export const selectPendingVerificationEmail = (state) => state.auth.pendingVerificationEmail;
+export const selectTokenExpiration = (state) => state.auth.tokenExpiration;
+export const selectIsTokenExpired = (state) => {
+  const exp = state.auth.tokenExpiration;
+  return exp ? exp < Date.now() : true;
+};
 
-// Default export
 export default authSlice.reducer;

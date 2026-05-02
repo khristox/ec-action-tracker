@@ -33,6 +33,8 @@ import {
   Switch,
   Grid,
   Collapse,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Visibility,
@@ -59,6 +61,10 @@ function SlideTransition(props) {
 }
 
 const SignUpCard = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
+  
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { isRegistering, error, fieldErrors: reduxFieldErrors, registrationSuccess, verificationEmailSent } = useSelector((state) => state.auth);
@@ -253,12 +259,10 @@ const SignUpCard = () => {
       dispatch(clearError());
       setIsSubmitting(false);
       
-      // Open verification dialog after successful registration
       setTimeout(() => {
         setVerificationDialogOpen(true);
       }, 1500);
       
-      // Reset registration success after showing dialog
       const timer = setTimeout(() => {
         dispatch(resetRegistrationSuccess());
       }, 5000);
@@ -326,13 +330,11 @@ const SignUpCard = () => {
     
     try {
       setResendDisabled(true);
-      setResendCountdown(60); // 60 second cooldown
+      setResendCountdown(60);
       
       await dispatch(resendVerification(registeredEmail || formData.email)).unwrap();
       
-      // Show success message
       setSnackbarOpen(true);
-      // You could also show a success notification here
     } catch (err) {
       console.error('Failed to resend verification:', err);
       setResendDisabled(false);
@@ -435,7 +437,6 @@ const SignUpCard = () => {
     setLocalFieldErrors({});
     setIsSubmitting(true);
     
-    // Store email for resend functionality
     setRegisteredEmail(formData.email.trim().toLowerCase());
     
     const registrationData = {
@@ -444,7 +445,6 @@ const SignUpCard = () => {
       last_name: formData.last_name.trim(),
       password: formData.password,
       username: formData.username.trim(),
-      // Do NOT send full_name - backend expects first_name and last_name only
     };
     
     if (formData.phone) {
@@ -525,11 +525,12 @@ const SignUpCard = () => {
         onClose={handleCloseVerificationDialog}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>
           <Box display="flex" alignItems="center" gap={1}>
             <MarkEmailReadOutlined color="primary" />
-            <Typography variant="h6">Verify Your Email Address</Typography>
+            <Typography variant={isMobile ? 'h6' : 'h5'}>Verify Your Email Address</Typography>
           </Box>
         </DialogTitle>
         <DialogContent>
@@ -537,7 +538,7 @@ const SignUpCard = () => {
             We've sent a verification link to:
           </Typography>
           <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover', textAlign: 'center', mb: 2 }}>
-            <Typography variant="subtitle1" fontWeight="bold" color="primary">
+            <Typography variant="subtitle1" fontWeight="bold" color="primary" sx={{ wordBreak: 'break-all' }}>
               {registeredEmail || formData.email}
             </Typography>
           </Paper>
@@ -600,7 +601,13 @@ const SignUpCard = () => {
       </Backdrop>
 
       {/* Name Modification Dialog */}
-      <Dialog open={nameDialogOpen} onClose={() => setNameDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={nameDialogOpen} 
+        onClose={() => setNameDialogOpen(false)} 
+        maxWidth="sm" 
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle>
           <Box display="flex" alignItems="center" gap={1}>
             <BadgeOutlined />
@@ -665,13 +672,16 @@ const SignUpCard = () => {
         </DialogActions>
       </Dialog>
 
+      {/* ==================== FIXED CARD STYLES ==================== */}
       <Card
         sx={{
-          width: { xs: '100%', sm: 500, md: 550 },
-          maxWidth: '95vw',
-          borderRadius: 4,
-          boxShadow: '0 12px 40px rgba(0,0,0,0.13)',
+          // FIX 1: Use responsive width that fills container on mobile
+          width: '100%',
+          maxWidth: { xs: '100%', sm: 520, md: 550 },
+          // FIX 2: Add margin auto for centering
           mx: 'auto',
+          borderRadius: { xs: 3, sm: 4 },
+          boxShadow: { xs: '0 8px 24px rgba(0,0,0,0.12)', md: '0 12px 40px rgba(0,0,0,0.13)' },
           position: 'relative',
           overflow: 'visible',
           opacity: isFormDisabled ? 0.5 : 1,
@@ -679,11 +689,15 @@ const SignUpCard = () => {
           transition: 'opacity 0.3s ease',
         }}
       >
-        <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
-          {/* Header */}
-          <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Group sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-            <Typography variant="h4" fontWeight={700} gutterBottom>
+        {/* FIX 3: Responsive padding based on screen size */}
+        <CardContent sx={{ 
+          p: { xs: 2.5, sm: 3.5, md: 4 },
+          '&:last-child': { pb: { xs: 2.5, sm: 3.5, md: 4 } }
+        }}>
+          {/* Header - FIX 4: Responsive icon and text sizes */}
+          <Box sx={{ textAlign: 'center', mb: { xs: 2.5, sm: 3 } }}>
+            <Group sx={{ fontSize: { xs: 40, sm: 48 }, color: 'primary.main', mb: 1 }} />
+            <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={700} gutterBottom>
               Create Account
             </Typography>
             <Typography variant="body2" color="text.secondary">
@@ -716,8 +730,18 @@ const SignUpCard = () => {
             </Fade>
           )}
 
-          {/* Stepper */}
-          <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
+          {/* Stepper - FIX 5: Hide labels on very small screens if needed */}
+          <Stepper 
+            activeStep={activeStep} 
+            sx={{ 
+              mb: 4, 
+              overflowX: 'auto',
+              // Optional: Make stepper scrollable on very small screens
+              '& .MuiStepLabel-label': {
+                fontSize: { xs: '0.75rem', sm: '0.875rem' }
+              }
+            }}
+          >
             {steps.map((label) => (
               <Step key={label}>
                 <StepLabel>{label}</StepLabel>
@@ -821,6 +845,7 @@ const SignUpCard = () => {
                               size="small"
                               disabled={isFormDisabled || !formData.email}
                               sx={{ ml: 0.5 }}
+                              edge="end"
                             >
                               <Refresh fontSize="small" />
                             </IconButton>
@@ -897,6 +922,7 @@ const SignUpCard = () => {
                         },
                       }}
                       size="small"
+                      edge="end"
                     >
                       <Edit fontSize="small" />
                     </IconButton>
@@ -909,7 +935,7 @@ const SignUpCard = () => {
                     <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                       Will be saved as:
                     </Typography>
-                    <Box sx={{ display: 'flex', gap: 3, mt: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 3, mt: 1, flexWrap: 'wrap' }}>
                       <Typography variant="body2">
                         <strong>First Name:</strong> {formData.first_name || '—'}
                       </Typography>
@@ -954,6 +980,7 @@ const SignUpCard = () => {
 
             {activeStep === 1 && (
               <Box>
+                {/* Password Field - with show/hide button inside */}
                 <TextField
                   fullWidth
                   label="Password"
@@ -976,8 +1003,10 @@ const SignUpCard = () => {
                       <InputAdornment position="end">
                         <IconButton 
                           onClick={() => setShowPassword(!showPassword)} 
+                          onMouseDown={(e) => e.preventDefault()}
                           type="button"
                           disabled={isFormDisabled}
+                          edge="end"
                         >
                           {showPassword ? <VisibilityOff /> : <Visibility />}
                         </IconButton>
@@ -986,6 +1015,7 @@ const SignUpCard = () => {
                   }}
                 />
                 
+                {/* Password Strength Indicator */}
                 {formData.password && !hasFieldError('password') && (
                   <Box sx={{ mt: 1, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1007,9 +1037,13 @@ const SignUpCard = () => {
                         />
                       ))}
                     </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                      Minimum 8 characters with uppercase, lowercase, number, and special character
+                    </Typography>
                   </Box>
                 )}
                 
+                {/* Confirm Password Field - with show/hide button inside */}
                 <TextField
                   fullWidth
                   label="Confirm Password"
@@ -1032,8 +1066,10 @@ const SignUpCard = () => {
                       <InputAdornment position="end">
                         <IconButton 
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)} 
+                          onMouseDown={(e) => e.preventDefault()}
                           type="button"
                           disabled={isFormDisabled}
+                          edge="end"
                         >
                           {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
                         </IconButton>
@@ -1050,7 +1086,7 @@ const SignUpCard = () => {
                   Review your information:
                 </Typography>
                 <Box sx={{ mt: 2 }}>
-                  <Typography variant="body2">
+                  <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
                     <strong>Email:</strong> {formData.email}
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1 }}>

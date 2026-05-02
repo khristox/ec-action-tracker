@@ -1,0 +1,2 @@
+import"./rolldown-runtime-BM3Ffeng.js";import{Oo as e,So as t,Wa as n,co as r,ho as i}from"./mui-vendor-BKLg3ThO.js";e();var a=t(),o=()=>(0,a.jsx)(n,{maxWidth:`lg`,sx:{py:4},children:(0,a.jsxs)(i,{sx:{p:4,textAlign:`center`},children:[(0,a.jsx)(r,{variant:`h4`,gutterBottom:!0,children:`Participant Details`}),(0,a.jsx)(r,{variant:`body2`,color:`text.secondary`,children:`Participant details coming soon.`})]})});export{o as default};
+//# sourceMappingURL=ParticipantDetail-DGVhpvzO.js.map

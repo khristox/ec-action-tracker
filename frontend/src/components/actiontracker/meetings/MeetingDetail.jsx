@@ -93,6 +93,7 @@ import {
   Code as CodeIcon,
   ViewStream as ViewStreamIcon,
   ViewAgenda as ViewAgendaIcon,
+  Email as EmailIcon,
 } from '@mui/icons-material';
 import {
   fetchMeetingById,
@@ -125,6 +126,121 @@ import {
 import MeetingAudit from './MeetingAudit';
 import MeetingRecorder from './MeetingRecorder';
 import api from '../../../services/api';
+import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
+
+// ==================== Permission Constants ====================
+const PERMISSIONS = {
+  // Meeting permissions
+  DELETE_MEETING: 'meeting:delete',
+  UPDATE_MEETING: 'meeting:update',
+  CREATE_MEETING: 'meeting:create',
+  VIEW_ALL_MEETINGS: 'meeting:view_all',
+  VIEW_OWN_MEETINGS: 'meeting:view',
+  CHANGE_STATUS: 'meeting:status_change',
+  RECORD_MEETING: 'meeting:record',
+  VIEW_RECORDER: 'meeting:view_recorder',
+  
+  // Notification permissions
+  SEND_NOTIFICATIONS: 'notification:send',
+  SEND_EMAIL_NOTIFICATIONS: 'notification:email',
+  VIEW_NOTIFICATIONS: 'notification:view',
+  MANAGE_NOTIFICATION_TEMPLATES: 'notification:manage_templates',
+  
+  // Minutes permissions
+  ADD_MINUTES: 'minutes:add',
+  EDIT_MINUTES: 'minutes:edit',
+  DELETE_MINUTES: 'minutes:delete',
+  APPROVE_MINUTES: 'minutes:approve',
+  SIGN_MINUTES: 'minutes:sign',
+  VIEW_MINUTES: 'minutes:view',
+  EXPORT_MINUTES: 'minutes:export',
+  
+  // Actions permissions
+  CREATE_ACTIONS: 'action:create',
+  UPDATE_ACTIONS: 'action:update',
+  DELETE_ACTIONS: 'action:delete',
+  ASSIGN_ACTIONS: 'action:assign',
+  COMMENT_ACTIONS: 'action:comment',
+  UPDATE_ACTION_STATUS: 'action:status_update',
+  UPDATE_ACTION_PRIORITY: 'action:priority_update',
+  VIEW_ALL_ACTIONS: 'action:view_all',
+  VIEW_OWN_ACTIONS: 'action:view_own',
+  ADD_ACTION_ATTACHMENTS: 'action:attachment',
+  ACTION_REPORTS: 'report:action',
+  
+  // Participants permissions
+  ADD_PARTICIPANTS: 'participant:add',
+  REMOVE_PARTICIPANTS: 'participant:remove',
+  VIEW_PARTICIPANTS: 'participant:view',
+  MANAGE_PARTICIPANT_LISTS: 'participant:manage_lists',
+  
+  // Reports permissions
+  EXPORT_REPORTS: 'report:export',
+  VIEW_REPORTS: 'report:view',
+  MEETING_REPORTS: 'report:meeting',
+  PARTICIPANT_REPORTS: 'report:participant',
+  VIEW_FINANCIAL_REPORTS: 'report:financial',
+  
+  // Dashboard permissions
+  VIEW_DASHBOARD: 'dashboard:view',
+  CUSTOMIZE_DASHBOARD: 'dashboard:customize',
+  DASHBOARD_OVERVIEW: 'dashboard:overview',
+  UPCOMING_MEETINGS_WIDGET: 'dashboard:upcoming_meetings',
+  RECENT_MEETINGS_WIDGET: 'dashboard:recent_meetings',
+  PENDING_ACTIONS_WIDGET: 'dashboard:pending_actions',
+  OVERDUE_ACTIONS_WIDGET: 'dashboard:overdue_actions',
+  NOTIFICATIONS_WIDGET: 'dashboard:notifications',
+  
+  // Audit permissions
+  VIEW_AUDIT_LOGS: 'admin:view_audit',
+  
+  // Location permissions
+  MANAGE_LOCATIONS: 'admin:manage_locations',
+  
+  // Structure permissions
+  CREATE_STRUCTURE: 'structure:create',
+  UPDATE_STRUCTURE: 'structure:update',
+  DELETE_STRUCTURE: 'structure:delete',
+  READ_STRUCTURE: 'structure:read',
+  MANAGE_ADMIN_STRUCTURES: 'admin:manage_structures',
+  
+  // User management
+  CREATE_USER: 'user:create',
+  UPDATE_USER: 'user:update',
+  DELETE_USER: 'user:delete',
+  READ_USER: 'user:read',
+  MANAGE_USERS: 'admin:manage_users',
+  VIEW_OTHERS_PROFILES: 'profile:view_others',
+  UPDATE_PROFILE: 'profile:update',
+  READ_PROFILE: 'profile:read',
+  VIEW_PROFILE: 'profile:view',
+  CHANGE_PASSWORD: 'profile:change_password',
+  
+  // Role management
+  MANAGE_ROLES: 'admin:manage_roles',
+  ASSIGN_ROLE: 'role:assign',
+  
+  // Menu management
+  MANAGE_MENU_ASSIGNMENT: 'admin:manage_menu_assignment',
+  
+  // Payment permissions
+  CREATE_PAYMENT: 'payment:create',
+  READ_PAYMENT: 'payment:read',
+  UPDATE_PAYMENT: 'payment:update',
+  PROCESS_PAYMENT: 'payment:process',
+  
+  // Lease permissions
+  CREATE_LEASE: 'lease:create',
+  READ_LEASE: 'lease:read',
+  UPDATE_LEASE: 'lease:update',
+  TERMINATE_LEASE: 'lease:terminate',
+  
+  // Tenant permissions
+  CREATE_TENANT: 'tenant:create',
+  READ_TENANT: 'tenant:read',
+  UPDATE_TENANT: 'tenant:update',
+  DELETE_TENANT: 'tenant:delete',
+};
 
 // ==================== Constants ====================
 const NOT_FOUND_DELAY_MS = 7000;
@@ -157,25 +273,43 @@ const STATUS_CONFIG = {
   awaiting:    { label: 'Awaiting',    icon: <HourglassEmptyIcon />, color: 'warning', action: 'Awaiting Action' },
 };
 
-// Tab configurations — `simple: true` = shown in both modes; `simple: false` = detailed only
+// Tab configurations
+// Tab configurations with correct permission codes
 const TABS = [
-  { label: 'Minutes',      icon: <DescriptionIcon />,       value: 0, simple: true  },
-  { label: 'Actions',      icon: <AssignmentIcon />,        value: 1, simple: true  },
-  { label: 'Participants', icon: <PeopleIcon />,            value: 2, simple: true  },
-  { label: 'Documents',    icon: <DescriptionIcon />,       value: 3, simple: false },
-  { label: 'History',      icon: <HistoryIcon />,           value: 4, simple: false },
-  { label: 'Audit',        icon: <HistoryIcon />,           value: 5, simple: false },
-  { label: 'Recordings',   icon: <FiberManualRecordIcon />, value: 6, simple: false, recording: true },
+  { label: 'Minutes',      icon: <DescriptionIcon />,       value: 0, simple: true, requiresPermission: PERMISSIONS.VIEW_MINUTES },
+  { label: 'Actions',      icon: <AssignmentIcon />,        value: 1, simple: true, requiresPermission: PERMISSIONS.VIEW_OWN_ACTIONS },
+  { label: 'Participants', icon: <PeopleIcon />,            value: 2, simple: true, requiresPermission: PERMISSIONS.VIEW_PARTICIPANTS },
+  { label: 'Documents',    icon: <DescriptionIcon />,       value: 3, simple: false, requiresPermission: null },
+  { label: 'History',      icon: <HistoryIcon />,           value: 4, simple: false, requiresPermission: null },
+  { label: 'Audit',        icon: <HistoryIcon />,           value: 5, simple: false, requiresPermission: PERMISSIONS.VIEW_AUDIT_LOGS },
+  { label: 'Recordings',   icon: <FiberManualRecordIcon />, value: 6, simple: false, requiresPermission: PERMISSIONS.VIEW_RECORDER },
 ];
 
-// Speed Dial Actions
-const SPEED_DIAL_ACTIONS = [
-  { icon: <EditIcon />,          name: 'Edit',        action: 'edit'   },
-  { icon: <NotificationsIcon />, name: 'Notify',      action: 'notify' },
-  { icon: <ShareIcon />,         name: 'Share',       action: 'share'  },
-  { icon: <PictureAsPdfIcon />,  name: 'PDF Report',  action: 'pdf'    },
-  { icon: <CodeIcon />,          name: 'Export JSON', action: 'json'   },
-];
+// Speed Dial Actions with permissions
+const getSpeedDialActions = (hasUpdatePermission, hasNotificationPermission, hasEmailPermission, hasExportPermission, hasDeletePermission) => {
+  const actions = [];
+  
+  if (hasUpdatePermission) {
+    actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit', requiresPermission: PERMISSIONS.UPDATE_MEETING });
+  }
+  
+  if (hasNotificationPermission || hasEmailPermission) {
+    actions.push({ icon: <NotificationsIcon />, name: 'Notify', action: 'notify', requiresPermission: null });
+  }
+  
+  actions.push({ icon: <ShareIcon />, name: 'Share', action: 'share', requiresPermission: null });
+  
+  if (hasExportPermission) {
+    actions.push({ icon: <PictureAsPdfIcon />, name: 'PDF Report', action: 'pdf', requiresPermission: PERMISSIONS.EXPORT_REPORTS });
+    actions.push({ icon: <CodeIcon />, name: 'Export JSON', action: 'json', requiresPermission: PERMISSIONS.EXPORT_REPORTS });
+  }
+  
+  if (hasDeletePermission) {
+    actions.push({ icon: <DeleteIcon />, name: 'Delete', action: 'delete', requiresPermission: PERMISSIONS.DELETE_MEETING });
+  }
+  
+  return actions;
+};
 
 // ==================== Helper Functions ====================
 const getLevelInfo = (level) =>
@@ -426,9 +560,14 @@ const HeaderBar = memo(({
   getStatusDisplay,
   isMobile,
   canRecord,
+  hasRecordPermission,
   onRecord,
   viewMode,
   onViewModeChange,
+  canSendNotifications,
+  hasUpdatePermission,
+  hasSendInAppPermission,
+  hasSendEmailPermission
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -460,11 +599,13 @@ const HeaderBar = memo(({
 
         {isMobile ? (
           <Stack direction="row" spacing={0.5}>
-            <IconButton onClick={onNotify}>
-              <Badge badgeContent={participantCount} color="error">
-                <NotificationsIcon />
-              </Badge>
-            </IconButton>
+            {canSendNotifications && (
+              <IconButton onClick={onNotify}>
+                <Badge badgeContent={participantCount} color="error">
+                  <NotificationsIcon />
+                </Badge>
+              </IconButton>
+            )}
             <IconButton onClick={onRefresh}>
               <RefreshIcon />
             </IconButton>
@@ -494,24 +635,38 @@ const HeaderBar = memo(({
                 <UpdateIcon />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Send Notifications">
-              <IconButton onClick={onNotify} size="small">
-                <Badge badgeContent={participantCount} color="error">
-                  <NotificationsIcon />
-                </Badge>
-              </IconButton>
-            </Tooltip>
+            {canSendNotifications && (
+              <Tooltip 
+                title={
+                  <>
+                    Send Notifications
+                    {hasSendInAppPermission && ' (In-App)'}
+                    {hasSendEmailPermission && ' (Email)'}
+                  </>
+                } 
+                arrow
+              >
+                <IconButton onClick={onNotify} size="small">
+                  <Badge badgeContent={participantCount} color="error">
+                    <NotificationsIcon />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+            )}
             <Tooltip title="Refresh">
               <IconButton onClick={onRefresh} size="small">
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Edit Meeting">
-              <IconButton onClick={onEdit} size="small">
-                <EditIcon />
-              </IconButton>
-            </Tooltip>
-            {canRecord && (
+            {hasUpdatePermission && (
+              <Tooltip title="Edit Meeting">
+                <IconButton onClick={onEdit} size="small">
+                  <EditIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            {/* Record button - requires BOTH canRecord (meeting status) AND hasRecordPermission (user permission) */}
+            {canRecord && hasRecordPermission && (
               <Tooltip title="Record Meeting">
                 <IconButton
                   onClick={onRecord}
@@ -825,6 +980,57 @@ const MeetingDetail = () => {
   const sendingNotifications = useSelector(selectNotificationSending);
   const notificationError = useSelector(selectNotificationError);
   const lastNotificationResult = useSelector(selectLastNotificationResult);
+  
+  // Permission selectors
+  const userPermissions = useSelector(selectUserPermissions);
+  const currentUser = useSelector((state) => state.auth.user);
+  
+  // Individual permission checks
+  const hasDeleteMeetingPermission = hasPermission(userPermissions, PERMISSIONS.DELETE_MEETING);
+  const hasUpdateMeetingPermission = hasPermission(userPermissions, PERMISSIONS.UPDATE_MEETING);
+  const hasRecordPermission = hasPermission(userPermissions, PERMISSIONS.RECORD_MEETING);
+  const hasViewRecorderPermission = hasPermission(userPermissions, PERMISSIONS.VIEW_RECORDER);
+  const hasSendInAppNotificationPermission = hasPermission(userPermissions, PERMISSIONS.SEND_NOTIFICATIONS);
+  const hasSendEmailNotificationPermission = hasPermission(userPermissions, PERMISSIONS.SEND_EMAIL_NOTIFICATIONS);
+  const hasExportReportPermission = hasPermission(userPermissions, PERMISSIONS.EXPORT_REPORTS);
+  const hasViewAuditPermission = hasPermission(userPermissions, PERMISSIONS.VIEW_AUDIT_LOGS);
+  
+  // Check if user is admin/superuser
+  const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
+  
+  // Check if user is the meeting creator
+  const isMeetingCreator = useMemo(() => {
+    return currentMeeting?.created_by === currentUser?.id;
+  }, [currentMeeting, currentUser]);
+  
+  // Combined permission checks
+  const canDeleteMeeting = useMemo(() => {
+    if (isAdmin) return true;
+    if (hasDeleteMeetingPermission) return true;
+    return false;
+  }, [isAdmin, hasDeleteMeetingPermission]);
+  
+  const canUpdateMeeting = useMemo(() => {
+    if (isAdmin) return true;
+    if (hasUpdateMeetingPermission) return true;
+    return false;
+  }, [isAdmin, hasUpdateMeetingPermission]);
+  
+  const canSendNotifications = useMemo(() => {
+    return hasSendInAppNotificationPermission || hasSendEmailNotificationPermission;
+  }, [hasSendInAppNotificationPermission, hasSendEmailNotificationPermission]);
+  
+  const canExportReports = useMemo(() => {
+    if (isAdmin) return true;
+    if (hasExportReportPermission) return true;
+    return false;
+  }, [isAdmin, hasExportReportPermission]);
+  
+  const canViewAudit = useMemo(() => {
+    if (isAdmin) return true;
+    if (hasViewAuditPermission) return true;
+    return false;
+  }, [isAdmin, hasViewAuditPermission]);
 
   // Local state
   const [tabValue, setTabValue] = useState(0);
@@ -856,6 +1062,17 @@ const MeetingDetail = () => {
     localStorage.setItem('meetingViewMode', mode);
   }, []);
 
+  // Speed dial actions based on permissions
+  const speedDialActions = useMemo(() => {
+    return getSpeedDialActions(
+      canUpdateMeeting,
+      hasSendInAppNotificationPermission,
+      hasSendEmailNotificationPermission,
+      canExportReports,
+      canDeleteMeeting
+    );
+  }, [canUpdateMeeting, hasSendInAppNotificationPermission, hasSendEmailNotificationPermission, canExportReports, canDeleteMeeting]);
+
   // Memoized values
   const normalizedMeeting = useMemo(
     () => (currentMeeting ? { ...currentMeeting, status: normalizeStatus(currentMeeting.status) } : null),
@@ -874,6 +1091,7 @@ const MeetingDetail = () => {
 
   const participantCount = useMemo(() => participants.length, [participants]);
 
+  // Can record based on meeting status (not permission - that's separate)
   const canRecord = useMemo(
     () =>
       normalizedMeeting?.status?.short_name === 'started' ||
@@ -881,6 +1099,24 @@ const MeetingDetail = () => {
       normalizedMeeting?.status?.short_name === 'in_progress',
     [normalizedMeeting?.status?.short_name]
   );
+
+  // Filter tabs based on user permissions
+  const visibleTabs = useMemo(() => {
+    const filtered = TABS.filter((tab) => {
+      // If tab requires a permission, check if user has it
+      if (tab.requiresPermission) {
+        if (tab.requiresPermission === PERMISSIONS.VIEW_RECORDER) {
+          return hasViewRecorderPermission;
+        }
+        if (tab.requiresPermission === PERMISSIONS.VIEW_AUDIT_LOGS) {
+          return canViewAudit;
+        }
+        return hasPermission(userPermissions, tab.requiresPermission);
+      }
+      return true;
+    });
+    return filtered;
+  }, [hasViewRecorderPermission, canViewAudit, userPermissions]);
 
   const getStatusValue = useCallback(() => {
     const status = normalizedMeeting?.status;
@@ -928,6 +1164,10 @@ const MeetingDetail = () => {
 
   // Report/export handlers
   const handlePrintPDF = useCallback(async () => {
+    if (!canExportReports) {
+      setSnackbar({ open: true, message: 'You don\'t have permission to export reports', severity: 'error' });
+      return;
+    }
     setSnackbar({ open: true, message: 'Generating PDF report...', severity: 'info' });
     try {
       const token = localStorage.getItem('access_token');
@@ -949,9 +1189,13 @@ const MeetingDetail = () => {
       console.error('Error generating report:', error);
       setSnackbar({ open: true, message: 'Failed to generate report', severity: 'error' });
     }
-  }, [id]);
+  }, [id, canExportReports]);
 
   const handleExportJSON = useCallback(async () => {
+    if (!canExportReports) {
+      setSnackbar({ open: true, message: 'You don\'t have permission to export data', severity: 'error' });
+      return;
+    }
     setSnackbar({ open: true, message: 'Exporting data...', severity: 'info' });
     try {
       const token = localStorage.getItem('access_token');
@@ -974,7 +1218,7 @@ const MeetingDetail = () => {
       console.error('Error exporting data:', error);
       setSnackbar({ open: true, message: 'Failed to export data', severity: 'error' });
     }
-  }, [id]);
+  }, [id, canExportReports]);
 
   // Effects
   useEffect(() => {
@@ -1043,8 +1287,22 @@ const MeetingDetail = () => {
   }, [fetchMeeting, fetchParticipants]);
 
   const handleBack   = useCallback(() => navigate('/meetings'), [navigate]);
-  const handleEdit   = useCallback(() => navigate(`/meetings/${id}/edit`), [navigate, id]);
-  const handleRecord = useCallback(() => navigate(`/meetings/${id}/record`), [navigate, id]);
+  
+  const handleEdit   = useCallback(() => {
+    if (!canUpdateMeeting) {
+      setSnackbar({ open: true, message: 'You don\'t have permission to edit meetings', severity: 'error' });
+      return;
+    }
+    navigate(`/meetings/${id}/edit`);
+  }, [navigate, id, canUpdateMeeting]);
+  
+  const handleRecord = useCallback(() => {
+    if (!hasRecordPermission) {
+      setSnackbar({ open: true, message: 'You don\'t have permission to record meetings', severity: 'error' });
+      return;
+    }
+    navigate(`/meetings/${id}/record`);
+  }, [navigate, id, hasRecordPermission]);
 
   const handleJoinMeeting = useCallback(() => {
     if (!normalizedMeeting) return;
@@ -1069,13 +1327,48 @@ const MeetingDetail = () => {
   }, [id]);
 
   const handleNotifyClick = useCallback(() => {
+    if (!canSendNotifications) {
+      setSnackbar({ open: true, message: 'You don\'t have permission to send notifications', severity: 'error' });
+      return;
+    }
     fetchParticipants();
     setNotificationDialogOpen(true);
-  }, [fetchParticipants]);
+  }, [fetchParticipants, canSendNotifications]);
 
   const handleSendNotifications = useCallback(
-    (notificationData) => dispatch(sendMeetingNotifications({ meetingId: id, notificationData })),
-    [id, dispatch]
+    (notificationData) => {
+      // Ensure at least one notification type is selected
+      if (!notificationData.type || notificationData.type.length === 0) {
+        setSnackbar({ 
+          open: true, 
+          message: 'Please select at least one notification type', 
+          severity: 'warning' 
+        });
+        return;
+      }
+      
+      // Check permissions for selected types
+      if (notificationData.type.includes('email') && !hasSendEmailNotificationPermission) {
+        setSnackbar({ 
+          open: true, 
+          message: 'You do not have permission to send email notifications', 
+          severity: 'error' 
+        });
+        return;
+      }
+      
+      if (notificationData.type.includes('in_app') && !hasSendInAppNotificationPermission) {
+        setSnackbar({ 
+          open: true, 
+          message: 'You do not have permission to send in-app notifications', 
+          severity: 'error' 
+        });
+        return;
+      }
+      
+      dispatch(sendMeetingNotifications({ meetingId: id, notificationData }));
+    },
+    [id, dispatch, hasSendEmailNotificationPermission, hasSendInAppNotificationPermission]
   );
 
   const handleStatusMenuOpen  = (event) => setStatusMenuAnchor(event.currentTarget);
@@ -1106,7 +1399,14 @@ const MeetingDetail = () => {
     }
   };
 
-  const handleDeleteClick = () => { setDeleteDialogOpen(true); handleMoreMenuClose(); };
+  const handleDeleteClick = () => { 
+    if (!canDeleteMeeting) {
+      setSnackbar({ open: true, message: 'You don\'t have permission to delete meetings', severity: 'error' });
+      return;
+    }
+    setDeleteDialogOpen(true); 
+    handleMoreMenuClose(); 
+  };
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -1129,6 +1429,7 @@ const MeetingDetail = () => {
       case 'share':  setShareDialogOpen(true);       break;
       case 'pdf':    handlePrintPDF();               break;
       case 'json':   handleExportJSON();             break;
+      case 'delete': handleDeleteClick();            break;
       default: break;
     }
     setSpeedDialOpen(false);
@@ -1203,8 +1504,13 @@ const MeetingDetail = () => {
         getStatusDisplay={getStatusDisplay}
         isMobile={isMobile}
         canRecord={canRecord}
+        hasRecordPermission={hasRecordPermission}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
+        canSendNotifications={canSendNotifications}
+        hasUpdatePermission={canUpdateMeeting}
+        hasSendInAppPermission={hasSendInAppNotificationPermission}
+        hasSendEmailPermission={hasSendEmailNotificationPermission}
       />
 
       <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
@@ -1223,12 +1529,17 @@ const MeetingDetail = () => {
         />
 
         {(() => {
-          // Filter visible tabs based on view mode
-          const visibleTabs = TABS.filter((t) => viewMode === 'detailed' || t.simple);
+          // Filter visible tabs based on view mode and permissions
+          const filteredByMode = visibleTabs.filter((t) => viewMode === 'detailed' || t.simple);
           // Find which visible-tab index corresponds to the currently active tab value
-          const visibleIndex = visibleTabs.findIndex((t) => t.value === tabValue);
+          const visibleIndex = filteredByMode.findIndex((t) => t.value === tabValue);
           const activeVisibleIndex = visibleIndex === -1 ? 0 : visibleIndex;
-          const handleTabChange = (_, newVisibleIdx) => setTabValue(visibleTabs[newVisibleIdx].value);
+          const handleTabChange = (_, newVisibleIdx) => setTabValue(filteredByMode[newVisibleIdx].value);
+
+          // Don't show tabs if no tabs are visible
+          if (filteredByMode.length === 0) {
+            return null;
+          }
 
           return (
             <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
@@ -1261,13 +1572,13 @@ const MeetingDetail = () => {
                     '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 },
                   }}
                 >
-                  {visibleTabs.map((tab) => (
+                  {filteredByMode.map((tab) => (
                     <Tab
                       key={tab.value}
                       icon={tab.icon}
                       iconPosition="start"
                       label={tab.label}
-                      sx={tab.recording && canRecord ? { color: '#f44336' } : {}}
+                      sx={tab.recording && canRecord && hasRecordPermission ? { color: '#f44336' } : {}}
                     />
                   ))}
                 </Tabs>
@@ -1275,11 +1586,11 @@ const MeetingDetail = () => {
                 {/* "+N more" chip — shown in simple mode, clicking switches to detailed */}
                 {viewMode === 'simple' && (
                   <Tooltip
-                    title={`Also available: ${TABS.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`}
+                    title={`Also available: ${visibleTabs.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`}
                     arrow
                   >
                     <Chip
-                      label={`+${TABS.filter((t) => !t.simple).length} more`}
+                      label={`+${visibleTabs.filter((t) => !t.simple).length} more`}
                       size="small"
                       onClick={() => handleViewModeChange('detailed')}
                       sx={{
@@ -1325,12 +1636,18 @@ const MeetingDetail = () => {
                 <TabPanel value={tabValue} index={4}>
                   <MeetingHistory meetingId={id} />
                 </TabPanel>
-                <TabPanel value={tabValue} index={5}>
-                  <MeetingAudit meetingId={id} />
-                </TabPanel>
-                <TabPanel value={tabValue} index={6}>
-                  <MeetingRecorder meetingId={id} />
-                </TabPanel>
+                {/* Audit tab - only shown if user has view audit permission */}
+                {canViewAudit && (
+                  <TabPanel value={tabValue} index={5}>
+                    <MeetingAudit meetingId={id} />
+                  </TabPanel>
+                )}
+                {/* Recordings tab - only shown if user has view_recorder permission */}
+                {hasViewRecorderPermission && (
+                  <TabPanel value={tabValue} index={6}>
+                    <MeetingRecorder meetingId={id} />
+                  </TabPanel>
+                )}
               </Box>
             </Paper>
           );
@@ -1338,7 +1655,7 @@ const MeetingDetail = () => {
       </Container>
 
       {/* Speed Dial — mobile only */}
-      {isMobile && (
+      {isMobile && speedDialActions.length > 0 && (
         <Zoom in={true}>
           <SpeedDial
             ariaLabel="Meeting Actions"
@@ -1348,7 +1665,7 @@ const MeetingDetail = () => {
             onOpen={() => setSpeedDialOpen(true)}
             open={speedDialOpen}
           >
-            {SPEED_DIAL_ACTIONS.map((action) => (
+            {speedDialActions.map((action) => (
               <SpeedDialAction
                 key={action.name}
                 icon={action.icon}
@@ -1366,35 +1683,67 @@ const MeetingDetail = () => {
           <ListItemIcon><UpdateIcon /></ListItemIcon>
           <ListItemText>Update Meeting Link</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleNotifyClick}>
-          <ListItemIcon><NotificationsIcon /></ListItemIcon>
-          <ListItemText>Send Notifications</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={handleEdit}>
-          <ListItemIcon><EditIcon /></ListItemIcon>
-          <ListItemText>Edit Meeting</ListItemText>
-        </MenuItem>
+        
+        {/* Send Notifications - shows if user has either permission */}
+        {canSendNotifications && (
+          <MenuItem onClick={handleNotifyClick}>
+            <ListItemIcon>
+              <Badge badgeContent={participantCount} color="error">
+                <NotificationsIcon />
+              </Badge>
+            </ListItemIcon>
+            <ListItemText>
+              Send Notifications
+              <Typography variant="caption" display="block" color="text.secondary">
+                {hasSendInAppNotificationPermission && 'In-App '}
+                {hasSendInAppNotificationPermission && hasSendEmailNotificationPermission && '& '}
+                {hasSendEmailNotificationPermission && 'Email'}
+              </Typography>
+            </ListItemText>
+          </MenuItem>
+        )}
+        
+        {/* Update Meeting - requires update permission */}
+        {canUpdateMeeting && (
+          <MenuItem onClick={handleEdit}>
+            <ListItemIcon><EditIcon /></ListItemIcon>
+            <ListItemText>Edit Meeting</ListItemText>
+          </MenuItem>
+        )}
+        
         <MenuItem onClick={handleStatusMenuOpen}>
           <ListItemIcon>{getStatusIcon()}</ListItemIcon>
           <ListItemText>Update Status</ListItemText>
         </MenuItem>
+        
         <MenuItem onClick={() => { setShareDialogOpen(true); handleMoreMenuClose(); }}>
           <ListItemIcon><ShareIcon /></ListItemIcon>
           <ListItemText>Share Meeting</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handlePrintPDF}>
-          <ListItemIcon><PictureAsPdfIcon /></ListItemIcon>
-          <ListItemText>PDF Report</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={handleExportJSON}>
-          <ListItemIcon><CodeIcon /></ListItemIcon>
-          <ListItemText>Export JSON</ListItemText>
-        </MenuItem>
+        
+        {/* Export options - requires export permission */}
+        {canExportReports && (
+          <>
+            <MenuItem onClick={handlePrintPDF}>
+              <ListItemIcon><PictureAsPdfIcon /></ListItemIcon>
+              <ListItemText>PDF Report</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={handleExportJSON}>
+              <ListItemIcon><CodeIcon /></ListItemIcon>
+              <ListItemText>Export JSON</ListItemText>
+            </MenuItem>
+          </>
+        )}
+        
         <Divider />
-        <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
-          <ListItemIcon><DeleteIcon sx={{ color: 'error.main' }} /></ListItemIcon>
-          <ListItemText>Delete Meeting</ListItemText>
-        </MenuItem>
+        
+        {/* Delete Meeting - Only show if user has permission */}
+        {canDeleteMeeting && (
+          <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
+            <ListItemIcon><DeleteIcon sx={{ color: 'error.main' }} /></ListItemIcon>
+            <ListItemText>Delete Meeting</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
 
       {/* Status Update Menu */}
@@ -1572,6 +1921,8 @@ const MeetingDetail = () => {
         participants={participants}
         onSend={handleSendNotifications}
         sending={sendingNotifications}
+        hasEmailPermission={hasSendEmailNotificationPermission}
+        hasInAppPermission={hasSendInAppNotificationPermission}
       />
 
       {/* Snackbar */}

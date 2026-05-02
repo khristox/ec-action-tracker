@@ -1,4 +1,4 @@
-// App.jsx - Improved Solution 2
+// App.jsx - MeetingRecorderProvider only where needed
 
 import React, { 
   useEffect, 
@@ -24,9 +24,7 @@ import { ThemeContextProvider } from './context/ThemeProvider';
 import Layout from './components/common/Layout';
 import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
 
-
-// Error Boundary Component (same as before)
-// Error Boundary Component - Fixed
+// Error Boundary Component
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -96,10 +94,9 @@ const COMPONENT_IMPORTS = {
   'CreateMeeting': () => import('./components/actiontracker/meetings/CreateMeeting'),
   'MeetingDetail': () => import('./components/actiontracker/meetings/MeetingDetail'),
   'EditMeeting': () => import('./components/actiontracker/meetings/EditMeeting'),
-
   'MeetingForm': () => import('./components/actiontracker/meetings/MeetingForm'),
+  'MeetingRecorder': () => import('./components/actiontracker/meetings/MeetingRecorder'),
   
-   
   // Action Tracker - Actions
   'ActionsList': () => import('./components/actiontracker/actions/ActionsList'),
   'MyTasks': () => import('./components/actiontracker/actions/MyTasks'),
@@ -108,7 +105,6 @@ const COMPONENT_IMPORTS = {
   'OverdueActions': () => import('./components/actiontracker/actions/OverdueActions'),
   'AssignAction': () => import('./components/actiontracker/actions/AssignAction'),
   'UpdateProgress': () => import('./components/actiontracker/actions/UpdateProgress'),
-  'MeetingRecorder': () => import('./components/actiontracker/meetings/MeetingRecorder'),
   
   // Action Tracker - Participants
   'ParticipantsLists': () => import('./components/actiontracker/participants/ParticipantsLists'),
@@ -126,7 +122,6 @@ const COMPONENT_IMPORTS = {
   'Settings': () => import('./components/actiontracker/settings/Settings'),
   'Locations': () => import('./components/address/LocationManager'),
 
-  
   // Profile Components
   'Profile': () => import('./components/profile/ProfileSettings'),
   'ProfileSettings': () => import('./components/profile/ProfileSettings'),
@@ -196,13 +191,11 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
   
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      
       const module = await importFn();
       const Component = module.default || module;
       
       // Cache the component
       componentCache.set(componentName, Promise.resolve(module));
-      
       
       return module;
       
@@ -237,7 +230,6 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
 const preloadCriticalComponents = async () => {
   const criticalComponents = ['Dashboard', 'MyTasks', 'ActionsList'];
   
-  
   const preloadPromises = criticalComponents.map(componentName => 
     loadComponent(componentName, 1, 500).catch(err => 
       console.warn(`[Preload] Failed to preload ${componentName}:`, err)
@@ -252,21 +244,23 @@ const preloadCriticalComponents = async () => {
  */
 const preloadRoleBasedComponents = async (userRoles) => {
   const roleComponents = {
-    admin: ['UserManagement', 'RoleManagement',  'RoleMenuAssignment', 'AuditLogs','Locations'],
+    admin: ['UserManagement', 'RoleManagement', 'RoleMenuAssignment', 'AuditLogs', 'Locations'],
     user: ['Profile', 'ProfileSettings'],
     manager: ['ReportsList', 'CalendarView']
   };
   
   const componentsToPreload = [];
   
-  for (const role of userRoles) {
+  // Convert role codes to string if they're objects
+  const roleCodes = userRoles.map(role => typeof role === 'object' ? role.code : role);
+  
+  for (const role of roleCodes) {
     if (roleComponents[role]) {
       componentsToPreload.push(...roleComponents[role]);
     }
   }
   
   if (componentsToPreload.length > 0) {
-    
     const preloadPromises = componentsToPreload.map(componentName =>
       loadComponent(componentName, 1, 500).catch(err =>
         console.warn(`[Preload] Failed to preload ${componentName}:`, err)
@@ -294,6 +288,7 @@ const MeetingForm = createLazyComponent('MeetingForm');
 const CreateMeeting = createLazyComponent('CreateMeeting');
 const MeetingDetail = createLazyComponent('MeetingDetail');
 const EditMeeting = createLazyComponent('EditMeeting');
+const MeetingRecorder = createLazyComponent('MeetingRecorder');
 
 // Action Tracker - Actions
 const ActionsList = createLazyComponent('ActionsList', { preload: true });
@@ -303,8 +298,6 @@ const ActionDetail = createLazyComponent('ActionDetail');
 const OverdueActions = createLazyComponent('OverdueActions');
 const AssignAction = createLazyComponent('AssignAction');
 const UpdateProgress = createLazyComponent('UpdateProgress');
-
-const MeetingRecorder = createLazyComponent('MeetingRecorder');
 
 // Action Tracker - Participants
 const ParticipantsLists = createLazyComponent('ParticipantsLists');
@@ -332,14 +325,14 @@ const PreferenceSettings = createLazyComponent('PreferenceSettings');
 // Admin Components
 const UserManagement = createLazyComponent('UserManagement');
 const RoleManagement = createLazyComponent('RoleManagement');
-const RoleMenuAssignment = createLazyComponent('RoleMenuAssignment'); // NEW
+const RoleMenuAssignment = createLazyComponent('RoleMenuAssignment');
 const AuditLogs = createLazyComponent('AuditLogs');
 
 // Error Pages
 const NotFound = createLazyComponent('NotFound');
 const Forbidden = createLazyComponent('Forbidden');
 
-// Animations (keep your existing animations)
+// Animations
 const pulse = keyframes`
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.05); opacity: 0.8; }
@@ -394,6 +387,18 @@ const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, 
 };
 
 /**
+ * Recording Route Wrapper - ONLY provides MeetingRecorderContext for recording routes
+ * This ensures microphone is ONLY requested when user navigates to actual recording page
+ */
+const RecordingRouteWrapper = ({ children }) => {
+  return (
+    <MeetingRecorderProvider>
+      {children}
+    </MeetingRecorderProvider>
+  );
+};
+
+/**
  * Role-Based Protected Route with preloading
  */
 const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = [] }) => {
@@ -417,8 +422,10 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
 
   // Check roles
   if (requiredRoles.length > 0) {
+    // Handle both string roles and object roles
     const userRoles = user?.roles || [];
-    const hasRole = requiredRoles.some(role => userRoles.includes(role));
+    const userRoleCodes = userRoles.map(role => typeof role === 'object' ? role.code : role);
+    const hasRole = requiredRoles.some(role => userRoleCodes.includes(role));
     if (!hasRole) {
       return <Navigate to="/forbidden" replace />;
     }
@@ -452,7 +459,7 @@ const PublicRoute = ({ children }) => {
 };
 
 /**
- * Route configuration
+ * Route configuration - SEPARATED recording routes from regular meeting routes
  */
 const routeConfig = {
   publicRoutes: [
@@ -465,12 +472,21 @@ const routeConfig = {
     { path: "/403", element: <Forbidden /> },
     { path: "/404", element: <NotFound /> },
   ],
-  protectedRoutes: [
-    { path: "dashboard", element: <Dashboard /> },
+  // ONLY routes that need microphone access (recording)
+  // These will be wrapped with MeetingRecorderProvider
+  recordingRoutes: [
+    { path: "meetings/:id/record", element: <MeetingRecorder /> },
+  ],
+  // Regular meeting routes - NO microphone access needed
+  regularMeetingRoutes: [
     { path: "meetings", element: <Meetings /> },
     { path: "meetings/create", element: <MeetingForm /> },
     { path: "meetings/:id", element: <MeetingDetail /> },
     { path: "meetings/:id/edit", element: <MeetingForm /> },
+  ],
+  // Standard protected routes (no MeetingRecorderProvider needed)
+  protectedRoutes: [
+    { path: "dashboard", element: <Dashboard /> },
     { path: "actions", element: <ActionsList /> },
     { path: "actions/all", element: <AllActions /> },
     { path: "actions/my-tasks", element: <MyTasks /> },
@@ -481,8 +497,6 @@ const routeConfig = {
     { path: "actions/edit/:id", element: <AssignAction /> },
     { path: "actions/:id/assign", element: <AssignAction /> },
     { path: "actions/progress", element: <UpdateProgress /> },
-    { path: "meetings/:id/record", element: <MeetingRecorder /> },
-
     { path: "actions/:id/progress", element: <UpdateProgress /> },
     { path: "participants", element: <ParticipantsLists /> },
     { path: "participants/create", element: <CreateParticipant /> },
@@ -518,10 +532,7 @@ const routeConfig = {
     { path: "admin/audit", element: <AuditLogs />, roles: ['admin', 'auditor'] },
     { path: "settings/users", element: <UserManagement />, roles: ['admin'] },
     { path: "settings/roles", element: <RoleManagement />, roles: ['admin'] },
-     { path: "settings/role-menu-assignment", element: <RoleMenuAssignment />, roles: ['admin'] },
-
-
-  
+    { path: "settings/role-menu-assignment", element: <RoleMenuAssignment />, roles: ['admin'] },
   ],
 };
 
@@ -617,7 +628,35 @@ const AppContent = () => {
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             
-            {/* Standard Protected Routes */}
+            {/* Regular Meeting Routes - NO MeetingRecorderProvider (no microphone request) */}
+            {routeConfig.regularMeetingRoutes.map(({ path, element }) => (
+              <Route 
+                key={path} 
+                path={path} 
+                element={
+                  <Suspense fallback={<LoadingScreen message="Loading meeting page..." fullScreen={false} />}>
+                    {element}
+                  </Suspense>
+                } 
+              />
+            ))}
+            
+            {/* Recording Routes ONLY - Wrapped with MeetingRecorderProvider (microphone requested only here) */}
+            {routeConfig.recordingRoutes.map(({ path, element }) => (
+              <Route 
+                key={path} 
+                path={path} 
+                element={
+                  <RecordingRouteWrapper>
+                    <Suspense fallback={<LoadingScreen message="Loading recorder..." fullScreen={false} />}>
+                      {element}
+                    </Suspense>
+                  </RecordingRouteWrapper>
+                } 
+              />
+            ))}
+            
+            {/* Standard Protected Routes - No MeetingRecorderProvider needed */}
             {routeConfig.protectedRoutes.map(({ path, element }) => (
               <Route 
                 key={path} 
@@ -673,8 +712,6 @@ const AppContent = () => {
 export default function App() {
   const baseUrl = import.meta.env.BASE_URL;
   
-
-  
   return (
     <ThemeContextProvider>
       <SnackbarProvider 
@@ -683,12 +720,9 @@ export default function App() {
         autoHideDuration={4000}
         preventDuplicate
       >
-        <MeetingRecorderProvider>
-          <Router basename={baseUrl}>
-            <AppContent />
-          </Router>
-        </MeetingRecorderProvider>
-        
+        <Router basename={baseUrl}>
+          <AppContent />
+        </Router>
       </SnackbarProvider>
     </ThemeContextProvider>
   );

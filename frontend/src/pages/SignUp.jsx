@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Container, CssBaseline, alpha, useTheme } from '@mui/material';
+import { Box, CssBaseline, alpha, useTheme } from '@mui/material';
 import SignUpCard from '../components/auth/SignUpCard';
 
 const SignUp = () => {
@@ -20,27 +20,14 @@ const SignUp = () => {
              #0f172a` 
           : `radial-gradient(circle at 2% 10%, ${alpha(theme.palette.primary.main, 0.05)} 0%, transparent 40%),
              #f8fafc`,
-        // On mobile (xs), remove padding to allow the card to feel more integrated
-        py: { xs: 0, sm: 4 },
-        px: { xs: 0, sm: 2 },
+        // Responsive padding
+        p: { xs: 2, sm: 3, md: 4 },
       }}
     >
       <CssBaseline />
       
-      <Container 
-        maxWidth="sm" 
-        disableGutters // Removes default padding on mobile to "fill the screen"
-        sx={{ 
-          display: 'flex', 
-          justifyContent: 'center',
-          // Ensure the container itself fills height on tiny screens if needed
-          minHeight: { xs: '100vh', sm: 'auto' } 
-        }}
-      >
-        <Box sx={{ width: '100%', maxWidth: { xs: '100%', sm: 450 } }}>
-          <SignUpCard />
-        </Box>
-      </Container>
+      {/* REMOVED the restrictive Container and Box wrappers */}
+      <SignUpCard />
     </Box>
   );
 };

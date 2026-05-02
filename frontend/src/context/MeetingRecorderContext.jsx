@@ -72,12 +72,14 @@ export const MeetingRecorderProvider = ({ children }) => {
   // ── Meeting ───────────────────────────────────────────────────────────────
   const [currentMeetingId, setCurrentMeetingId] = useState(null);
 
+  // ── Preview tracking ── NO AUTO MICROPHONE REQUEST
+  const [previewRequested, setPreviewRequested] = useState(false);
+
   // ── Refs ──────────────────────────────────────────────────────────────────
   const mediaRecorderRef = useRef(null);
   const streamRef        = useRef(null);
   const timerRef         = useRef(null);
   const chunksRef        = useRef([]);
-  // FIX #5: expose videoRef so MeetingRecorder can attach the <video> element
   const videoRef         = useRef(null);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -90,7 +92,6 @@ export const MeetingRecorderProvider = ({ children }) => {
 
   const startTimer = () => {
     stopTimer();
-    // FIX #1: use functional setter so the timer correctly accumulates
     timerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
   };
 
@@ -99,20 +100,16 @@ export const MeetingRecorderProvider = ({ children }) => {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-    // Also clear the video preview
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
   // ── Enumerate devices ─────────────────────────────────────────────────────
-  // FIX #2: propagate NotAllowedError instead of silently swallowing it
   const enumerateDevices = useCallback(async () => {
     setStreamError(null);
     try {
-      // Trigger a real permission prompt for the relevant mode
       const permStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       permStream.getTracks().forEach(t => t.stop());
     } catch (err) {
-      // Permission denied at enumerate time — set a meaningful error
       setStreamError(friendlyError(err));
       return;
     }
@@ -131,8 +128,7 @@ export const MeetingRecorderProvider = ({ children }) => {
     }
   }, []);
 
-  // ── Start preview stream ──────────────────────────────────────────────────
-  // FIX #3 & #4: always surface NotAllowedError; attach stream to videoRef
+  // ── Start preview stream ── ONLY CALLED BY USER ACTION ────────────────────
   const startPreview = useCallback(async (mode, camId, micId, qual) => {
     const effectiveMode = mode   ?? recordingMode;
     const effectiveCam  = camId  ?? selectedCamera;
@@ -164,13 +160,13 @@ export const MeetingRecorderProvider = ({ children }) => {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
-      // Attach to video element for live preview
       if (isVideo && videoRef.current) {
         videoRef.current.srcObject = stream;
       }
 
       setStreamReady(true);
       setStreamError(null);
+      setPreviewRequested(true);
       return stream;
     } catch (err) {
       setStreamError(friendlyError(err));
@@ -179,22 +175,35 @@ export const MeetingRecorderProvider = ({ children }) => {
     }
   }, [recordingMode, selectedCamera, selectedMic, quality]);
 
-  // Re-run preview when device selection or mode changes (only if not recording)
+  // ── Initialize preview (user-triggered) ───────────────────────────────────
+  const initializePreview = useCallback(async () => {
+    if (previewRequested) return;
+    return await startPreview();
+  }, [previewRequested, startPreview]);
+
+  // ── REMOVED AUTO-STARTING USEFFECT ────────────────────────────────────────
+  // The old useEffect that automatically called startPreview() is GONE
+  // Now we only restart preview if user has already requested it
   useEffect(() => {
+    if (!previewRequested) return;
     if (isRecording || recordedUrl) return;
     startPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordingMode, selectedCamera, selectedMic, quality]);
+  }, [recordingMode, selectedCamera, selectedMic, quality, previewRequested, isRecording, recordedUrl, startPreview]);
 
   // ── Start recording ───────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
     if (isRecording) return;
 
-    // Reuse live stream or acquire a fresh one
+    // Initialize preview if not already done (this triggers mic permission)
+    if (!previewRequested) {
+      const stream = await startPreview();
+      if (!stream) return;
+    }
+
     let stream = streamRef.current?.active ? streamRef.current : null;
     if (!stream) {
       stream = await startPreview();
-      if (!stream) return; // error already set inside startPreview
+      if (!stream) return;
     }
 
     const isAudio   = recordingMode === RECORDING_MODE.audio;
@@ -242,7 +251,7 @@ export const MeetingRecorderProvider = ({ children }) => {
     setIsRecording(true);
     setIsPaused(false);
     startTimer();
-  }, [isRecording, recordingMode, fileFormat, startPreview]);
+  }, [isRecording, recordingMode, fileFormat, startPreview, previewRequested]);
 
   // ── Stop recording ────────────────────────────────────────────────────────
   const stopRecording = useCallback(() => {
@@ -252,7 +261,6 @@ export const MeetingRecorderProvider = ({ children }) => {
     stopTimer();
     setIsRecording(false);
     setIsPaused(false);
-    // Keep the stream alive for potential re-recording
   }, []);
 
   // ── Pause / Resume ────────────────────────────────────────────────────────
@@ -278,10 +286,11 @@ export const MeetingRecorderProvider = ({ children }) => {
     setRecordedBlob(null);
     setRecordingTime(0);
     setRecordingSize(0);
+    setPreviewRequested(false);
     chunksRef.current = [];
-    // Restart preview so the user can record again immediately
-    startPreview();
-  }, [startPreview]);
+    stopStream();
+    setStreamReady(false);
+  }, []);
 
   // ── Full reset ────────────────────────────────────────────────────────────
   const resetRecorder = useCallback(() => {
@@ -296,6 +305,7 @@ export const MeetingRecorderProvider = ({ children }) => {
     setStreamReady(false);
     setStreamError(null);
     setCurrentMeetingId(null);
+    setPreviewRequested(false);
     chunksRef.current = [];
   }, []);
 
@@ -308,7 +318,6 @@ export const MeetingRecorderProvider = ({ children }) => {
       stopTimer();
       stopStream();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Context value ─────────────────────────────────────────────────────────
@@ -330,6 +339,7 @@ export const MeetingRecorderProvider = ({ children }) => {
     streamReady,
     streamError,
     currentMeetingId,
+    previewRequested,
 
     // Constants
     RECORDING_QUALITY,
@@ -338,10 +348,11 @@ export const MeetingRecorderProvider = ({ children }) => {
     RECORDING_MODE,
 
     // Refs
-    videoRef, // FIX #5: now exposed so MeetingRecorder can attach <video>
+    videoRef,
 
     // Actions
     startPreview,
+    initializePreview,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -351,10 +362,10 @@ export const MeetingRecorderProvider = ({ children }) => {
     setMeetingId,
     enumerateDevices,
 
-    // Setters (with side-effect: restart preview when changed)
+    // Setters
     setRecordingMode: (mode) => {
       setRecordingMode(mode);
-      setFileFormat('webm'); // reset format when switching modes
+      setFileFormat('webm');
     },
     setQuality:        setQuality,
     setFileFormat:     setFileFormat,

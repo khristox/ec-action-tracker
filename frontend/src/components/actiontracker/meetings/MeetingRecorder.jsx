@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -9,18 +9,21 @@ import {
   useTheme, alpha, Tabs, Tab, LinearProgress, Accordion,
   AccordionSummary, AccordionDetails, Badge,
   List, ListItem, ListItemAvatar, ListItemText, Avatar,
+  Fade, Slide,
 } from '@mui/material';
 import {
   Stop, Pause, PlayArrow, Videocam, Mic,
   CloudUpload, Download, Timer, Storage,
   ExpandMore, CloudDone, Delete, CheckCircle,
   RadioButtonChecked, History, PlayCircle,
-  Warning as WarningIcon,
+  Warning as WarningIcon, MicOff, Settings,
+  Visibility, VisibilityOff, CheckCircleOutline,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import api from '../../../services/api';
 import { useMeetingRecorder, RECORDING_MODE } from '../../../context/MeetingRecorderContext';
 import { fetchMeetingById, selectCurrentMeeting } from '../../../store/slices/actionTracker/meetingSlice';
+import { hasPermission, selectUserPermissions } from '../../../store/slices/authSlice';
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 const formatTime = (seconds) => {
@@ -60,7 +63,6 @@ const TIME_LIMIT_OPTIONS = [
 // ─── Recording Badge with Time Limit ──────────────────────────────────────────
 const RecordingBadge = ({ time, isPaused, timeLimit, timeRemaining, isNearLimit }) => {
   const theme = useTheme();
-  const warningThreshold = 60; // 1 minute warning
   
   return (
     <Stack direction="row" alignItems="center" spacing={1.5}>
@@ -87,7 +89,7 @@ const RecordingBadge = ({ time, isPaused, timeLimit, timeRemaining, isNearLimit 
             fontFamily="monospace" 
             fontWeight={600}
             sx={{ 
-              color: timeRemaining <= warningThreshold ? theme.palette.error.main : theme.palette.text.secondary,
+              color: timeRemaining <= 60 ? theme.palette.error.main : theme.palette.text.secondary,
               display: 'flex',
               alignItems: 'center',
               gap: 0.5
@@ -133,6 +135,69 @@ const AudioWaveform = ({ active, barCount = 40 }) => (
     ))}
   </Box>
 );
+
+// ─── Permission Request Dialog ────────────────────────────────────────────────
+const PermissionRequestDialog = ({ open, onClose, onGrant, onRetry, mode, isChecking }) => {
+  const theme = useTheme();
+  
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: alpha(theme.palette.primary.main, 0.05) }}>
+        <Mic sx={{ color: 'primary.main' }} />
+        <Typography variant="h6" fontWeight={700}>Microphone Access Required</Typography>
+      </DialogTitle>
+      <DialogContent>
+        <Fade in timeout={500}>
+          <Stack spacing={3} sx={{ mt: 2 }}>
+            <Alert severity="info" icon={<Mic />}>
+              <Typography variant="body2" fontWeight={600} gutterBottom>
+                This meeting recorder needs access to your microphone
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Your microphone will only be used while recording. No audio is stored without your explicit action.
+              </Typography>
+            </Alert>
+            
+            <Box sx={{ p: 2, borderRadius: 2, bgcolor: alpha(theme.palette.info.main, 0.04) }}>
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                Why do we need this?
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                • Record meeting proceedings accurately
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                • Create audio/video recordings for future reference
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                • Ensure all meeting decisions are properly documented
+              </Typography>
+            </Box>
+            
+            {mode === 'video' && (
+              <Alert severity="warning" icon={<Videocam />}>
+                Camera access will also be requested for video recording
+              </Alert>
+            )}
+          </Stack>
+        </Fade>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} color="secondary">
+          Cancel
+        </Button>
+        <Button
+          onClick={onGrant}
+          variant="contained"
+          startIcon={isChecking ? <CircularProgress size={20} /> : <Mic />}
+          disabled={isChecking}
+          sx={{ bgcolor: '#7C3AED', '&:hover': { bgcolor: '#6D28D9' } }}
+        >
+          {isChecking ? 'Requesting...' : 'Allow Microphone Access'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
 
 // ─── Time Limit Warning Dialog ────────────────────────────────────────────────
 const TimeLimitWarningDialog = ({ open, onClose, onExtend, onStop, timeLimit, timeRemaining }) => {
@@ -193,7 +258,14 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
   const theme          = useTheme();
   const effectiveId    = meetingId || id;
   const currentMeeting = useSelector(selectCurrentMeeting);
+  const userPermissions = useSelector(selectUserPermissions);
   const recorder       = useMeetingRecorder();
+
+  // Permission state
+  const [showPermissionDialog, setShowPermissionDialog] = useState(false);
+  const [permissionRequested, setPermissionRequested] = useState(false);
+  const [permissionCheckDone, setPermissionCheckDone] = useState(false);
+  const [hasMicPermission, setHasMicPermission] = useState(false);
 
   // ── Local UI state ──────────────────────────────────────────────────────
   const [activeTab,             setActiveTab]             = useState(0);
@@ -211,6 +283,7 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
   const [snackbar,              setSnackbar]              = useState({ open: false, message: '', severity: 'success' });
   const [advancedOpen,          setAdvancedOpen]          = useState(false);
   const [streamUrl,             setStreamUrl]             = useState(null);
+  const [isInitializing,        setIsInitializing]        = useState(false);
   
   // ── Time Limit State ────────────────────────────────────────────────────
   const [timeLimit,             setTimeLimit]             = useState(3600); // Default 1 hour
@@ -221,12 +294,97 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
   // ── Derived ─────────────────────────────────────────────────────────────
   const isAudioMode   = recorder.recordingMode === RECORDING_MODE.audio;
   const activeFormats = isAudioMode ? recorder.AUDIO_FORMATS : recorder.RECORDING_FORMATS;
-  const canStart = isAudioMode ? true : (recorder.streamReady && !recorder.streamError);
+  const canStart = hasMicPermission && (isAudioMode ? true : (recorder.streamReady && !recorder.streamError));
   
   // Calculate time remaining
   const timeRemaining = timeLimit > 0 ? Math.max(0, timeLimit - recorder.recordingTime) : 0;
   const isNearLimit = timeLimit > 0 && timeRemaining <= 60 && timeRemaining > 0; // Last minute
   const shouldAutoStop = timeLimit > 0 && timeRemaining <= 0 && recorder.isRecording && !autoStopTriggered;
+
+  // ── Check permissions without requesting (silent check) ─────────────────
+  const checkPermissionsSilently = useCallback(async () => {
+    try {
+      // Check if we already have permission stored
+      const permissionStatus = await navigator.permissions?.query({ name: 'microphone' });
+      if (permissionStatus?.state === 'granted') {
+        setHasMicPermission(true);
+        setShowPermissionDialog(false);
+        return true;
+      } else if (permissionStatus?.state === 'denied') {
+        setHasMicPermission(false);
+        setShowPermissionDialog(false);
+        showSnack('Microphone access denied. Please check your browser settings.', 'error');
+        return false;
+      }
+      
+      // Try a silent check without requesting
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+      if (stream) {
+        // Stop all tracks immediately
+        stream.getTracks().forEach(track => track.stop());
+        setHasMicPermission(true);
+        setShowPermissionDialog(false);
+        return true;
+      }
+      
+      setHasMicPermission(false);
+      setShowPermissionDialog(true);
+      return false;
+    } catch (err) {
+      console.warn('Silent permission check failed:', err);
+      setHasMicPermission(false);
+      setShowPermissionDialog(true);
+      return false;
+    }
+  }, []);
+
+  // ── Request permissions explicitly (when user clicks) ──────────────────
+  const handleRequestPermissions = useCallback(async () => {
+    setPermissionRequested(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Stop all tracks immediately after getting permission
+      stream.getTracks().forEach(track => track.stop());
+      setHasMicPermission(true);
+      setShowPermissionDialog(false);
+      showSnack('Microphone access granted! You can now start recording.', 'success');
+      
+      // Re-initialize recorder devices after permission granted
+      await recorder.enumerateDevices();
+      return true;
+    } catch (err) {
+      console.error('Permission request failed:', err);
+      setHasMicPermission(false);
+      
+      if (err.name === 'NotAllowedError') {
+        showSnack('Microphone access denied. Please allow microphone access in your browser settings.', 'error');
+      } else if (err.name === 'NotFoundError') {
+        showSnack('No microphone found. Please connect a microphone and try again.', 'error');
+      } else {
+        showSnack('Unable to access microphone. Please check your browser settings.', 'error');
+      }
+      return false;
+    } finally {
+      setPermissionRequested(false);
+    }
+  }, [recorder]);
+
+  // ── Initialize: Check permissions without requesting ───────────────────
+  useEffect(() => {
+    const initPermissions = async () => {
+      setIsInitializing(true);
+      try {
+        await checkPermissionsSilently();
+      } catch (err) {
+        console.error('Error checking permissions:', err);
+      } finally {
+        setIsInitializing(false);
+        setPermissionCheckDone(true);
+      }
+    };
+    
+    initPermissions();
+  }, [checkPermissionsSilently]);
 
   // ── Auto-stop recording when time limit reached ─────────────────────────
   useEffect(() => {
@@ -235,17 +393,10 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
       setWarningShown(false);
       setTimeLimitWarningOpen(false);
       
-      // Stop recording
       recorder.stopRecording();
       
-      // Show notification
-      setSnackbar({ 
-        open: true, 
-        message: `⏰ Recording stopped automatically after reaching the ${formatTime(timeLimit)} time limit.`, 
-        severity: 'info' 
-      });
+      showSnack(`⏰ Recording stopped automatically after reaching the ${formatTime(timeLimit)} time limit.`, 'info');
       
-      // Reset auto-stop flag after a delay
       setTimeout(() => setAutoStopTriggered(false), 1000);
     }
   }, [shouldAutoStop, recorder.isRecording, recorder, timeLimit, autoStopTriggered]);
@@ -257,7 +408,6 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
       setTimeLimitWarningOpen(true);
     }
     
-    // Reset warning when recording stops or limit changes
     if (!recorder.isRecording) {
       setWarningShown(false);
       setTimeLimitWarningOpen(false);
@@ -276,18 +426,20 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
   // ── Effects ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (effectiveId) recorder.setMeetingId(effectiveId);
-  }, [effectiveId]);
+  }, [effectiveId, recorder]);
 
   useEffect(() => {
-    recorder.enumerateDevices();
-  }, []);
+    if (hasMicPermission) {
+      recorder.enumerateDevices();
+    }
+  }, [hasMicPermission, recorder]);
 
   useEffect(() => {
-    if (effectiveId) {
+    if (effectiveId && hasMicPermission) {
       loadRecordings();
       if (!currentMeeting) dispatch(fetchMeetingById(effectiveId));
     }
-  }, [effectiveId]);
+  }, [effectiveId, hasMicPermission]);
 
   // ── Handle extending recording time ─────────────────────────────────────
   const handleExtendRecording = useCallback(() => {
@@ -296,11 +448,7 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
     setTimeLimitWarningOpen(false);
     setWarningShown(false);
     
-    setSnackbar({ 
-      open: true, 
-      message: `⏰ Recording extended by 30 minutes. New limit: ${formatTime(newTimeLimit)}`, 
-      severity: 'success' 
-    });
+    showSnack(`⏰ Recording extended by 30 minutes. New limit: ${formatTime(newTimeLimit)}`, 'success');
   }, [timeLimit]);
 
   // ── Handle stopping recording from warning dialog ───────────────────────
@@ -308,12 +456,7 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
     setTimeLimitWarningOpen(false);
     setWarningShown(false);
     recorder.stopRecording();
-    
-    setSnackbar({ 
-      open: true, 
-      message: 'Recording stopped manually.', 
-      severity: 'info' 
-    });
+    showSnack('Recording stopped manually.', 'info');
   }, [recorder]);
 
   // ── Recordings CRUD ─────────────────────────────────────────────────────
@@ -421,12 +564,17 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
   }, [recorder, currentMeeting, effectiveId, recordingName, recordingDescription, recordingCategory, loadRecordings, isAudioMode, timeLimit]);
 
   // ── Start recording with time limit ─────────────────────────────────────
-  const handleStartRecording = useCallback(() => {
+  const handleStartRecording = useCallback(async () => {
+    if (!hasMicPermission) {
+      // Try to get permission one more time
+      const granted = await handleRequestPermissions();
+      if (!granted) return;
+    }
     recorder.startRecording();
     setAutoStopTriggered(false);
     setWarningShown(false);
     setTimeLimitWarningOpen(false);
-  }, [recorder]);
+  }, [hasMicPermission, handleRequestPermissions, recorder]);
 
   // ── Preview (authenticated stream) ──────────────────────────────────────
   const handleOpenPreview = useCallback(async (recording) => {
@@ -456,7 +604,41 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
     });
   }, []);
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Loading state while checking permissions ────────────────────────────
+  if (isInitializing || !permissionCheckDone) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 8, gap: 2 }}>
+        <CircularProgress size={48} sx={{ color: '#7C3AED' }} />
+        <Typography variant="body1" color="text.secondary">
+          Checking microphone permissions...
+        </Typography>
+      </Box>
+    );
+  }
+
+  // ── No permission state ──
+  if (!hasMicPermission && !showPermissionDialog) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 8, gap: 2 }}>
+        <MicOff sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
+        <Typography variant="h6" gutterBottom>
+          Microphone Access Required
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3, textAlign: 'center', maxWidth: 400 }}>
+          This meeting recorder needs access to your microphone to record meeting proceedings.
+        </Typography>
+        <Button
+          variant="contained"
+          startIcon={<Mic />}
+          onClick={() => setShowPermissionDialog(true)}
+          sx={{ bgcolor: '#7C3AED' }}
+        >
+          Grant Microphone Access
+        </Button>
+      </Box>
+    );
+  }
+
   if (!currentMeeting && !recorder.currentMeetingId) {
     return (
       <Box sx={{ display:'flex', justifyContent:'center', alignItems:'center', height:'60vh' }}>
@@ -465,6 +647,21 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
     );
   }
 
+  // ── Permission Request Dialog ──
+  if (showPermissionDialog) {
+    return (
+      <PermissionRequestDialog
+        open={showPermissionDialog}
+        onClose={() => setShowPermissionDialog(false)}
+        onGrant={handleRequestPermissions}
+        onRetry={checkPermissionsSilently}
+        mode={isAudioMode ? 'audio' : 'video'}
+        isChecking={permissionRequested}
+      />
+    );
+  }
+
+  // ── Main Render ──
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
       <Tabs
@@ -518,6 +715,11 @@ const MeetingRecorder = ({ meetingId, meetingStatus, onRefresh }) => {
                         timeRemaining={timeRemaining}
                         isNearLimit={isNearLimit}
                       />
+                    )}
+                    {!recorder.isRecording && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                        Ready to record • Click "Start Recording" below
+                      </Typography>
                     )}
                   </Box>
                 )}

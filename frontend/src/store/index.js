@@ -9,12 +9,10 @@ import {
 } from './slices/actionTracker';
 import adminReducer from './slices/adminSlice';
 import userReducer from './slices/userSlice';
-
 import roleReducer from './slices/roleSlice';
 import profileReducer from './slices/profileSlice';
-import auditReducer from './slices/auditSlice'; // Add this import
+import auditReducer from './slices/auditSlice';
 import notificationReducer from './slices/actionTracker/notificationSlice';
-
 
 export const store = configureStore({
   reducer: {
@@ -23,14 +21,13 @@ export const store = configureStore({
     meetings: meetingReducer,
     participants: participantReducer,
     actions: actionReducer,
-    admin: adminReducer,        // Only once
+    admin: adminReducer,
     profile: profileReducer,
     roles: roleReducer,
     dashboard: dashboardReducer,
-    audit: auditReducer, 
+    audit: auditReducer,
     notifications: notificationReducer,
     users: userReducer,
-
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

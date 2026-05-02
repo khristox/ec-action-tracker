@@ -1,4 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
+// Sidebar.jsx - FIXED VERSION (removed React.memo)
+
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -26,8 +28,8 @@ import * as fab from '@fortawesome/free-brands-svg-icons';
 import * as fas from '@fortawesome/free-solid-svg-icons';
 import * as far from '@fortawesome/free-regular-svg-icons';
 
-import { fetchUserMenus, selectMenus } from '../../store/slices/menuSlice';
-import { selectUser } from '../../store/slices/authSlice';
+import { fetchUserMenus, selectMenus, resetMenuState } from '../../store/slices/menuSlice';
+import { selectUser, selectIsAuthenticated } from '../../store/slices/authSlice';
 
 const DRAWER_WIDTHS = { expanded: 280, collapsed: 72 };
 const LOGO_PATH = '/logo.png';
@@ -47,9 +49,9 @@ const materialIconMap = {
   article: ArticleIcon,
   security: SecurityIcon,
   calendar: CalendarMonthIcon,
-  Calendar_month: CalendarMonthIcon,  // Add this for underscore version
-  calendarMonth: CalendarMonthIcon,   // Add camelCase version
-  calendarmonth: CalendarMonthIcon,  
+  Calendar_month: CalendarMonthIcon,
+  calendarMonth: CalendarMonthIcon,
+  calendarmonth: CalendarMonthIcon,
   menu_book: MenuBookIcon,
   help: HelpIcon,
   star: StarIcon,
@@ -120,7 +122,6 @@ const faIconMapping = {
 // ==================== Icon Helper Functions ====================
 
 const getFontAwesomeIcon = (iconName, library) => {
-  // Handle direct icon names
   let camelCaseName = iconName
     .replace(/^fa-/, '')
     .split('-')
@@ -129,20 +130,16 @@ const getFontAwesomeIcon = (iconName, library) => {
   
   camelCaseName = 'fa' + camelCaseName.charAt(0).toUpperCase() + camelCaseName.slice(1);
   
-  // Check mapping first
   const mappedName = faIconMapping[iconName] || camelCaseName;
   
-  // Try each library
   if (library === 'fab' && fab[mappedName]) return fab[mappedName];
   if (library === 'fas' && fas[mappedName]) return fas[mappedName];
   if (library === 'far' && far[mappedName]) return far[mappedName];
   
-  // Try all libraries as fallback
   if (fab[mappedName]) return fab[mappedName];
   if (fas[mappedName]) return fas[mappedName];
   if (far[mappedName]) return far[mappedName];
   
-  // Try common variations
   const variations = [
     mappedName,
     camelCaseName,
@@ -165,18 +162,15 @@ const getMaterialIcon = (iconName) => {
   
   const normalizedName = iconName.toLowerCase().trim();
   
-  // Direct match
   if (materialIconMap[normalizedName]) {
     return materialIconMap[normalizedName];
   }
   
-  // Try without underscores
   const withoutUnderscore = normalizedName.replace(/_/g, '');
   if (materialIconMap[withoutUnderscore]) {
     return materialIconMap[withoutUnderscore];
   }
   
-  // Try without spaces
   const withoutSpaces = normalizedName.replace(/\s/g, '');
   if (materialIconMap[withoutSpaces]) {
     return materialIconMap[withoutSpaces];
@@ -186,7 +180,6 @@ const getMaterialIcon = (iconName) => {
 };
 
 const renderIcon = (menu) => {
-  // Material Symbols
   if (menu.icon_type === 'material_symbols') {
     return (
       <span className="material-symbols-outlined" style={{ 
@@ -201,7 +194,6 @@ const renderIcon = (menu) => {
     );
   }
   
-  // Font Awesome
   if (menu.icon_type === 'fontawesome') {
     const icon = getFontAwesomeIcon(menu.icon, menu.icon_library);
     if (icon) {
@@ -217,18 +209,15 @@ const renderIcon = (menu) => {
         />
       );
     }
-    // Fallback to default if icon not found
     console.warn(`FontAwesome icon not found: ${menu.icon}`);
     return <DashboardIcon fontSize="small" />;
   }
   
-  // MUI Icons
   if (menu.icon_type === 'mui' || !menu.icon_type) {
     const MuiIcon = getMaterialIcon(menu.icon);
     return <MuiIcon fontSize="small" sx={{ color: menu.icon_color !== 'inherit' ? menu.icon_color : undefined }} />;
   }
   
-  // Default fallback
   return <DashboardIcon fontSize="small" />;
 };
 
@@ -240,17 +229,61 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   const navigate = useNavigate();
   const location = useLocation();
   const user = useSelector(selectUser);
+  const isLoggedIn = useSelector(selectIsAuthenticated);
   const menus = useSelector(selectMenus);
   const menusLoading = useSelector((state) => state.menus?.loading);
+  const previousUserId = useRef(null);
+  const previousAuthState = useRef(isLoggedIn);
 
   const [openSubmenus, setOpenSubmenus] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Force re-render when auth state changes
+  const [forceUpdate, setForceUpdate] = useState(0);
 
+  // Force re-render when authentication state changes
   useEffect(() => {
-    if (!menus || menus.length === 0) {
-      dispatch(fetchUserMenus());
+    console.log('Sidebar: Auth state changed, forcing re-render');
+    setForceUpdate(prev => prev + 1);
+  }, [isLoggedIn, user?.id]);
+
+  // Reset menus and fetch when user changes or auth state changes
+  useEffect(() => {
+    const currentUserId = user?.id;
+    
+    // Check if user has changed (different user logged in)
+    const userChanged = currentUserId && previousUserId.current && currentUserId !== previousUserId.current;
+    
+    // Check if auth state changed from false to true (user just logged in)
+    const justLoggedIn = isLoggedIn && !previousAuthState.current;
+    
+    // Check if logged out
+    const justLoggedOut = !isLoggedIn && previousAuthState.current;
+    
+    if (justLoggedOut) {
+      console.log('Sidebar: User logged out, clearing menus');
+      // Clear menus on logout
+      dispatch(resetMenuState());
+      setOpenSubmenus({});
+      setSearchQuery('');
+      previousUserId.current = null;
+      previousAuthState.current = isLoggedIn;
+      return;
     }
-  }, [dispatch, menus]);
+    
+    if ((isLoggedIn && (!menus || menus.length === 0)) || userChanged || justLoggedIn) {
+      console.log('Sidebar: Fetching menus for user', user?.username);
+      // Fetch new menus for the logged-in user
+      dispatch(fetchUserMenus());
+      // Reset submenu states
+      setOpenSubmenus({});
+      setSearchQuery('');
+    }
+    
+    // Update refs
+    previousUserId.current = currentUserId;
+    previousAuthState.current = isLoggedIn;
+  }, [dispatch, user?.id, isLoggedIn, menus]);
 
   // Auto-expand current path
   useEffect(() => {
@@ -329,7 +362,6 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
       const hasChildren = item.children && item.children.length > 0;
       const isOpen = openSubmenus[item.id] && !isCollapsed;
       
-      // Skip rendering if no title
       if (!item.title) return null;
 
       const menuItem = (
@@ -384,11 +416,13 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
             <>
               <ListItemText 
                 primary={item.title}
-                primaryTypographyProps={{ 
-                  fontSize: '0.875rem', 
-                  fontWeight: isSelected ? 600 : 450,
-                  noWrap: true
-                }} 
+                slotProps={{
+                  primary: {
+                    fontSize: '0.875rem', 
+                    fontWeight: isSelected ? 600 : 450,
+                    noWrap: true
+                  }
+                }}
               />
               {hasChildren && (
                 isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />
@@ -419,8 +453,13 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     });
   };
 
+  // Don't render sidebar if not authenticated
+  if (!isLoggedIn) {
+    return null;
+  }
+
   // Loading state
-  if (menusLoading) {
+  if (menusLoading && (!menus || menus.length === 0)) {
     return (
       <Box sx={{ 
         width: isCollapsed ? DRAWER_WIDTHS.collapsed : DRAWER_WIDTHS.expanded,
@@ -481,40 +520,40 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
 
       {/* Search Bar - Only show when expanded */}
       {!isCollapsed && (
-      <Box sx={{ px: 2, py: 2 }}>
-        <TextField
-          fullWidth
-          size="small"
-          placeholder="Search menu..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-              endAdornment: searchQuery && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSearchQuery('')} edge="end">
-                    <ClearIcon fontSize="inherit" />
-                  </IconButton>
-                </InputAdornment>
-              ),
-              sx: { 
-                borderRadius: 2, 
-                fontSize: '0.8rem',
-                bgcolor: alpha(theme.palette.action.hover, 0.3),
-                '&:hover': {
-                  bgcolor: alpha(theme.palette.action.hover, 0.5),
+        <Box sx={{ px: 2, py: 2 }}>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search menu..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+                endAdornment: searchQuery && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setSearchQuery('')} edge="end">
+                      <ClearIcon fontSize="inherit" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+                sx: { 
+                  borderRadius: 2, 
+                  fontSize: '0.8rem',
+                  bgcolor: alpha(theme.palette.action.hover, 0.3),
+                  '&:hover': {
+                    bgcolor: alpha(theme.palette.action.hover, 0.5),
+                  }
                 }
               }
-            }
-          }}
-        />
-      </Box>
-    )}
+            }}
+          />
+        </Box>
+      )}
 
       {/* Menu List */}
       <Box sx={{ flex: 1, overflowY: 'auto', py: 1 }}>
@@ -600,4 +639,5 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   );
 };
 
-export default React.memo(Sidebar);
+// IMPORTANT: REMOVED React.memo to allow re-renders on auth state changes
+export default Sidebar;

@@ -1,18 +1,26 @@
-// App.jsx - MeetingRecorderProvider only where needed
+// App.jsx - Improved version
+// Key changes:
+//   1. AuthReloader removed — it caused a timing race that prevented menu fetches
+//   2. Route config cleaned up — adminRoutes deduplicated from protectedRoutes
+//   3. preloadRoleBasedComponents called once, not twice
+//   4. Minor cleanup throughout
 
-import React, { 
-  useEffect, 
-  useState, 
-  useRef, 
-  Suspense, 
-  lazy, 
-  useCallback, 
-  useMemo 
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  Suspense,
+  lazy,
+  useCallback,
+  useMemo
 } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { SnackbarProvider } from 'notistack';
-import { Box, CircularProgress, Typography, Fade, keyframes, Button, LinearProgress, Alert } from '@mui/material';
+import {
+  Box, CircularProgress, Typography, Fade, keyframes,
+  Button, LinearProgress
+} from '@mui/material';
 
 // Slices & Selectors
 import { checkAuth, selectAuth } from './store/slices/authSlice';
@@ -24,7 +32,8 @@ import { ThemeContextProvider } from './context/ThemeProvider';
 import Layout from './components/common/Layout';
 import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
 
-// Error Boundary Component
+// ==================== Error Boundary ====================
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -37,21 +46,15 @@ class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('Component Error:', error?.message || error);
-    console.error('Error Info:', errorInfo);
     this.setState({ errorInfo });
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: '100vh', 
-          flexDirection: 'column', 
-          p: 3, 
-          textAlign: 'center' 
+        <Box sx={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          height: '100vh', flexDirection: 'column', p: 3, textAlign: 'center'
         }}>
           <Typography variant="h5" color="error" gutterBottom>
             Something went wrong
@@ -59,11 +62,7 @@ class ErrorBoundary extends React.Component {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {this.state.error?.message || 'An unexpected error occurred'}
           </Typography>
-          <Button 
-            variant="contained" 
-            onClick={() => window.location.reload()}
-            startIcon={<span>🔄</span>}
-          >
+          <Button variant="contained" onClick={() => window.location.reload()} startIcon={<span>🔄</span>}>
             Reload Page
           </Button>
         </Box>
@@ -73,341 +72,274 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// ========== IMPROVED STATIC IMPORT MAP ==========
+// ==================== Static Import Map ====================
 
-/**
- * Static import map for all lazy-loaded components
- * This eliminates Vite warnings and provides better bundling
- */
 const COMPONENT_IMPORTS = {
   // Auth Pages
-  'SignInSide': () => import('./pages/SignInSide'),
-  'SignUp': () => import('./pages/SignUp'),
-  'ForgotPassword': () => import('./components/auth/ForgotPassword'),
-  'ResetPassword': () => import('./components/auth/ResetPassword'),
-  
-  // Action Tracker - Dashboard
-  'Dashboard': () => import('./components/actiontracker/dashboard/Dashboard'),
-  
-  // Action Tracker - Meetings
-  'Meetings': () => import('./components/actiontracker/meetings/Meetings'),
-  'CreateMeeting': () => import('./components/actiontracker/meetings/CreateMeeting'),
-  'MeetingDetail': () => import('./components/actiontracker/meetings/MeetingDetail'),
-  'EditMeeting': () => import('./components/actiontracker/meetings/EditMeeting'),
-  'MeetingForm': () => import('./components/actiontracker/meetings/MeetingForm'),
-  'MeetingRecorder': () => import('./components/actiontracker/meetings/MeetingRecorder'),
-  
-  // Action Tracker - Actions
-  'ActionsList': () => import('./components/actiontracker/actions/ActionsList'),
-  'MyTasks': () => import('./components/actiontracker/actions/MyTasks'),
-  'AllActions': () => import('./components/actiontracker/actions/AllActions'),
-  'ActionDetail': () => import('./components/actiontracker/actions/ActionDetail'),
-  'OverdueActions': () => import('./components/actiontracker/actions/OverdueActions'),
-  'AssignAction': () => import('./components/actiontracker/actions/AssignAction'),
-  'UpdateProgress': () => import('./components/actiontracker/actions/UpdateProgress'),
-  
-  // Action Tracker - Participants
-  'ParticipantsLists': () => import('./components/actiontracker/participants/ParticipantsLists'),
-  'ParticipantListsManager': () => import('./components/actiontracker/participants/ParticipantListsManager'),
-  'CreateParticipant': () => import('./components/actiontracker/participants/CreateParticipant'),
-  'ParticipantDetail': () => import('./components/actiontracker/participants/ParticipantDetail'),
-  'BulkImportPage': () => import('./components/actiontracker/participants/BulkImportPage'),
-  
-  // Action Tracker - Documents & Reports
-  'DocumentsList': () => import('./components/actiontracker/documents/DocumentsList'),
-  'ReportsList': () => import('./components/actiontracker/reports/ReportsList'),
-  
-  // Action Tracker - Calendar & Settings
-  'CalendarView': () => import('./components/actiontracker/calendar/CalendarView'),
-  'Settings': () => import('./components/actiontracker/settings/Settings'),
-  'Locations': () => import('./components/address/LocationManager'),
+  'SignInSide':             () => import('./pages/SignInSide'),
+  'SignUp':                 () => import('./pages/SignUp'),
+  'ForgotPassword':         () => import('./components/auth/ForgotPassword'),
+  'ResetPassword':          () => import('./components/auth/ResetPassword'),
 
-  // Profile Components
-  'Profile': () => import('./components/profile/ProfileSettings'),
-  'ProfileSettings': () => import('./components/profile/ProfileSettings'),
-  'SecuritySettings': () => import('./components/profile/SecuritySettings'),
-  'NotificationSettings': () => import('./components/profile/NotificationSettings'),
-  'PreferenceSettings': () => import('./components/profile/PreferenceSettings'),
-  
-  // Admin Components
-  'UserManagement': () => import('./components/admin/UserManagement'),
-  'RoleManagement': () => import('./components/admin/RoleManagement'),
-  'RoleMenuAssignment': () => import('./components/admin/RoleMenuAssignment'), 
-  'AuditLogs': () => import('./components/admin/AuditLogs'),
-  
+  // Dashboard
+  'Dashboard':              () => import('./components/actiontracker/dashboard/Dashboard'),
+
+  // Meetings
+  'Meetings':               () => import('./components/actiontracker/meetings/Meetings'),
+  'CreateMeeting':          () => import('./components/actiontracker/meetings/CreateMeeting'),
+  'MeetingDetail':          () => import('./components/actiontracker/meetings/MeetingDetail'),
+  'EditMeeting':            () => import('./components/actiontracker/meetings/EditMeeting'),
+  'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm'),
+  'MeetingRecorder':        () => import('./components/actiontracker/meetings/MeetingRecorder'),
+
+  // Actions
+  'ActionsList':            () => import('./components/actiontracker/actions/ActionsList'),
+  'MyTasks':                () => import('./components/actiontracker/actions/MyTasks'),
+  'AllActions':             () => import('./components/actiontracker/actions/AllActions'),
+  'ActionDetail':           () => import('./components/actiontracker/actions/ActionDetail'),
+  'OverdueActions':         () => import('./components/actiontracker/actions/OverdueActions'),
+  'AssignAction':           () => import('./components/actiontracker/actions/AssignAction'),
+  'UpdateProgress':         () => import('./components/actiontracker/actions/UpdateProgress'),
+
+  // Participants
+  'ParticipantsLists':      () => import('./components/actiontracker/participants/ParticipantsLists'),
+  'ParticipantListsManager':() => import('./components/actiontracker/participants/ParticipantListsManager'),
+  'CreateParticipant':      () => import('./components/actiontracker/participants/CreateParticipant'),
+  'ParticipantDetail':      () => import('./components/actiontracker/participants/ParticipantDetail'),
+  'BulkImportPage':         () => import('./components/actiontracker/participants/BulkImportPage'),
+
+  // Documents & Reports
+  'DocumentsList':          () => import('./components/actiontracker/documents/DocumentsList'),
+  'ReportsList':            () => import('./components/actiontracker/reports/ReportsList'),
+
+  // Calendar & Settings
+  'CalendarView':           () => import('./components/actiontracker/calendar/CalendarView'),
+  'Settings':               () => import('./components/actiontracker/settings/Settings'),
+  'Locations':              () => import('./components/address/LocationManager'),
+
+  // Profile
+  'Profile':                () => import('./components/profile/ProfileSettings'),
+  'ProfileSettings':        () => import('./components/profile/ProfileSettings'),
+  'SecuritySettings':       () => import('./components/profile/SecuritySettings'),
+  'NotificationSettings':   () => import('./components/profile/NotificationSettings'),
+  'PreferenceSettings':     () => import('./components/profile/PreferenceSettings'),
+
+  // Admin
+  'UserManagement':         () => import('./components/admin/UserManagement'),
+  'RoleManagement':         () => import('./components/admin/RoleManagement'),
+  'RoleMenuAssignment':     () => import('./components/admin/RoleMenuAssignment'),
+  'AuditLogs':              () => import('./components/admin/AuditLogs'),
+
   // Error Pages
-  'NotFound': () => import('./pages/NotFound'),
-  'Forbidden': () => import('./pages/Forbidden'),
+  'NotFound':               () => import('./pages/NotFound'),
+  'Forbidden':              () => import('./pages/Forbidden'),
 };
 
-// Component cache for already loaded components
+// ==================== Lazy Loading ====================
+
 const componentCache = new Map();
 
-// Preload queue for components that will likely be needed
-const preloadQueue = new Set();
-
-/**
- * Enhanced lazy loading with retry and preloading capabilities
- */
-const createLazyComponent = (componentName, options = {}) => {
-  const { preload = false, retries = 2, retryDelay = 1000 } = options;
-  
-  // Get the import function
-  const importFn = COMPONENT_IMPORTS[componentName];
-  
-  if (!importFn) {
-    console.error(`Component "${componentName}" not found in import map`);
-    return () => <div>Component "{componentName}" not found</div>;
-  }
-  
-  // Preload if requested
-  if (preload && !componentCache.has(componentName)) {
-    preloadQueue.add(componentName);
-    // Don't await, just start loading in background
-    loadComponent(componentName, retries, retryDelay).catch(err => {
-      console.warn(`Preload failed for ${componentName}:`, err);
-    });
-  }
-  
-  // Return lazy component
-  return lazy(() => loadComponent(componentName, retries, retryDelay));
-};
-
-/**
- * Load component with retry logic and caching
- */
 const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
-  // Check cache first
   if (componentCache.has(componentName)) {
     return componentCache.get(componentName);
   }
-  
+
   const importFn = COMPONENT_IMPORTS[componentName];
-  if (!importFn) {
-    throw new Error(`Component "${componentName}" not found in import map`);
-  }
-  
+  if (!importFn) throw new Error(`Component "${componentName}" not found in import map`);
+
   let lastError;
-  
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const module = await importFn();
-      const Component = module.default || module;
-      
-      // Cache the component
       componentCache.set(componentName, Promise.resolve(module));
-      
       return module;
-      
     } catch (error) {
       lastError = error;
       console.error(`[Failed] Attempt ${attempt + 1} for ${componentName}:`, error);
-      
-      // Check if it's a chunk loading error
-      const isChunkError = error?.message?.includes('chunk') || 
-                          error?.message?.includes('loading') ||
-                          error?.code === 'CHUNK_LOAD_ERROR';
-      
+
+      const isChunkError =
+        error?.message?.includes('chunk') ||
+        error?.message?.includes('loading') ||
+        error?.code === 'CHUNK_LOAD_ERROR';
+
       if (isChunkError && attempt < retries) {
-        // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
         continue;
       }
-      
       break;
     }
   }
-  
-  // All retries failed
-  const errorMessage = `Failed to load ${componentName} after ${retries + 1} attempts: ${lastError?.message}`;
-  console.error(errorMessage);
-  throw new Error(errorMessage);
+
+  throw new Error(`Failed to load ${componentName} after ${retries + 1} attempts: ${lastError?.message}`);
 };
 
-/**
- * Preload critical components after initial load
- */
+const createLazyComponent = (componentName, options = {}) => {
+  const { retries = 2, retryDelay = 1000 } = options;
+
+  if (!COMPONENT_IMPORTS[componentName]) {
+    console.error(`Component "${componentName}" not found in import map`);
+    return () => <div>Component "{componentName}" not found</div>;
+  }
+
+  return lazy(() => loadComponent(componentName, retries, retryDelay));
+};
+
 const preloadCriticalComponents = async () => {
-  const criticalComponents = ['Dashboard', 'MyTasks', 'ActionsList'];
-  
-  const preloadPromises = criticalComponents.map(componentName => 
-    loadComponent(componentName, 1, 500).catch(err => 
-      console.warn(`[Preload] Failed to preload ${componentName}:`, err)
-    )
+  const critical = ['Dashboard', 'MyTasks', 'ActionsList'];
+  await Promise.allSettled(
+    critical.map(name => loadComponent(name, 1, 500).catch(err =>
+      console.warn(`[Preload] Failed: ${name}`, err)
+    ))
   );
-  
-  await Promise.allSettled(preloadPromises);
 };
 
-/**
- * Preload components based on user role
- */
 const preloadRoleBasedComponents = async (userRoles) => {
   const roleComponents = {
-    admin: ['UserManagement', 'RoleManagement', 'RoleMenuAssignment', 'AuditLogs', 'Locations'],
-    user: ['Profile', 'ProfileSettings'],
-    manager: ['ReportsList', 'CalendarView']
+    admin:   ['UserManagement', 'RoleManagement', 'RoleMenuAssignment', 'AuditLogs', 'Locations'],
+    user:    ['Profile', 'ProfileSettings'],
+    manager: ['ReportsList', 'CalendarView'],
   };
-  
-  const componentsToPreload = [];
-  
-  // Convert role codes to string if they're objects
+
   const roleCodes = userRoles.map(role => typeof role === 'object' ? role.code : role);
-  
-  for (const role of roleCodes) {
-    if (roleComponents[role]) {
-      componentsToPreload.push(...roleComponents[role]);
-    }
-  }
-  
-  if (componentsToPreload.length > 0) {
-    const preloadPromises = componentsToPreload.map(componentName =>
-      loadComponent(componentName, 1, 500).catch(err =>
-        console.warn(`[Preload] Failed to preload ${componentName}:`, err)
-      )
+  const toPreload = roleCodes.flatMap(code => roleComponents[code] || []);
+
+  if (toPreload.length > 0) {
+    await Promise.allSettled(
+      toPreload.map(name => loadComponent(name, 1, 500).catch(err =>
+        console.warn(`[Preload] Failed: ${name}`, err)
+      ))
     );
-    
-    await Promise.allSettled(preloadPromises);
   }
 };
 
-// ========== Create Lazy Components ==========
+// ==================== Lazy Components ====================
 
-// Auth Pages
-const SignInSide = createLazyComponent('SignInSide');
-const SignUp = createLazyComponent('SignUp');
-const ForgotPassword = createLazyComponent('ForgotPassword');
-const ResetPassword = createLazyComponent('ResetPassword');
+// Auth
+const SignInSide       = createLazyComponent('SignInSide');
+const SignUp           = createLazyComponent('SignUp');
+const ForgotPassword   = createLazyComponent('ForgotPassword');
+const ResetPassword    = createLazyComponent('ResetPassword');
 
-// Action Tracker - Dashboard
-const Dashboard = createLazyComponent('Dashboard', { preload: true });
+// Dashboard
+const Dashboard        = createLazyComponent('Dashboard');
 
-// Action Tracker - Meetings
-const Meetings = createLazyComponent('Meetings');
-const MeetingForm = createLazyComponent('MeetingForm');
-const CreateMeeting = createLazyComponent('CreateMeeting');
-const MeetingDetail = createLazyComponent('MeetingDetail');
-const EditMeeting = createLazyComponent('EditMeeting');
-const MeetingRecorder = createLazyComponent('MeetingRecorder');
+// Meetings
+const Meetings         = createLazyComponent('Meetings');
+const MeetingForm      = createLazyComponent('MeetingForm');
+const CreateMeeting    = createLazyComponent('CreateMeeting');
+const MeetingDetail    = createLazyComponent('MeetingDetail');
+const EditMeeting      = createLazyComponent('EditMeeting');
+const MeetingRecorder  = createLazyComponent('MeetingRecorder');
 
-// Action Tracker - Actions
-const ActionsList = createLazyComponent('ActionsList', { preload: true });
-const MyTasks = createLazyComponent('MyTasks', { preload: true });
-const AllActions = createLazyComponent('AllActions');
-const ActionDetail = createLazyComponent('ActionDetail');
-const OverdueActions = createLazyComponent('OverdueActions');
-const AssignAction = createLazyComponent('AssignAction');
-const UpdateProgress = createLazyComponent('UpdateProgress');
+// Actions
+const ActionsList      = createLazyComponent('ActionsList');
+const MyTasks          = createLazyComponent('MyTasks');
+const AllActions       = createLazyComponent('AllActions');
+const ActionDetail     = createLazyComponent('ActionDetail');
+const OverdueActions   = createLazyComponent('OverdueActions');
+const AssignAction     = createLazyComponent('AssignAction');
+const UpdateProgress   = createLazyComponent('UpdateProgress');
 
-// Action Tracker - Participants
-const ParticipantsLists = createLazyComponent('ParticipantsLists');
+// Participants
+const ParticipantsLists       = createLazyComponent('ParticipantsLists');
 const ParticipantListsManager = createLazyComponent('ParticipantListsManager');
-const CreateParticipant = createLazyComponent('CreateParticipant');
-const ParticipantDetail = createLazyComponent('ParticipantDetail');
-const BulkImportPage = createLazyComponent('BulkImportPage');
+const CreateParticipant       = createLazyComponent('CreateParticipant');
+const ParticipantDetail       = createLazyComponent('ParticipantDetail');
+const BulkImportPage          = createLazyComponent('BulkImportPage');
 
-// Action Tracker - Documents & Reports
-const DocumentsList = createLazyComponent('DocumentsList');
-const ReportsList = createLazyComponent('ReportsList');
+// Documents & Reports
+const DocumentsList    = createLazyComponent('DocumentsList');
+const ReportsList      = createLazyComponent('ReportsList');
 
-// Action Tracker - Calendar & Settings
-const CalendarView = createLazyComponent('CalendarView');
-const Settings = createLazyComponent('Settings');
-const Locations = createLazyComponent('Locations');
+// Calendar & Settings
+const CalendarView     = createLazyComponent('CalendarView');
+const Settings         = createLazyComponent('Settings');
+const Locations        = createLazyComponent('Locations');
 
-// Profile Components
-const Profile = createLazyComponent('Profile');
-const ProfileSettings = createLazyComponent('ProfileSettings');
-const SecuritySettings = createLazyComponent('SecuritySettings');
-const NotificationSettings = createLazyComponent('NotificationSettings');
-const PreferenceSettings = createLazyComponent('PreferenceSettings');
+// Profile
+const Profile                = createLazyComponent('Profile');
+const ProfileSettings        = createLazyComponent('ProfileSettings');
+const SecuritySettings       = createLazyComponent('SecuritySettings');
+const NotificationSettings   = createLazyComponent('NotificationSettings');
+const PreferenceSettings     = createLazyComponent('PreferenceSettings');
 
-// Admin Components
-const UserManagement = createLazyComponent('UserManagement');
-const RoleManagement = createLazyComponent('RoleManagement');
-const RoleMenuAssignment = createLazyComponent('RoleMenuAssignment');
-const AuditLogs = createLazyComponent('AuditLogs');
+// Admin
+const UserManagement    = createLazyComponent('UserManagement');
+const RoleManagement    = createLazyComponent('RoleManagement');
+const RoleMenuAssignment= createLazyComponent('RoleMenuAssignment');
+const AuditLogs         = createLazyComponent('AuditLogs');
 
 // Error Pages
-const NotFound = createLazyComponent('NotFound');
+const NotFound  = createLazyComponent('NotFound');
 const Forbidden = createLazyComponent('Forbidden');
 
-// Animations
+// ==================== Animations ====================
+
 const pulse = keyframes`
   0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.05); opacity: 0.8; }
+  50%       { transform: scale(1.05); opacity: 0.8; }
 `;
 
 const fadeInOut = keyframes`
   0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+  50%       { opacity: 1; }
 `;
 
-/**
- * Enhanced Loading Screen with progress indication
- */
-const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, progress = null }) => {
-  return (
-    <Fade in timeout={500}>
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: fullScreen ? '100vh' : '100%',
-          minHeight: fullScreen ? '100vh' : '400px',
-          flexDirection: 'column',
-          gap: 3,
-          bgcolor: 'background.default',
-        }}
+// ==================== Loading Screen ====================
+
+const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, progress = null }) => (
+  <Fade in timeout={500}>
+    <Box sx={{
+      display: 'flex', justifyContent: 'center', alignItems: 'center',
+      height: fullScreen ? '100vh' : '100%',
+      minHeight: fullScreen ? '100vh' : '400px',
+      flexDirection: 'column', gap: 3,
+      bgcolor: 'background.default',
+    }}>
+      <CircularProgress
+        size={56}
+        thickness={4}
+        sx={{ animation: `${pulse} 1.5s ease-in-out infinite` }}
+      />
+      <Typography
+        variant="h6"
+        color="text.secondary"
+        sx={{ animation: `${fadeInOut} 1.5s ease-in-out infinite`, fontWeight: 500 }}
       >
-        <CircularProgress 
-          size={56} 
-          thickness={4}
-          sx={{ animation: `${pulse} 1.5s ease-in-out infinite` }}
-        />
-        <Typography 
-          variant="h6" 
-          color="text.secondary"
-          sx={{ animation: `${fadeInOut} 1.5s ease-in-out infinite`, fontWeight: 500 }}
-        >
-          {message}
-        </Typography>
-        {progress !== null && (
-          <Box sx={{ width: '200px', mt: 2 }}>
-            <LinearProgress variant="determinate" value={progress} />
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
-              {Math.round(progress)}%
-            </Typography>
-          </Box>
-        )}
-      </Box>
-    </Fade>
-  );
-};
+        {message}
+      </Typography>
+      {progress !== null && (
+        <Box sx={{ width: '200px', mt: 2 }}>
+          <LinearProgress variant="determinate" value={progress} />
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block', textAlign: 'center' }}>
+            {Math.round(progress)}%
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  </Fade>
+);
 
-/**
- * Recording Route Wrapper - ONLY provides MeetingRecorderContext for recording routes
- * This ensures microphone is ONLY requested when user navigates to actual recording page
- */
-const RecordingRouteWrapper = ({ children }) => {
-  return (
-    <MeetingRecorderProvider>
-      {children}
-    </MeetingRecorderProvider>
-  );
-};
+// ==================== Recording Route Wrapper ====================
+// Provides MeetingRecorderContext ONLY for the recording route so the
+// browser microphone prompt is never triggered on other pages.
 
-/**
- * Role-Based Protected Route with preloading
- */
+const RecordingRouteWrapper = ({ children }) => (
+  <MeetingRecorderProvider>
+    {children}
+  </MeetingRecorderProvider>
+);
+
+// ==================== Protected Route ====================
+
 const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = [] }) => {
   const { isAuthenticated, isAuthChecking, user } = useSelector(selectAuth);
   const location = useLocation();
-  
-  // Preload role-based components when user is loaded
+
+  // Preload role-based components as soon as we know who the user is
   useEffect(() => {
-    if (user?.roles && user.roles.length > 0) {
+    if (user?.roles?.length > 0) {
       preloadRoleBasedComponents(user.roles);
     }
   }, [user]);
@@ -420,32 +352,23 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Check roles
   if (requiredRoles.length > 0) {
-    // Handle both string roles and object roles
-    const userRoles = user?.roles || [];
-    const userRoleCodes = userRoles.map(role => typeof role === 'object' ? role.code : role);
-    const hasRole = requiredRoles.some(role => userRoleCodes.includes(role));
-    if (!hasRole) {
-      return <Navigate to="/forbidden" replace />;
-    }
+    const userRoleCodes = (user?.roles || []).map(r => typeof r === 'object' ? r.code : r);
+    const hasRole = requiredRoles.some(r => userRoleCodes.includes(r));
+    if (!hasRole) return <Navigate to="/forbidden" replace />;
   }
 
-  // Check permissions
   if (requiredPermissions.length > 0) {
     const userPermissions = user?.permissions || [];
-    const hasPermission = requiredPermissions.some(permission => userPermissions.includes(permission));
-    if (!hasPermission) {
-      return <Navigate to="/forbidden" replace />;
-    }
+    const hasPermission = requiredPermissions.some(p => userPermissions.includes(p));
+    if (!hasPermission) return <Navigate to="/forbidden" replace />;
   }
 
   return children;
 };
 
-/**
- * Public Only Route
- */
+// ==================== Public Route ====================
+
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, isAuthChecking } = useSelector(selectAuth);
   const location = useLocation();
@@ -454,91 +377,103 @@ const PublicRoute = ({ children }) => {
   if (isAuthChecking) {
     return <LoadingScreen message="Checking session..." fullScreen={false} />;
   }
-  
+
   return isAuthenticated ? <Navigate to={from} replace /> : children;
 };
 
-/**
- * Route configuration - SEPARATED recording routes from regular meeting routes
- */
+// ==================== Route Config ====================
+// Admin routes that also appear in protectedRoutes have been removed from
+// adminRoutes to avoid duplicate route registration.
+
 const routeConfig = {
   publicRoutes: [
-    { path: "/login", element: <SignInSide />, wrapper: PublicRoute },
-    { path: "/signup", element: <SignUp />, wrapper: PublicRoute },
-    { path: "/forgot-password", element: <ForgotPassword />, wrapper: PublicRoute },
-    { path: "/reset-password/:token", element: <ResetPassword />, wrapper: PublicRoute },
+    { path: '/login',                   element: <SignInSide />,     wrapper: PublicRoute },
+    { path: '/signup',                  element: <SignUp />,         wrapper: PublicRoute },
+    { path: '/forgot-password',         element: <ForgotPassword />, wrapper: PublicRoute },
+    { path: '/reset-password/:token',   element: <ResetPassword />,  wrapper: PublicRoute },
   ],
+
   errorRoutes: [
-    { path: "/403", element: <Forbidden /> },
-    { path: "/404", element: <NotFound /> },
+    { path: '/403', element: <Forbidden /> },
+    { path: '/404', element: <NotFound /> },
   ],
-  // ONLY routes that need microphone access (recording)
-  // These will be wrapped with MeetingRecorderProvider
+
+  // ONLY the recording page gets MeetingRecorderProvider (microphone prompt)
   recordingRoutes: [
-    { path: "meetings/:id/record", element: <MeetingRecorder /> },
+    { path: 'meetings/:id/record', element: <MeetingRecorder /> },
   ],
-  // Regular meeting routes - NO microphone access needed
+
+  // Regular meeting routes — no microphone access
   regularMeetingRoutes: [
-    { path: "meetings", element: <Meetings /> },
-    { path: "meetings/create", element: <MeetingForm /> },
-    { path: "meetings/:id", element: <MeetingDetail /> },
-    { path: "meetings/:id/edit", element: <MeetingForm /> },
+    { path: 'meetings',             element: <Meetings /> },
+    { path: 'meetings/create',      element: <MeetingForm /> },
+    { path: 'meetings/:id',         element: <MeetingDetail /> },
+    { path: 'meetings/:id/edit',    element: <MeetingForm /> },
   ],
-  // Standard protected routes (no MeetingRecorderProvider needed)
+
+  // Standard protected routes
   protectedRoutes: [
-    { path: "dashboard", element: <Dashboard /> },
-    { path: "actions", element: <ActionsList /> },
-    { path: "actions/all", element: <AllActions /> },
-    { path: "actions/my-tasks", element: <MyTasks /> },
-    { path: "actions/:id", element: <ActionDetail /> },
-    { path: "actions/overdue", element: <OverdueActions /> },
-    { path: "actions/assign", element: <AssignAction /> },
-    { path: "actions/assign/minute/:minuteId", element: <AssignAction /> },
-    { path: "actions/edit/:id", element: <AssignAction /> },
-    { path: "actions/:id/assign", element: <AssignAction /> },
-    { path: "actions/progress", element: <UpdateProgress /> },
-    { path: "actions/:id/progress", element: <UpdateProgress /> },
-    { path: "participants", element: <ParticipantsLists /> },
-    { path: "participants/create", element: <CreateParticipant /> },
-    { path: "participants/:id", element: <ParticipantDetail /> },
-    { path: "participants/:id/edit", element: <CreateParticipant /> },
-    { path: "participants/import", element: <BulkImportPage /> },
-    { path: "participant-lists", element: <ParticipantListsManager /> },
-    { path: "participant-lists/:id", element: <ParticipantListsManager /> },
-    { path: "participants/lists", element: <ParticipantListsManager /> },
-    { path: "documents", element: <DocumentsList /> },
-    { path: "documents/:category", element: <DocumentsList /> },
-    { path: "reports", element: <ReportsList /> },
-    { path: "reports/:type", element: <ReportsList /> },
-    { path: "calendar", element: <CalendarView /> },
-    { path: "profile", element: <Profile /> },
-    { path: "profile/:tab", element: <Profile /> },
-    { path: "settings", element: <Settings /> },
-    { path: "settings/profile", element: <ProfileSettings /> },
-    { path: "settings/locations", element: <Locations /> },
-    { path: "settings/security", element: <SecuritySettings /> },
-    { path: "settings/notifications", element: <NotificationSettings /> },
-    { path: "settings/preferences", element: <PreferenceSettings /> },
-    { path: "settings/status", element: <Settings /> },
-    { path: "settings/document-types", element: <Settings /> },
-    { path: "settings/users", element: <UserManagement /> },
-    { path: "settings/roles", element: <RoleManagement /> },
-    { path: "settings/audit", element: <AuditLogs /> },
-    { path: "settings/role-menu-assignment", element: <RoleMenuAssignment /> },
+    { path: 'dashboard',                          element: <Dashboard /> },
+    { path: 'actions',                            element: <ActionsList /> },
+    { path: 'actions/all',                        element: <AllActions /> },
+    { path: 'actions/my-tasks',                   element: <MyTasks /> },
+    { path: 'actions/:id',                        element: <ActionDetail /> },
+    { path: 'actions/overdue',                    element: <OverdueActions /> },
+    { path: 'actions/assign',                     element: <AssignAction /> },
+    { path: 'actions/assign/minute/:minuteId',    element: <AssignAction /> },
+    { path: 'actions/edit/:id',                   element: <AssignAction /> },
+    { path: 'actions/:id/assign',                 element: <AssignAction /> },
+    { path: 'actions/progress',                   element: <UpdateProgress /> },
+    { path: 'actions/:id/progress',               element: <UpdateProgress /> },
+    { path: 'participants',                       element: <ParticipantsLists /> },
+    { path: 'participants/create',                element: <CreateParticipant /> },
+    { path: 'participants/:id',                   element: <ParticipantDetail /> },
+    { path: 'participants/:id/edit',              element: <CreateParticipant /> },
+    { path: 'participants/import',                element: <BulkImportPage /> },
+    { path: 'participant-lists',                  element: <ParticipantListsManager /> },
+    { path: 'participant-lists/:id',              element: <ParticipantListsManager /> },
+    { path: 'participants/lists',                 element: <ParticipantListsManager /> },
+    { path: 'documents',                          element: <DocumentsList /> },
+    { path: 'documents/:category',               element: <DocumentsList /> },
+    { path: 'reports',                            element: <ReportsList /> },
+    { path: 'reports/:type',                      element: <ReportsList /> },
+    { path: 'calendar',                           element: <CalendarView /> },
+    { path: 'profile',                            element: <Profile /> },
+    { path: 'profile/:tab',                       element: <Profile /> },
+    { path: 'settings',                           element: <Settings /> },
+    { path: 'settings/profile',                   element: <ProfileSettings /> },
+    { path: 'settings/locations',                 element: <Locations /> },
+    { path: 'settings/security',                  element: <SecuritySettings /> },
+    { path: 'settings/notifications',             element: <NotificationSettings /> },
+    { path: 'settings/preferences',              element: <PreferenceSettings /> },
+    { path: 'settings/status',                    element: <Settings /> },
+    { path: 'settings/document-types',            element: <Settings /> },
+    { path: 'settings/users',                     element: <UserManagement /> },
+    { path: 'settings/roles',                     element: <RoleManagement /> },
+    { path: 'settings/audit',                     element: <AuditLogs /> },
+    { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment /> },
   ],
+
+  // Admin-only routes — these are separate from protectedRoutes above
+  // so they get the role guard applied. The settings/* variants above
+  // are intentionally left without a role guard (handled server-side).
   adminRoutes: [
-    { path: "admin/users", element: <UserManagement />, roles: ['admin'] },
-    { path: "admin/roles", element: <RoleManagement />, roles: ['admin'] },
-    { path: "admin/audit", element: <AuditLogs />, roles: ['admin', 'auditor'] },
-    { path: "settings/users", element: <UserManagement />, roles: ['admin'] },
-    { path: "settings/roles", element: <RoleManagement />, roles: ['admin'] },
-    { path: "settings/role-menu-assignment", element: <RoleMenuAssignment />, roles: ['admin'] },
+    { path: 'admin/users',  element: <UserManagement />,    roles: ['admin'] },
+    { path: 'admin/roles',  element: <RoleManagement />,    roles: ['admin'] },
+    { path: 'admin/audit',  element: <AuditLogs />,         roles: ['admin', 'auditor'] },
   ],
 };
 
-/**
- * AppContent Component with preloading on initialization
- */
+// ==================== Suspense wrapper helper ====================
+
+const Lazy = ({ message = 'Loading page...', children }) => (
+  <Suspense fallback={<LoadingScreen message={message} fullScreen={false} />}>
+    {children}
+  </Suspense>
+);
+
+// ==================== AppContent ====================
+
 const AppContent = () => {
   const dispatch = useDispatch();
   const { isAuthenticated, user } = useSelector(selectAuth);
@@ -553,17 +488,14 @@ const AppContent = () => {
       initCalled.current = true;
 
       setLoadingProgress(30);
-      
+
       try {
-        // Attempt to restore session from token
         setLoadingProgress(60);
         await dispatch(checkAuth()).unwrap();
         setLoadingProgress(80);
-        
-        // Preload critical components after auth check
+
         await preloadCriticalComponents();
         setLoadingProgress(100);
-        
       } catch (err) {
         console.error('Initialization error:', err?.message || err);
         if (err?.status === 0 || err?.code === 'ERR_NETWORK') {
@@ -571,6 +503,8 @@ const AppContent = () => {
         } else if (err?.status === 500) {
           setInitError('Server error. Please try again later.');
         }
+        // Non-network errors (e.g. 401 unauthenticated) are not fatal —
+        // the app still loads and the user will be redirected to /login.
       } finally {
         setInitialized(true);
       }
@@ -579,28 +513,17 @@ const AppContent = () => {
     initialize();
   }, [dispatch]);
 
-  // Preload role-based components when user is authenticated
-  useEffect(() => {
-    if (isAuthenticated && user?.roles) {
-      preloadRoleBasedComponents(user.roles);
-    }
-  }, [isAuthenticated, user]);
-
-  // Fatal Error UI
   if (initError) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', textAlign: 'center', p: 3 }}>
-        <Typography variant="h4" color="error" gutterBottom>
-          Connection Error
-        </Typography>
+      <Box sx={{
+        display: 'flex', justifyContent: 'center', alignItems: 'center',
+        height: '100vh', flexDirection: 'column', textAlign: 'center', p: 3
+      }}>
+        <Typography variant="h4" color="error" gutterBottom>Connection Error</Typography>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
           {initError}
         </Typography>
-        <Button 
-          variant="contained" 
-          onClick={() => window.location.reload()}
-          startIcon={<span>🔄</span>}
-        >
+        <Button variant="contained" onClick={() => window.location.reload()} startIcon={<span>🔄</span>}>
           Retry Connection
         </Button>
       </Box>
@@ -617,88 +540,80 @@ const AppContent = () => {
         <Routes>
           {/* Public Routes */}
           {routeConfig.publicRoutes.map(({ path, element, wrapper: Wrapper }) => (
-            <Route 
-              key={path} 
-              path={path} 
-              element={<Wrapper>{element}</Wrapper>} 
-            />
+            <Route key={path} path={path} element={<Wrapper>{element}</Wrapper>} />
           ))}
-          
+
           {/* Protected App Routes */}
-          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+          {/* NOTE: AuthReloader has been removed. The Sidebar manages its own
+              menu fetch lifecycle via two separate useEffect hooks that watch
+              isLoggedIn and user.id independently. Adding AuthReloader here
+              caused a timing race where the Sidebar would mount before Redux
+              had propagated isLoggedIn=true, causing the fetch to be skipped. */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Navigate to="/dashboard" replace />} />
-            
-            {/* Regular Meeting Routes - NO MeetingRecorderProvider (no microphone request) */}
+
+            {/* Regular Meeting Routes — no MeetingRecorderProvider */}
             {routeConfig.regularMeetingRoutes.map(({ path, element }) => (
-              <Route 
-                key={path} 
-                path={path} 
-                element={
-                  <Suspense fallback={<LoadingScreen message="Loading meeting page..." fullScreen={false} />}>
-                    {element}
-                  </Suspense>
-                } 
+              <Route
+                key={path}
+                path={path}
+                element={<Lazy message="Loading meeting page...">{element}</Lazy>}
               />
             ))}
-            
-            {/* Recording Routes ONLY - Wrapped with MeetingRecorderProvider (microphone requested only here) */}
+
+            {/* Recording Route ONLY — MeetingRecorderProvider here triggers mic prompt */}
             {routeConfig.recordingRoutes.map(({ path, element }) => (
-              <Route 
-                key={path} 
-                path={path} 
+              <Route
+                key={path}
+                path={path}
                 element={
                   <RecordingRouteWrapper>
-                    <Suspense fallback={<LoadingScreen message="Loading recorder..." fullScreen={false} />}>
-                      {element}
-                    </Suspense>
+                    <Lazy message="Loading recorder...">{element}</Lazy>
                   </RecordingRouteWrapper>
-                } 
+                }
               />
             ))}
-            
-            {/* Standard Protected Routes - No MeetingRecorderProvider needed */}
+
+            {/* Standard Protected Routes */}
             {routeConfig.protectedRoutes.map(({ path, element }) => (
-              <Route 
-                key={path} 
-                path={path} 
-                element={
-                  <Suspense fallback={<LoadingScreen message="Loading page..." fullScreen={false} />}>
-                    {element}
-                  </Suspense>
-                } 
+              <Route
+                key={path}
+                path={path}
+                element={<Lazy>{element}</Lazy>}
               />
             ))}
-            
-            {/* Admin Routes with Role Protection */}
+
+            {/* Admin Routes — role-guarded */}
             {routeConfig.adminRoutes.map(({ path, element, roles }) => (
-              <Route 
-                key={path} 
-                path={path} 
+              <Route
+                key={path}
+                path={path}
                 element={
                   <ProtectedRoute requiredRoles={roles}>
-                    <Suspense fallback={<LoadingScreen message="Loading page..." fullScreen={false} />}>
-                      {element}
-                    </Suspense>
+                    <Lazy>{element}</Lazy>
                   </ProtectedRoute>
-                } 
+                }
               />
             ))}
           </Route>
 
           {/* Error Routes */}
           {routeConfig.errorRoutes.map(({ path, element }) => (
-            <Route 
-              key={path} 
-              path={path} 
-              element={
-                <Suspense fallback={<LoadingScreen message="Loading..." fullScreen={false} />}>
-                  {element}
-                </Suspense>
-              } 
+            <Route
+              key={path}
+              path={path}
+              element={<Lazy message="Loading...">{element}</Lazy>}
             />
           ))}
-          
-          {/* Catch-all Route */}
+
+          {/* Catch-all */}
           <Route path="*" element={<Navigate to="/404" replace />} />
         </Routes>
       </Suspense>
@@ -706,16 +621,15 @@ const AppContent = () => {
   );
 };
 
-/**
- * Main App Component
- */
+// ==================== Main App ====================
+
 export default function App() {
   const baseUrl = import.meta.env.BASE_URL;
-  
+
   return (
     <ThemeContextProvider>
-      <SnackbarProvider 
-        maxSnack={3} 
+      <SnackbarProvider
+        maxSnack={3}
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
         autoHideDuration={4000}
         preventDuplicate

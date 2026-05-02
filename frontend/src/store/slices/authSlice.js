@@ -654,19 +654,21 @@ const authSlice = createSlice({
       })
       .addCase(checkAuth.fulfilled, (state, action) => {
         state.isAuthChecking = false;
-        state.isAuthenticated = true;
+        
         state.user = action.payload.user;
         state.userPermissions = action.payload.permissions || [];
         state.token = action.payload.token;
         state.tokenExpiration = getTokenExpiration(action.payload.token);
+        state.isAuthenticated = true;
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
       })
       .addCase(checkAuth.rejected, (state) => {
         state.isAuthChecking = false;
-        state.isAuthenticated = false;
+        
         state.user = null;
+        state.isAuthenticated = false;
         state.token = null;
         state.profilePicture = null;
         state.userPermissions = [];
@@ -682,22 +684,38 @@ const authSlice = createSlice({
       })
       .addCase(login.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.isAuthenticated = true;
         state.token = action.payload.access_token;
         state.tokenExpiration = getTokenExpiration(action.payload.access_token);
-        state.user = action.payload.user || action.payload;
+        state.isAuthenticated = true;
         state.userPermissions = action.payload.permissions || [];
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
+
+        // FIX: build a proper user object from the flat login response
+        // action.payload.user is undefined — the API returns flat fields
+        state.user = action.payload.user || {
+          id: action.payload.user_id,           // ← map user_id → id
+          username: action.payload.username,
+          email: action.payload.email,
+          roles: action.payload.roles,
+          full_name: action.payload.full_name,
+          first_name: action.payload.first_name,
+          last_name: action.payload.last_name,
+          is_active: action.payload.is_active,
+          is_verified: action.payload.is_verified,
+          created_at: action.payload.created_at,
+          permissions: action.payload.permissions || [],
+        };
       })
       .addCase(login.rejected, (state, action) => {
         state.isLoading = false;
-        state.isAuthenticated = false;
+        
         state.error = action.payload?.message || 'Login failed';
         state.fieldErrors = action.payload?.fieldErrors || {};
         state.errorCode = action.payload?.errorCode;
         state.userPermissions = [];
+        state.isAuthenticated = false;
       })
       
       // ==================== REGISTER ====================

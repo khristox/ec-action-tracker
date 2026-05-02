@@ -1,4 +1,4 @@
-// Sidebar.jsx - FIXED VERSION (removed React.memo)
+// Sidebar.jsx - FIXED VERSION (menu reload on auth state change)
 
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
@@ -34,9 +34,10 @@ import { selectUser, selectIsAuthenticated } from '../../store/slices/authSlice'
 const DRAWER_WIDTHS = { expanded: 280, collapsed: 72 };
 const LOGO_PATH = '/logo.png';
 
+
+
 // ==================== Icon Mapping ====================
 
-// Material Icons mapping
 const materialIconMap = {
   dashboard: DashboardIcon,
   event: EventIcon,
@@ -68,7 +69,6 @@ const materialIconMap = {
   default: DashboardIcon
 };
 
-// Font Awesome icon name mapping
 const faIconMapping = {
   'fa-dashboard': 'faTachometerAlt',
   'fa-calendar': 'faCalendar',
@@ -127,19 +127,19 @@ const getFontAwesomeIcon = (iconName, library) => {
     .split('-')
     .map((part, index) => index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1))
     .join('');
-  
+
   camelCaseName = 'fa' + camelCaseName.charAt(0).toUpperCase() + camelCaseName.slice(1);
-  
+
   const mappedName = faIconMapping[iconName] || camelCaseName;
-  
+
   if (library === 'fab' && fab[mappedName]) return fab[mappedName];
   if (library === 'fas' && fas[mappedName]) return fas[mappedName];
   if (library === 'far' && far[mappedName]) return far[mappedName];
-  
+
   if (fab[mappedName]) return fab[mappedName];
   if (fas[mappedName]) return fas[mappedName];
   if (far[mappedName]) return far[mappedName];
-  
+
   const variations = [
     mappedName,
     camelCaseName,
@@ -147,77 +147,80 @@ const getFontAwesomeIcon = (iconName, library) => {
     iconName,
     iconName.replace(/[_-]/g, '')
   ];
-  
+
   for (const variation of variations) {
     if (fab[variation]) return fab[variation];
     if (fas[variation]) return fas[variation];
     if (far[variation]) return far[variation];
   }
-  
+
   return null;
 };
 
 const getMaterialIcon = (iconName) => {
   if (!iconName) return materialIconMap.default;
-  
+
   const normalizedName = iconName.toLowerCase().trim();
-  
+
   if (materialIconMap[normalizedName]) {
     return materialIconMap[normalizedName];
   }
-  
+
   const withoutUnderscore = normalizedName.replace(/_/g, '');
   if (materialIconMap[withoutUnderscore]) {
     return materialIconMap[withoutUnderscore];
   }
-  
+
   const withoutSpaces = normalizedName.replace(/\s/g, '');
   if (materialIconMap[withoutSpaces]) {
     return materialIconMap[withoutSpaces];
   }
-  
+
   return materialIconMap.default;
 };
 
 const renderIcon = (menu) => {
   if (menu.icon_type === 'material_symbols') {
     return (
-      <span className="material-symbols-outlined" style={{ 
-        fontSize: '22px', 
-        color: menu.icon_color !== 'inherit' && menu.icon_color !== '#inherit' ? menu.icon_color : undefined,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
+      <span
+        className="material-symbols-outlined"
+        style={{
+          fontSize: '22px',
+          color: menu.icon_color !== 'inherit' && menu.icon_color !== '#inherit' ? menu.icon_color : undefined,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+      >
         {menu.icon || 'dashboard'}
       </span>
     );
   }
-  
+
   if (menu.icon_type === 'fontawesome') {
     const icon = getFontAwesomeIcon(menu.icon, menu.icon_library);
     if (icon) {
       return (
-        <FontAwesomeIcon 
-          icon={icon} 
-          style={{ 
-            color: menu.icon_color !== 'inherit' && menu.icon_color !== '#inherit' ? menu.icon_color : undefined, 
+        <FontAwesomeIcon
+          icon={icon}
+          style={{
+            color: menu.icon_color !== 'inherit' && menu.icon_color !== '#inherit' ? menu.icon_color : undefined,
             fontSize: '1.1rem',
             width: '22px',
             height: '22px'
-          }} 
+          }}
         />
       );
     }
     console.warn(`FontAwesome icon not found: ${menu.icon}`);
     return <DashboardIcon fontSize="small" />;
   }
-  
+
   if (menu.icon_type === 'mui' || !menu.icon_type) {
     const MuiIcon = getMaterialIcon(menu.icon);
     return <MuiIcon fontSize="small" sx={{ color: menu.icon_color !== 'inherit' ? menu.icon_color : undefined }} />;
   }
-  
+
   return <DashboardIcon fontSize="small" />;
 };
 
@@ -232,60 +235,57 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   const isLoggedIn = useSelector(selectIsAuthenticated);
   const menus = useSelector(selectMenus);
   const menusLoading = useSelector((state) => state.menus?.loading);
+
+  // Track the previous user ID across renders (does not trigger re-render)
   const previousUserId = useRef(null);
-  const previousAuthState = useRef(isLoggedIn);
 
   const [openSubmenus, setOpenSubmenus] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Force re-render when auth state changes
-  const [forceUpdate, setForceUpdate] = useState(0);
 
-  // Force re-render when authentication state changes
+
+
+
+  // ==================== FIX: Split auth effects ====================
+
+  // Effect 1: Handle logout — clear menus immediately when user logs out
+ useEffect(() => {
+  console.log('Effect1 fired — isLoggedIn:', isLoggedIn);
+  if (!isLoggedIn) {
+    dispatch(resetMenuState());
+    setOpenSubmenus({});
+    setSearchQuery('');
+    previousUserId.current = null;
+  }
+}, [isLoggedIn, dispatch]);
+
+
+
+  // Effect 2: Fetch menus when user logs in or a different user logs in.
+  // Does NOT depend on `menus` — menu presence is irrelevant to whether we should fetch.
   useEffect(() => {
-    console.log('Sidebar: Auth state changed, forcing re-render');
-    setForceUpdate(prev => prev + 1);
-  }, [isLoggedIn, user?.id]);
 
-  // Reset menus and fetch when user changes or auth state changes
-  useEffect(() => {
-    const currentUserId = user?.id;
-    
-    // Check if user has changed (different user logged in)
-    const userChanged = currentUserId && previousUserId.current && currentUserId !== previousUserId.current;
-    
-    // Check if auth state changed from false to true (user just logged in)
-    const justLoggedIn = isLoggedIn && !previousAuthState.current;
-    
-    // Check if logged out
-    const justLoggedOut = !isLoggedIn && previousAuthState.current;
-    
-    if (justLoggedOut) {
-      console.log('Sidebar: User logged out, clearing menus');
-      // Clear menus on logout
-      dispatch(resetMenuState());
-      setOpenSubmenus({});
-      setSearchQuery('');
-      previousUserId.current = null;
-      previousAuthState.current = isLoggedIn;
-      return;
-    }
-    
-    if ((isLoggedIn && (!menus || menus.length === 0)) || userChanged || justLoggedIn) {
-      console.log('Sidebar: Fetching menus for user', user?.username);
-      // Fetch new menus for the logged-in user
-      dispatch(fetchUserMenus());
-      // Reset submenu states
-      setOpenSubmenus({});
-      setSearchQuery('');
-    }
-    
-    // Update refs
-    previousUserId.current = currentUserId;
-    previousAuthState.current = isLoggedIn;
-  }, [dispatch, user?.id, isLoggedIn, menus]);
+  if (!isLoggedIn || !user?.id) {
+    return;
+  }
 
-  // Auto-expand current path
+  const isFirstLoad = !previousUserId.current;
+  const userChanged = previousUserId.current !== null && previousUserId.current !== user.id;
+  const menusEmpty = !menus || menus.length === 0;
+
+
+  if (isFirstLoad || userChanged || menusEmpty) {
+    dispatch(resetMenuState());
+    dispatch(fetchUserMenus());
+    setOpenSubmenus({});
+    setSearchQuery('');
+  }
+
+  previousUserId.current = user.id;
+}, [isLoggedIn, user?.id, menus, dispatch]);
+
+  // ==================== End of fix ====================
+
+  // Auto-expand the submenu that matches the current path
   useEffect(() => {
     const expandPath = (items, path) => {
       for (const item of items) {
@@ -302,34 +302,32 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
       }
       return false;
     };
-    
+
     if (menus && menus.length > 0) {
       expandPath(menus, location.pathname);
     }
   }, [menus, location.pathname]);
 
-  // Search Logic
+  // Search logic
   const filteredMenus = useMemo(() => {
     if (!searchQuery.trim()) return menus || [];
 
-    const filterItems = (items) => {
-      return items
+    const filterItems = (items) =>
+      items
         .map(item => {
           const match = item.title?.toLowerCase().includes(searchQuery.toLowerCase());
           const filteredChildren = item.children ? filterItems(item.children) : [];
-          
           if (match || filteredChildren.length > 0) {
             return { ...item, children: filteredChildren };
           }
           return null;
         })
         .filter(Boolean);
-    };
 
     return filterItems(menus || []);
   }, [menus, searchQuery]);
 
-  // Auto-expand parents when searching
+  // Auto-expand all parents when the user is searching
   useEffect(() => {
     if (searchQuery.trim() && !isCollapsed) {
       const newOpenStates = {};
@@ -346,6 +344,8 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     }
   }, [searchQuery, filteredMenus, isCollapsed]);
 
+  // ==================== Render Helpers ====================
+
   const renderMenuItems = (items, depth = 0) => {
     if (!items || items.length === 0) {
       return (
@@ -361,7 +361,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
       const isSelected = location.pathname === item.path;
       const hasChildren = item.children && item.children.length > 0;
       const isOpen = openSubmenus[item.id] && !isCollapsed;
-      
+
       if (!item.title) return null;
 
       const menuItem = (
@@ -378,7 +378,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
           sx={{
             minHeight: 44,
             justifyContent: isCollapsed ? 'center' : 'flex-start',
-            px: isCollapsed ? 2 : 2,
+            px: 2,
             pl: isCollapsed ? 2 : 2 + Math.min(depth * 2, 4),
             borderRadius: 1.5,
             mx: 1,
@@ -391,42 +391,36 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
             '&.Mui-selected': {
               bgcolor: alpha(theme.palette.primary.main, 0.12),
               color: theme.palette.primary.main,
-              '& .MuiListItemIcon-root': { 
-                color: theme.palette.primary.main,
-              },
-              '&:hover': {
-                bgcolor: alpha(theme.palette.primary.main, 0.16),
-              }
+              '& .MuiListItemIcon-root': { color: theme.palette.primary.main },
+              '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) }
             },
           }}
         >
-          <ListItemIcon sx={{ 
-            minWidth: 0, 
-            mr: isCollapsed ? 0 : 2, 
-            color: 'inherit',
-            justifyContent: 'center',
-            '& svg, & .material-symbols-outlined': {
-              fontSize: '22px'
-            }
-          }}>
+          <ListItemIcon
+            sx={{
+              minWidth: 0,
+              mr: isCollapsed ? 0 : 2,
+              color: 'inherit',
+              justifyContent: 'center',
+              '& svg, & .material-symbols-outlined': { fontSize: '22px' }
+            }}
+          >
             {renderIcon(item)}
           </ListItemIcon>
-          
+
           {!isCollapsed && (
             <>
-              <ListItemText 
+              <ListItemText
                 primary={item.title}
                 slotProps={{
                   primary: {
-                    fontSize: '0.875rem', 
+                    fontSize: '0.875rem',
                     fontWeight: isSelected ? 600 : 450,
                     noWrap: true
                   }
                 }}
               />
-              {hasChildren && (
-                isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />
-              )}
+              {hasChildren && (isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />)}
             </>
           )}
         </ListItemButton>
@@ -453,50 +447,54 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     });
   };
 
-  // Don't render sidebar if not authenticated
-  if (!isLoggedIn) {
-    return null;
-  }
+  // ==================== Guard clauses ====================
 
-  // Loading state
+  // Don't render sidebar if not authenticated
+  if (!isLoggedIn) return null;
+
+  // Show spinner only on the very first load when no menus are cached yet
   if (menusLoading && (!menus || menus.length === 0)) {
     return (
-      <Box sx={{ 
-        width: isCollapsed ? DRAWER_WIDTHS.collapsed : DRAWER_WIDTHS.expanded,
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh' 
-      }}>
+      <Box
+        sx={{
+          width: isCollapsed ? DRAWER_WIDTHS.collapsed : DRAWER_WIDTHS.expanded,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh'
+        }}
+      >
         <CircularProgress size={40} />
       </Box>
     );
   }
 
+  // ==================== Sidebar content ====================
+
   const sidebarContent = (
-    <Box sx={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      height: '100%', 
-      overflow: 'hidden',
-      bgcolor: 'background.paper'
-    }}>
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+        bgcolor: 'background.paper'
+      }}
+    >
       {/* Header */}
-      <Box sx={{ 
-        p: 2, 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: isCollapsed ? 'center' : 'space-between', 
-        minHeight: 64,
-        borderBottom: `1px solid ${alpha(theme.palette.divider, 0.6)}`
-      }}>
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isCollapsed ? 'center' : 'space-between',
+          minHeight: 64,
+          borderBottom: `1px solid ${alpha(theme.palette.divider, 0.6)}`
+        }}
+      >
         {!isCollapsed && (
-          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-            <Avatar 
-              src={LOGO_PATH} 
-              sx={{ width: 32, height: 32 }}
-              alt="Logo"
-            >
+          <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+            <Avatar src={LOGO_PATH} sx={{ width: 32, height: 32 }} alt="Logo">
               {!LOGO_PATH && <DashboardIcon />}
             </Avatar>
             <Typography variant="subtitle1" fontWeight={700} noWrap sx={{ letterSpacing: '-0.3px' }}>
@@ -505,8 +503,8 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
           </Stack>
         )}
         {!isMobile && (
-          <IconButton 
-            onClick={() => setIsCollapsed(!isCollapsed)} 
+          <IconButton
+            onClick={() => setIsCollapsed(!isCollapsed)}
             size="small"
             sx={{
               bgcolor: alpha(theme.palette.action.hover, 0.5),
@@ -518,7 +516,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
         )}
       </Box>
 
-      {/* Search Bar - Only show when expanded */}
+      {/* Search Bar — only when expanded */}
       {!isCollapsed && (
         <Box sx={{ px: 2, py: 2 }}>
           <TextField
@@ -541,13 +539,11 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
                     </IconButton>
                   </InputAdornment>
                 ),
-                sx: { 
-                  borderRadius: 2, 
+                sx: {
+                  borderRadius: 2,
                   fontSize: '0.8rem',
                   bgcolor: alpha(theme.palette.action.hover, 0.3),
-                  '&:hover': {
-                    bgcolor: alpha(theme.palette.action.hover, 0.5),
-                  }
+                  '&:hover': { bgcolor: alpha(theme.palette.action.hover, 0.5) }
                 }
               }
             }}
@@ -561,23 +557,25 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
           {renderMenuItems(filteredMenus)}
         </List>
       </Box>
-      
+
       <Divider />
 
       {/* User Info Footer */}
-      <Box sx={{ 
-        p: 2, 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: isCollapsed ? 'center' : 'flex-start',
-        borderTop: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
-        bgcolor: alpha(theme.palette.action.hover, 0.2)
-      }}>
-        <Avatar 
-          sx={{ 
-            bgcolor: theme.palette.primary.main, 
-            width: 36, 
-            height: 36, 
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isCollapsed ? 'center' : 'flex-start',
+          borderTop: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
+          bgcolor: alpha(theme.palette.action.hover, 0.2)
+        }}
+      >
+        <Avatar
+          sx={{
+            bgcolor: theme.palette.primary.main,
+            width: 36,
+            height: 36,
             fontSize: '0.9rem',
             fontWeight: 600
           }}
@@ -598,18 +596,19 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     </Box>
   );
 
-  // Mobile drawer
+  // ==================== Mobile / Desktop shell ====================
+
   if (isMobile) {
     return (
-      <Drawer 
-        variant="temporary" 
-        open={mobileOpen} 
-        onClose={onClose} 
-        sx={{ 
-          '& .MuiDrawer-paper': { 
+      <Drawer
+        variant="temporary"
+        open={mobileOpen}
+        onClose={onClose}
+        sx={{
+          '& .MuiDrawer-paper': {
             width: DRAWER_WIDTHS.expanded,
             boxShadow: theme.shadows[5]
-          } 
+          }
         }}
       >
         {sidebarContent}
@@ -617,7 +616,6 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     );
   }
 
-  // Desktop sidebar
   return (
     <Box
       component="aside"
@@ -639,5 +637,4 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   );
 };
 
-// IMPORTANT: REMOVED React.memo to allow re-renders on auth state changes
 export default Sidebar;

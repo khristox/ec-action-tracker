@@ -1,4 +1,4 @@
-// Sidebar.jsx - FIXED VERSION (menu reload on auth state change)
+// Sidebar.jsx - Material UI Icon Mapping Version
 
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
@@ -11,22 +11,21 @@ import {
 } from '@mui/material';
 import {
   ExpandLess, ExpandMore, Dashboard as DashboardIcon,
-  People as PeopleIcon, Description as DescriptionIcon,
-  Settings as SettingsIcon, ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon, MeetingRoom as MeetingIcon,
+  ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon,
   Search as SearchIcon, Clear as ClearIcon,
-  Event as EventIcon, Assignment as AssignmentIcon,
-  History as HistoryIcon, Group as GroupIcon,
-  Security as SecurityIcon, Article as ArticleIcon,
+  People as PeopleIcon, Event as EventIcon, Assignment as AssignmentIcon,
+  Settings as SettingsIcon, MeetingRoom as MeetingRoomIcon,
+  Description as DescriptionIcon, History as HistoryIcon,
+  Group as GroupIcon, Security as SecurityIcon, Article as ArticleIcon,
   MenuBook as MenuBookIcon, CalendarMonth as CalendarMonthIcon,
-  Help as HelpIcon, Star as StarIcon, Folder as FolderIcon
+  Help as HelpIcon, Star as StarIcon, Folder as FolderIcon,
+  Home as HomeIcon, Business as BusinessIcon, LocationOn as LocationIcon,
+  Person as PersonIcon, Email as EmailIcon, Phone as PhoneIcon,
+  Save as SaveIcon, Edit as EditIcon, Delete as DeleteIcon,
+  Add as AddIcon, Search as SearchIconAlt, FilterList as FilterIcon,
+  Refresh as RefreshIcon, CheckCircle as CheckCircleIcon,
+  Cancel as CancelIcon, Warning as WarningIcon, Info as InfoIcon
 } from '@mui/icons-material';
-
-// Font Awesome Imports
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import * as fab from '@fortawesome/free-brands-svg-icons';
-import * as fas from '@fortawesome/free-solid-svg-icons';
-import * as far from '@fortawesome/free-regular-svg-icons';
 
 import { fetchUserMenus, selectMenus, resetMenuState } from '../../store/slices/menuSlice';
 import { selectUser, selectIsAuthenticated } from '../../store/slices/authSlice';
@@ -34,152 +33,155 @@ import { selectUser, selectIsAuthenticated } from '../../store/slices/authSlice'
 const DRAWER_WIDTHS = { expanded: 280, collapsed: 72 };
 const LOGO_PATH = '/logo.png';
 
-
-
-// ==================== Icon Mapping ====================
+// ==================== Material UI Icon Mapping ====================
 
 const materialIconMap = {
-  dashboard: DashboardIcon,
-  event: EventIcon,
-  meeting: MeetingIcon,
-  people: PeopleIcon,
-  assignment: AssignmentIcon,
-  settings: SettingsIcon,
-  history: HistoryIcon,
-  group: GroupIcon,
-  article: ArticleIcon,
-  security: SecurityIcon,
-  calendar: CalendarMonthIcon,
-  Calendar_month: CalendarMonthIcon,
-  calendarMonth: CalendarMonthIcon,
-  calendarmonth: CalendarMonthIcon,
-  menu_book: MenuBookIcon,
-  help: HelpIcon,
-  star: StarIcon,
-  folder: FolderIcon,
-  description: DescriptionIcon,
-  meetings: MeetingIcon,
-  tasks: AssignmentIcon,
-  users: PeopleIcon,
-  roles: SecurityIcon,
-  permissions: SecurityIcon,
-  documents: DescriptionIcon,
-  reports: ArticleIcon,
-  analytics: DashboardIcon,
-  default: DashboardIcon
-};
-
-const faIconMapping = {
-  'fa-dashboard': 'faTachometerAlt',
-  'fa-calendar': 'faCalendar',
-  'fa-users': 'faUsers',
-  'fa-tasks': 'faTasks',
-  'fa-cog': 'faCog',
-  'fa-gear': 'faCog',
-  'fa-file': 'faFile',
-  'fa-folder': 'faFolder',
-  'fa-chart': 'faChartLine',
-  'fa-chart-line': 'faChartLine',
-  'fa-chart-bar': 'faChartBar',
-  'fa-bell': 'faBell',
-  'fa-envelope': 'faEnvelope',
-  'fa-user': 'faUser',
-  'fa-user-plus': 'faUserPlus',
-  'fa-sign-out': 'faSignOutAlt',
-  'fa-sign-in': 'faSignInAlt',
-  'fa-lock': 'faLock',
-  'fa-unlock': 'faUnlock',
-  'fa-key': 'faKey',
-  'fa-search': 'faSearch',
-  'fa-print': 'faPrint',
-  'fa-download': 'faDownload',
-  'fa-upload': 'faUpload',
-  'fa-edit': 'faEdit',
-  'fa-trash': 'faTrash',
-  'fa-plus': 'faPlus',
-  'fa-minus': 'faMinus',
-  'fa-check': 'faCheck',
-  'fa-times': 'faTimes',
-  'fa-exclamation': 'faExclamation',
-  'fa-question': 'faQuestion',
-  'fa-info': 'faInfo',
-  'fa-warning': 'faExclamationTriangle',
-  'fa-calendar-alt': 'faCalendarAlt',
-  'fa-clock': 'faClock',
-  'fa-hourglass': 'faHourglass',
-  'fa-list': 'faList',
-  'fa-table': 'faTable',
-  'fa-th': 'faTh',
-  'fa-th-large': 'faThLarge',
-  'fa-th-list': 'faThList',
-  'fa-check-circle': 'faCheckCircle',
-  'fa-times-circle': 'faTimesCircle',
-  'fa-exclamation-circle': 'faExclamationCircle',
-  'fa-info-circle': 'faInfoCircle',
-  'fa-question-circle': 'faQuestionCircle'
-};
-
-// ==================== Icon Helper Functions ====================
-
-const getFontAwesomeIcon = (iconName, library) => {
-  let camelCaseName = iconName
-    .replace(/^fa-/, '')
-    .split('-')
-    .map((part, index) => index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1))
-    .join('');
-
-  camelCaseName = 'fa' + camelCaseName.charAt(0).toUpperCase() + camelCaseName.slice(1);
-
-  const mappedName = faIconMapping[iconName] || camelCaseName;
-
-  if (library === 'fab' && fab[mappedName]) return fab[mappedName];
-  if (library === 'fas' && fas[mappedName]) return fas[mappedName];
-  if (library === 'far' && far[mappedName]) return far[mappedName];
-
-  if (fab[mappedName]) return fab[mappedName];
-  if (fas[mappedName]) return fas[mappedName];
-  if (far[mappedName]) return far[mappedName];
-
-  const variations = [
-    mappedName,
-    camelCaseName,
-    `fa${iconName}`,
-    iconName,
-    iconName.replace(/[_-]/g, '')
-  ];
-
-  for (const variation of variations) {
-    if (fab[variation]) return fab[variation];
-    if (fas[variation]) return fas[variation];
-    if (far[variation]) return far[variation];
-  }
-
-  return null;
+  // Dashboard & Overview
+  'dashboard': DashboardIcon,
+  'dashboard_icon': DashboardIcon,
+  'overview': DashboardIcon,
+  'home': HomeIcon,
+  'home_icon': HomeIcon,
+  
+  // Meetings
+  'meeting': MeetingRoomIcon,
+  'meetings': MeetingRoomIcon,
+  'meeting_room': MeetingRoomIcon,
+  'calendar': CalendarMonthIcon,
+  'calendar_month': CalendarMonthIcon,
+  'event': EventIcon,
+  'schedule': EventIcon,
+  
+  // People & Users
+  'people': PeopleIcon,
+  'users': PeopleIcon,
+  'user': PersonIcon,
+  'profile': PersonIcon,
+  'group': GroupIcon,
+  'groups': GroupIcon,
+  'participant': PeopleIcon,
+  'participants': PeopleIcon,
+  
+  // Tasks & Assignments
+  'assignment': AssignmentIcon,
+  'tasks': AssignmentIcon,
+  'task': AssignmentIcon,
+  'action': AssignmentIcon,
+  'actions': AssignmentIcon,
+  'todo': AssignmentIcon,
+  
+  // Documents & Reports
+  'description': DescriptionIcon,
+  'documents': DescriptionIcon,
+  'document': DescriptionIcon,
+  'reports': ArticleIcon,
+  'report': ArticleIcon,
+  'article': ArticleIcon,
+  'folder': FolderIcon,
+  'folders': FolderIcon,
+  'file': DescriptionIcon,
+  
+  // Settings & Admin
+  'settings': SettingsIcon,
+  'admin': SettingsIcon,
+  'configuration': SettingsIcon,
+  'security': SecurityIcon,
+  'permissions': SecurityIcon,
+  'roles': SecurityIcon,
+  'audit': HistoryIcon,
+  'logs': HistoryIcon,
+  
+  // History & Tracking
+  'history': HistoryIcon,
+  'tracking': HistoryIcon,
+  'audit_log': HistoryIcon,
+  
+  // Help & Support
+  'help': HelpIcon,
+  'support': HelpIcon,
+  'faq': HelpIcon,
+  
+  // Favorites & Starred
+  'star': StarIcon,
+  'favorite': StarIcon,
+  'bookmark': StarIcon,
+  
+  // Location
+  'location': LocationIcon,
+  'address': LocationIcon,
+  'place': LocationIcon,
+  'building': BusinessIcon,
+  'office': BusinessIcon,
+  
+  // CRUD Operations
+  'add': AddIcon,
+  'create': AddIcon,
+  'new': AddIcon,
+  'edit': EditIcon,
+  'update': EditIcon,
+  'delete': DeleteIcon,
+  'remove': DeleteIcon,
+  'save': SaveIcon,
+  'cancel': CancelIcon,
+  
+  // Actions
+  'search': SearchIconAlt,
+  'filter': FilterIcon,
+  'refresh': RefreshIcon,
+  
+  // Status
+  'success': CheckCircleIcon,
+  'completed': CheckCircleIcon,
+  'done': CheckCircleIcon,
+  'warning': WarningIcon,
+  'error': CancelIcon,
+  'info': InfoIcon,
+  
+  // Default
+  'default': DashboardIcon
 };
 
 const getMaterialIcon = (iconName) => {
-  if (!iconName) return materialIconMap.default;
-
+  if (!iconName || typeof iconName !== 'string') {
+    return DashboardIcon;
+  }
+  
   const normalizedName = iconName.toLowerCase().trim();
-
+  
+  // Direct match
   if (materialIconMap[normalizedName]) {
     return materialIconMap[normalizedName];
   }
-
+  
+  // Remove underscores and try again
   const withoutUnderscore = normalizedName.replace(/_/g, '');
   if (materialIconMap[withoutUnderscore]) {
     return materialIconMap[withoutUnderscore];
   }
-
+  
+  // Remove spaces and try again
   const withoutSpaces = normalizedName.replace(/\s/g, '');
   if (materialIconMap[withoutSpaces]) {
     return materialIconMap[withoutSpaces];
   }
-
-  return materialIconMap.default;
+  
+  // Check if it contains any keyword
+  for (const [key, value] of Object.entries(materialIconMap)) {
+    if (normalizedName.includes(key) || key.includes(normalizedName)) {
+      return value;
+    }
+  }
+  
+  // Default fallback
+  return DashboardIcon;
 };
 
 const renderIcon = (menu) => {
+  if (!menu) {
+    return <DashboardIcon fontSize="small" />;
+  }
+  
+  // Handle material_symbols type
   if (menu.icon_type === 'material_symbols') {
     return (
       <span
@@ -196,32 +198,17 @@ const renderIcon = (menu) => {
       </span>
     );
   }
-
-  if (menu.icon_type === 'fontawesome') {
-    const icon = getFontAwesomeIcon(menu.icon, menu.icon_library);
-    if (icon) {
-      return (
-        <FontAwesomeIcon
-          icon={icon}
-          style={{
-            color: menu.icon_color !== 'inherit' && menu.icon_color !== '#inherit' ? menu.icon_color : undefined,
-            fontSize: '1.1rem',
-            width: '22px',
-            height: '22px'
-          }}
-        />
-      );
-    }
-    console.warn(`FontAwesome icon not found: ${menu.icon}`);
-    return <DashboardIcon fontSize="small" />;
-  }
-
-  if (menu.icon_type === 'mui' || !menu.icon_type) {
-    const MuiIcon = getMaterialIcon(menu.icon);
-    return <MuiIcon fontSize="small" sx={{ color: menu.icon_color !== 'inherit' ? menu.icon_color : undefined }} />;
-  }
-
-  return <DashboardIcon fontSize="small" />;
+  
+  // Handle mui type or default
+  const MuiIcon = getMaterialIcon(menu.icon);
+  return (
+    <MuiIcon 
+      fontSize="small" 
+      sx={{ 
+        color: menu.icon_color !== 'inherit' && menu.icon_color !== '#inherit' ? menu.icon_color : undefined 
+      }} 
+    />
+  );
 };
 
 // ==================== Sidebar Component ====================
@@ -236,56 +223,39 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   const menus = useSelector(selectMenus);
   const menusLoading = useSelector((state) => state.menus?.loading);
 
-  // Track the previous user ID across renders (does not trigger re-render)
   const previousUserId = useRef(null);
-
   const [openSubmenus, setOpenSubmenus] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
 
-
-
-
-  // ==================== FIX: Split auth effects ====================
-
-  // Effect 1: Handle logout — clear menus immediately when user logs out
- useEffect(() => {
-  console.log('Effect1 fired — isLoggedIn:', isLoggedIn);
-  if (!isLoggedIn) {
-    dispatch(resetMenuState());
-    setOpenSubmenus({});
-    setSearchQuery('');
-    previousUserId.current = null;
-  }
-}, [isLoggedIn, dispatch]);
-
-
-
-  // Effect 2: Fetch menus when user logs in or a different user logs in.
-  // Does NOT depend on `menus` — menu presence is irrelevant to whether we should fetch.
+  // Effect 1: Handle logout
   useEffect(() => {
+    if (!isLoggedIn) {
+      dispatch(resetMenuState());
+      setOpenSubmenus({});
+      setSearchQuery('');
+      previousUserId.current = null;
+    }
+  }, [isLoggedIn, dispatch]);
 
-  if (!isLoggedIn || !user?.id) {
-    return;
-  }
+  // Effect 2: Fetch menus on login
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
 
-  const isFirstLoad = !previousUserId.current;
-  const userChanged = previousUserId.current !== null && previousUserId.current !== user.id;
-  const menusEmpty = !menus || menus.length === 0;
+    const isFirstLoad = !previousUserId.current;
+    const userChanged = previousUserId.current !== null && previousUserId.current !== user.id;
+    const menusEmpty = !menus || menus.length === 0;
 
+    if (isFirstLoad || userChanged || menusEmpty) {
+      dispatch(resetMenuState());
+      dispatch(fetchUserMenus());
+      setOpenSubmenus({});
+      setSearchQuery('');
+    }
 
-  if (isFirstLoad || userChanged || menusEmpty) {
-    dispatch(resetMenuState());
-    dispatch(fetchUserMenus());
-    setOpenSubmenus({});
-    setSearchQuery('');
-  }
+    previousUserId.current = user.id;
+  }, [isLoggedIn, user?.id, menus, dispatch]);
 
-  previousUserId.current = user.id;
-}, [isLoggedIn, user?.id, menus, dispatch]);
-
-  // ==================== End of fix ====================
-
-  // Auto-expand the submenu that matches the current path
+  // Auto-expand current path
   useEffect(() => {
     const expandPath = (items, path) => {
       for (const item of items) {
@@ -293,7 +263,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
           setOpenSubmenus(prev => ({ ...prev, [item.id]: true }));
           return true;
         }
-        if (item.children && item.children.length > 0) {
+        if (item.children?.length > 0) {
           if (expandPath(item.children, path)) {
             setOpenSubmenus(prev => ({ ...prev, [item.id]: true }));
             return true;
@@ -303,7 +273,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
       return false;
     };
 
-    if (menus && menus.length > 0) {
+    if (menus?.length > 0) {
       expandPath(menus, location.pathname);
     }
   }, [menus, location.pathname]);
@@ -327,9 +297,9 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     return filterItems(menus || []);
   }, [menus, searchQuery]);
 
-  // Auto-expand all parents when the user is searching
+  // Auto-expand all parents when searching
   useEffect(() => {
-    if (searchQuery.trim() && !isCollapsed) {
+    if (searchQuery.trim() && !isCollapsed && filteredMenus.length > 0) {
       const newOpenStates = {};
       const expandAll = (items) => {
         items.forEach(item => {
@@ -344,10 +314,8 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     }
   }, [searchQuery, filteredMenus, isCollapsed]);
 
-  // ==================== Render Helpers ====================
-
   const renderMenuItems = (items, depth = 0) => {
-    if (!items || items.length === 0) {
+    if (!items?.length) {
       return (
         <Box sx={{ p: 2, textAlign: 'center' }}>
           <Typography variant="body2" color="text.secondary">
@@ -359,7 +327,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
 
     return items.map((item) => {
       const isSelected = location.pathname === item.path;
-      const hasChildren = item.children && item.children.length > 0;
+      const hasChildren = item.children?.length > 0;
       const isOpen = openSubmenus[item.id] && !isCollapsed;
 
       if (!item.title) return null;
@@ -402,7 +370,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
               mr: isCollapsed ? 0 : 2,
               color: 'inherit',
               justifyContent: 'center',
-              '& svg, & .material-symbols-outlined': { fontSize: '22px' }
+              '& svg': { fontSize: '22px' }
             }}
           >
             {renderIcon(item)}
@@ -447,12 +415,10 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     });
   };
 
-  // ==================== Guard clauses ====================
-
   // Don't render sidebar if not authenticated
   if (!isLoggedIn) return null;
 
-  // Show spinner only on the very first load when no menus are cached yet
+  // Loading state
   if (menusLoading && (!menus || menus.length === 0)) {
     return (
       <Box
@@ -468,8 +434,6 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
       </Box>
     );
   }
-
-  // ==================== Sidebar content ====================
 
   const sidebarContent = (
     <Box
@@ -495,7 +459,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
         {!isCollapsed && (
           <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
             <Avatar src={LOGO_PATH} sx={{ width: 32, height: 32 }} alt="Logo">
-              {!LOGO_PATH && <DashboardIcon />}
+              <DashboardIcon />
             </Avatar>
             <Typography variant="subtitle1" fontWeight={700} noWrap sx={{ letterSpacing: '-0.3px' }}>
               EC Uganda
@@ -516,7 +480,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
         )}
       </Box>
 
-      {/* Search Bar — only when expanded */}
+      {/* Search Bar */}
       {!isCollapsed && (
         <Box sx={{ px: 2, py: 2 }}>
           <TextField
@@ -596,8 +560,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     </Box>
   );
 
-  // ==================== Mobile / Desktop shell ====================
-
+  // Mobile drawer
   if (isMobile) {
     return (
       <Drawer
@@ -616,6 +579,7 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
     );
   }
 
+  // Desktop sidebar
   return (
     <Box
       component="aside"

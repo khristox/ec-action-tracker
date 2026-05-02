@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   IconButton, Tooltip, Alert, CircularProgress, Pagination,
   TextField, InputAdornment, MenuItem, Select, FormControl, InputLabel,
-  Card, CardContent, Grid, LinearProgress, useTheme, alpha
+  Card, CardContent, Grid, useTheme, alpha
 } from '@mui/material';
 import {
   Visibility, Search, Refresh, AccessTime, Assignment,
@@ -33,7 +33,11 @@ const StyledStatCard = ({ label, value, baseColor, icon }) => {
       }}
     >
       <CardContent>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Stack 
+          direction="row" 
+          justifyContent="space-between" 
+          alignItems="center"
+        >
           <Typography 
             variant="h3" 
             fontWeight={800} 
@@ -50,7 +54,14 @@ const StyledStatCard = ({ label, value, baseColor, icon }) => {
             </Box>
           )}
         </Stack>
-        <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600, mt: 1 }}>
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            color: 'text.secondary', 
+            fontWeight: 600, 
+            mt: 1 
+          }}
+        >
           {label}
         </Typography>
       </CardContent>
@@ -163,22 +174,51 @@ const AllActions = () => {
 
   if (loading && actions.length === 0) {
     return (
-      <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Box 
+        sx={{ 
+          bgcolor: 'background.default', 
+          minHeight: '100vh', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center' 
+        }}
+      >
         <CircularProgress sx={{ color: theme.palette.primary.main }} />
-        <Typography sx={{ ml: 2, color: theme.palette.text.secondary }}>Loading actions...</Typography>
+        <Typography sx={{ ml: 2, color: theme.palette.text.secondary }}>
+          Loading actions...
+        </Typography>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', py: { xs: 2, sm: 3, md: 4 } }}>
-      <Container maxWidth="xl" sx={{ px: { xs: 2, sm: 3, md: 4 } }}>
+    <Box 
+      sx={{ 
+        bgcolor: 'background.default', 
+        minHeight: '100vh', 
+        py: { xs: 2, sm: 3, md: 4 } 
+      }}
+    >
+      <Container 
+        maxWidth="xl" 
+        sx={{ px: { xs: 2, sm: 3, md: 4 } }}
+      >
         {/* Header */}
         <Box mb={4}>
-          <Typography variant="h4" fontWeight={800} sx={{ color: 'text.primary', fontSize: { xs: '1.75rem', sm: '2rem', md: '2.25rem' } }}>
+          <Typography 
+            variant="h4" 
+            fontWeight={800} 
+            sx={{ 
+              color: 'text.primary', 
+              fontSize: { xs: '1.75rem', sm: '2rem', md: '2.25rem' } 
+            }}
+          >
             All Actions
           </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+          <Typography 
+            variant="body2" 
+            sx={{ color: 'text.secondary', mt: 0.5 }}
+          >
             Manage and track all action items across all meetings
           </Typography>
         </Box>
@@ -230,19 +270,24 @@ const AllActions = () => {
             borderColor: 'divider' 
           }}
         >
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+          <Stack 
+            direction={{ xs: 'column', md: 'row' }} 
+            spacing={2}
+          >
             <TextField
               fullWidth
               size="small"
               placeholder="Search actions by description..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" sx={{ color: 'text.secondary' }} />
-                  </InputAdornment>
-                ),
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search fontSize="small" sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                }
               }}
               sx={{ flex: 2 }}
             />
@@ -296,7 +341,11 @@ const AllActions = () => {
         </Paper>
 
         {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
+          <Alert 
+            severity="error" 
+            sx={{ mb: 3, borderRadius: 2 }} 
+            onClose={() => setError(null)}
+          >
             {error}
           </Alert>
         )}
@@ -334,7 +383,10 @@ const AllActions = () => {
                 overflowX: 'auto'
               }}
             >
-              <Table size="small" sx={{ minWidth: 800 }}>
+              <Table 
+                size="small" 
+                sx={{ minWidth: 800 }}
+              >
                 <TableHead sx={{ bgcolor: isDark ? alpha(theme.palette.common.white, 0.05) : '#F8FAFC' }}>
                   <TableRow>
                     <TableCell sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>Description</TableCell>
@@ -364,11 +416,22 @@ const AllActions = () => {
                         }}
                       >
                         <TableCell>
-                          <Typography variant="body2" fontWeight={600} sx={{ color: 'text.primary' }}>
+                          <Typography 
+                            variant="body2" 
+                            fontWeight={600} 
+                            sx={{ color: 'text.primary' }}
+                          >
                             {action.description}
                           </Typography>
                           {action.remarks && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+                            <Typography 
+                              variant="caption" 
+                              sx={{ 
+                                color: 'text.secondary', 
+                                display: 'block', 
+                                mt: 0.5 
+                              }}
+                            >
                               {action.remarks.length > 80 ? action.remarks.substring(0, 80) + '...' : action.remarks}
                             </Typography>
                           )}
@@ -388,11 +451,17 @@ const AllActions = () => {
                               }}
                             />
                           ) : (
-                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>—</Typography>
+                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                              —
+                            </Typography>
                           )}
                         </TableCell>
                         <TableCell>
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                          <Stack 
+                            direction="row" 
+                            spacing={0.5} 
+                            flexWrap="wrap"
+                          >
                             {action.assigned_to_name ? (
                               <Chip
                                 label={typeof action.assigned_to_name === 'string' ? action.assigned_to_name : action.assigned_to_name?.name || 'Unassigned'}
@@ -407,18 +476,30 @@ const AllActions = () => {
                           </Stack>
                         </TableCell>
                         <TableCell>
-                          <Stack direction="row" alignItems="center" spacing={1}>
-                            <AccessTime fontSize="small" sx={{ color: isOverdue ? 'error.main' : 'action.active' }} />
+                          <Stack 
+                            direction="row" 
+                            alignItems="center" 
+                            spacing={1}
+                          >
+                            <AccessTime 
+                              fontSize="small" 
+                              sx={{ color: isOverdue ? 'error.main' : 'action.active' }} 
+                            />
                             <Typography 
                               variant="body2" 
-                              sx={{ color: isOverdue ? 'error.main' : 'text.primary' }}
-                              fontWeight={isOverdue ? 600 : 400}
+                              sx={{ 
+                                color: isOverdue ? 'error.main' : 'text.primary',
+                                fontWeight: isOverdue ? 600 : 400
+                              }}
                             >
                               {dueDate}
                             </Typography>
                           </Stack>
                           {isOverdue && (
-                            <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
+                            <Typography 
+                              variant="caption" 
+                              sx={{ color: 'error.main', display: 'block' }}
+                            >
                               Overdue
                             </Typography>
                           )}
@@ -443,41 +524,66 @@ const AllActions = () => {
                           />
                         </TableCell>
                         <TableCell sx={{ minWidth: 120 }}>
-                          <Box display="flex" alignItems="center" gap={1}>
-                            <Box sx={{ 
-                              flex: 1, 
-                              bgcolor: alpha(theme.palette.text.disabled, 0.2), 
-                              borderRadius: 2, 
-                              height: 6,
-                              overflow: 'hidden'
-                            }}>
-                              <Box sx={{ 
-                                width: `${action.overall_progress_percentage || 0}%`, 
-                                bgcolor: isOverdue ? 'error.main' : statusInfo.label === 'Completed' ? 'success.main' : 'primary.main', 
-                                height: 6, 
-                                borderRadius: 2,
-                                transition: 'width 0.3s ease'
-                              }} />
+                          <Stack 
+                            direction="row" 
+                            alignItems="center" 
+                            spacing={1}
+                          >
+                            <Box 
+                              sx={{ 
+                                flex: 1, 
+                                bgcolor: alpha(theme.palette.text.disabled, 0.2), 
+                                borderRadius: 2, 
+                                height: 6,
+                                overflow: 'hidden'
+                              }}
+                            >
+                              <Box 
+                                sx={{ 
+                                  width: `${action.overall_progress_percentage || 0}%`, 
+                                  bgcolor: isOverdue ? 'error.main' : statusInfo.label === 'Completed' ? 'success.main' : 'primary.main', 
+                                  height: 6, 
+                                  borderRadius: 2,
+                                  transition: 'width 0.3s ease'
+                                }} 
+                              />
                             </Box>
-                            <Typography variant="caption" fontWeight={500} sx={{ color: 'text.secondary' }}>
+                            <Typography 
+                              variant="caption" 
+                              fontWeight={500} 
+                              sx={{ color: 'text.secondary' }}
+                            >
                               {action.overall_progress_percentage || 0}%
                             </Typography>
-                          </Box>
+                          </Stack>
                         </TableCell>
                         <TableCell align="center">
-                          <Stack direction="row" spacing={0.5} justifyContent="center">
+                          <Stack 
+                            direction="row" 
+                            spacing={0.5} 
+                            justifyContent="center"
+                          >
                             <Tooltip title="View Details">
-                              <IconButton size="small" onClick={() => handleViewAction(action.id)}>
+                              <IconButton 
+                                size="small" 
+                                onClick={() => handleViewAction(action.id)}
+                              >
                                 <Visibility fontSize="small" sx={{ color: 'primary.main' }} />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title="Edit">
-                              <IconButton size="small" onClick={() => handleEditAction(action.id)}>
+                              <IconButton 
+                                size="small" 
+                                onClick={() => handleEditAction(action.id)}
+                              >
                                 <Edit fontSize="small" sx={{ color: 'warning.main' }} />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title="Delete">
-                              <IconButton size="small" onClick={() => handleDeleteAction(action.id)}>
+                              <IconButton 
+                                size="small" 
+                                onClick={() => handleDeleteAction(action.id)}
+                              >
                                 <Delete fontSize="small" sx={{ color: 'error.main' }} />
                               </IconButton>
                             </Tooltip>

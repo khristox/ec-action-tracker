@@ -88,12 +88,10 @@ import {
   FiberManualRecord as FiberManualRecordIcon,
   Share as ShareIcon,
   CopyAll as CopyAllIcon,
-  Print as PrintIcon,
   PictureAsPdf as PictureAsPdfIcon,
   Code as CodeIcon,
   ViewStream as ViewStreamIcon,
   ViewAgenda as ViewAgendaIcon,
-  Email as EmailIcon,
 } from '@mui/icons-material';
 import {
   fetchMeetingById,
@@ -130,7 +128,6 @@ import { selectUserPermissions, hasPermission } from '../../../store/slices/auth
 
 // ==================== Permission Constants ====================
 const PERMISSIONS = {
-  // Meeting permissions
   DELETE_MEETING: 'meeting:delete',
   UPDATE_MEETING: 'meeting:update',
   CREATE_MEETING: 'meeting:create',
@@ -139,14 +136,10 @@ const PERMISSIONS = {
   CHANGE_STATUS: 'meeting:status_change',
   RECORD_MEETING: 'meeting:record',
   VIEW_RECORDER: 'meeting:view_recorder',
-  
-  // Notification permissions
   SEND_NOTIFICATIONS: 'notification:send',
   SEND_EMAIL_NOTIFICATIONS: 'notification:email',
   VIEW_NOTIFICATIONS: 'notification:view',
   MANAGE_NOTIFICATION_TEMPLATES: 'notification:manage_templates',
-  
-  // Minutes permissions
   ADD_MINUTES: 'minutes:add',
   EDIT_MINUTES: 'minutes:edit',
   DELETE_MINUTES: 'minutes:delete',
@@ -154,8 +147,6 @@ const PERMISSIONS = {
   SIGN_MINUTES: 'minutes:sign',
   VIEW_MINUTES: 'minutes:view',
   EXPORT_MINUTES: 'minutes:export',
-  
-  // Actions permissions
   CREATE_ACTIONS: 'action:create',
   UPDATE_ACTIONS: 'action:update',
   DELETE_ACTIONS: 'action:delete',
@@ -167,21 +158,15 @@ const PERMISSIONS = {
   VIEW_OWN_ACTIONS: 'action:view_own',
   ADD_ACTION_ATTACHMENTS: 'action:attachment',
   ACTION_REPORTS: 'report:action',
-  
-  // Participants permissions
   ADD_PARTICIPANTS: 'participant:add',
   REMOVE_PARTICIPANTS: 'participant:remove',
   VIEW_PARTICIPANTS: 'participant:view',
   MANAGE_PARTICIPANT_LISTS: 'participant:manage_lists',
-  
-  // Reports permissions
   EXPORT_REPORTS: 'report:export',
   VIEW_REPORTS: 'report:view',
   MEETING_REPORTS: 'report:meeting',
   PARTICIPANT_REPORTS: 'report:participant',
   VIEW_FINANCIAL_REPORTS: 'report:financial',
-  
-  // Dashboard permissions
   VIEW_DASHBOARD: 'dashboard:view',
   CUSTOMIZE_DASHBOARD: 'dashboard:customize',
   DASHBOARD_OVERVIEW: 'dashboard:overview',
@@ -190,21 +175,13 @@ const PERMISSIONS = {
   PENDING_ACTIONS_WIDGET: 'dashboard:pending_actions',
   OVERDUE_ACTIONS_WIDGET: 'dashboard:overdue_actions',
   NOTIFICATIONS_WIDGET: 'dashboard:notifications',
-  
-  // Audit permissions
   VIEW_AUDIT_LOGS: 'admin:view_audit',
-  
-  // Location permissions
   MANAGE_LOCATIONS: 'admin:manage_locations',
-  
-  // Structure permissions
   CREATE_STRUCTURE: 'structure:create',
   UPDATE_STRUCTURE: 'structure:update',
   DELETE_STRUCTURE: 'structure:delete',
   READ_STRUCTURE: 'structure:read',
   MANAGE_ADMIN_STRUCTURES: 'admin:manage_structures',
-  
-  // User management
   CREATE_USER: 'user:create',
   UPDATE_USER: 'user:update',
   DELETE_USER: 'user:delete',
@@ -215,27 +192,17 @@ const PERMISSIONS = {
   READ_PROFILE: 'profile:read',
   VIEW_PROFILE: 'profile:view',
   CHANGE_PASSWORD: 'profile:change_password',
-  
-  // Role management
   MANAGE_ROLES: 'admin:manage_roles',
   ASSIGN_ROLE: 'role:assign',
-  
-  // Menu management
   MANAGE_MENU_ASSIGNMENT: 'admin:manage_menu_assignment',
-  
-  // Payment permissions
   CREATE_PAYMENT: 'payment:create',
   READ_PAYMENT: 'payment:read',
   UPDATE_PAYMENT: 'payment:update',
   PROCESS_PAYMENT: 'payment:process',
-  
-  // Lease permissions
   CREATE_LEASE: 'lease:create',
   READ_LEASE: 'lease:read',
   UPDATE_LEASE: 'lease:update',
   TERMINATE_LEASE: 'lease:terminate',
-  
-  // Tenant permissions
   CREATE_TENANT: 'tenant:create',
   READ_TENANT: 'tenant:read',
   UPDATE_TENANT: 'tenant:update',
@@ -273,8 +240,7 @@ const STATUS_CONFIG = {
   awaiting:    { label: 'Awaiting',    icon: <HourglassEmptyIcon />, color: 'warning', action: 'Awaiting Action' },
 };
 
-// Tab configurations
-// Tab configurations with correct permission codes
+// Tab configurations with proper permission codes
 const TABS = [
   { label: 'Minutes',      icon: <DescriptionIcon />,       value: 0, simple: true, requiresPermission: PERMISSIONS.VIEW_MINUTES },
   { label: 'Actions',      icon: <AssignmentIcon />,        value: 1, simple: true, requiresPermission: PERMISSIONS.VIEW_OWN_ACTIONS },
@@ -285,44 +251,22 @@ const TABS = [
   { label: 'Recordings',   icon: <FiberManualRecordIcon />, value: 6, simple: false, requiresPermission: PERMISSIONS.VIEW_RECORDER },
 ];
 
-// Speed Dial Actions with permissions
+// Speed Dial Actions
 const getSpeedDialActions = (hasUpdatePermission, hasNotificationPermission, hasEmailPermission, hasExportPermission, hasDeletePermission) => {
   const actions = [];
-  
-  if (hasUpdatePermission) {
-    actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit', requiresPermission: PERMISSIONS.UPDATE_MEETING });
-  }
-  
-  if (hasNotificationPermission || hasEmailPermission) {
-    actions.push({ icon: <NotificationsIcon />, name: 'Notify', action: 'notify', requiresPermission: null });
-  }
-  
-  actions.push({ icon: <ShareIcon />, name: 'Share', action: 'share', requiresPermission: null });
-  
+  if (hasUpdatePermission) actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit' });
+  if (hasNotificationPermission || hasEmailPermission) actions.push({ icon: <NotificationsIcon />, name: 'Notify', action: 'notify' });
+  actions.push({ icon: <ShareIcon />, name: 'Share', action: 'share' });
   if (hasExportPermission) {
-    actions.push({ icon: <PictureAsPdfIcon />, name: 'PDF Report', action: 'pdf', requiresPermission: PERMISSIONS.EXPORT_REPORTS });
-    actions.push({ icon: <CodeIcon />, name: 'Export JSON', action: 'json', requiresPermission: PERMISSIONS.EXPORT_REPORTS });
+    actions.push({ icon: <PictureAsPdfIcon />, name: 'PDF Report', action: 'pdf' });
+    actions.push({ icon: <CodeIcon />, name: 'Export JSON', action: 'json' });
   }
-  
-  if (hasDeletePermission) {
-    actions.push({ icon: <DeleteIcon />, name: 'Delete', action: 'delete', requiresPermission: PERMISSIONS.DELETE_MEETING });
-  }
-  
+  if (hasDeletePermission) actions.push({ icon: <DeleteIcon />, name: 'Delete', action: 'delete' });
   return actions;
 };
 
 // ==================== Helper Functions ====================
-const getLevelInfo = (level) =>
-  LOCATION_LEVELS[level] || { name: `Level ${level}`, icon: <LocationIcon fontSize="small" />, color: '#7C3AED' };
-
-const hexAlpha = (color, opacity) => {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
-  if (result) {
-    const [r, g, b] = [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)];
-    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-  }
-  return color;
-};
+const getLevelInfo = (level) => LOCATION_LEVELS[level] || { name: `Level ${level}`, icon: <LocationIcon fontSize="small" />, color: '#7C3AED' };
 
 const formatDate = (dateString) => {
   if (!dateString) return 'Date not set';
@@ -355,13 +299,11 @@ const normalizeStatus = (status) => {
 const CTELocationDisplay = memo(({ locationId, locationData }) => {
   const [locationHierarchy, setLocationHierarchy] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchLocationHierarchy = async () => {
       if (!locationId && !locationData) { setLocationHierarchy([]); return; }
       setLoading(true);
-      setError(null);
       try {
         if (locationData && locationData.ancestors) {
           setLocationHierarchy([...locationData.ancestors, locationData]);
@@ -372,12 +314,9 @@ const CTELocationDisplay = memo(({ locationId, locationData }) => {
           api.get(`/locations/${locationId}`),
           api.get(`/locations/${locationId}/ancestors`),
         ]);
-        const location = locationRes.data;
-        const ancestors = ancestorsRes.data || [];
-        setLocationHierarchy([...ancestors, location]);
+        setLocationHierarchy([...(ancestorsRes.data || []), locationRes.data]);
       } catch (err) {
         console.error('Error loading location hierarchy:', err);
-        setError(err.response?.data?.detail || 'Failed to load location');
       } finally {
         setLoading(false);
       }
@@ -386,13 +325,8 @@ const CTELocationDisplay = memo(({ locationId, locationData }) => {
   }, [locationId, locationData]);
 
   if (loading) return <Skeleton variant="rounded" width={200} height={32} />;
-
-  if (error || locationHierarchy.length === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        {locationData?.name || 'Location not specified'}
-      </Typography>
-    );
+  if (locationHierarchy.length === 0) {
+    return <Typography variant="body2" color="text.secondary">{locationData?.name || 'Location not specified'}</Typography>;
   }
 
   return (
@@ -408,23 +342,17 @@ const CTELocationDisplay = memo(({ locationId, locationData }) => {
               size="small"
               icon={levelInfo.icon}
               sx={{
-                bgcolor: hexAlpha(levelInfo.color, 0.1),
+                bgcolor: alpha(levelInfo.color, 0.1),
                 borderColor: levelInfo.color,
                 color: levelInfo.color,
                 border: '1px solid',
                 fontWeight: isLast ? 700 : 500,
-                '& .MuiChip-label': { fontWeight: isLast ? 700 : 500 },
-                ...(isLast && { bgcolor: hexAlpha(levelInfo.color, 0.2) }),
+                ...(isLast && { bgcolor: alpha(levelInfo.color, 0.2) }),
               }}
             />
           );
         })}
       </Breadcrumbs>
-      {locationHierarchy[locationHierarchy.length - 1]?.address && (
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-          📍 {locationHierarchy[locationHierarchy.length - 1].address}
-        </Typography>
-      )}
     </Stack>
   );
 });
@@ -447,19 +375,19 @@ const RichTextContent = memo(({ content }) => {
     <Box
       sx={{
         color: isDarkMode ? '#E5E7EB' : 'inherit',
-        '& p': { marginBottom: '12px', lineHeight: 1.7, color: isDarkMode ? '#D1D5DB' : 'inherit' },
+        '& p': { marginBottom: '12px', lineHeight: 1.7 },
         '& p:last-child': { marginBottom: 0 },
-        '& ul, & ol': { paddingLeft: '24px', marginBottom: '12px', color: isDarkMode ? '#D1D5DB' : 'inherit' },
-        '& li': { marginBottom: '6px', color: isDarkMode ? '#D1D5DB' : 'inherit' },
-        '& h1, & h2, & h3': { margin: '16px 0 8px 0', fontWeight: 600, color: isDarkMode ? '#FFFFFF' : 'inherit' },
+        '& ul, & ol': { paddingLeft: '24px', marginBottom: '12px' },
+        '& li': { marginBottom: '6px' },
+        '& h1, & h2, & h3': { margin: '16px 0 8px 0', fontWeight: 600 },
         '& blockquote': {
-          borderLeft: '4px solid', borderColor: isDarkMode ? '#7C3AED' : 'primary.main',
-          paddingLeft: '16px', color: isDarkMode ? '#9CA3AF' : 'text.secondary',
-          fontStyle: 'italic', margin: '16px 0',
-          backgroundColor: isDarkMode ? alpha('#7C3AED', 0.1) : 'transparent',
+          borderLeft: '4px solid #7C3AED',
+          paddingLeft: '16px',
+          fontStyle: 'italic',
+          margin: '16px 0',
         },
-        '& a': { color: isDarkMode ? '#A78BFA' : '#7C3AED', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
-        '& strong, & b': { color: isDarkMode ? '#FFFFFF' : 'inherit', fontWeight: 700 },
+        '& a': { color: '#A78BFA', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
+        '& strong, & b': { fontWeight: 700 },
       }}
       dangerouslySetInnerHTML={{ __html: content }}
     />
@@ -525,7 +453,6 @@ const ViewModeToggle = memo(({ viewMode, onChange }) => {
               color: '#7C3AED',
               '&:hover': { bgcolor: alpha('#7C3AED', 0.18) },
             },
-            '&:hover': { bgcolor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.04) },
           },
         }}
       >
@@ -555,19 +482,17 @@ const HeaderBar = memo(({
   onShare,
   onPrintPDF,
   onExportJSON,
+  onRecord,
   participantCount,
   getStatusIcon,
   getStatusDisplay,
   isMobile,
   canRecord,
   hasRecordPermission,
-  onRecord,
   viewMode,
   onViewModeChange,
   canSendNotifications,
   hasUpdatePermission,
-  hasSendInAppPermission,
-  hasSendEmailPermission
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -592,7 +517,6 @@ const HeaderBar = memo(({
           Meeting Details
         </Typography>
 
-        {/* View Mode Toggle — always visible */}
         <Box sx={{ mr: { xs: 1, sm: 2 } }}>
           <ViewModeToggle viewMode={viewMode} onChange={onViewModeChange} />
         </Box>
@@ -606,80 +530,29 @@ const HeaderBar = memo(({
                 </Badge>
               </IconButton>
             )}
-            <IconButton onClick={onRefresh}>
-              <RefreshIcon />
-            </IconButton>
-            <IconButton onClick={onMoreMenuOpen}>
-              <MoreVertIcon />
-            </IconButton>
+            <IconButton onClick={onRefresh}><RefreshIcon /></IconButton>
+            <IconButton onClick={onMoreMenuOpen}><MoreVertIcon /></IconButton>
           </Stack>
         ) : (
           <Stack direction="row" spacing={0.5}>
-            <Tooltip title="Share Meeting">
-              <IconButton onClick={onShare} size="small">
-                <ShareIcon />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Generate PDF Report">
-              <IconButton onClick={onPrintPDF} size="small">
-                <PictureAsPdfIcon />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Export as JSON">
-              <IconButton onClick={onExportJSON} size="small">
-                <CodeIcon />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Update Meeting Link">
-              <IconButton onClick={onUpdateLink} size="small">
-                <UpdateIcon />
-              </IconButton>
-            </Tooltip>
+{/*             <Tooltip title="Share Meeting"><IconButton onClick={onShare} size="small"><ShareIcon /></IconButton></Tooltip>
+ */}            <Tooltip title="Generate PDF Report"><IconButton onClick={onPrintPDF} size="small"><PictureAsPdfIcon /></IconButton></Tooltip>
+{/*             <Tooltip title="Export as JSON"><IconButton onClick={onExportJSON} size="small"><CodeIcon /></IconButton></Tooltip>
+ */}            <Tooltip title="Update Meeting Link"><IconButton onClick={onUpdateLink} size="small"><UpdateIcon /></IconButton></Tooltip>
             {canSendNotifications && (
-              <Tooltip 
-                title={
-                  <>
-                    Send Notifications
-                    {hasSendInAppPermission && ' (In-App)'}
-                    {hasSendEmailPermission && ' (Email)'}
-                  </>
-                } 
-                arrow
-              >
+              <Tooltip title="Send Notifications" arrow>
                 <IconButton onClick={onNotify} size="small">
-                  <Badge badgeContent={participantCount} color="error">
-                    <NotificationsIcon />
-                  </Badge>
+                  <Badge badgeContent={participantCount} color="error"><NotificationsIcon /></Badge>
                 </IconButton>
               </Tooltip>
             )}
-            <Tooltip title="Refresh">
-              <IconButton onClick={onRefresh} size="small">
-                <RefreshIcon />
-              </IconButton>
-            </Tooltip>
+            <Tooltip title="Refresh"><IconButton onClick={onRefresh} size="small"><RefreshIcon /></IconButton></Tooltip>
             {hasUpdatePermission && (
-              <Tooltip title="Edit Meeting">
-                <IconButton onClick={onEdit} size="small">
-                  <EditIcon />
-                </IconButton>
-              </Tooltip>
+              <Tooltip title="Edit Meeting"><IconButton onClick={onEdit} size="small"><EditIcon /></IconButton></Tooltip>
             )}
-            {/* Record button - requires BOTH canRecord (meeting status) AND hasRecordPermission (user permission) */}
             {canRecord && hasRecordPermission && (
-              <Tooltip title="Record Meeting">
-                <IconButton
-                  onClick={onRecord}
-                  size="small"
-                  sx={{
-                    color: '#f44336',
-                    animation: 'pulse 2s infinite',
-                    '@keyframes pulse': {
-                      '0%, 100%': { opacity: 1 },
-                      '50%':       { opacity: 0.6 },
-                    },
-                  }}
-                >
+              <Tooltip title="Record Meeting" arrow>
+                <IconButton onClick={onRecord} size="small" sx={{ color: '#f44336' }}>
                   <FiberManualRecordIcon />
                 </IconButton>
               </Tooltip>
@@ -695,11 +568,7 @@ const HeaderBar = memo(({
                 {getStatusDisplay()}
               </Button>
             </Tooltip>
-            <Tooltip title="More Options">
-              <IconButton onClick={onMoreMenuOpen} size="small">
-                <MoreVertIcon />
-              </IconButton>
-            </Tooltip>
+            <Tooltip title="More Options"><IconButton onClick={onMoreMenuOpen} size="small"><MoreVertIcon /></IconButton></Tooltip>
           </Stack>
         )}
       </Toolbar>
@@ -736,26 +605,15 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
         overflow: 'hidden',
         border: `1px solid ${isDarkMode ? alpha('#FFFFFF', 0.1) : '#E5E7EB'}`,
         bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
-        transition: 'all 0.25s ease',
       }}
     >
       <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-        {/* Title + Status — always shown */}
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          justifyContent="space-between"
-          alignItems={{ xs: 'flex-start', sm: 'center' }}
-          spacing={2}
-        >
+        {/* Title + Status */}
+        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2}>
           <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight={800}>
             {meeting?.title}
           </Typography>
-          <Chip
-            label={statusConfig.label}
-            color={statusConfig.color}
-            icon={statusConfig.icon}
-            sx={{ fontWeight: 600 }}
-          />
+          <Chip label={statusConfig.label} color={statusConfig.color} icon={statusConfig.icon} sx={{ fontWeight: 600 }} />
         </Stack>
 
         {/* Description — detailed only */}
@@ -771,19 +629,15 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
         <Divider sx={{ my: 2 }} />
 
         <Grid container spacing={{ xs: 2, sm: 3 }}>
-          {/* Date & Time — always shown */}
+          {/* Date & Time */}
           <Grid size={{ xs: 12, sm: 6, md: isSimple ? 4 : 3 }}>
             <Stack direction="row" spacing={2} alignItems="center">
               <Avatar sx={{ bgcolor: alpha('#7C3AED', 0.1), color: '#7C3AED' }}>
                 <CalendarIcon />
               </Avatar>
               <Box>
-                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                  DATE & TIME
-                </Typography>
-                <Typography variant="body1" fontWeight={600}>
-                  {formatDate(meeting?.meeting_date)}
-                </Typography>
+                <Typography variant="caption" fontWeight={600} color="text.secondary">DATE & TIME</Typography>
+                <Typography variant="body1" fontWeight={600}>{formatDate(meeting?.meeting_date)}</Typography>
                 {meeting?.start_time && (
                   <Typography variant="body2" color="text.secondary">
                     <AccessTimeIcon sx={{ fontSize: 12, mr: 0.5, verticalAlign: 'middle' }} />
@@ -795,51 +649,32 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
             </Stack>
           </Grid>
 
-          {/* Location / Platform — always shown */}
+          {/* Location / Platform */}
           <Grid size={{ xs: 12, sm: 6, md: isSimple ? 4 : 3 }}>
             <Stack direction="row" spacing={2} alignItems="flex-start">
               <Avatar sx={{ bgcolor: alpha('#3B82F6', 0.1), color: '#3B82F6' }}>
                 {isOnlineMeeting ? <VideoCallIcon /> : <LocationIcon />}
               </Avatar>
               <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                <Typography variant="caption" fontWeight={600} color="text.secondary">
                   {isOnlineMeeting ? 'PLATFORM' : 'LOCATION'}
                 </Typography>
                 {isOnlineMeeting ? (
                   <>
                     <Stack direction="row" alignItems="center" spacing={1}>
                       <Typography variant="body1" fontWeight={600}>
-                        {meeting?.platform === 'zoom'             ? 'Zoom'
-                         : meeting?.platform === 'google_meet'    ? 'Google Meet'
-                         : meeting?.platform === 'microsoft_teams' ? 'Microsoft Teams'
-                         : 'Online Meeting'}
+                        {meeting?.platform === 'zoom' ? 'Zoom' : meeting?.platform === 'google_meet' ? 'Google Meet' : meeting?.platform === 'microsoft_teams' ? 'Microsoft Teams' : 'Online Meeting'}
                       </Typography>
-                      <Tooltip title="Update Meeting Link">
-                        <IconButton size="small" onClick={onUpdateLink}>
-                          <UpdateIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      <Tooltip title="Update Meeting Link"><IconButton size="small" onClick={onUpdateLink}><UpdateIcon fontSize="small" /></IconButton></Tooltip>
                     </Stack>
                     {hasMeetingLink && (
-                      <Button
-                        size="small"
-                        startIcon={<LinkIcon />}
-                        onClick={onJoinMeeting}
-                        sx={{ mt: 0.5, textTransform: 'none' }}
-                      >
+                      <Button size="small" startIcon={<LinkIcon />} onClick={onJoinMeeting} sx={{ mt: 0.5, textTransform: 'none' }}>
                         Join Meeting
                       </Button>
                     )}
                   </>
                 ) : (
-                  <>
-                    <CTELocationDisplay locationId={meeting?.location_id} locationData={meeting?.location} />
-                    {meeting?.location_text && meeting?.location_text !== meeting?.location?.name && (
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                        📍 {meeting.location_text}
-                      </Typography>
-                    )}
-                  </>
+                  <CTELocationDisplay locationId={meeting?.location_id} locationData={meeting?.location} />
                 )}
               </Box>
             </Stack>
@@ -849,16 +684,10 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
           {!isSimple && meeting?.facilitator && (
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: alpha('#10B981', 0.1), color: '#10B981' }}>
-                  <PeopleIcon />
-                </Avatar>
+                <Avatar sx={{ bgcolor: alpha('#10B981', 0.1), color: '#10B981' }}><PeopleIcon /></Avatar>
                 <Box>
-                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                    SECRETARY
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {meeting.facilitator}
-                  </Typography>
+                  <Typography variant="caption" fontWeight={600} color="text.secondary">SECRETARY</Typography>
+                  <Typography variant="body1" fontWeight={600}>{meeting.facilitator}</Typography>
                 </Box>
               </Stack>
             </Grid>
@@ -868,16 +697,10 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
           {!isSimple && meeting?.chairperson_name && (
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}>
-                  <PeopleIcon />
-                </Avatar>
+                <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}><PeopleIcon /></Avatar>
                 <Box>
-                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                    CHAIRPERSON
-                  </Typography>
-                  <Typography variant="body1" fontWeight={600}>
-                    {meeting.chairperson_name}
-                  </Typography>
+                  <Typography variant="caption" fontWeight={600} color="text.secondary">CHAIRPERSON</Typography>
+                  <Typography variant="body1" fontWeight={600}>{meeting.chairperson_name}</Typography>
                 </Box>
               </Stack>
             </Grid>
@@ -887,23 +710,11 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
           {isSimple && (meeting?.facilitator || meeting?.chairperson_name) && (
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
               <Stack direction="row" spacing={2} alignItems="flex-start">
-                <Avatar sx={{ bgcolor: alpha('#10B981', 0.1), color: '#10B981' }}>
-                  <PeopleIcon />
-                </Avatar>
+                <Avatar sx={{ bgcolor: alpha('#10B981', 0.1), color: '#10B981' }}><PeopleIcon /></Avatar>
                 <Box>
-                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                    KEY PERSONS
-                  </Typography>
-                  {meeting?.chairperson_name && (
-                    <Typography variant="body2" fontWeight={600}>
-                      Chair: {meeting.chairperson_name}
-                    </Typography>
-                  )}
-                  {meeting?.facilitator && (
-                    <Typography variant="body2" color="text.secondary">
-                      Secretary: {meeting.facilitator}
-                    </Typography>
-                  )}
+                  <Typography variant="caption" fontWeight={600} color="text.secondary">KEY PERSONS</Typography>
+                  {meeting?.chairperson_name && <Typography variant="body2" fontWeight={600}>Chair: {meeting.chairperson_name}</Typography>}
+                  {meeting?.facilitator && <Typography variant="body2" color="text.secondary">Secretary: {meeting.facilitator}</Typography>}
                 </Box>
               </Stack>
             </Grid>
@@ -914,24 +725,12 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
         {!isSimple && hasAgenda && (
           <Box sx={{ mt: 4 }}>
             <Divider sx={{ mb: 3 }} />
-            <Stack
-              direction="row"
-              spacing={2}
-              alignItems="flex-start"
-              sx={{ cursor: 'pointer' }}
-              onClick={() => setAgendaExpanded(!agendaExpanded)}
-            >
-              <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}>
-                <DescriptionIcon />
-              </Avatar>
+            <Stack direction="row" spacing={2} alignItems="flex-start" sx={{ cursor: 'pointer' }} onClick={() => setAgendaExpanded(!agendaExpanded)}>
+              <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}><DescriptionIcon /></Avatar>
               <Box sx={{ flex: 1 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                  <Typography variant="subtitle1" fontWeight={700}>
-                    Agenda
-                  </Typography>
-                  <IconButton size="small">
-                    {agendaExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                  </IconButton>
+                  <Typography variant="subtitle1" fontWeight={700}>Agenda</Typography>
+                  <IconButton size="small">{agendaExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}</IconButton>
                 </Stack>
                 <Collapse in={agendaExpanded} collapsedSize={60}>
                   <Paper variant="outlined" sx={{ p: 3, bgcolor: alpha('#000000', 0.02), borderRadius: 2 }}>
@@ -998,39 +797,12 @@ const MeetingDetail = () => {
   // Check if user is admin/superuser
   const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
   
-  // Check if user is the meeting creator
-  const isMeetingCreator = useMemo(() => {
-    return currentMeeting?.created_by === currentUser?.id;
-  }, [currentMeeting, currentUser]);
-  
   // Combined permission checks
-  const canDeleteMeeting = useMemo(() => {
-    if (isAdmin) return true;
-    if (hasDeleteMeetingPermission) return true;
-    return false;
-  }, [isAdmin, hasDeleteMeetingPermission]);
-  
-  const canUpdateMeeting = useMemo(() => {
-    if (isAdmin) return true;
-    if (hasUpdateMeetingPermission) return true;
-    return false;
-  }, [isAdmin, hasUpdateMeetingPermission]);
-  
-  const canSendNotifications = useMemo(() => {
-    return hasSendInAppNotificationPermission || hasSendEmailNotificationPermission;
-  }, [hasSendInAppNotificationPermission, hasSendEmailNotificationPermission]);
-  
-  const canExportReports = useMemo(() => {
-    if (isAdmin) return true;
-    if (hasExportReportPermission) return true;
-    return false;
-  }, [isAdmin, hasExportReportPermission]);
-  
-  const canViewAudit = useMemo(() => {
-    if (isAdmin) return true;
-    if (hasViewAuditPermission) return true;
-    return false;
-  }, [isAdmin, hasViewAuditPermission]);
+  const canDeleteMeeting = isAdmin || hasDeleteMeetingPermission;
+  const canUpdateMeeting = isAdmin || hasUpdateMeetingPermission;
+  const canSendNotifications = hasSendInAppNotificationPermission || hasSendEmailNotificationPermission;
+  const canExportReports = isAdmin || hasExportReportPermission;
+  const canViewAudit = isAdmin || hasViewAuditPermission;
 
   // Local state
   const [tabValue, setTabValue] = useState(0);
@@ -1052,26 +824,21 @@ const MeetingDetail = () => {
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
-  // View mode — persisted to localStorage
-  const [viewMode, setViewMode] = useState(
-    () => localStorage.getItem('meetingViewMode') || 'simple'
-  );
+  // View mode — default to 'simple'
+  const [viewMode, setViewMode] = useState('simple');
 
   const handleViewModeChange = useCallback((mode) => {
     setViewMode(mode);
-    localStorage.setItem('meetingViewMode', mode);
   }, []);
 
-  // Speed dial actions based on permissions
-  const speedDialActions = useMemo(() => {
-    return getSpeedDialActions(
-      canUpdateMeeting,
-      hasSendInAppNotificationPermission,
-      hasSendEmailNotificationPermission,
-      canExportReports,
-      canDeleteMeeting
-    );
-  }, [canUpdateMeeting, hasSendInAppNotificationPermission, hasSendEmailNotificationPermission, canExportReports, canDeleteMeeting]);
+  // Speed dial actions
+  const speedDialActions = useMemo(() => getSpeedDialActions(
+    canUpdateMeeting,
+    hasSendInAppNotificationPermission,
+    hasSendEmailNotificationPermission,
+    canExportReports,
+    canDeleteMeeting
+  ), [canUpdateMeeting, hasSendInAppNotificationPermission, hasSendEmailNotificationPermission, canExportReports, canDeleteMeeting]);
 
   // Memoized values
   const normalizedMeeting = useMemo(
@@ -1091,31 +858,23 @@ const MeetingDetail = () => {
 
   const participantCount = useMemo(() => participants.length, [participants]);
 
-  // Can record based on meeting status (not permission - that's separate)
   const canRecord = useMemo(
-    () =>
-      normalizedMeeting?.status?.short_name === 'started' ||
-      normalizedMeeting?.status?.short_name === 'ongoing' ||
-      normalizedMeeting?.status?.short_name === 'in_progress',
+    () => normalizedMeeting?.status?.short_name === 'started' ||
+          normalizedMeeting?.status?.short_name === 'ongoing' ||
+          normalizedMeeting?.status?.short_name === 'in_progress',
     [normalizedMeeting?.status?.short_name]
   );
 
   // Filter tabs based on user permissions
   const visibleTabs = useMemo(() => {
-    const filtered = TABS.filter((tab) => {
-      // If tab requires a permission, check if user has it
+    return TABS.filter((tab) => {
       if (tab.requiresPermission) {
-        if (tab.requiresPermission === PERMISSIONS.VIEW_RECORDER) {
-          return hasViewRecorderPermission;
-        }
-        if (tab.requiresPermission === PERMISSIONS.VIEW_AUDIT_LOGS) {
-          return canViewAudit;
-        }
+        if (tab.requiresPermission === PERMISSIONS.VIEW_RECORDER) return hasViewRecorderPermission;
+        if (tab.requiresPermission === PERMISSIONS.VIEW_AUDIT_LOGS) return canViewAudit;
         return hasPermission(userPermissions, tab.requiresPermission);
       }
       return true;
     });
-    return filtered;
   }, [hasViewRecorderPermission, canViewAudit, userPermissions]);
 
   const getStatusValue = useCallback(() => {
@@ -1129,16 +888,8 @@ const MeetingDetail = () => {
     return '';
   }, [normalizedMeeting?.status]);
 
-  const getStatusColor = useCallback(() => {
-    const status = getStatusValue();
-    return STATUS_CONFIG[status]?.color || 'default';
-  }, [getStatusValue]);
-
-  const getStatusIcon = useCallback(() => {
-    const status = getStatusValue();
-    return STATUS_CONFIG[status]?.icon || <ScheduleIcon />;
-  }, [getStatusValue]);
-
+  const getStatusColor = useCallback(() => STATUS_CONFIG[getStatusValue()]?.color || 'default', [getStatusValue]);
+  const getStatusIcon = useCallback(() => STATUS_CONFIG[getStatusValue()]?.icon || <ScheduleIcon />, [getStatusValue]);
   const getStatusDisplay = useCallback(() => {
     const status = normalizedMeeting?.status;
     if (!status) return 'Unknown';
@@ -1154,13 +905,8 @@ const MeetingDetail = () => {
   }, [normalizedMeeting?.status]);
 
   // Fetch functions
-  const fetchMeeting = useCallback(() => {
-    if (id) dispatch(fetchMeetingById(id));
-  }, [id, dispatch]);
-
-  const fetchParticipants = useCallback(() => {
-    if (id) dispatch(fetchMeetingParticipants(id));
-  }, [id, dispatch]);
+  const fetchMeeting = useCallback(() => { if (id) dispatch(fetchMeetingById(id)); }, [id, dispatch]);
+  const fetchParticipants = useCallback(() => { if (id) dispatch(fetchMeetingParticipants(id)); }, [id, dispatch]);
 
   // Report/export handlers
   const handlePrintPDF = useCallback(async () => {
@@ -1260,11 +1006,7 @@ const MeetingDetail = () => {
 
   useEffect(() => {
     if (lastNotificationResult) {
-      setSnackbar({
-        open: true,
-        message: `✅ Notifications sent to ${lastNotificationResult.sent} participants!`,
-        severity: 'success',
-      });
+      setSnackbar({ open: true, message: `✅ Notifications sent to ${lastNotificationResult.sent} participants!`, severity: 'success' });
       setNotificationDialogOpen(false);
       dispatch(clearLastNotificationResult());
     }
@@ -1286,9 +1028,8 @@ const MeetingDetail = () => {
     fetchParticipants();
   }, [fetchMeeting, fetchParticipants]);
 
-  const handleBack   = useCallback(() => navigate('/meetings'), [navigate]);
-  
-  const handleEdit   = useCallback(() => {
+  const handleBack = useCallback(() => navigate('/meetings'), [navigate]);
+  const handleEdit = useCallback(() => {
     if (!canUpdateMeeting) {
       setSnackbar({ open: true, message: 'You don\'t have permission to edit meetings', severity: 'error' });
       return;
@@ -1335,46 +1076,26 @@ const MeetingDetail = () => {
     setNotificationDialogOpen(true);
   }, [fetchParticipants, canSendNotifications]);
 
-  const handleSendNotifications = useCallback(
-    (notificationData) => {
-      // Ensure at least one notification type is selected
-      if (!notificationData.type || notificationData.type.length === 0) {
-        setSnackbar({ 
-          open: true, 
-          message: 'Please select at least one notification type', 
-          severity: 'warning' 
-        });
-        return;
-      }
-      
-      // Check permissions for selected types
-      if (notificationData.type.includes('email') && !hasSendEmailNotificationPermission) {
-        setSnackbar({ 
-          open: true, 
-          message: 'You do not have permission to send email notifications', 
-          severity: 'error' 
-        });
-        return;
-      }
-      
-      if (notificationData.type.includes('in_app') && !hasSendInAppNotificationPermission) {
-        setSnackbar({ 
-          open: true, 
-          message: 'You do not have permission to send in-app notifications', 
-          severity: 'error' 
-        });
-        return;
-      }
-      
-      dispatch(sendMeetingNotifications({ meetingId: id, notificationData }));
-    },
-    [id, dispatch, hasSendEmailNotificationPermission, hasSendInAppNotificationPermission]
-  );
+  const handleSendNotifications = useCallback((notificationData) => {
+    if (!notificationData.type || notificationData.type.length === 0) {
+      setSnackbar({ open: true, message: 'Please select at least one notification type', severity: 'warning' });
+      return;
+    }
+    if (notificationData.type.includes('email') && !hasSendEmailNotificationPermission) {
+      setSnackbar({ open: true, message: 'You do not have permission to send email notifications', severity: 'error' });
+      return;
+    }
+    if (notificationData.type.includes('in_app') && !hasSendInAppNotificationPermission) {
+      setSnackbar({ open: true, message: 'You do not have permission to send in-app notifications', severity: 'error' });
+      return;
+    }
+    dispatch(sendMeetingNotifications({ meetingId: id, notificationData }));
+  }, [id, dispatch, hasSendEmailNotificationPermission, hasSendInAppNotificationPermission]);
 
-  const handleStatusMenuOpen  = (event) => setStatusMenuAnchor(event.currentTarget);
-  const handleStatusMenuClose = ()      => setStatusMenuAnchor(null);
-  const handleMoreMenuOpen    = (event) => setMoreMenuAnchor(event.currentTarget);
-  const handleMoreMenuClose   = ()      => setMoreMenuAnchor(null);
+  const handleStatusMenuOpen = (event) => setStatusMenuAnchor(event.currentTarget);
+  const handleStatusMenuClose = () => setStatusMenuAnchor(null);
+  const handleMoreMenuOpen = (event) => setMoreMenuAnchor(event.currentTarget);
+  const handleMoreMenuClose = () => setMoreMenuAnchor(null);
 
   const handleStatusSelect = (statusValue) => {
     setSelectedStatus(statusValue);
@@ -1399,13 +1120,13 @@ const MeetingDetail = () => {
     }
   };
 
-  const handleDeleteClick = () => { 
+  const handleDeleteClick = () => {
     if (!canDeleteMeeting) {
       setSnackbar({ open: true, message: 'You don\'t have permission to delete meetings', severity: 'error' });
       return;
     }
-    setDeleteDialogOpen(true); 
-    handleMoreMenuClose(); 
+    setDeleteDialogOpen(true);
+    handleMoreMenuClose();
   };
 
   const handleDelete = async () => {
@@ -1424,19 +1145,19 @@ const MeetingDetail = () => {
 
   const handleSpeedDialAction = (action) => {
     switch (action) {
-      case 'edit':   handleEdit();                   break;
-      case 'notify': handleNotifyClick();            break;
-      case 'share':  setShareDialogOpen(true);       break;
-      case 'pdf':    handlePrintPDF();               break;
-      case 'json':   handleExportJSON();             break;
-      case 'delete': handleDeleteClick();            break;
+      case 'edit': handleEdit(); break;
+      case 'notify': handleNotifyClick(); break;
+      case 'share': setShareDialogOpen(true); break;
+      case 'pdf': handlePrintPDF(); break;
+/*       case 'json': handleExportJSON(); break;
+ */      case 'delete': handleDeleteClick(); break;
       default: break;
     }
     setSpeedDialOpen(false);
   };
 
   const handleSnackbarClose = () => setSnackbar((prev) => ({ ...prev, open: false }));
-  const handleErrorClose    = () => { setLocalError(null); dispatch(clearMeetingState()); };
+  const handleErrorClose = () => { setLocalError(null); dispatch(clearMeetingState()); };
 
   // ---- Loading state ----
   if (loading && !currentMeeting && !showNotFound) {
@@ -1445,9 +1166,7 @@ const MeetingDetail = () => {
         <Container maxWidth="sm">
           <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
             <CircularProgress size={60} sx={{ mb: 3, color: '#7C3AED' }} />
-            <Typography variant="h6" fontWeight={600} gutterBottom>
-              Loading Meeting Details
-            </Typography>
+            <Typography variant="h6" fontWeight={600} gutterBottom>Loading Meeting Details</Typography>
             <LoadingTimeout timeout={NOT_FOUND_DELAY_MS} />
           </Paper>
         </Container>
@@ -1464,19 +1183,13 @@ const MeetingDetail = () => {
             <Box sx={{ width: 80, height: 80, borderRadius: '50%', bgcolor: alpha('#EF4444', 0.1), display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3 }}>
               <ErrorOutlineIcon sx={{ fontSize: 48, color: '#EF4444' }} />
             </Box>
-            <Typography variant="h5" color="error" gutterBottom fontWeight={700}>
-              Meeting Not Found
-            </Typography>
+            <Typography variant="h5" color="error" gutterBottom fontWeight={700}>Meeting Not Found</Typography>
             <Typography variant="body2" sx={{ mb: 4, color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
               The meeting you're looking for doesn't exist or has been deleted.
             </Typography>
             <Stack spacing={2}>
-              <Button variant="contained" onClick={handleBack} size="large" sx={{ bgcolor: '#7C3AED' }}>
-                Back to Meetings
-              </Button>
-              <Button variant="outlined" onClick={handleRefresh} sx={{ borderColor: '#7C3AED', color: '#7C3AED' }}>
-                Try Again
-              </Button>
+              <Button variant="contained" onClick={handleBack} size="large" sx={{ bgcolor: '#7C3AED' }}>Back to Meetings</Button>
+              <Button variant="outlined" onClick={handleRefresh} sx={{ borderColor: '#7C3AED', color: '#7C3AED' }}>Try Again</Button>
             </Stack>
           </Paper>
         </Container>
@@ -1509,8 +1222,6 @@ const MeetingDetail = () => {
         onViewModeChange={handleViewModeChange}
         canSendNotifications={canSendNotifications}
         hasUpdatePermission={canUpdateMeeting}
-        hasSendInAppPermission={hasSendInAppNotificationPermission}
-        hasSendEmailPermission={hasSendEmailNotificationPermission}
       />
 
       <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
@@ -1529,89 +1240,40 @@ const MeetingDetail = () => {
         />
 
         {(() => {
-          // Filter visible tabs based on view mode and permissions
           const filteredByMode = visibleTabs.filter((t) => viewMode === 'detailed' || t.simple);
-          // Find which visible-tab index corresponds to the currently active tab value
           const visibleIndex = filteredByMode.findIndex((t) => t.value === tabValue);
           const activeVisibleIndex = visibleIndex === -1 ? 0 : visibleIndex;
           const handleTabChange = (_, newVisibleIdx) => setTabValue(filteredByMode[newVisibleIdx].value);
 
-          // Don't show tabs if no tabs are visible
-          if (filteredByMode.length === 0) {
-            return null;
-          }
+          if (filteredByMode.length === 0) return null;
 
           return (
             <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
-              {/* Tab header row */}
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  borderBottom: 1,
-                  borderColor: 'divider',
-                  bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB',
-                  pr: 1.5,
-                }}
-              >
+              <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB', pr: 1.5 }}>
                 <Tabs
                   value={activeVisibleIndex}
                   onChange={handleTabChange}
                   variant="scrollable"
                   scrollButtons="auto"
-                  sx={{
-                    flex: 1,
-                    minHeight: 48,
-                    '& .MuiTab-root': {
-                      py: 1.5,
-                      minHeight: 48,
-                      fontWeight: 600,
-                      fontSize: '0.8rem',
-                      '&.Mui-selected': { color: '#7C3AED' },
-                    },
-                    '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 },
-                  }}
+                  sx={{ flex: 1, minHeight: 48, '& .MuiTab-root': { py: 1.5, minHeight: 48, fontWeight: 600, fontSize: '0.8rem', '&.Mui-selected': { color: '#7C3AED' } }, '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 } }}
                 >
                   {filteredByMode.map((tab) => (
-                    <Tab
-                      key={tab.value}
-                      icon={tab.icon}
-                      iconPosition="start"
-                      label={tab.label}
-                      sx={tab.recording && canRecord && hasRecordPermission ? { color: '#f44336' } : {}}
-                    />
+                    <Tab key={tab.value} icon={tab.icon} iconPosition="start" label={tab.label} />
                   ))}
                 </Tabs>
 
-                {/* "+N more" chip — shown in simple mode, clicking switches to detailed */}
                 {viewMode === 'simple' && (
-                  <Tooltip
-                    title={`Also available: ${visibleTabs.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`}
-                    arrow
-                  >
+                  <Tooltip title={`Also available: ${visibleTabs.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`} arrow>
                     <Chip
                       label={`+${visibleTabs.filter((t) => !t.simple).length} more`}
                       size="small"
                       onClick={() => handleViewModeChange('detailed')}
-                      sx={{
-                        ml: 1,
-                        height: 24,
-                        fontSize: '0.7rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                        bgcolor: alpha('#7C3AED', 0.08),
-                        color: '#7C3AED',
-                        border: `1px dashed ${alpha('#7C3AED', 0.45)}`,
-                        '&:hover': { bgcolor: alpha('#7C3AED', 0.16) },
-                        '& .MuiChip-label': { px: 1 },
-                      }}
+                      sx={{ ml: 1, height: 24, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0, bgcolor: alpha('#7C3AED', 0.08), color: '#7C3AED', border: `1px dashed ${alpha('#7C3AED', 0.45)}`, '&:hover': { bgcolor: alpha('#7C3AED', 0.16) }, '& .MuiChip-label': { px: 1 } }}
                     />
                   </Tooltip>
                 )}
               </Box>
 
-              {/* Tab panels — always keyed to original tab values so content is stable */}
               <Box sx={{ p: { xs: 2, sm: 3 } }}>
                 <TabPanel value={tabValue} index={0}>
                   <MeetingMinutes meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
@@ -1636,13 +1298,11 @@ const MeetingDetail = () => {
                 <TabPanel value={tabValue} index={4}>
                   <MeetingHistory meetingId={id} />
                 </TabPanel>
-                {/* Audit tab - only shown if user has view audit permission */}
                 {canViewAudit && (
                   <TabPanel value={tabValue} index={5}>
                     <MeetingAudit meetingId={id} />
                   </TabPanel>
                 )}
-                {/* Recordings tab - only shown if user has view_recorder permission */}
                 {hasViewRecorderPermission && (
                   <TabPanel value={tabValue} index={6}>
                     <MeetingRecorder meetingId={id} />
@@ -1666,12 +1326,7 @@ const MeetingDetail = () => {
             open={speedDialOpen}
           >
             {speedDialActions.map((action) => (
-              <SpeedDialAction
-                key={action.name}
-                icon={action.icon}
-                tooltipTitle={action.name}
-                onClick={() => handleSpeedDialAction(action.action)}
-              />
+              <SpeedDialAction key={action.name} icon={action.icon} tooltipTitle={action.name} onClick={() => handleSpeedDialAction(action.action)} />
             ))}
           </SpeedDial>
         </Zoom>
@@ -1680,145 +1335,67 @@ const MeetingDetail = () => {
       {/* More Options Menu */}
       <Menu anchorEl={moreMenuAnchor} open={Boolean(moreMenuAnchor)} onClose={handleMoreMenuClose}>
         <MenuItem onClick={() => { setUpdateLinkDialogOpen(true); handleMoreMenuClose(); }}>
-          <ListItemIcon><UpdateIcon /></ListItemIcon>
-          <ListItemText>Update Meeting Link</ListItemText>
+          <ListItemIcon><UpdateIcon /></ListItemIcon><ListItemText>Update Meeting Link</ListItemText>
         </MenuItem>
-        
-        {/* Send Notifications - shows if user has either permission */}
         {canSendNotifications && (
           <MenuItem onClick={handleNotifyClick}>
-            <ListItemIcon>
-              <Badge badgeContent={participantCount} color="error">
-                <NotificationsIcon />
-              </Badge>
-            </ListItemIcon>
-            <ListItemText>
-              Send Notifications
-              <Typography variant="caption" display="block" color="text.secondary">
-                {hasSendInAppNotificationPermission && 'In-App '}
-                {hasSendInAppNotificationPermission && hasSendEmailNotificationPermission && '& '}
-                {hasSendEmailNotificationPermission && 'Email'}
-              </Typography>
-            </ListItemText>
+            <ListItemIcon><Badge badgeContent={participantCount} color="error"><NotificationsIcon /></Badge></ListItemIcon>
+            <ListItemText>Send Notifications</ListItemText>
           </MenuItem>
         )}
-        
-        {/* Update Meeting - requires update permission */}
         {canUpdateMeeting && (
-          <MenuItem onClick={handleEdit}>
-            <ListItemIcon><EditIcon /></ListItemIcon>
-            <ListItemText>Edit Meeting</ListItemText>
-          </MenuItem>
+          <MenuItem onClick={handleEdit}><ListItemIcon><EditIcon /></ListItemIcon><ListItemText>Edit Meeting</ListItemText></MenuItem>
         )}
-        
-        <MenuItem onClick={handleStatusMenuOpen}>
-          <ListItemIcon>{getStatusIcon()}</ListItemIcon>
-          <ListItemText>Update Status</ListItemText>
-        </MenuItem>
-        
-        <MenuItem onClick={() => { setShareDialogOpen(true); handleMoreMenuClose(); }}>
-          <ListItemIcon><ShareIcon /></ListItemIcon>
-          <ListItemText>Share Meeting</ListItemText>
-        </MenuItem>
-        
-        {/* Export options - requires export permission */}
+        <MenuItem onClick={handleStatusMenuOpen}><ListItemIcon>{getStatusIcon()}</ListItemIcon><ListItemText>Update Status</ListItemText></MenuItem>
+        <MenuItem onClick={() => { setShareDialogOpen(true); handleMoreMenuClose(); }}><ListItemIcon><ShareIcon /></ListItemIcon><ListItemText>Share Meeting</ListItemText></MenuItem>
         {canExportReports && (
           <>
-            <MenuItem onClick={handlePrintPDF}>
-              <ListItemIcon><PictureAsPdfIcon /></ListItemIcon>
-              <ListItemText>PDF Report</ListItemText>
-            </MenuItem>
-            <MenuItem onClick={handleExportJSON}>
-              <ListItemIcon><CodeIcon /></ListItemIcon>
-              <ListItemText>Export JSON</ListItemText>
-            </MenuItem>
+            <MenuItem onClick={handlePrintPDF}><ListItemIcon><PictureAsPdfIcon /></ListItemIcon><ListItemText>PDF Report</ListItemText></MenuItem>
+            <MenuItem onClick={handleExportJSON}><ListItemIcon><CodeIcon /></ListItemIcon><ListItemText>Export JSON</ListItemText></MenuItem>
           </>
         )}
-        
         <Divider />
-        
-        {/* Delete Meeting - Only show if user has permission */}
         {canDeleteMeeting && (
           <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
-            <ListItemIcon><DeleteIcon sx={{ color: 'error.main' }} /></ListItemIcon>
-            <ListItemText>Delete Meeting</ListItemText>
+            <ListItemIcon><DeleteIcon sx={{ color: 'error.main' }} /></ListItemIcon><ListItemText>Delete Meeting</ListItemText>
           </MenuItem>
         )}
       </Menu>
 
       {/* Status Update Menu */}
       <Menu anchorEl={statusMenuAnchor} open={Boolean(statusMenuAnchor)} onClose={handleStatusMenuClose}>
-        {statusOptions && statusOptions.length > 0 ? (
-          statusOptions.map((status) => {
-            const statusValue  = status.short_name || status.value;
-            const displayName  = status.label || status.short_name;
-            const config       = STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
-            return (
-              <MenuItem key={status.id} onClick={() => handleStatusSelect(statusValue)}>
-                <ListItemIcon sx={{
-                  color: config.color === 'warning' ? '#F59E0B'
-                       : config.color === 'info'    ? '#3B82F6'
-                       : config.color === 'success' ? '#10B981'
-                       : config.color === 'error'   ? '#EF4444'
-                       : '#6B7280',
-                }}>
-                  {config.icon}
-                </ListItemIcon>
-                <ListItemText primary={displayName?.charAt(0).toUpperCase() + displayName?.slice(1)} />
-              </MenuItem>
-            );
-          })
-        ) : (
-          Object.entries(STATUS_CONFIG).map(([key, config]) => (
-            <MenuItem key={key} onClick={() => handleStatusSelect(key)}>
-              <ListItemIcon sx={{
-                color: config.color === 'warning' ? '#F59E0B'
-                     : config.color === 'info'    ? '#3B82F6'
-                     : config.color === 'success' ? '#10B981'
-                     : config.color === 'error'   ? '#EF4444'
-                     : '#6B7280',
-              }}>
+        {(statusOptions?.length > 0 ? statusOptions : Object.entries(STATUS_CONFIG).map(([key, config]) => ({ short_name: key, label: config.label, id: key }))).map((status) => {
+          const statusValue = status.short_name || status.value;
+          const displayName = status.label || status.short_name;
+          const config = STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
+          return (
+            <MenuItem key={status.id || statusValue} onClick={() => handleStatusSelect(statusValue)}>
+              <ListItemIcon sx={{ color: config.color === 'warning' ? '#F59E0B' : config.color === 'info' ? '#3B82F6' : config.color === 'success' ? '#10B981' : config.color === 'error' ? '#EF4444' : '#6B7280' }}>
                 {config.icon}
               </ListItemIcon>
-              <ListItemText primary={config.label} />
+              <ListItemText primary={displayName?.charAt(0).toUpperCase() + displayName?.slice(1)} />
             </MenuItem>
-          ))
-        )}
+          );
+        })}
       </Menu>
 
       {/* Status Update Dialog */}
       <Dialog open={statusDialogOpen} onClose={() => setStatusDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Typography variant="h6" fontWeight={700}>Update Meeting Status</Typography>
-        </DialogTitle>
+        <DialogTitle><Typography variant="h6" fontWeight={700}>Update Meeting Status</Typography></DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
               <Select value={selectedStatus} label="Status" onChange={(e) => setSelectedStatus(e.target.value)}>
-                {statusOptions && statusOptions.length > 0 ? (
-                  statusOptions.map((status) => {
-                    const statusValue = status.short_name || status.value;
-                    const config      = STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
-                    return (
-                      <MenuItem key={status.id || status.code} value={statusValue}>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          {config.icon}
-                          <span>{status.short_name?.charAt(0).toUpperCase() + status.short_name?.slice(1)}</span>
-                        </Stack>
-                      </MenuItem>
-                    );
-                  })
-                ) : (
-                  Object.entries(STATUS_CONFIG).map(([key, config]) => (
-                    <MenuItem key={key} value={key}>
-                      <Stack direction="row" alignItems="center" spacing={1}>
-                        {config.icon}
-                        <span>{config.label}</span>
-                      </Stack>
+                {(statusOptions?.length > 0 ? statusOptions : Object.entries(STATUS_CONFIG).map(([key, config]) => ({ short_name: key, label: config.label }))).map((status) => {
+                  const statusValue = status.short_name || status.value;
+                  const config = STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
+                  return (
+                    <MenuItem key={status.id || statusValue} value={statusValue}>
+                      <Stack direction="row" alignItems="center" spacing={1}>{config.icon}<span>{status.short_name?.charAt(0).toUpperCase() + status.short_name?.slice(1)}</span></Stack>
                     </MenuItem>
-                  ))
-                )}
+                  );
+                })}
               </Select>
             </FormControl>
             <TextField
@@ -1834,12 +1411,7 @@ const MeetingDetail = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setStatusDialogOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleStatusUpdate}
-            disabled={statusUpdating || !selectedStatus}
-            sx={{ bgcolor: '#7C3AED' }}
-          >
+          <Button variant="contained" onClick={handleStatusUpdate} disabled={statusUpdating || !selectedStatus} sx={{ bgcolor: '#7C3AED' }}>
             {statusUpdating ? <CircularProgress size={24} /> : 'Update Status'}
           </Button>
         </DialogActions>
@@ -1847,16 +1419,10 @@ const MeetingDetail = () => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Typography variant="h6" fontWeight={700}>Delete Meeting</Typography>
-        </DialogTitle>
+        <DialogTitle><Typography variant="h6" fontWeight={700}>Delete Meeting</Typography></DialogTitle>
         <DialogContent>
-          <Typography variant="body1" gutterBottom>
-            Are you sure you want to delete this meeting?
-          </Typography>
-          <Alert severity="error" sx={{ mt: 2 }}>
-            <strong>Warning:</strong> This action cannot be undone. All minutes, actions, and documents will also be deleted.
-          </Alert>
+          <Typography variant="body1" gutterBottom>Are you sure you want to delete this meeting?</Typography>
+          <Alert severity="error" sx={{ mt: 2 }}><strong>Warning:</strong> This action cannot be undone. All minutes, actions, and documents will also be deleted.</Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
@@ -1868,32 +1434,13 @@ const MeetingDetail = () => {
 
       {/* Share Dialog */}
       <Dialog open={shareDialogOpen} onClose={() => setShareDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Typography variant="h6" fontWeight={700}>Share Meeting</Typography>
-        </DialogTitle>
+        <DialogTitle><Typography variant="h6" fontWeight={700}>Share Meeting</Typography></DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Share this meeting link with participants:
-            </Typography>
-            <Paper
-              variant="outlined"
-              sx={{
-                p: 2,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                bgcolor: alpha('#7C3AED', 0.05),
-              }}
-            >
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                {`${window.location.origin}/meetings/${id}`}
-              </Typography>
-              <Tooltip title="Copy Link">
-                <IconButton onClick={handleShare} size="small" sx={{ color: '#7C3AED' }}>
-                  <CopyAllIcon />
-                </IconButton>
-              </Tooltip>
+            <Typography variant="body2" color="text.secondary">Share this meeting link with participants:</Typography>
+            <Paper variant="outlined" sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: alpha('#7C3AED', 0.05) }}>
+              <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{`${window.location.origin}/meetings/${id}`}</Typography>
+              <Tooltip title="Copy Link"><IconButton onClick={handleShare} size="small" sx={{ color: '#7C3AED' }}><CopyAllIcon /></IconButton></Tooltip>
             </Paper>
           </Stack>
         </DialogContent>
@@ -1926,15 +1473,8 @@ const MeetingDetail = () => {
       />
 
       {/* Snackbar */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={SNACKBAR_AUTO_HIDE_MS}
-        onClose={handleSnackbarClose}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert onClose={handleSnackbarClose} severity={snackbar.severity} variant="filled">
-          {snackbar.message}
-        </Alert>
+      <Snackbar open={snackbar.open} autoHideDuration={SNACKBAR_AUTO_HIDE_MS} onClose={handleSnackbarClose} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
+        <Alert onClose={handleSnackbarClose} severity={snackbar.severity} variant="filled">{snackbar.message}</Alert>
       </Snackbar>
     </Box>
   );

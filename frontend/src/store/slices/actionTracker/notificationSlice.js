@@ -140,9 +140,7 @@ export default notificationSlice.reducer;
 
 // Improved selectors with error handling
 export const selectNotificationParticipants = (state) => {
-  console.log('Full Redux state:', state);
-  console.log('Notifications slice:', state.notifications);
-  
+ 
   if (!state || !state.notifications) {
     console.warn('Notifications slice not found in state');
     return [];

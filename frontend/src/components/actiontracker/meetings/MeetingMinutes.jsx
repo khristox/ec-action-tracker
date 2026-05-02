@@ -39,10 +39,6 @@ import {
   Grow,
   Zoom,
   Badge,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent,
   Collapse,
   FormControlLabel,
   Checkbox,
@@ -91,11 +87,38 @@ import EditActionDialog from './components/EditActionDialog';
 import EditMinuteDialog from './components/EditMinuteDialog';
 import RichTextEditor from './components/RichTextEditor';
 import { parseWordDocument } from '../../../utils/minutesParser';
+import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
 
-// ─────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────
+// ==================== Permission Constants ====================
+const PERMISSIONS = {
+  // Minutes permissions
+  ADD_MINUTES: 'minutes:add',
+  EDIT_MINUTES: 'minutes:edit',
+  DELETE_MINUTES: 'minutes:delete',
+  APPROVE_MINUTES: 'minutes:approve',
+  SIGN_MINUTES: 'minutes:sign',
+  VIEW_MINUTES: 'minutes:view',
+  EXPORT_MINUTES: 'minutes:export',
+  
+  // Actions permissions
+  CREATE_ACTIONS: 'action:create',
+  UPDATE_ACTIONS: 'action:update',
+  DELETE_ACTIONS: 'action:delete',
+  ASSIGN_ACTIONS: 'action:assign',
+  COMMENT_ACTIONS: 'action:comment',
+  UPDATE_ACTION_STATUS: 'action:status_update',
+  UPDATE_ACTION_PRIORITY: 'action:priority_update',
+  VIEW_ALL_ACTIONS: 'action:view_all',
+  VIEW_OWN_ACTIONS: 'action:view_own',
+  ADD_ACTION_ATTACHMENTS: 'action:attachment',
+  
+  // Meeting permissions
+  CHANGE_STATUS: 'meeting:status_change',
+  RECORD_MEETING: 'meeting:record',
+  VIEW_RECORDER: 'meeting:view_recorder',
+};
 
+// ==================== Helper Functions ====================
 const formatDate = (dateString) => {
   if (!dateString) return 'Date not set';
   const date = new Date(dateString);
@@ -121,18 +144,13 @@ const getStatusConfig = (action) => {
   return { label: 'Pending', color: 'warning', icon: <ScheduleIcon fontSize="small" /> };
 };
 
-const canEditMinutes = (meetingStatus) => {
+const canEditMinutesByStatus = (meetingStatus) => {
   if (!meetingStatus) return false;
   const s = String(meetingStatus).toLowerCase();
-  return ['started', 'ongoing', 'in_progress', 'in progress', 'completed'].some((x) =>
-    s.includes(x)
-  );
+  return ['started', 'ongoing', 'in_progress', 'in progress'].some((x) => s.includes(x));
 };
 
-// ─────────────────────────────────────────────────────────────
-// RichTextContent – renders stored HTML safely
-// ─────────────────────────────────────────────────────────────
-
+// ==================== RichTextContent Component ====================
 const RichTextContent = ({ content }) => {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
@@ -171,16 +189,19 @@ const RichTextContent = ({ content }) => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// ActionRow
-// ─────────────────────────────────────────────────────────────
-
-const ActionRow = ({ action, onEdit, canEdit }) => {
+// ==================== ActionRow Component ====================
+const ActionRow = ({ action, onEdit, canEditActions, canViewAllActions, currentUserId }) => {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
   const isOverdue =
     action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
   const statusConfig = getStatusConfig(action);
+
+  // Check if user can view this action (either view_all or is assigned to them)
+  const canViewAction = canViewAllActions || action.assigned_to_id === currentUserId;
+  
+  // Check if user can edit this action
+  const canEditThisAction = canEditActions && (canViewAllActions || action.assigned_to_id === currentUserId);
 
   let assignedToName = 'Unassigned';
   if (action.assigned_to?.full_name) assignedToName = action.assigned_to.full_name;
@@ -189,6 +210,8 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
   else if (action.assigned_to_name?.name) assignedToName = action.assigned_to_name.name;
 
   const progress = action.overall_progress_percentage || 0;
+
+  if (!canViewAction) return null;
 
   return (
     <TableRow
@@ -284,12 +307,12 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
         </Stack>
       </TableCell>
       <TableCell align="center">
-        <Tooltip title={canEdit ? 'Edit Action' : 'Meeting must be started to edit actions'}>
+        <Tooltip title={canEditThisAction ? 'Edit Action' : 'You do not have permission to edit this action'}>
           <span>
             <IconButton
               size="small"
               onClick={() => onEdit(action.id)}
-              disabled={!canEdit}
+              disabled={!canEditThisAction}
               sx={{
                 color: dark ? '#A78BFA' : 'primary.main',
                 '&:hover': { bgcolor: dark ? alpha('#A78BFA', 0.1) : alpha('#7C3AED', 0.1) },
@@ -304,10 +327,7 @@ const ActionRow = ({ action, onEdit, canEdit }) => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// MinutesCard
-// ─────────────────────────────────────────────────────────────
-
+// ==================== MinutesCard Component ====================
 const MinutesCard = ({
   minute,
   expanded,
@@ -316,7 +336,12 @@ const MinutesCard = ({
   onEditAction,
   onEditMinute,
   onMenuOpen,
-  canEdit,
+  canEditMinutes,
+  canDeleteMinutes,
+  canCreateActions,
+  canEditActions,
+  canViewAllActions,
+  currentUserId,
 }) => {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
@@ -330,6 +355,12 @@ const MinutesCard = ({
     minute.actions?.filter((a) => a.completed_at || a.overall_progress_percentage >= 100)
       .length || 0;
   const recordedByName = minute.recorded_by_name || minute.created_by_name;
+
+  // Filter actions based on permissions
+  const visibleActions = minute.actions?.filter((action) => {
+    if (canViewAllActions) return true;
+    return action.assigned_to_id === currentUserId;
+  }) || [];
 
   return (
     <Zoom in timeout={300}>
@@ -350,6 +381,9 @@ const MinutesCard = ({
           sx={{
             '&:hover': { bgcolor: dark ? alpha('#FFF', 0.05) : alpha('#000', 0.02) },
             borderRadius: expanded ? '8px 8px 0 0' : '8px',
+            '& .MuiAccordionSummary-content': {
+              marginRight: (canEditMinutes || canDeleteMinutes) ? 0 : 2,
+            },
           }}
         >
           <Stack direction="row" alignItems="center" spacing={2} sx={{ flex: 1 }}>
@@ -384,7 +418,7 @@ const MinutesCard = ({
                   </Typography>
                 )}
                 <Badge
-                  badgeContent={actionCount}
+                  badgeContent={visibleActions.length}
                   color="primary"
                   sx={{ '& .MuiBadge-badge': { bgcolor: dark ? '#A78BFA' : undefined } }}
                 >
@@ -395,28 +429,34 @@ const MinutesCard = ({
                 </Badge>
               </Stack>
             </Box>
-            {canEdit && (
-              <Stack direction="row" spacing={0.5}>
-                <Tooltip title="Edit Minutes">
-                  <IconButton
-                    size="small"
-                    onClick={(e) => { e.stopPropagation(); onEditMinute(minute); }}
-                    sx={{ color: dark ? '#A78BFA' : 'primary.main' }}
-                  >
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-                <IconButton
-                  size="small"
-                  onClick={(e) => { e.stopPropagation(); onMenuOpen(e, minute); }}
-                  sx={{ color: dark ? '#9CA3AF' : 'inherit' }}
-                >
-                  <MoreVertIcon fontSize="small" />
-                </IconButton>
-              </Stack>
-            )}
           </Stack>
         </AccordionSummary>
+
+        {/* Action Buttons - OUTSIDE AccordionSummary */}
+        {(canEditMinutes || canDeleteMinutes) && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 2, pt: 1, gap: 0.5 }}>
+            {canEditMinutes && (
+              <Tooltip title="Edit Minutes">
+                <IconButton
+                  size="small"
+                  onClick={(e) => { e.stopPropagation(); onEditMinute(minute); }}
+                  sx={{ color: dark ? '#A78BFA' : 'primary.main' }}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            <Tooltip title="More Options">
+              <IconButton
+                size="small"
+                onClick={(e) => { e.stopPropagation(); onMenuOpen(e, minute); }}
+                sx={{ color: dark ? '#9CA3AF' : 'inherit' }}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        )}
 
         <AccordionDetails sx={{ pt: 0 }}>
           <Divider sx={{ mb: 3, borderColor: dark ? '#374151' : '#E5E7EB' }} />
@@ -482,7 +522,7 @@ const MinutesCard = ({
                 direction="row"
                 justifyContent="space-between"
                 alignItems="center"
-                sx={{ mb: 2 }}
+                sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}
               >
                 <Stack direction="row" spacing={1} alignItems="center">
                   <PlaylistAddCheckIcon
@@ -496,9 +536,9 @@ const MinutesCard = ({
                   >
                     Action Items
                   </Typography>
-                  {actionCount > 0 && (
+                  {visibleActions.length > 0 && (
                     <Chip
-                      label={`${completedActions}/${actionCount} completed`}
+                      label={`${completedActions}/${visibleActions.length} completed`}
                       size="small"
                       color="success"
                       variant="outlined"
@@ -509,7 +549,7 @@ const MinutesCard = ({
                     />
                   )}
                 </Stack>
-                {canEdit && (
+                {canCreateActions && (
                   <Button
                     size="small"
                     variant="contained"
@@ -525,7 +565,7 @@ const MinutesCard = ({
                 )}
               </Stack>
 
-              {actionCount > 0 ? (
+              {visibleActions.length > 0 ? (
                 <TableContainer
                   component={Paper}
                   variant="outlined"
@@ -557,7 +597,9 @@ const MinutesCard = ({
                           key={action.id}
                           action={action}
                           onEdit={onEditAction}
-                          canEdit={canEdit}
+                          canEditActions={canEditActions}
+                          canViewAllActions={canViewAllActions}
+                          currentUserId={currentUserId}
                         />
                       ))}
                     </TableBody>
@@ -575,9 +617,9 @@ const MinutesCard = ({
                 >
                   <AssignmentIcon sx={{ fontSize: 48, color: dark ? '#6B7280' : '#CBD5E1', mb: 2 }} />
                   <Typography variant="body2" sx={{ color: dark ? '#9CA3AF' : 'text.secondary' }}>
-                    No action items yet.
+                    No action items available.
                   </Typography>
-                  {canEdit && (
+                  {canCreateActions && (
                     <Button
                       size="small"
                       startIcon={<AddIcon />}
@@ -597,10 +639,7 @@ const MinutesCard = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// Loading / Empty states
-// ─────────────────────────────────────────────────────────────
-
+// ==================== Loading Skeleton ====================
 const LoadingSkeleton = () => {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
@@ -621,7 +660,8 @@ const LoadingSkeleton = () => {
   );
 };
 
-const EmptyState = ({ canEdit, statusMessage, onAddClick }) => {
+// ==================== Empty State ====================
+const EmptyState = ({ canAddMinutes, statusMessage, onAddClick }) => {
   const theme = useTheme();
   const dark = theme.palette.mode === 'dark';
   return (
@@ -640,11 +680,11 @@ const EmptyState = ({ canEdit, statusMessage, onAddClick }) => {
           No Minutes Yet
         </Typography>
         <Typography variant="body2" sx={{ color: dark ? '#9CA3AF' : 'text.secondary', mb: 3 }}>
-          {canEdit
+          {canAddMinutes
             ? 'Start by adding the first meeting minutes'
             : statusMessage || 'Minutes can only be added once the meeting is in progress'}
         </Typography>
-        {canEdit && (
+        {canAddMinutes && (
           <Button
             variant="contained"
             startIcon={<AddIcon />}
@@ -660,10 +700,7 @@ const EmptyState = ({ canEdit, statusMessage, onAddClick }) => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// Upload Preview – parsed minute entry row (selectable)
-// ─────────────────────────────────────────────────────────────
-
+// ==================== ParsedMinuteRow Component ====================
 const ParsedMinuteRow = ({ entry, selected, onToggle, onFieldChange, dark }) => {
   const [open, setOpen] = useState(false);
 
@@ -682,7 +719,6 @@ const ParsedMinuteRow = ({ entry, selected, onToggle, onFieldChange, dark }) => 
         transition: 'all 0.2s',
       }}
     >
-      {/* Header row */}
       <Stack
         direction="row"
         alignItems="center"
@@ -742,7 +778,6 @@ const ParsedMinuteRow = ({ entry, selected, onToggle, onFieldChange, dark }) => 
         </IconButton>
       </Stack>
 
-      {/* Expandable edit fields */}
       <Collapse in={open}>
         <Divider sx={{ borderColor: dark ? '#374151' : '#E5E7EB' }} />
         <Stack spacing={2} sx={{ p: 2 }}>
@@ -752,7 +787,6 @@ const ParsedMinuteRow = ({ entry, selected, onToggle, onFieldChange, dark }) => 
             label="Topic"
             value={entry.title}
             onChange={(e) => onFieldChange(entry.id, 'title', e.target.value)}
-            sx={textFieldSx(dark)}
           />
           <Box>
             <Typography variant="caption" sx={{ color: dark ? '#9CA3AF' : '#6B7280', mb: 0.5, display: 'block' }}>
@@ -822,37 +856,39 @@ const ParsedMinuteRow = ({ entry, selected, onToggle, onFieldChange, dark }) => 
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// Shared TextField sx helper
-// ─────────────────────────────────────────────────────────────
-
-const textFieldSx = (dark) => ({
-  '& .MuiOutlinedInput-root': {
-    color: dark ? '#D1D5DB' : 'inherit',
-    '& fieldset': { borderColor: dark ? '#4B5563' : '#E5E7EB' },
-    '&:hover fieldset': { borderColor: dark ? '#6B7280' : '#D1D5DB' },
-    '&.Mui-focused fieldset': { borderColor: dark ? '#A78BFA' : '#7C3AED' },
-  },
-  '& .MuiInputLabel-root': {
-    color: dark ? '#9CA3AF' : '#6B7280',
-    '&.Mui-focused': { color: dark ? '#A78BFA' : '#7C3AED' },
-  },
-  '& .MuiFormHelperText-root': { color: dark ? '#9CA3AF' : '#6B7280' },
-});
-
-// ─────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────
-
+// ==================== Main Component ====================
 const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const dark = theme.palette.mode === 'dark';
 
+  // Redux state
   const minutesList = useSelector(selectMeetingMinutes);
   const isLoading = useSelector(selectMinutesLoading);
   const error = useSelector(selectMinutesError);
+  const userPermissions = useSelector(selectUserPermissions);
+  const currentUser = useSelector((state) => state.auth.user);
+
+  // Permission checks
+  const canAddMinutes = hasPermission(userPermissions, PERMISSIONS.ADD_MINUTES);
+  const canEditMinutes = hasPermission(userPermissions, PERMISSIONS.EDIT_MINUTES);
+  const canDeleteMinutes = hasPermission(userPermissions, PERMISSIONS.DELETE_MINUTES);
+  const canViewMinutes = hasPermission(userPermissions, PERMISSIONS.VIEW_MINUTES);
+  const canExportMinutes = hasPermission(userPermissions, PERMISSIONS.EXPORT_MINUTES);
+  const canCreateActions = hasPermission(userPermissions, PERMISSIONS.CREATE_ACTIONS);
+  const canEditActions = hasPermission(userPermissions, PERMISSIONS.UPDATE_ACTIONS);
+  const canViewAllActions = hasPermission(userPermissions, PERMISSIONS.VIEW_ALL_ACTIONS);
+  
+  // Check if user can edit based on meeting status (only active meetings)
+  const canEditByStatus = canEditMinutesByStatus(meetingStatus);
+  
+  // Combined permissions
+  const canAddMinutesWithStatus = canAddMinutes && canEditByStatus;
+  const canEditMinutesWithStatus = canEditMinutes && canEditByStatus;
+  const canDeleteMinutesWithStatus = canDeleteMinutes && canEditByStatus;
+  const canCreateActionsWithStatus = canCreateActions && canEditByStatus;
+  const canEditActionsWithStatus = canEditActions && canEditByStatus;
 
   // UI state
   const [expandedMinute, setExpandedMinute] = useState(null);
@@ -873,12 +909,10 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   // Upload / import state
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [parsedData, setParsedData] = useState(null);          // full ParsedMinutes
-  const [parsedEntries, setParsedEntries] = useState([]);      // MinuteEntry[] (editable copy)
-  const [selectedEntryIds, setSelectedEntryIds] = useState(new Set()); // which to import
-  const [importProgress, setImportProgress] = useState(null);  // { done, total }
-
-  const canEdit = canEditMinutes(meetingStatus);
+  const [parsedData, setParsedData] = useState(null);
+  const [parsedEntries, setParsedEntries] = useState([]);
+  const [selectedEntryIds, setSelectedEntryIds] = useState(new Set());
+  const [importProgress, setImportProgress] = useState(null);
 
   const getStatusMessage = () => {
     if (!meetingStatus) return null;
@@ -886,25 +920,31 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     if (s === 'scheduled' || s === 'pending')
       return "Meeting hasn't started yet. Minutes can only be added once the meeting is in progress.";
     if (s === 'cancelled') return 'Meeting has been cancelled. Minutes cannot be added or edited.';
+    if (s === 'ended' || s === 'closed') return 'Meeting has ended. Minutes are now read-only.';
     return null;
   };
 
   const fetchMinutes = useCallback(() => {
-    if (meetingId) dispatch(fetchMeetingMinutes(meetingId));
-  }, [dispatch, meetingId]);
+    if (meetingId && canViewMinutes) {
+      dispatch(fetchMeetingMinutes(meetingId));
+    }
+  }, [dispatch, meetingId, canViewMinutes]);
 
   useEffect(() => {
-    if (meetingId) fetchMinutes();
-  }, [meetingId, fetchMinutes]);
+    if (meetingId && canViewMinutes) fetchMinutes();
+  }, [meetingId, fetchMinutes, canViewMinutes]);
 
   const handleRefresh = () => {
     fetchMinutes();
     if (onRefresh) onRefresh();
   };
 
-  // ── Add minutes (manual) ──
-
+  // Add minutes (manual)
   const handleAddMinutes = async () => {
+    if (!canAddMinutesWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to add minutes', severity: 'error' });
+      return;
+    }
     if (!newMinutes.topic.trim()) {
       setSnackbar({ open: true, message: 'Please enter a topic', severity: 'warning' });
       return;
@@ -924,14 +964,21 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   };
 
-  // ── Action helpers ──
-
+  // Action helpers
   const handleAddAction = (minuteId) => {
+    if (!canCreateActionsWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to create actions', severity: 'error' });
+      return;
+    }
     setSelectedMinuteId(minuteId);
     setShowAddActionDialog(true);
   };
 
   const handleEditAction = (actionId) => {
+    if (!canEditActionsWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to edit actions', severity: 'error' });
+      return;
+    }
     let action = null;
     for (const m of minutesList) {
       action = m.actions?.find((a) => a.id === actionId);
@@ -942,6 +989,10 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   };
 
   const handleEditMinute = (minute) => {
+    if (!canEditMinutesWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to edit minutes', severity: 'error' });
+      return;
+    }
     setSelectedMinute(minute);
     setShowEditMinuteDialog(true);
   };
@@ -961,8 +1012,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     setSnackbar({ open: true, message: 'Minutes updated successfully!', severity: 'success' });
   };
 
-  // ── Menu ──
-
+  // Menu handlers
   const handleMenuOpen = (event, minute) => {
     setAnchorEl(event.currentTarget);
     setSelectedMinute(minute);
@@ -974,6 +1024,11 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   };
 
   const handleDeleteMinutes = async () => {
+    if (!canDeleteMinutesWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to delete minutes', severity: 'error' });
+      handleMenuClose();
+      return;
+    }
     if (!selectedMinute?.id) return;
     if (!window.confirm(`Delete "${selectedMinute.topic || 'this minute'}" and all its actions?`)) {
       handleMenuClose();
@@ -996,13 +1051,13 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     setExpandedMinute(expandedMinute === minuteId ? null : minuteId);
   };
 
-  // ─────────────────────────────────────────────────────────
   // Upload & parse
-  // ─────────────────────────────────────────────────────────
-
   const handleFileSelect = async (event) => {
+    if (!canAddMinutesWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to upload minutes', severity: 'error' });
+      return;
+    }
     const file = event.target.files[0];
-    // reset so the same file can be re-selected
     event.target.value = '';
     if (!file) return;
 
@@ -1029,9 +1084,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       }
 
       setParsedData(parsed);
-      // Deep-copy entries so the user can edit titles inline
       setParsedEntries(parsed.minutes.map((m) => ({ ...m })));
-      // Select all by default
       setSelectedEntryIds(new Set(parsed.minutes.map((m) => m.id)));
       setUploadDialogOpen(true);
     } catch (err) {
@@ -1045,7 +1098,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   };
 
-  // Toggle individual entry selection
   const handleToggleEntry = (id) => {
     setSelectedEntryIds((prev) => {
       const next = new Set(prev);
@@ -1062,15 +1114,17 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   };
 
-  // Inline field edit inside the preview
   const handleEntryFieldChange = (id, field, value) => {
     setParsedEntries((prev) =>
       prev.map((e) => (e.id === id ? { ...e, [field]: value } : e))
     );
   };
 
-  // ── Import selected entries one by one ──
   const handleImportMinutes = async () => {
+    if (!canAddMinutesWithStatus) {
+      setSnackbar({ open: true, message: 'You do not have permission to import minutes', severity: 'error' });
+      return;
+    }
     const toImport = parsedEntries.filter((e) => selectedEntryIds.has(e.id));
     if (toImport.length === 0) {
       setSnackbar({ open: true, message: 'Please select at least one minute to import', severity: 'warning' });
@@ -1127,11 +1181,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   };
 
-  // ─────────────────────────────────────────────────────────
-  // Filtered list
-  // ─────────────────────────────────────────────────────────
-
-  const filteredMinutes = minutesList.filter((m) => {
+  // Filtered minutes (only show if user can view)
+  const filteredMinutes = canViewMinutes ? minutesList.filter((m) => {
     if (!searchTerm) return true;
     const s = searchTerm.toLowerCase();
     return (
@@ -1139,19 +1190,30 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       m.discussion?.toLowerCase().includes(s) ||
       m.decisions?.toLowerCase().includes(s)
     );
-  });
+  }) : [];
 
   const statusMessage = getStatusMessage();
 
-  if (isLoading && minutesList.length === 0) return <LoadingSkeleton />;
+  // Permission denial state
+  if (!canViewMinutes) {
+    return (
+      <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3, bgcolor: dark ? '#1F2937' : '#FFF' }}>
+        <LockIcon sx={{ fontSize: 80, color: dark ? '#6B7280' : '#CBD5E1', mb: 2 }} />
+        <Typography variant="h6" sx={{ color: dark ? '#FFF' : 'text.secondary' }} gutterBottom>
+          Access Denied
+        </Typography>
+        <Typography variant="body2" sx={{ color: dark ? '#9CA3AF' : 'text.secondary' }}>
+          You do not have permission to view meeting minutes.
+        </Typography>
+      </Paper>
+    );
+  }
 
-  // ─────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────
+  if (isLoading && minutesList.length === 0) return <LoadingSkeleton />;
 
   return (
     <Box>
-      {/* ── Header ── */}
+      {/* Header */}
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         justifyContent="space-between"
@@ -1163,20 +1225,19 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           Meeting Minutes ({filteredMinutes.length})
         </Typography>
 
-        <Stack direction="row" spacing={1} flexWrap="wrap">
+        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1 }}>
           <TextField
             size="small"
             placeholder="Search minutes…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            sx={{
-              width: isMobile ? '100%' : 200,
-              ...textFieldSx(dark),
-            }}
-            InputProps={{
-              startAdornment: (
-                <SearchIcon fontSize="small" sx={{ color: dark ? '#9CA3AF' : '#6B7280', mr: 1 }} />
-              ),
+            sx={{ width: isMobile ? '100%' : 200 }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <SearchIcon fontSize="small" sx={{ color: dark ? '#9CA3AF' : '#6B7280', mr: 1 }} />
+                ),
+              }
             }}
           />
 
@@ -1186,80 +1247,68 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
             </IconButton>
           </Tooltip>
 
-          {/* Upload button */}
-          <Tooltip
-            title={
-              !canEdit
-                ? statusMessage || 'Meeting must be started to upload minutes'
-                : 'Upload minutes from a Word document'
-            }
-          >
-            <span>
-              <Button
-                variant="outlined"
-                component="label"
-                disabled={!canEdit || uploading}
-                startIcon={
-                  uploading ? (
-                    <CircularProgress size={16} />
-                  ) : !canEdit ? (
-                    <LockIcon />
-                  ) : (
-                    <CloudUploadIcon />
-                  )
-                }
-                sx={{
-                  borderColor: dark ? '#A78BFA' : '#7C3AED',
-                  color: dark ? '#A78BFA' : '#7C3AED',
-                  '&:hover': {
-                    borderColor: dark ? '#C4B5FD' : '#6D28D9',
-                    bgcolor: dark ? alpha('#A78BFA', 0.1) : alpha('#7C3AED', 0.08),
-                  },
-                  '&.Mui-disabled': {
-                    borderColor: dark ? '#374151' : '#E5E7EB',
-                    color: dark ? '#6B7280' : '#9CA3AF',
-                  },
-                }}
-              >
-                <input
-                  type="file"
-                  hidden
-                  accept=".doc,.docx"
-                  onChange={handleFileSelect}
-                  disabled={!canEdit}
-                />
-                {uploading ? 'Parsing…' : 'Upload Minutes'}
-              </Button>
-            </span>
-          </Tooltip>
+          {/* Upload button - requires add minutes permission */}
+          {canAddMinutesWithStatus && (
+            <Tooltip
+              title={
+                !canAddMinutesWithStatus
+                  ? statusMessage || 'Meeting must be started to upload minutes'
+                  : 'Upload minutes from a Word document'
+              }
+            >
+              <span>
+                <Button
+                  variant="outlined"
+                  component="label"
+                  disabled={!canAddMinutesWithStatus || uploading}
+                  startIcon={uploading ? <CircularProgress size={16} /> : <CloudUploadIcon />}
+                  sx={{
+                    borderColor: dark ? '#A78BFA' : '#7C3AED',
+                    color: dark ? '#A78BFA' : '#7C3AED',
+                    '&:hover': {
+                      borderColor: dark ? '#C4B5FD' : '#6D28D9',
+                      bgcolor: dark ? alpha('#A78BFA', 0.1) : alpha('#7C3AED', 0.08),
+                    },
+                  }}
+                >
+                  <input
+                    type="file"
+                    hidden
+                    accept=".doc,.docx"
+                    onChange={handleFileSelect}
+                    disabled={!canAddMinutesWithStatus}
+                  />
+                  {uploading ? 'Parsing…' : 'Upload Minutes'}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
 
-          {/* Add minutes button */}
-          <Tooltip
-            title={
-              !canEdit
-                ? statusMessage || 'Meeting must be started to add minutes'
-                : 'Add meeting minutes'
-            }
-          >
-            <span>
-              <Button
-                variant="contained"
-                startIcon={!canEdit ? <LockIcon /> : <AddIcon />}
-                onClick={() => setShowAddDialog(true)}
-                disabled={!canEdit}
-                sx={{
-                  bgcolor: '#7C3AED',
-                  '&:hover': { bgcolor: '#6D28D9' },
-                  '&.Mui-disabled': {
-                    bgcolor: dark ? '#374151' : '#E5E7EB',
-                    color: dark ? '#6B7280' : '#9CA3AF',
-                  },
-                }}
-              >
-                Add Minutes
-              </Button>
-            </span>
-          </Tooltip>
+          {/* Add minutes button - requires add minutes permission */}
+          {canAddMinutesWithStatus && (
+            <Tooltip
+              title={
+                !canAddMinutesWithStatus
+                  ? statusMessage || 'Meeting must be started to add minutes'
+                  : 'Add meeting minutes'
+              }
+            >
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => setShowAddDialog(true)}
+                  disabled={!canAddMinutesWithStatus}
+                  sx={{
+                    bgcolor: '#7C3AED',
+                    '&:hover': { bgcolor: '#6D28D9' },
+                  }}
+                >
+                  Add Minutes
+                </Button>
+              </span>
+            </Tooltip>
+          )}
         </Stack>
       </Stack>
 
@@ -1299,7 +1348,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           </Paper>
         ) : (
           <EmptyState
-            canEdit={canEdit}
+            canAddMinutes={canAddMinutesWithStatus}
             statusMessage={statusMessage}
             onAddClick={() => setShowAddDialog(true)}
           />
@@ -1316,15 +1365,18 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
               onEditAction={handleEditAction}
               onEditMinute={handleEditMinute}
               onMenuOpen={handleMenuOpen}
-              canEdit={canEdit}
+              canEditMinutes={canEditMinutesWithStatus}
+              canDeleteMinutes={canDeleteMinutesWithStatus}
+              canCreateActions={canCreateActionsWithStatus}
+              canEditActions={canEditActionsWithStatus}
+              canViewAllActions={canViewAllActions}
+              currentUserId={currentUser?.id}
             />
           ))}
         </Stack>
       )}
 
-      {/* ══════════════════════════════════════════════════
-          Add Minutes Dialog (manual)
-      ══════════════════════════════════════════════════ */}
+      {/* Add Minutes Dialog */}
       <Dialog
         open={showAddDialog}
         onClose={() => !submitting && setShowAddDialog(false)}
@@ -1365,7 +1417,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
               required
               disabled={submitting}
               helperText="A descriptive title for these minutes"
-              sx={textFieldSx(dark)}
             />
             <Box>
               <Typography variant="subtitle2" gutterBottom sx={{ color: dark ? '#D1D5DB' : '#374151' }}>
@@ -1422,9 +1473,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         </DialogActions>
       </Dialog>
 
-      {/* ══════════════════════════════════════════════════
-          Upload Preview Dialog
-      ══════════════════════════════════════════════════ */}
+      {/* Upload Preview Dialog */}
       <Dialog
         open={uploadDialogOpen}
         onClose={() => !submitting && setUploadDialogOpen(false)}
@@ -1456,7 +1505,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
             </IconButton>
           </Stack>
 
-          {/* Import progress bar */}
           {importProgress && (
             <Box sx={{ mt: 2 }}>
               <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
@@ -1479,39 +1527,28 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         <DialogContent sx={{ p: isMobile ? 2 : 3 }}>
           {parsedEntries.length > 0 && (
             <Stack spacing={2}>
-              {/* Meeting metadata summary */}
               {parsedData?.meetingInfo && Object.values(parsedData.meetingInfo).some(Boolean) && (
                 <Alert
                   severity="info"
                   icon={<InfoIcon />}
                   sx={{ bgcolor: dark ? alpha('#3B82F6', 0.1) : undefined }}
                 >
-                  <Stack direction="row" spacing={3} flexWrap="wrap">
-                    {parsedData.meetingInfo.date && (
-                      <span>📅 {parsedData.meetingInfo.date}</span>
-                    )}
-                    {parsedData.meetingInfo.time && (
-                      <span>🕐 {parsedData.meetingInfo.time}</span>
-                    )}
-                    {parsedData.meetingInfo.location && (
-                      <span>📍 {parsedData.meetingInfo.location}</span>
-                    )}
-                    {parsedData.meetingInfo.recordedBy && (
-                      <span>✍️ {parsedData.meetingInfo.recordedBy}</span>
-                    )}
+                  <Stack direction="row" spacing={3} flexWrap="wrap" sx={{ gap: 1 }}>
+                    {parsedData.meetingInfo.date && <span>📅 {parsedData.meetingInfo.date}</span>}
+                    {parsedData.meetingInfo.time && <span>🕐 {parsedData.meetingInfo.time}</span>}
+                    {parsedData.meetingInfo.location && <span>📍 {parsedData.meetingInfo.location}</span>}
+                    {parsedData.meetingInfo.recordedBy && <span>✍️ {parsedData.meetingInfo.recordedBy}</span>}
                   </Stack>
                 </Alert>
               )}
 
-              {/* Attendees count */}
               {parsedData?.attendees?.length > 0 && (
                 <Alert severity="success" sx={{ bgcolor: dark ? alpha('#10B981', 0.1) : undefined }}>
                   Found {parsedData.attendees.length} attendee{parsedData.attendees.length > 1 ? 's' : ''} in the document (not imported — manage via Participants tab).
                 </Alert>
               )}
 
-              {/* Select all / count */}
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ flexWrap: 'wrap', gap: 1 }}>
                 <FormControlLabel
                   control={
                     <Checkbox
@@ -1543,7 +1580,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                 Click ▼ on any row to preview / edit its content before importing.
               </Typography>
 
-              {/* Parsed entry rows */}
               <Box>
                 {parsedEntries.map((entry) => (
                   <ParsedMinuteRow
@@ -1557,7 +1593,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                 ))}
               </Box>
 
-              {/* Resolutions preview */}
               {parsedData?.resolutions?.length > 0 && (
                 <Box>
                   <Typography
@@ -1621,7 +1656,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         </DialogActions>
       </Dialog>
 
-      {/* ── Sub-dialogs ── */}
+      {/* Sub-dialogs */}
       {showAddActionDialog && (
         <AddActionDialog
           open={showAddActionDialog}
@@ -1673,7 +1708,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         />
       )}
 
-      {/* ── Context menu ── */}
+      {/* Context Menu */}
       <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
@@ -1682,20 +1717,24 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           sx: { bgcolor: dark ? '#1F2937' : '#FFF', border: dark ? '1px solid #374151' : 'none' },
         }}
       >
-        <MenuItem
-          onClick={() => { handleMenuClose(); if (selectedMinute) handleAddAction(selectedMinute.id); }}
-          sx={{ color: dark ? '#D1D5DB' : 'inherit' }}
-        >
-          <AssignmentIcon fontSize="small" sx={{ mr: 1, color: dark ? '#A78BFA' : 'primary.main' }} />
-          Add Action Item
-        </MenuItem>
-        <MenuItem onClick={handleDeleteMinutes} sx={{ color: dark ? '#F87171' : 'error.main' }}>
-          <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
-          Delete Minutes
-        </MenuItem>
+        {canCreateActionsWithStatus && (
+          <MenuItem
+            onClick={() => { handleMenuClose(); if (selectedMinute) handleAddAction(selectedMinute.id); }}
+            sx={{ color: dark ? '#D1D5DB' : 'inherit' }}
+          >
+            <AssignmentIcon fontSize="small" sx={{ mr: 1, color: dark ? '#A78BFA' : 'primary.main' }} />
+            Add Action Item
+          </MenuItem>
+        )}
+        {canDeleteMinutesWithStatus && (
+          <MenuItem onClick={handleDeleteMinutes} sx={{ color: dark ? '#F87171' : 'error.main' }}>
+            <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
+            Delete Minutes
+          </MenuItem>
+        )}
       </Menu>
 
-      {/* ── Snackbar ── */}
+      {/* Snackbar */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}

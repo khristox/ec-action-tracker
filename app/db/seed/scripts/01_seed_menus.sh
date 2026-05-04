@@ -1,6 +1,6 @@
 #!/bin/bash
 # app/db/seed/scripts/seed_permissions.sh
-# Seed Fine-Grained Permissions for Action Tracker (Electoral Commission)
+# Seed Fine-Grained Permissions for Action Tracker including Recurring Meetings
 
 # ==================== CONFIGURATION ====================
 DEFAULT_BASE_URL="http://localhost:8001"
@@ -23,7 +23,7 @@ print_header() { echo -e "${CYAN}📌 $1${NC}"; }
 print_separator() { echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 
 print_separator
-print_header "ACTION TRACKER PERMISSIONS SEEDER"
+print_header "ACTION TRACKER PERMISSIONS SEEDER (with Recurring Meetings)"
 print_separator
 echo ""
 
@@ -157,7 +157,7 @@ create_permission() {
     local category=$5
     local description=$6
     
-    # Delete if exists
+    # Delete if exists (to ensure clean state)
     if [ -n "${EXISTING_PERM_CODES[$code]}" ]; then
         delete_existing_permission "$code"
         ((UPDATE_COUNT++))
@@ -204,7 +204,24 @@ create_permission() {
 }
 
 # ==================== CREATE PERMISSIONS BY CATEGORY ====================
-print_header "STEP 1: Creating Meeting Management Permissions"
+print_header "STEP 1: Creating Recurring Meeting Permissions"
+echo ""
+
+# Recurring Meeting Permissions
+create_permission "meeting:view_recurring" "View Recurring Meetings" "meeting" "view_recurring" "Recurring Meetings" "Ability to view recurring meetings"
+create_permission "meeting:create_recurring" "Create Recurring Meetings" "meeting" "create_recurring" "Recurring Meetings" "Ability to create recurring meetings"
+create_permission "meeting:edit_recurring" "Edit Recurring Meetings" "meeting" "edit_recurring" "Recurring Meetings" "Ability to edit recurring meetings"
+create_permission "meeting:delete_recurring" "Delete Recurring Meetings" "meeting" "delete_recurring" "Recurring Meetings" "Ability to delete recurring meetings"
+create_permission "meeting:manage_templates" "Manage Meeting Templates" "meeting" "manage_templates" "Recurring Meetings" "Ability to manage meeting templates"
+create_permission "meeting:manage_occurrences" "Manage Occurrences" "meeting" "manage_occurrences" "Recurring Meetings" "Ability to manage recurring meeting occurrences"
+create_permission "meeting:reschedule_occurrence" "Reschedule Occurrences" "meeting" "reschedule_occurrence" "Recurring Meetings" "Ability to reschedule occurrences"
+create_permission "meeting:skip_occurrence" "Skip Occurrences" "meeting" "skip_occurrence" "Recurring Meetings" "Ability to skip occurrences"
+create_permission "meeting:export_recurring" "Export Recurring Data" "meeting" "export_recurring" "Recurring Meetings" "Ability to export recurring meeting data"
+create_permission "meeting:configure_recurring" "Configure Recurring Settings" "meeting" "configure_recurring" "Recurring Meetings" "Ability to configure recurring meeting settings"
+
+echo ""
+
+print_header "STEP 2: Creating Meeting Management Permissions"
 echo ""
 
 # Meeting Management
@@ -219,7 +236,7 @@ create_permission "meeting:delete" "Delete Meeting" "meeting" "delete" "Meeting 
 
 echo ""
 
-print_header "STEP 2: Creating Minutes Management Permissions"
+print_header "STEP 3: Creating Minutes Management Permissions"
 echo ""
 
 # Minutes Management
@@ -233,7 +250,7 @@ create_permission "minutes:sign" "Sign Minutes" "minutes" "sign" "Minutes Manage
 
 echo ""
 
-print_header "STEP 3: Creating Actions Management Permissions"
+print_header "STEP 4: Creating Actions Management Permissions"
 echo ""
 
 # Actions Management
@@ -250,7 +267,7 @@ create_permission "action:attachment" "Add Action Attachments" "action" "attachm
 
 echo ""
 
-print_header "STEP 4: Creating Notifications Permissions"
+print_header "STEP 5: Creating Notifications Permissions"
 echo ""
 
 # Notifications
@@ -261,7 +278,7 @@ create_permission "notification:manage_templates" "Manage Notification Templates
 
 echo ""
 
-print_header "STEP 5: Creating Profile Management Permissions"
+print_header "STEP 6: Creating Profile Management Permissions"
 echo ""
 
 # Profile Management
@@ -272,7 +289,7 @@ create_permission "profile:view_others" "View Others' Profiles" "profile" "view_
 
 echo ""
 
-print_header "STEP 6: Creating Participants Management Permissions"
+print_header "STEP 7: Creating Participants Management Permissions"
 echo ""
 
 # Participants Management
@@ -283,7 +300,7 @@ create_permission "participant:manage_lists" "Manage Participant Lists" "partici
 
 echo ""
 
-print_header "STEP 7: Creating Administrative Permissions"
+print_header "STEP 8: Creating Administrative Permissions"
 echo ""
 
 # Administrative
@@ -296,7 +313,7 @@ create_permission "admin:manage_structures" "Manage Admin Structures" "admin" "m
 
 echo ""
 
-print_header "STEP 8: Creating Report Permissions"
+print_header "STEP 9: Creating Report Permissions"
 echo ""
 
 # Reports
@@ -307,7 +324,7 @@ create_permission "report:export" "Export Reports" "report" "export" "Reports" "
 
 echo ""
 
-print_header "STEP 9: Creating Dashboard Permissions"
+print_header "STEP 10: Creating Dashboard Permissions"
 echo ""
 
 # Dashboard Permissions
@@ -384,8 +401,14 @@ admin_role_id="${ROLE_IDS[admin]}"
 if [ -n "$admin_role_id" ]; then
     print_info "Assigning permissions to ADMIN role..."
     
-    # All permissions
+    # All permissions including recurring
     ALL_PERMISSIONS=(
+        # Recurring Meetings (NEW)
+        "meeting:view_recurring" "meeting:create_recurring" "meeting:edit_recurring"
+        "meeting:delete_recurring" "meeting:manage_templates" "meeting:manage_occurrences"
+        "meeting:reschedule_occurrence" "meeting:skip_occurrence" "meeting:export_recurring"
+        "meeting:configure_recurring"
+        
         # Dashboard
         "dashboard:view" "dashboard:overview" "dashboard:recent_meetings"
         "dashboard:upcoming_meetings" "dashboard:pending_actions"
@@ -422,12 +445,9 @@ if [ -n "$admin_role_id" ]; then
     )
     
     for perm_code in "${ALL_PERMISSIONS[@]}"; do
-        if assign_permission_to_role "$admin_role_id" "$perm_code"; then
-            echo -n "."
-        fi
+        assign_permission_to_role "$admin_role_id" "$perm_code" > /dev/null 2>&1
     done
-    echo ""
-    print_success "✅ ADMIN role granted all permissions"
+    print_success "✅ ADMIN role granted all permissions (including Recurring Meetings)"
 fi
 
 # ==================== SUPER ADMIN ROLE - FULL ACCESS ====================
@@ -435,120 +455,66 @@ super_admin_role_id="${ROLE_IDS[super_admin]}"
 if [ -n "$super_admin_role_id" ]; then
     print_info "Assigning permissions to SUPER_ADMIN role..."
     
-    # Same as admin - full access
     for perm_code in "${ALL_PERMISSIONS[@]}"; do
         assign_permission_to_role "$super_admin_role_id" "$perm_code" > /dev/null 2>&1
     done
     print_success "✅ SUPER_ADMIN role granted all permissions"
 fi
 
-# ==================== DEFAULT USER ROLE - ALL EXCEPT CREATE/RECORD MEETINGS ====================
+# ==================== DEFAULT USER ROLE ====================
 user_role_id="${ROLE_IDS[user]}"
 if [ -n "$user_role_id" ]; then
-    print_info "Assigning permissions to DEFAULT USER role (All except Create/Record Meetings)..."
+    print_info "Assigning permissions to DEFAULT USER role..."
     
     USER_PERMISSIONS=(
-        # Dashboard - Full dashboard access
-        "dashboard:view"
-        "dashboard:overview"
-        "dashboard:recent_meetings"
-        "dashboard:upcoming_meetings"
-        "dashboard:pending_actions"
-        "dashboard:overdue_actions"
-        "dashboard:notifications"
-        "dashboard:customize"
+        # Recurring Meetings - View only
+        "meeting:view_recurring"
         
-        # Meeting Management - All except create and record
-        "meeting:view_all"                      # View all meetings
-        "meeting:view"                          # View meetings they're part of
-        "meeting:view_recorder"                 # View recorder in meetings
-        "meeting:status_change"                 # Change meeting status (useful for participants)
-        "meeting:update"                        # Update meeting details
-        "meeting:delete"                        # Delete meetings they created
+        # Dashboard
+        "dashboard:view" "dashboard:overview"
+        "dashboard:recent_meetings" "dashboard:upcoming_meetings"
+        "dashboard:pending_actions" "dashboard:overdue_actions"
         
-        # Minutes Management - Full minutes access except approve/sign
-        "minutes:view"                          # View minutes
-        "minutes:add"                           # Add minutes to meetings
-        "minutes:edit"                          # Edit minutes
-        "minutes:delete"                        # Delete minutes
-        "minutes:export"                        # Export minutes
+        # Meeting Management - Limited
+        "meeting:view_all" "meeting:view"
         
-        # Actions Management - Full action management
-        "action:create"                         # Create actions from meetings
-        "action:update"                         # Update actions
-        "action:delete"                         # Delete actions
-        "action:view_all"                       # View all actions
-        "action:view_own"                       # View assigned actions
-        "action:assign"                         # Assign actions to others
-        "action:status_update"                  # Update action status
-        "action:priority_update"                # Update action priority
-        "action:comment"                        # Comment on actions
-        "action:attachment"                     # Add attachments to actions
+        # Minutes - View only
+        "minutes:view"
         
-        # Notifications - Full notification access
-        "notification:send"                     # Send notifications
-        "notification:email"                    # Send email notifications
-        "notification:view"                     # View notifications
+        # Actions - Limited
+        "action:view_all" "action:view_own" "action:status_update" "action:comment"
         
-        # Profile Management - Full profile control
-        "profile:view"                          # View own profile
-        "profile:update"                        # Update own profile
-        "profile:change_password"               # Change password
+        # Notifications
+        "notification:view"
         
-        # Participants Management - Full participant management
-        "participant:add"                       # Add participants
-        "participant:remove"                    # Remove participants
-        "participant:view"                      # View participants
-        "participant:manage_lists"              # Manage participant lists
+        # Profile
+        "profile:view" "profile:update" "profile:change_password"
         
-        # Reports - Full reporting
-        "report:meeting"                        # Meeting reports
-        "report:action"                         # Action reports
-        "report:participant"                    # Participant reports
-        "report:export"                         # Export reports
+        # Participants
+        "participant:view"
     )
     
     for perm_code in "${USER_PERMISSIONS[@]}"; do
         assign_permission_to_role "$user_role_id" "$perm_code" > /dev/null 2>&1
     done
-    print_success "✅ DEFAULT USER role granted all permissions except Create/Record Meetings"
+    print_success "✅ DEFAULT USER role granted limited permissions"
 fi
 
 # ==================== SECRETARY ROLE ====================
 secretary_role_id="${ROLE_IDS[secretary]}"
-if [ -z "$secretary_role_id" ]; then
-    # Create secretary role if it doesn't exist
-    print_info "Creating Secretary role..."
-    SECRETARY_RESPONSE=$(curl -s -X POST "${API_URL}/roles/" \
-        -H "Authorization: Bearer $ADMIN_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "code": "secretary",
-            "name": "Secretary",
-            "description": "Meeting secretary role with minutes management permissions"
-        }')
-    
-    secretary_role_id=$(echo "$SECRETARY_RESPONSE" | jq -r '.id // empty' 2>/dev/null)
-    if [ -n "$secretary_role_id" ] && [ "$secretary_role_id" != "null" ]; then
-        ROLE_IDS["secretary"]="$secretary_role_id"
-        print_success "✅ Secretary role created"
-    else
-        print_error "Failed to create Secretary role"
-    fi
-fi
-
 if [ -n "$secretary_role_id" ]; then
     print_info "Assigning permissions to SECRETARY role..."
     
     SECRETARY_PERMISSIONS=(
-        # Full access similar to admin but focused on minutes
+        # Recurring Meetings - View and templates only
+        "meeting:view_recurring" "meeting:manage_templates"
+        
+        # Full meeting and minutes management
         "dashboard:view" "dashboard:overview" "dashboard:recent_meetings"
-        "dashboard:upcoming_meetings" "dashboard:pending_actions"
-        "dashboard:overdue_actions" "dashboard:notifications"
+        "dashboard:upcoming_meetings" "dashboard:pending_actions" "dashboard:overdue_actions"
         
         "meeting:create" "meeting:view_all" "meeting:view"
-        "meeting:status_change" "meeting:record" "meeting:view_recorder"
-        "meeting:update"
+        "meeting:status_change" "meeting:record" "meeting:view_recorder" "meeting:update"
         
         "minutes:add" "minutes:edit" "minutes:delete" "minutes:view"
         "minutes:approve" "minutes:export" "minutes:sign"
@@ -568,74 +534,30 @@ if [ -n "$secretary_role_id" ]; then
     for perm_code in "${SECRETARY_PERMISSIONS[@]}"; do
         assign_permission_to_role "$secretary_role_id" "$perm_code" > /dev/null 2>&1
     done
-    print_success "✅ SECRETARY role granted full minutes and meeting permissions"
-fi
-
-# ==================== MEETING PARTICIPANT ROLE ====================
-participant_role_id="${ROLE_IDS[meeting_participant]}"
-if [ -n "$participant_role_id" ]; then
-    print_info "Assigning permissions to MEETING PARTICIPANT role..."
-    
-    PARTICIPANT_PERMISSIONS=(
-        "dashboard:view" "dashboard:overview"
-        "meeting:view" "meeting:view_recorder"
-        "minutes:view"
-        "action:view_own" "action:status_update" "action:comment"
-        "profile:view" "profile:update" "profile:change_password"
-        "notification:view"
-    )
-    
-    for perm_code in "${PARTICIPANT_PERMISSIONS[@]}"; do
-        assign_permission_to_role "$participant_role_id" "$perm_code" > /dev/null 2>&1
-    done
-    print_success "✅ MEETING PARTICIPANT role granted view permissions"
-fi
-
-# ==================== ACTION OWNER ROLE ====================
-action_owner_role_id="${ROLE_IDS[action_owner]}"
-if [ -n "$action_owner_role_id" ]; then
-    print_info "Assigning permissions to ACTION OWNER role..."
-    
-    ACTION_OWNER_PERMISSIONS=(
-        "dashboard:view" "dashboard:pending_actions" "dashboard:overdue_actions"
-        "meeting:view"
-        "minutes:view"
-        "action:view_own" "action:update" "action:status_update"
-        "action:comment" "action:attachment"
-        "profile:view" "profile:update" "profile:change_password"
-        "notification:view"
-    )
-    
-    for perm_code in "${ACTION_OWNER_PERMISSIONS[@]}"; do
-        assign_permission_to_role "$action_owner_role_id" "$perm_code" > /dev/null 2>&1
-    done
-    print_success "✅ ACTION OWNER role granted action update permissions"
-fi
-
-# ==================== MEETING CREATOR ROLE ====================
-meeting_creator_role_id="${ROLE_IDS[meeting_creator]}"
-if [ -n "$meeting_creator_role_id" ]; then
-    print_info "Assigning permissions to MEETING CREATOR role..."
-    
-    MEETING_CREATOR_PERMISSIONS=(
-        "dashboard:view" "dashboard:overview" "dashboard:recent_meetings"
-        "dashboard:upcoming_meetings"
-        "meeting:create" "meeting:view" "meeting:status_change"
-        "meeting:update" "meeting:record" "meeting:view_recorder"
-        "minutes:add" "minutes:edit" "minutes:view"
-        "action:create" "action:update" "action:view_own"
-        "participant:add" "participant:view"
-        "notification:send" "notification:view"
-        "profile:view" "profile:update"
-    )
-    
-    for perm_code in "${MEETING_CREATOR_PERMISSIONS[@]}"; do
-        assign_permission_to_role "$meeting_creator_role_id" "$perm_code" > /dev/null 2>&1
-    done
-    print_success "✅ MEETING CREATOR role granted meeting management permissions"
+    print_success "✅ SECRETARY role granted full meeting management permissions"
 fi
 
 # ==================== SUMMARY ====================
 echo ""
 print_separator
-print_success "Permission Seeding Completed Success
+print_success "Permission Seeding Completed Successfully!"
+print_separator
+echo ""
+echo -e "${CYAN}📊 Summary:${NC}"
+echo "  • Permissions created: ${CREATE_COUNT}"
+echo "  • Permissions updated: ${UPDATE_COUNT}"
+echo "  • Permissions failed: ${FAIL_COUNT}"
+echo ""
+echo -e "${CYAN}📋 Recurring Meeting Permissions Added:${NC}"
+echo "  • meeting:view_recurring - View recurring meetings"
+echo "  • meeting:create_recurring - Create recurring meetings"
+echo "  • meeting:edit_recurring - Edit recurring meetings"
+echo "  • meeting:delete_recurring - Delete recurring meetings"
+echo "  • meeting:manage_templates - Manage meeting templates"
+echo "  • meeting:manage_occurrences - Manage occurrences"
+echo "  • meeting:reschedule_occurrence - Reschedule occurrences"
+echo "  • meeting:skip_occurrence - Skip occurrences"
+echo "  • meeting:export_recurring - Export recurring data"
+echo "  • meeting:configure_recurring - Configure recurring settings"
+echo ""
+print_separator

@@ -102,10 +102,8 @@ class ParticipantList(Base):
         return self.updated_by.username if self.updated_by else None
 
 
-
-
 class Meeting(Base):
-    """Depends on Location, User, Attribute"""
+    """Meeting model with relationships to Location, User, and Attribute"""
     __tablename__ = "meetings"
     __table_args__ = (
         Index('ix_meetings_title', 'title'),
@@ -113,27 +111,48 @@ class Meeting(Base):
         Index('ix_meetings_status_id', 'status_id'),
         Index('ix_meetings_created_by', 'created_by_id'),
         Index('ix_meetings_updated_by', 'updated_by_id'),
+        Index('ix_meetings_is_recurring', 'is_recurring'),
+        Index('ix_meetings_recurring_meeting_id', 'recurring_meeting_id'),
     )
     
+    # Primary Key
     id = Column(CustomUUID, primary_key=True, default=uuid4)
+    
+    # Basic Information
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     
+    # Location Information
     location_id = Column(CustomUUID, ForeignKey('locations.id', ondelete='SET NULL'), nullable=True)
     location_text = Column(String(500), nullable=True)
     gps_coordinates = Column(String(100), nullable=True)
     
+    # Meeting Platform (for recurring meetings)
+    platform = Column(String(50), default='physical', nullable=True)
+    meeting_link = Column(String(500), nullable=True)
+    
+    # Date and Time
     meeting_date = Column(DateTime(timezone=True), nullable=False)
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=True)
+    duration_minutes = Column(Integer, nullable=True)  # Calculated field
     
+    # Meeting Content
     agenda = Column(Text, nullable=True)
     facilitator = Column(String(255), nullable=True)
     chairperson_name = Column(String(255), nullable=True)
-    chairperson_id = Column(CustomUUID, ForeignKey("meeting_participants.id"), nullable=True)  # New
-    secretary_id = Column(CustomUUID, ForeignKey("meeting_participants.id"), nullable=True)   # New
     
+    # Leadership (FK to MeetingParticipant)
+    chairperson_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
+    secretary_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
+    
+    # Status (FK to Attribute)
     status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
+    
+    # Recurring Meeting Support
+    is_recurring = Column(Boolean, default=False, nullable=False)
+    recurring_meeting_id = Column(CustomUUID, ForeignKey('recurring_meetings.id', ondelete='SET NULL'), nullable=True)
+    occurrence_number = Column(Integer, nullable=True)  # Which occurrence number this is
     
     # Audit fields
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
@@ -142,31 +161,65 @@ class Meeting(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    # Relationships with explicit join conditions and eager loading defaults
+    # Soft Delete
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # ==================== Relationships ====================
+    
+    # Location
     location = relationship("Location", lazy="selectin")
+    
+    # Users
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    
+    # Status
     status = relationship("Attribute", foreign_keys=[status_id], lazy="selectin")
     
-    # One-to-many relationships with cascade delete
+    # Participants
     participants = relationship(
-        "MeetingParticipant", 
-        back_populates="meeting", 
+        "MeetingParticipant",
+        foreign_keys="MeetingParticipant.meeting_id",
+        back_populates="meeting",
         cascade="all, delete-orphan",
         lazy="selectin"
     )
+    
+    # Leadership (to MeetingParticipant)
+    chairperson = relationship(
+        "MeetingParticipant",
+        foreign_keys=[chairperson_id],
+        remote_side="MeetingParticipant.id",
+        back_populates="chairperson_of",
+        lazy="selectin"
+    )
+    
+    secretary = relationship(
+        "MeetingParticipant",
+        foreign_keys=[secretary_id],
+        remote_side="MeetingParticipant.id",
+        back_populates="secretary_of",
+        lazy="selectin"
+    )
+    
+    # Minutes
     minutes = relationship(
         "MeetingMinutes", 
         back_populates="meeting", 
         cascade="all, delete-orphan",
         lazy="selectin"
     )
+    
+    # Documents
     documents = relationship(
         "MeetingDocument", 
         back_populates="meeting", 
         cascade="all, delete-orphan",
         lazy="selectin"
     )
+    
+    # Status History
     status_history = relationship(
         "MeetingStatusHistory", 
         back_populates="meeting", 
@@ -174,7 +227,17 @@ class Meeting(Base):
         lazy="selectin",
         order_by="MeetingStatusHistory.status_date.desc()"
     )
-
+    
+    # Recurring Meeting (parent)
+    recurring_meeting = relationship(
+        "RecurringMeeting",
+        foreign_keys=[recurring_meeting_id],
+        back_populates="meetings",
+        lazy="selectin"
+    )
+    
+    # ==================== Properties ====================
+    
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -183,35 +246,109 @@ class Meeting(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
     
-
-    chairperson_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
-    secretary_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
+    @property
+    def chairperson_name_from_participant(self) -> Optional[str]:
+        """Get chairperson name from the participant relationship"""
+        return self.chairperson.name if self.chairperson else self.chairperson_name
     
-    # Relationships - specify foreign_keys to resolve ambiguity
-    participants = relationship(
-        "MeetingParticipant",
-        foreign_keys="MeetingParticipant.meeting_id",  # Specify which foreign key to use
-        back_populates="meeting",
-        lazy="noload"
-    )
+    @property
+    def secretary_name_from_participant(self) -> Optional[str]:
+        """Get secretary name from the participant relationship"""
+        return self.secretary.name if self.secretary else None
     
-    chairperson = relationship(
-        "MeetingParticipant",
-        foreign_keys=[chairperson_id],
-        remote_side="MeetingParticipant.id",
-        back_populates="chairperson_of",
-        lazy="noload"
-    )
+    @property
+    def participant_count(self) -> int:
+        """Get total number of participants"""
+        return len(self.participants) if self.participants else 0
     
-    secretary = relationship(
-        "MeetingParticipant",
-        foreign_keys=[secretary_id],
-        remote_side="MeetingParticipant.id",
-        back_populates="secretary_of",
-        lazy="noload"
-    )
-
-
+    @property
+    def duration(self) -> Optional[str]:
+        """Get formatted duration"""
+        if self.duration_minutes:
+            hours = self.duration_minutes // 60
+            minutes = self.duration_minutes % 60
+            if hours > 0:
+                return f"{hours}h {minutes}m" if minutes > 0 else f"{hours}h"
+            return f"{minutes}m"
+        return None
+    
+    @property
+    def is_online(self) -> bool:
+        """Check if meeting is online"""
+        return self.platform and self.platform != 'physical'
+    
+    @property
+    def has_meeting_link(self) -> bool:
+        """Check if meeting has a link"""
+        return bool(self.meeting_link)
+    
+    # ==================== Methods ====================
+    
+    def calculate_duration(self) -> Optional[int]:
+        """Calculate duration in minutes from start and end times"""
+        if self.start_time and self.end_time:
+            delta = self.end_time - self.start_time
+            self.duration_minutes = int(delta.total_seconds() / 60)
+            return self.duration_minutes
+        return None
+    
+    def get_status_value(self) -> Optional[str]:
+        """Get status attribute value"""
+        if self.status and self.status.extra_metadata:
+            import json
+            metadata = self.status.extra_metadata
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    pass
+            return metadata.get('value')
+        return None
+    
+    def to_dict(self, include_relationships: bool = False) -> dict:
+        """Convert meeting to dictionary"""
+        data = {
+            "id": str(self.id),
+            "title": self.title,
+            "description": self.description,
+            "location_id": str(self.location_id) if self.location_id else None,
+            "location_text": self.location_text,
+            "gps_coordinates": self.gps_coordinates,
+            "platform": self.platform,
+            "meeting_link": self.meeting_link,
+            "meeting_date": self.meeting_date.isoformat() if self.meeting_date else None,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "duration_minutes": self.duration_minutes,
+            "agenda": self.agenda,
+            "facilitator": self.facilitator,
+            "chairperson_name": self.chairperson_name,
+            "chairperson_id": str(self.chairperson_id) if self.chairperson_id else None,
+            "secretary_id": str(self.secretary_id) if self.secretary_id else None,
+            "status_id": str(self.status_id) if self.status_id else None,
+            "status_value": self.get_status_value(),
+            "is_recurring": self.is_recurring,
+            "recurring_meeting_id": str(self.recurring_meeting_id) if self.recurring_meeting_id else None,
+            "occurrence_number": self.occurrence_number,
+            "created_by_id": str(self.created_by_id) if self.created_by_id else None,
+            "created_by_name": self.created_by_name,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "is_active": self.is_active,
+            "participant_count": self.participant_count,
+            "duration": self.duration,
+            "is_online": self.is_online
+        }
+        
+        if include_relationships:
+            data["participants"] = [p.to_dict() for p in self.participants] if self.participants else []
+            data["minutes"] = [m.to_dict() for m in self.minutes] if self.minutes else []
+            data["documents"] = [d.to_dict() for d in self.documents] if self.documents else []
+        
+        return data
+    
+    def __repr__(self):
+        return f"<Meeting id={self.id} title='{self.title[:50]}' date={self.meeting_date}>"
 # app/models/action_tracker.py
 
 class MeetingStatus(Base):

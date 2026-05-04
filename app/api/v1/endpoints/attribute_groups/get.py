@@ -574,7 +574,11 @@ async def get_group_attributes_internal(
                 "name": a.name,
                 "short_name": a.short_name,
                 "sort_order": a.sort_order,
-                "description": a.description if a.description else None
+                "description": a.description if a.description else None,
+                "mextra_metadata":a.extra_metadata,
+                "default_value":a.default_value,
+                "value_type":a.value_type,
+                "validation_rules":a.validation_rules
             }
             for a in attrs
         ]

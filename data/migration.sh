@@ -1583,3 +1583,362 @@ UPDATE meeting_recordings SET status = 'COMPLETED' WHERE status IS NULL OR statu
 -- Step 5: Verify the data
 SELECT DISTINCT recording_type FROM meeting_recordings;
 SELECT DISTINCT status FROM meeting_recordings;
+
+
+
+
+-- ==============================================
+-- Complete Migration: Create Recurring Meetings Tables
+-- Run this entire script to create both tables
+-- ==============================================
+
+-- Drop existing tables if they exist (optional, for clean install)
+-- DROP TABLE IF EXISTS `recurring_meeting_occurrences`;
+-- DROP TABLE IF EXISTS `recurring_meetings`;
+
+-- Create recurring_meetings table
+CREATE TABLE IF NOT EXISTS `recurring_meetings` (
+    `id` CHAR(36) NOT NULL DEFAULT (UUID()),
+    `title` VARCHAR(500) NOT NULL,
+    `description` TEXT,
+    `recurrence_type_id` CHAR(36) NOT NULL,
+    `recurrence_interval` INT DEFAULT 1,
+    `recurrence_days` JSON,
+    `recurrence_day_of_month` INT,
+    `recurrence_week_of_month_id` CHAR(36),
+    `recurrence_day_of_week_id` CHAR(36),
+    `recurrence_end_date` DATETIME,
+    `recurrence_max_occurrences` INT,
+    `recurrence_end_after_occurrences` INT,
+    `meeting_template_id` CHAR(36),
+    `start_time` DATETIME NOT NULL,
+    `end_time` DATETIME,
+    `duration_minutes` INT,
+    `location_id` CHAR(36),
+    `location_text` VARCHAR(500),
+    `platform` VARCHAR(50) DEFAULT 'physical',
+    `meeting_link` VARCHAR(500),
+    `chairperson_id` CHAR(36),
+    `secretary_id` CHAR(36),
+    `facilitator` VARCHAR(255),
+    `default_participant_ids` JSON,
+    `agenda` TEXT,
+    `additional_info` JSON,
+    `status_id` CHAR(36) NOT NULL,
+    `last_occurrence_date` DATETIME,
+    `next_occurrence_date` DATETIME,
+    `occurrences_count` INT DEFAULT 0,
+    `total_occurrences_generated` INT DEFAULT 0,
+    `created_by_id` CHAR(36) NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `is_deleted` BOOLEAN DEFAULT FALSE,
+    `deleted_at` DATETIME,
+    
+    PRIMARY KEY (`id`),
+    
+    CONSTRAINT `fk_recurring_meetings_recurrence_type` 
+        FOREIGN KEY (`recurrence_type_id`) REFERENCES `attributes`(`id`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_recurring_meetings_recurrence_week` 
+        FOREIGN KEY (`recurrence_week_of_month_id`) REFERENCES `attributes`(`id`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_recurring_meetings_recurrence_day` 
+        FOREIGN KEY (`recurrence_day_of_week_id`) REFERENCES `attributes`(`id`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_recurring_meetings_status` 
+        FOREIGN KEY (`status_id`) REFERENCES `attributes`(`id`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_recurring_meetings_template` 
+        FOREIGN KEY (`meeting_template_id`) REFERENCES `meetings`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_recurring_meetings_location` 
+        FOREIGN KEY (`location_id`) REFERENCES `locations`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_recurring_meetings_chairperson` 
+        FOREIGN KEY (`chairperson_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_recurring_meetings_secretary` 
+        FOREIGN KEY (`secretary_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_recurring_meetings_created_by` 
+        FOREIGN KEY (`created_by_id`) REFERENCES `users`(`id`),
+    
+    INDEX `idx_recurring_meetings_status_next_date` (`status_id`, `next_occurrence_date`, `is_deleted`),
+    INDEX `idx_recurring_meetings_created_by` (`created_by_id`, `is_deleted`),
+    INDEX `idx_recurring_meetings_recurrence_type` (`recurrence_type_id`, `is_deleted`),
+    INDEX `idx_recurring_meetings_status` (`status_id`, `is_deleted`),
+    INDEX `idx_recurring_meetings_next_occurrence` (`next_occurrence_date`, `is_deleted`),
+    INDEX `idx_recurring_meetings_created_at` (`created_at` DESC),
+    INDEX `idx_recurring_meetings_title` (`title`(100), `is_deleted`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Create recurring_meeting_occurrences table
+CREATE TABLE IF NOT EXISTS `recurring_meeting_occurrences` (
+    `id` CHAR(36) NOT NULL DEFAULT (UUID()),
+    `recurring_meeting_id` CHAR(36) NOT NULL,
+    `meeting_id` CHAR(36) NOT NULL,
+    `occurrence_number` INT NOT NULL,
+    `scheduled_date` DATETIME NOT NULL,
+    `status` VARCHAR(20) DEFAULT 'scheduled',
+    `rescheduled_to_date` DATETIME,
+    `cancellation_reason` VARCHAR(500),
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (`id`),
+    
+    CONSTRAINT `fk_occurrences_recurring_meeting` 
+        FOREIGN KEY (`recurring_meeting_id`) REFERENCES `recurring_meetings`(`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_occurrences_meeting` 
+        FOREIGN KEY (`meeting_id`) REFERENCES `meetings`(`id`) ON DELETE CASCADE,
+    
+    CONSTRAINT `uk_occurrence_number` 
+        UNIQUE (`recurring_meeting_id`, `occurrence_number`),
+    CONSTRAINT `uk_occurrence_meeting` 
+        UNIQUE (`meeting_id`),
+    
+    INDEX `idx_occurrences_recurring_meeting` (`recurring_meeting_id`),
+    INDEX `idx_occurrences_meeting` (`meeting_id`),
+    INDEX `idx_occurrences_scheduled_date` (`scheduled_date`),
+    INDEX `idx_occurrences_status` (`status`),
+    INDEX `idx_occurrences_recurring_status_date` (`recurring_meeting_id`, `status`, `scheduled_date`),
+    INDEX `idx_occurrences_date_range` (`scheduled_date`, `status`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Triggers for recurring_meetings table
+DELIMITER $$
+
+DROP TRIGGER IF EXISTS `validate_recurrence_interval_before_insert`$$
+CREATE TRIGGER `validate_recurrence_interval_before_insert` 
+BEFORE INSERT ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.recurrence_interval < 1 OR NEW.recurrence_interval > 365 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'recurrence_interval must be between 1 and 365';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_recurrence_interval_before_update`$$
+CREATE TRIGGER `validate_recurrence_interval_before_update` 
+BEFORE UPDATE ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.recurrence_interval < 1 OR NEW.recurrence_interval > 365 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'recurrence_interval must be between 1 and 365';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_recurrence_day_before_insert`$$
+CREATE TRIGGER `validate_recurrence_day_before_insert` 
+BEFORE INSERT ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.recurrence_day_of_month IS NOT NULL AND (NEW.recurrence_day_of_month < 1 OR NEW.recurrence_day_of_month > 31) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'recurrence_day_of_month must be between 1 and 31';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_recurrence_day_before_update`$$
+CREATE TRIGGER `validate_recurrence_day_before_update` 
+BEFORE UPDATE ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.recurrence_day_of_month IS NOT NULL AND (NEW.recurrence_day_of_month < 1 OR NEW.recurrence_day_of_month > 31) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'recurrence_day_of_month must be between 1 and 31';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_max_occurrences_before_insert`$$
+CREATE TRIGGER `validate_max_occurrences_before_insert` 
+BEFORE INSERT ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.recurrence_max_occurrences IS NOT NULL AND (NEW.recurrence_max_occurrences < 1 OR NEW.recurrence_max_occurrences > 999) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'recurrence_max_occurrences must be between 1 and 999';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_max_occurrences_before_update`$$
+CREATE TRIGGER `validate_max_occurrences_before_update` 
+BEFORE UPDATE ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.recurrence_max_occurrences IS NOT NULL AND (NEW.recurrence_max_occurrences < 1 OR NEW.recurrence_max_occurrences > 999) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'recurrence_max_occurrences must be between 1 and 999';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_dates_before_insert`$$
+CREATE TRIGGER `validate_dates_before_insert` 
+BEFORE INSERT ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.end_time IS NOT NULL AND NEW.end_time <= NEW.start_time THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'end_time must be greater than start_time';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_dates_before_update`$$
+CREATE TRIGGER `validate_dates_before_update` 
+BEFORE UPDATE ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.end_time IS NOT NULL AND NEW.end_time <= NEW.start_time THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'end_time must be greater than start_time';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_duration_before_insert`$$
+CREATE TRIGGER `validate_duration_before_insert` 
+BEFORE INSERT ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.duration_minutes IS NOT NULL AND NEW.duration_minutes <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'duration_minutes must be greater than 0';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_duration_before_update`$$
+CREATE TRIGGER `validate_duration_before_update` 
+BEFORE UPDATE ON `recurring_meetings` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.duration_minutes IS NOT NULL AND NEW.duration_minutes <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'duration_minutes must be greater than 0';
+    END IF;
+END$$
+
+-- Triggers for recurring_meeting_occurrences table
+DROP TRIGGER IF EXISTS `validate_occurrence_status_before_insert`$$
+CREATE TRIGGER `validate_occurrence_status_before_insert` 
+BEFORE INSERT ON `recurring_meeting_occurrences` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.status NOT IN ('scheduled', 'completed', 'cancelled', 'rescheduled', 'skipped') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid status value';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_occurrence_status_before_update`$$
+CREATE TRIGGER `validate_occurrence_status_before_update` 
+BEFORE UPDATE ON `recurring_meeting_occurrences` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.status NOT IN ('scheduled', 'completed', 'cancelled', 'rescheduled', 'skipped') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid status value';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_reschedule_date_before_insert`$$
+CREATE TRIGGER `validate_reschedule_date_before_insert` 
+BEFORE INSERT ON `recurring_meeting_occurrences` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.rescheduled_to_date IS NOT NULL AND NEW.rescheduled_to_date <= NEW.scheduled_date THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'rescheduled_to_date must be greater than scheduled_date';
+    END IF;
+END$$
+
+DROP TRIGGER IF EXISTS `validate_reschedule_date_before_update`$$
+CREATE TRIGGER `validate_reschedule_date_before_update` 
+BEFORE UPDATE ON `recurring_meeting_occurrences` 
+FOR EACH ROW 
+BEGIN
+    IF NEW.rescheduled_to_date IS NOT NULL AND NEW.rescheduled_to_date <= NEW.scheduled_date THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'rescheduled_to_date must be greater than scheduled_date';
+    END IF;
+END$$
+
+DELIMITER ;
+
+-- Verification
+SELECT 
+    '✅ Tables created successfully!' AS Status,
+    COUNT(*) AS TableCount
+FROM information_schema.tables 
+WHERE table_schema = DATABASE() 
+AND table_name IN ('recurring_meetings', 'recurring_meeting_occurrences');
+
+-- Add duration_minutes column to meetings table
+ALTER TABLE meetings 
+ADD COLUMN duration_minutes INT NULL AFTER end_time;
+
+-- Add platform and meeting_link columns if they don't exist
+ALTER TABLE meetings 
+ADD COLUMN platform VARCHAR(50) DEFAULT 'physical' NULL,
+ADD COLUMN meeting_link VARCHAR(500) NULL;
+
+
+-- ==============================================
+-- Migration: Add recurring meeting columns to meetings table
+-- ==============================================
+
+-- Add is_recurring flag
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE NOT NULL 
+COMMENT 'Whether this meeting is part of a recurring series';
+
+-- Add recurring_meeting_id foreign key
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS recurring_meeting_id CHAR(36) NULL 
+COMMENT 'Reference to recurring meeting if part of a series';
+
+-- Add occurrence_number
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS occurrence_number INT NULL 
+COMMENT 'Occurrence number in recurring series';
+
+-- Add duration_minutes (if still missing)
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS duration_minutes INT NULL 
+COMMENT 'Meeting duration in minutes';
+
+-- Add platform (if still missing)
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT 'physical' NULL 
+COMMENT 'Meeting platform (zoom, google_meet, teams, physical)';
+
+-- Add meeting_link (if still missing)
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS meeting_link VARCHAR(500) NULL 
+COMMENT 'URL for online meetings';
+
+-- Add foreign key constraint for recurring_meeting_id
+ALTER TABLE meetings 
+ADD CONSTRAINT fk_meetings_recurring_meeting 
+FOREIGN KEY (recurring_meeting_id) 
+REFERENCES recurring_meetings(id) 
+ON DELETE SET NULL;
+
+-- Add indexes for better performance
+CREATE INDEX idx_meetings_is_recurring ON meetings(is_recurring);
+CREATE INDEX idx_meetings_recurring_meeting_id ON meetings(recurring_meeting_id);
+CREATE INDEX idx_meetings_occurrence_number ON meetings(occurrence_number);
+
+-- Verify all columns exist
+SELECT 
+    COLUMN_NAME, 
+    DATA_TYPE, 
+    IS_NULLABLE,
+    COLUMN_DEFAULT,
+    COLUMN_COMMENT
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = 'meetings' 
+AND COLUMN_NAME IN (
+    'duration_minutes', 
+    'platform', 
+    'meeting_link',
+    'is_recurring',
+    'recurring_meeting_id',
+    'occurrence_number'
+)
+ORDER BY ORDINAL_POSITION;
+
+
+-- Add is_deleted column to meetings table
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE NOT NULL 
+COMMENT 'Soft delete flag for meetings';
+
+-- Add an index for soft delete queries
+CREATE INDEX idx_meetings_is_deleted ON meetings(is_deleted);
+
+-- If you need to track when a meeting was deleted, add deleted_at as well
+ALTER TABLE meetings 
+ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL 
+COMMENT 'Timestamp when meeting was soft deleted';

@@ -478,6 +478,8 @@ async def get_group_attributes_by_uuid(
     )
 
 
+
+
 async def get_group_attributes_internal(
     group_id: uuid.UUID,
     db: AsyncSession,
@@ -565,7 +567,7 @@ async def get_group_attributes_internal(
         attrs = attrs[:limit]
         last_attr = attrs[-1]
         next_cursor = paginator.encode_cursor({"id": str(last_attr.id)})
-
+    print('Chrs',detail_level)
     if detail_level == "limited":
         response_items = [
             {
@@ -583,8 +585,21 @@ async def get_group_attributes_internal(
             for a in attrs
         ]
     else:
-        response_items = attrs
-
+        response_items = [
+            {
+                "id": a.id,
+                "code": a.code,
+                "name": a.name,
+                "short_name": a.short_name,
+                "sort_order": a.sort_order,
+                "description": a.description if a.description else None,
+                "mextra_metadata":a.extra_metadata,
+                "default_value":a.default_value,
+                "value_type":a.value_type,
+                "validation_rules":a.validation_rules
+            }
+            for a in attrs
+        ]
     return {
         "items": response_items,
         "next_cursor": next_cursor,

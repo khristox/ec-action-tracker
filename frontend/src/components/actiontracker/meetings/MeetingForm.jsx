@@ -1,4 +1,4 @@
-// src/components/meetings/MeetingForm.jsx - With Debug Logs
+// src/components/meetings/MeetingForm.jsx - IMPROVED with RichTextEditor and Proper Recurring Meeting Handling
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -7,11 +7,11 @@ import {
   Alert, CircularProgress, Snackbar, Chip, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem,
   List, ListItem, ListItemText, ListItemAvatar, ListItemButton, ListItemIcon,
-  Avatar, Divider, useMediaQuery,
+  Avatar, Divider, useMediaQuery, Tab, Tabs,
   useTheme, Card, CardContent, Stack, Container, AppBar, Toolbar,
   InputAdornment, Grid, Switch, Collapse, CardActionArea, ToggleButton,
   ToggleButtonGroup, Breadcrumbs, LinearProgress,
-  Backdrop, Skeleton, Tooltip, FormHelperText, Badge
+  Backdrop, Skeleton, Tooltip, FormHelperText, Badge, Radio, RadioGroup, FormControlLabel
 } from '@mui/material';
 import {
   Delete as DeleteIcon, PersonAdd as PersonAddIcon, Close as CloseIcon,
@@ -24,15 +24,18 @@ import {
   Public as PublicIcon, Flag as FlagIcon, Terrain as TerrainIcon, Home as HomeIcon,
   MeetingRoom as MeetingRoomIcon, EventSeat as EventSeatIcon, ChevronRight as ChevronRightIcon,
   Phone as PhoneIcon, Email as EmailIcon, Work as WorkIcon, Title as TitleIcon,
-  Visibility as VisibilityIcon, Update as UpdateIcon,
+  Visibility as VisibilityIcon, Update as UpdateIcon, Person as PersonIcon,
   DomainOutlined as StructureIcon, Repeat as RepeatIcon, Info as InfoIcon,
-  Preview as PreviewIcon, Today as TodayIcon
+  Preview as PreviewIcon, Today as TodayIcon, GroupAdd as GroupAddIcon,
+  ListAlt as ListAltIcon, PersonSearch as PersonSearchIcon
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { addDays, addWeeks, addMonths, differenceInDays, format } from 'date-fns';
 import api from '../../../services/api';
+import RichTextEditor from '../../actiontracker/meetings/components/RichTextEditor';
 
 // Redux imports
 import {
@@ -40,7 +43,8 @@ import {
   removeLocalMeetingParticipant, setMeetingChairperson,
   addParticipantsFromListToMeeting, clearMeetingParticipants,
   selectParticipantLists, selectMeetingParticipantsAll,
-  selectMeetingChairperson, selectParticipantsLoading
+  selectMeetingChairperson, selectParticipantsLoading,
+  fetchUsers, selectUsers, selectUsersLoading
 } from '../../../store/slices/actionTracker/participantSlice';
 import {
   createMeeting, updateMeeting, fetchMeetingById,
@@ -76,13 +80,13 @@ const RECURRENCE_TYPES = [
 ];
 
 const WEEK_DAYS = [
-  { value: 'monday', label: 'M', full: 'Monday' },
-  { value: 'tuesday', label: 'T', full: 'Tuesday' },
-  { value: 'wednesday', label: 'W', full: 'Wednesday' },
-  { value: 'thursday', label: 'T', full: 'Thursday' },
-  { value: 'friday', label: 'F', full: 'Friday' },
-  { value: 'saturday', label: 'S', full: 'Saturday' },
-  { value: 'sunday', label: 'S', full: 'Sunday' }
+  { value: 'monday', label: 'M', full: 'Monday', dayIndex: 1 },
+  { value: 'tuesday', label: 'T', full: 'Tuesday', dayIndex: 2 },
+  { value: 'wednesday', label: 'W', full: 'Wednesday', dayIndex: 3 },
+  { value: 'thursday', label: 'T', full: 'Thursday', dayIndex: 4 },
+  { value: 'friday', label: 'F', full: 'Friday', dayIndex: 5 },
+  { value: 'saturday', label: 'S', full: 'Saturday', dayIndex: 6 },
+  { value: 'sunday', label: 'S', full: 'Sunday', dayIndex: 0 }
 ];
 
 const END_OPTIONS = [
@@ -96,6 +100,13 @@ const steps = [
   { label: 'Participants', icon: PeopleIcon, description: 'Add attendees and roles' },
   { label: 'Recurrence', icon: RepeatIcon, description: 'Set up recurring schedule' },
   { label: 'Review & Submit', icon: CheckCircleIcon, description: 'Verify all information' },
+];
+
+// Participant source tabs
+const PARTICIPANT_TABS = [
+  { value: 'existing', label: 'Existing Users', icon: <PersonSearchIcon /> },
+  { value: 'manual', label: 'Add Manually', icon: <PersonAddIcon /> },
+  { value: 'lists', label: 'Participant Lists', icon: <ListAltIcon /> }
 ];
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -115,7 +126,6 @@ const getLevelInfo = (location) => {
   return ADDRESS_LEVELS.find(l => l.level === location?.level);
 };
 
-// ─── Safe Scroll To Top ───────────────────────────────────────────────────────
 const safeScrollToTop = () => {
   if (typeof window !== 'undefined' && window.scrollTo) {
     try {
@@ -124,6 +134,66 @@ const safeScrollToTop = () => {
       window.scrollTo(0, 0);
     }
   }
+};
+
+// Calculate next occurrence date based on recurrence pattern
+const calculateNextOccurrence = (recurrence, fromDate) => {
+  if (!recurrence || !recurrence.enabled) return null;
+  
+  let nextDate = new Date(fromDate);
+  const interval = recurrence.interval || 1;
+  
+  switch (recurrence.type) {
+    case 'daily':
+      nextDate = addDays(nextDate, interval);
+      break;
+    case 'weekly':
+      if (recurrence.days && recurrence.days.length > 0) {
+        const currentDay = nextDate.getDay();
+        const dayIndices = recurrence.days.map(d => WEEK_DAYS.find(wd => wd.value === d)?.dayIndex);
+        let daysToAdd = null;
+        
+        for (let i = 1; i <= 7; i++) {
+          const nextDayIndex = (currentDay + i) % 7;
+          if (dayIndices.includes(nextDayIndex)) {
+            daysToAdd = i;
+            break;
+          }
+        }
+        
+        if (daysToAdd !== null) {
+          nextDate = addDays(nextDate, daysToAdd);
+          if (interval > 1) {
+            nextDate = addWeeks(nextDate, interval - 1);
+          }
+        } else {
+          nextDate = addWeeks(nextDate, interval);
+        }
+      } else {
+        nextDate = addWeeks(nextDate, interval);
+      }
+      break;
+    case 'biweekly':
+      nextDate = addWeeks(nextDate, interval * 2);
+      break;
+    case 'monthly':
+      nextDate = addMonths(nextDate, interval);
+      if (recurrence.day_of_month) {
+        const targetDay = Math.min(recurrence.day_of_month, new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate());
+        nextDate.setDate(targetDay);
+      }
+      break;
+    case 'quarterly':
+      nextDate = addMonths(nextDate, interval * 3);
+      break;
+    case 'yearly':
+      nextDate = addMonths(nextDate, interval * 12);
+      break;
+    default:
+      nextDate = addWeeks(nextDate, 1);
+  }
+  
+  return nextDate;
 };
 
 // ─── HierarchyNode Component ──────────────────────────────────────────────────
@@ -358,6 +428,246 @@ const LocationSearch = React.memo(({ value, onChange, onClear }) => {
   );
 });
 
+// ─── Existing Users Selection Component ───────────────────────────────────────
+const ExistingUsersSelector = ({ onAddUser, existingParticipants, selectedUserIds }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  
+  const dispatch = useDispatch();
+  const users = useSelector(selectUsers);
+  const usersLoading = useSelector(selectUsersLoading);
+  
+  useEffect(() => {
+    dispatch(fetchUsers({ limit: 100 }));
+  }, [dispatch]);
+  
+  const filteredUsers = users.filter(user => 
+    !selectedUserIds.includes(user.id) && (
+      user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.username?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+  );
+  
+  const handleAddUser = () => {
+    if (selectedUser) {
+      onAddUser({
+        id: selectedUser.id,
+        name: selectedUser.full_name || selectedUser.username,
+        email: selectedUser.email,
+        telephone: selectedUser.phone,
+        title: selectedUser.title,
+        organization: selectedUser.organization,
+        is_chairperson: false,
+        is_existing: true
+      });
+      setSelectedUser(null);
+      setSearchTerm('');
+    }
+  };
+  
+  return (
+    <Stack spacing={2}>
+      <TextField
+        fullWidth
+        placeholder="Search users by name, email or username..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        size="small"
+        slotProps={{
+          input: {
+            startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+          }
+        }}
+      />
+      
+      <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+        {usersLoading ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}><CircularProgress size={30} /></Box>
+        ) : filteredUsers.length === 0 ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">No users found</Typography>
+          </Box>
+        ) : (
+          <List dense>
+            {filteredUsers.map((user) => (
+              <ListItemButton
+                key={user.id}
+                selected={selectedUser?.id === user.id}
+                onClick={() => setSelectedUser(user)}
+              >
+                <ListItemAvatar>
+                  <Avatar>{user.full_name?.[0] || user.username?.[0] || 'U'}</Avatar>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={user.full_name || user.username}
+                  secondary={user.email}
+                />
+                {selectedUser?.id === user.id && <CheckCircleIcon color="primary" fontSize="small" />}
+              </ListItemButton>
+            ))}
+          </List>
+        )}
+      </Paper>
+      
+      <Button
+        variant="contained"
+        onClick={handleAddUser}
+        disabled={!selectedUser}
+        startIcon={<PersonAddIcon />}
+      >
+        Add Selected User
+      </Button>
+    </Stack>
+  );
+};
+
+// ─── Manual Participant Entry Component ───────────────────────────────────────
+const ManualParticipantEntry = ({ onAddParticipant }) => {
+  const [newParticipant, setNewParticipant] = useState({
+    name: '', email: '', telephone: '', title: '', organization: ''
+  });
+  
+  const handleAdd = () => {
+    if (!newParticipant.name.trim()) return;
+    onAddParticipant({
+      ...newParticipant,
+      id: `manual-${Date.now()}-${Math.random()}`,
+      is_chairperson: false,
+      is_manual: true
+    });
+    setNewParticipant({ name: '', email: '', telephone: '', title: '', organization: '' });
+  };
+  
+  return (
+    <Stack spacing={2}>
+      <TextField
+        fullWidth
+        label="Full Name *"
+        value={newParticipant.name}
+        onChange={(e) => setNewParticipant(prev => ({ ...prev, name: e.target.value }))}
+        required
+        size="small"
+        autoFocus
+      />
+      <TextField
+        fullWidth
+        label="Email"
+        value={newParticipant.email}
+        onChange={(e) => setNewParticipant(prev => ({ ...prev, email: e.target.value }))}
+        type="email"
+        size="small"
+      />
+      <TextField
+        fullWidth
+        label="Telephone"
+        value={newParticipant.telephone}
+        onChange={(e) => setNewParticipant(prev => ({ ...prev, telephone: e.target.value }))}
+        size="small"
+      />
+      <TextField
+        fullWidth
+        label="Title"
+        value={newParticipant.title}
+        onChange={(e) => setNewParticipant(prev => ({ ...prev, title: e.target.value }))}
+        size="small"
+      />
+      <TextField
+        fullWidth
+        label="Organization"
+        value={newParticipant.organization}
+        onChange={(e) => setNewParticipant(prev => ({ ...prev, organization: e.target.value }))}
+        size="small"
+      />
+      <Button
+        variant="contained"
+        onClick={handleAdd}
+        disabled={!newParticipant.name.trim()}
+        startIcon={<PersonAddIcon />}
+      >
+        Add Participant
+      </Button>
+    </Stack>
+  );
+};
+
+// ─── Participant Lists Component ──────────────────────────────────────────────
+const ParticipantListsSelector = ({ onAddFromList, selectedParticipantIds }) => {
+  const [selectedListId, setSelectedListId] = useState(null);
+  
+  const dispatch = useDispatch();
+  const participantLists = useSelector(selectParticipantLists);
+  
+  useEffect(() => {
+    dispatch(fetchParticipantLists());
+  }, [dispatch]);
+  
+  const selectedList = participantLists.find(l => l.id === selectedListId);
+  const availableParticipants = selectedList?.participants?.filter(p => !selectedParticipantIds.includes(p.id)) || [];
+  
+  const handleAddAll = () => {
+    if (selectedList && availableParticipants.length > 0) {
+      const participantsToAdd = availableParticipants.map(p => ({
+        ...p,
+        is_chairperson: false,
+        from_list: true,
+        list_id: selectedList.id
+      }));
+      onAddFromList(participantsToAdd);
+    }
+  };
+  
+  return (
+    <Stack spacing={2}>
+      <FormControl fullWidth size="small">
+        <InputLabel>Select Participant List</InputLabel>
+        <Select
+          value={selectedListId || ''}
+          onChange={(e) => setSelectedListId(e.target.value)}
+          label="Select Participant List"
+        >
+          {participantLists.map(list => (
+            <MenuItem key={list.id} value={list.id}>
+              {list.name} ({list.participants?.length || 0} participants)
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      
+      {selectedList && (
+        <>
+          <Paper variant="outlined" sx={{ maxHeight: 250, overflow: 'auto' }}>
+            <List dense>
+              {availableParticipants.length === 0 ? (
+                <ListItem>
+                  <ListItemText primary="All participants from this list have been added" />
+                </ListItem>
+              ) : (
+                availableParticipants.map(p => (
+                  <ListItem key={p.id}>
+                    <ListItemAvatar>
+                      <Avatar>{p.name?.[0] || 'P'}</Avatar>
+                    </ListItemAvatar>
+                    <ListItemText primary={p.name} secondary={p.email} />
+                  </ListItem>
+                ))
+              )}
+            </List>
+          </Paper>
+          <Button
+            variant="contained"
+            onClick={handleAddAll}
+            disabled={availableParticipants.length === 0}
+            startIcon={<GroupAddIcon />}
+          >
+            Add All ({availableParticipants.length}) Participants
+          </Button>
+        </>
+      )}
+    </Stack>
+  );
+};
+
 // ─── ParticipantItem Component ────────────────────────────────────────────────
 const ParticipantItem = React.memo(({ participant, onRemove, onMakeChairperson, isChairperson, isSecretary, showActions = true }) => (
   <ListItem
@@ -367,13 +677,19 @@ const ParticipantItem = React.memo(({ participant, onRemove, onMakeChairperson, 
       </Tooltip>
     )}
   >
-    <ListItemAvatar><Avatar sx={{ bgcolor: isChairperson ? 'primary.main' : 'success.main' }}>{participant.name?.charAt(0) || 'P'}</Avatar></ListItemAvatar>
+    <ListItemAvatar>
+      <Avatar sx={{ bgcolor: isChairperson ? 'primary.main' : 'success.main' }}>
+        {participant.name?.charAt(0) || 'P'}
+      </Avatar>
+    </ListItemAvatar>
     <ListItemText
       primary={
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
           <Typography variant="body2" fontWeight={500}>{participant.name}</Typography>
           {isChairperson && <Chip label="Chairperson" size="small" color="primary" />}
           {isSecretary && <Chip label="Secretary" size="small" color="secondary" />}
+          {participant.is_existing && <Chip label="Existing User" size="small" variant="outlined" />}
+          {participant.is_manual && <Chip label="Manual" size="small" variant="outlined" />}
         </Stack>
       }
       secondary={
@@ -392,14 +708,13 @@ const ParticipantItem = React.memo(({ participant, onRemove, onMakeChairperson, 
 ));
 
 // ─── RecurrenceSection Component ──────────────────────────────────────────────
-const RecurrenceSection = ({ recurrence, setRecurrence }) => {
+const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
   const [isRecurring, setIsRecurring] = useState(!!recurrence?.enabled);
   const [showPreview, setShowPreview] = useState(false);
   const [previewDates, setPreviewDates] = useState([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
   const handleRecurringToggle = (checked) => {
-    console.log('Recurrence toggle:', checked);
     setIsRecurring(checked);
     if (checked) {
       const newRecurrence = { 
@@ -413,48 +728,66 @@ const RecurrenceSection = ({ recurrence, setRecurrence }) => {
         max_occurrences: null 
       };
       setRecurrence(newRecurrence);
-      console.log('Recurrence enabled:', newRecurrence);
     } else { 
       setRecurrence(null);
-      console.log('Recurrence disabled');
     }
   };
 
   const updateRecurrence = (field, value) => { 
     setRecurrence(prev => ({ ...prev, [field]: value }));
-    console.log(`Updated recurrence ${field}:`, value);
   };
 
-  const fetchPreview = async () => {
-    if (!recurrence?.enabled) return;
+  const calculatePreviewDates = useCallback(() => {
+    if (!recurrence?.enabled || !startDate) return;
+    
     setLoadingPreview(true);
-    try {
-      const mockDates = [];
-      let date = new Date();
-      for (let i = 0; i < 5; i++) {
-        if (recurrence.type === 'daily') date = new Date(date.setDate(date.getDate() + recurrence.interval));
-        else if (recurrence.type === 'weekly') date = new Date(date.setDate(date.getDate() + 7 * recurrence.interval));
-        else if (recurrence.type === 'monthly') date = new Date(date.setMonth(date.getMonth() + recurrence.interval));
-        mockDates.push(new Date(date));
-      }
-      setPreviewDates(mockDates);
-    } catch (error) { console.error('Error fetching preview:', error);
-    } finally { setLoadingPreview(false); }
-  };
+    const dates = [];
+    let currentDate = new Date(startDate);
+    const maxOccurrences = Math.min(recurrence.max_occurrences || 10, 20);
+    const endDate = recurrence.end_date ? new Date(recurrence.end_date) : null;
+    
+    for (let i = 0; i < maxOccurrences; i++) {
+      const nextDate = calculateNextOccurrence(recurrence, currentDate);
+      if (!nextDate) break;
+      if (endDate && nextDate > endDate) break;
+      dates.push(nextDate);
+      currentDate = nextDate;
+    }
+    
+    setPreviewDates(dates);
+    setLoadingPreview(false);
+  }, [recurrence, startDate]);
+
+  useEffect(() => {
+    if (showPreview && recurrence?.enabled && startDate) {
+      calculatePreviewDates();
+    }
+  }, [showPreview, recurrence, startDate, calculatePreviewDates]);
 
   const toggleDay = (day) => {
     const currentDays = recurrence?.days || [];
-    updateRecurrence('days', currentDays.includes(day) ? currentDays.filter(d => d !== day) : [...currentDays, day]);
+    updateRecurrence('days', currentDays.includes(day) 
+      ? currentDays.filter(d => d !== day) 
+      : [...currentDays, day]);
   };
 
-  useEffect(() => { if (showPreview && recurrence?.enabled) fetchPreview(); }, [showPreview, recurrence]);
-
-  const getIntervalText = () => {
-    const type = recurrence?.type;
-    const interval = recurrence?.interval || 1;
-    const typeConfig = RECURRENCE_TYPES.find(t => t.value === type);
-    const unit = typeConfig?.intervalText || 'day(s)';
-    return `${interval} ${unit}`;
+  const getRecurrenceSummary = () => {
+    if (!recurrence) return '';
+    const type = recurrence.type;
+    const interval = recurrence.interval || 1;
+    
+    if (type === 'weekly') {
+      const days = recurrence.days?.map(d => d.charAt(0).toUpperCase() + d.slice(1, 3)).join(', ');
+      return `Every ${interval} week(s) on ${days}`;
+    }
+    if (type === 'biweekly') {
+      const days = recurrence.days?.map(d => d.charAt(0).toUpperCase() + d.slice(1, 3)).join(', ');
+      return `Every ${interval * 2} weeks on ${days}`;
+    }
+    if (type === 'monthly') {
+      return `Every ${interval} month(s) on day ${recurrence.day_of_month || 1}`;
+    }
+    return `Every ${interval} ${type}`;
   };
 
   return (
@@ -462,7 +795,7 @@ const RecurrenceSection = ({ recurrence, setRecurrence }) => {
       <CardContent>
         <Stack spacing={3}>
           <Paper variant="outlined" sx={{ p: 2, borderColor: isRecurring ? 'primary.main' : 'divider' }}>
-            <Stack direction="row" alignItems="center" sx={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
               <Stack direction="row" alignItems="center" spacing={2}>
                 <Switch checked={isRecurring} onChange={(e) => handleRecurringToggle(e.target.checked)} color="primary" size="large" />
                 <Stack>
@@ -473,7 +806,14 @@ const RecurrenceSection = ({ recurrence, setRecurrence }) => {
                   <Typography variant="body2" color="text.secondary">Create a series of meetings that repeat on a schedule</Typography>
                 </Stack>
               </Stack>
-              {isRecurring && <Chip icon={<RepeatIcon />} label={`Repeats ${getIntervalText()}`} color="primary" variant="outlined" />}
+              {isRecurring && (
+                <Chip 
+                  icon={<RepeatIcon />} 
+                  label={getRecurrenceSummary()} 
+                  color="primary" 
+                  variant="outlined"
+                />
+              )}
             </Stack>
           </Paper>
 
@@ -525,6 +865,12 @@ const RecurrenceSection = ({ recurrence, setRecurrence }) => {
                         </ToggleButton>
                       ))}
                     </Stack>
+                    {(!recurrence?.days || recurrence?.days.length === 0) && (
+                      <FormHelperText error>Please select at least one day</FormHelperText>
+                    )}
+                    {recurrence?.type === 'biweekly' && (
+                      <FormHelperText>Meeting will occur every {recurrence.interval * 2} weeks</FormHelperText>
+                    )}
                   </Grid>
                 )}
 
@@ -563,7 +909,7 @@ const RecurrenceSection = ({ recurrence, setRecurrence }) => {
                 </Grid>
               </Grid>
 
-              <Stack direction="row" sx={{ justifyContent: 'flex-end', mt: 2 }}>
+              <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
                 <Button variant="outlined" startIcon={<PreviewIcon />} onClick={() => setShowPreview(!showPreview)} size="small">
                   {showPreview ? 'Hide Preview' : 'Preview Occurrences'}
                 </Button>
@@ -575,25 +921,29 @@ const RecurrenceSection = ({ recurrence, setRecurrence }) => {
                 }>
                   <Typography variant="subtitle2" fontWeight={600} gutterBottom>Upcoming Occurrences</Typography>
                   {loadingPreview ? <CircularProgress size={24} /> : previewDates.length > 0 ? (
-                    <Stack spacing={1} sx={{ mt: 1 }}>
+                    <Stack spacing={1} sx={{ mt: 1, maxHeight: 300, overflow: 'auto' }}>
                       {previewDates.map((date, idx) => (
                         <Stack key={idx} direction="row" alignItems="center" spacing={2}>
                           <Badge badgeContent={idx + 1} color="primary" />
                           <EventIcon fontSize="small" />
                           <Typography variant="body2">
-                            {new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                            {format(date, 'EEEE, MMMM d, yyyy')}
                           </Typography>
                         </Stack>
                       ))}
                     </Stack>
-                  ) : <Typography variant="body2">Click "Preview" to see upcoming dates</Typography>}
+                  ) : <Typography variant="body2">No occurrences to preview</Typography>}
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    Based on start date: {startDate ? format(new Date(startDate), 'MMM d, yyyy') : 'Not set'}
+                  </Typography>
                 </Alert>
               )}
 
               <Alert severity="info" sx={{ mt: 2 }} icon={<InfoIcon />}>
                 <Typography variant="body2">
                   <strong>How it works:</strong> This will create a series of meetings based on the pattern above.
-                  Each occurrence will be created as a separate meeting.
+                  The recurring meeting will appear in your dashboard showing the next occurrence date.
+                  When you click "Join", the actual meeting instance will be created.
                 </Typography>
               </Alert>
             </Box>
@@ -629,6 +979,7 @@ const MeetingForm = () => {
   const returnPath = location.state?.from || '/meetings';
 
   const initialParticipantsLoaded = useRef(false);
+  const isMounted = useRef(true);
 
   const participantLists = useSelector(selectParticipantLists);
   const meetingParticipants = useSelector(selectMeetingParticipantsAll);
@@ -639,7 +990,7 @@ const MeetingForm = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
-  const [selectedParticipantList, setSelectedParticipantList] = useState(null);
+  const [participantTab, setParticipantTab] = useState('existing');
   const [showGpsDetails, setShowGpsDetails] = useState(false);
   const [formLoading, setFormLoading] = useState(isEditMode);
   const [gpsEnabled, setGpsEnabled] = useState(false);
@@ -649,6 +1000,7 @@ const MeetingForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [recurrence, setRecurrence] = useState(null);
+  const [mappingsLoading, setMappingsLoading] = useState(true);
   
   // Attribute mappings state
   const [attributeMappings, setAttributeMappings] = useState({
@@ -664,16 +1016,31 @@ const MeetingForm = () => {
     secretary_name: '', gps_latitude: '', gps_longitude: '',
   });
 
-  const [newParticipant, setNewParticipant] = useState({
-    name: '', email: '', telephone: '', title: '', organization: '', is_chairperson: false,
-  });
-
   const apiLoading = submitting || participantsLoading || formLoading || isSubmitting;
   const chairpersonName = useMemo(() => chairperson?.name || 'Not selected', [chairperson]);
   const pageTitle = isEditMode ? 'Edit Meeting' : 'Create New Meeting';
   const pageSubtitle = isEditMode ? 'Update meeting details' : 'Fill in the details to schedule a new meeting';
   const isRecurring = useMemo(() => recurrence?.enabled === true, [recurrence]);
   const isValid = useMemo(() => formData.title.trim() && formData.meeting_date && formData.start_time, [formData.title, formData.meeting_date, formData.start_time]);
+  
+  // Track selected user IDs to prevent duplicates
+  const selectedUserIds = useMemo(() => 
+    meetingParticipants.filter(p => p.is_existing).map(p => p.id),
+    [meetingParticipants]
+  );
+  
+  const selectedParticipantIds = useMemo(() => 
+    meetingParticipants.map(p => p.id),
+    [meetingParticipants]
+  );
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   // Fetch attribute mappings for recurring meetings
   useEffect(() => {
@@ -684,7 +1051,7 @@ const MeetingForm = () => {
         const response = await api.get('/attribute-groups/RECURRING_MEETING/attributes', {
           params: { 
             active_only: true,
-            detail_level: 'limited',
+            detail_level: 'full',
             sort_by: 'sort_order',
             sort_order: 'asc',
             limit: 100
@@ -696,58 +1063,90 @@ const MeetingForm = () => {
         const allAttributes = response.data?.items || [];
         console.log(`📊 Total attributes found: ${allAttributes.length}`);
         
-        // Build maps - NOTE: use 'mextra_metadata' not 'extra_metadata'
         const typesMap = {};
         const daysMap = {};
         const weeksMap = {};
         const statusMap = {};
         
-// In the fetchAttributeMappings function, ensure UUIDs keep their hyphens
-// In the fetchAttributeMappings function, ensure ALL UUIDs are formatted
-allAttributes.forEach(attr => {
-  const code = attr.code;
-  const metadata = attr.mextra_metadata || {};
-  const value = metadata?.value;
-  
-  if (!value) return;
-  
-  // Ensure the ID is stored with hyphens - THIS IS CRITICAL
-  const attributeId = attr.id;
-
-  
-  if (code && code.includes('RECURRENCE_TYPE_')) {
-    typesMap[value] = attributeId;
-    console.log(`  ✅ Mapped type: ${value} -> ${attributeId}`);
-  }
-  else if (code && code.includes('RECURRENCE_DAY_')) {
-    daysMap[value] = attributeId;
-    console.log(`  ✅ Mapped day: ${value} -> ${attributeId}`);
-  }
-  else if (code && code.includes('RECURRENCE_WEEK_')) {
-    weeksMap[String(value)] = attributeId;
-    console.log(`  ✅ Mapped week: ${value} -> ${attributeId}`);
-  }
-  else if (code && code.includes('RECURRING_STATUS_')) {
-    statusMap[value] = attributeId;
-    console.log(`  ✅ Mapped status: ${value} -> ${attributeId}`);
-  }
-});
-
+        allAttributes.forEach(attr => {
+          const code = attr.code;
+          const metadata = attr.mextra_metadata || {};
+          const value = metadata?.value;
+          
+          if (!value) return;
+          
+          const attributeId = attr.id;
+          
+          if (code && code.includes('RECURRENCE_TYPE_')) {
+            typesMap[value] = attributeId;
+            console.log(`  ✅ Mapped type: ${value} -> ${attributeId}`);
+          }
+          else if (code && code.includes('RECURRENCE_DAY_')) {
+            daysMap[value] = attributeId;
+            console.log(`  ✅ Mapped day: ${value} -> ${attributeId}`);
+          }
+          else if (code && code.includes('RECURRENCE_WEEK_')) {
+            weeksMap[String(value)] = attributeId;
+            console.log(`  ✅ Mapped week: ${value} -> ${attributeId}`);
+          }
+          else if (code && code.includes('RECURRING_STATUS_')) {
+            statusMap[value] = attributeId;
+            console.log(`  ✅ Mapped status: ${value} -> ${attributeId}`);
+          }
+        });
+        
         console.log('🎯 Final typesMap:', typesMap);
         console.log('🎯 Final daysMap:', daysMap);
         console.log('🎯 Final weeksMap:', weeksMap);
         console.log('🎯 Final statusMap:', statusMap);
         
-        setAttributeMappings({
-          recurrenceTypes: typesMap,
-          recurrenceDays: daysMap,
-          recurrenceWeeks: weeksMap,
-          statuses: statusMap
-        });
+        if (isMounted.current) {
+          setAttributeMappings({
+            recurrenceTypes: typesMap,
+            recurrenceDays: daysMap,
+            recurrenceWeeks: weeksMap,
+            statuses: statusMap
+          });
+        }
         
       } catch (error) {
         console.error('❌ Error fetching attribute mappings:', error);
-        console.error('Error details:', error.response?.data);
+        // Set fallback mappings based on your attribute structure
+        if (isMounted.current) {
+          setAttributeMappings({
+            recurrenceTypes: {
+              'daily': '4fc22df7-bf30-4e04-9889-c445146a4b7b',
+              'weekly': '4882abb6-d704-4921-8659-c72635c4ae64',
+              'biweekly': '2b27b1c3-5006-4baa-9220-e5b92751f0f6',
+              'monthly': '2f96de9e-d58d-4ede-881c-d17c5f27451d',
+              'quarterly': '2b594bfd-e4ef-4e49-80d2-44953fd7e858',
+              'yearly': '4b537d63-39d5-4627-8f86-98ae148d2951'
+            },
+            recurrenceDays: {
+              'monday': '76685763-c370-4d18-a96b-1ad103a3212f',
+              'tuesday': 'a887d009-2664-4e2b-affb-26cae4c8bfa8',
+              'wednesday': 'c43b16e9-c773-40d9-a004-cbe746635730',
+              'thursday': '83ba8158-84a0-4d2b-9c4e-b411328843d7',
+              'friday': '013ea5ff-a988-4e6b-b794-7a85b81e9034',
+              'saturday': '9f89ab4e-75ff-4910-8867-f37e14de51e8',
+              'sunday': '1738c0ae-3898-4ed2-9636-2697ecbad68a'
+            },
+            recurrenceWeeks: {
+              '1': '3e3aba0f-b48d-44c4-b640-d9f8ba8279e4',
+              '2': 'a445e3f8-30c0-4496-b86a-5f05e18a6b52',
+              '3': '0c484631-e50b-4431-b636-81ad1085cb01',
+              '4': '79eab126-944e-48a9-9744-12a9178437eb',
+              '-1': '88710065-c777-4e8c-a233-e2afd73faf1e'
+            },
+            statuses: {
+              'active': 'fc00c685-6aa9-4037-8478-f3917fb6b9c9'
+            }
+          });
+        }
+      } finally {
+        if (isMounted.current) {
+          setMappingsLoading(false);
+        }
       }
     };
     
@@ -760,7 +1159,7 @@ allAttributes.forEach(attr => {
       setFormLoading(true);
       dispatch(fetchMeetingById(id)).unwrap()
         .then(meeting => {
-          if (meeting) {
+          if (meeting && isMounted.current) {
             const meetingDate = new Date(meeting.meeting_date);
             const startTime = meeting.start_time ? new Date(meeting.start_time) : null;
             const endTime = meeting.end_time ? new Date(meeting.end_time) : null;
@@ -775,7 +1174,12 @@ allAttributes.forEach(attr => {
             if (meeting.gps_coordinates) setGpsEnabled(true);
             dispatch(clearMeetingParticipants());
             if (meeting.participants?.length) {
-              meeting.participants.forEach(p => dispatch(addCustomParticipant({ ...p, is_chairperson: p.is_chairperson || false, id: p.id || `participant-${Date.now()}-${Math.random()}` })));
+              meeting.participants.forEach(p => dispatch(addCustomParticipant({ 
+                ...p, 
+                is_chairperson: p.is_chairperson || false, 
+                is_existing: true,
+                id: p.id 
+              })));
               const chair = meeting.participants.find(p => p.is_chairperson === true);
               if (chair) setTimeout(() => dispatch(setMeetingChairperson(chair.id)), 150);
             }
@@ -784,7 +1188,12 @@ allAttributes.forEach(attr => {
           setFormLoading(false);
           initialParticipantsLoaded.current = true;
         })
-        .catch(() => { setSnackbar({ open: true, message: 'Failed to load meeting data', severity: 'error' }); setFormLoading(false); });
+        .catch(() => { 
+          if (isMounted.current) {
+            setSnackbar({ open: true, message: 'Failed to load meeting data', severity: 'error' });
+            setFormLoading(false);
+          }
+        });
     }
   }, [isEditMode, id, dispatch]);
 
@@ -799,7 +1208,6 @@ allAttributes.forEach(attr => {
 
   useEffect(() => {
     dispatch(fetchParticipantLists());
-    dispatch(fetchParticipants({ limit: 100 }));
     if (!navigator.geolocation) {
       setGpsSupported(false);
       setSnackbar({ open: true, message: 'Geolocation is not supported by your browser', severity: 'warning' });
@@ -815,28 +1223,31 @@ allAttributes.forEach(attr => {
   const handleDateChange = useCallback((date) => { setFormData(prev => ({ ...prev, meeting_date: date })); setFormDirty(true); }, []);
   const handleStartTimeChange = useCallback((time) => { setFormData(prev => ({ ...prev, start_time: time })); setFormDirty(true); }, []);
   const handleEndTimeChange = useCallback((time) => { setFormData(prev => ({ ...prev, end_time: time })); setFormDirty(true); }, []);
-  const handleAgendaChange = useCallback((e) => { setFormData(prev => ({ ...prev, agenda: e.target.value })); setFormDirty(true); }, []);
-const handleLocationSelect = useCallback((loc) => {
-  if (loc) {
-    // Ensure the ID is stored with hyphens
-    const locationId = loc.id; // This should already have hyphens
-    setFormData(prev => ({ 
-      ...prev, 
-      location_id: locationId, 
-      location_text: loc.name, 
-      location_details: { 
-        id: locationId, 
-        name: loc.name, 
-        code: loc.code, 
-        level: loc.level, 
-        location_mode: loc.location_mode 
-      } 
-    }));
-  } else {
-    setFormData(prev => ({ ...prev, location_id: null, location_text: '', location_details: null }));
-  }
-  setFormDirty(true);
-}, []);
+  const handleAgendaChange = useCallback((content) => { 
+    console.log('Agenda content changed:', content);
+    setFormData(prev => ({ ...prev, agenda: content })); 
+    setFormDirty(true); 
+  }, []);
+  const handleLocationSelect = useCallback((loc) => {
+    if (loc) {
+      const locationId = loc.id;
+      setFormData(prev => ({ 
+        ...prev, 
+        location_id: locationId, 
+        location_text: loc.name, 
+        location_details: { 
+          id: locationId, 
+          name: loc.name, 
+          code: loc.code, 
+          level: loc.level, 
+          location_mode: loc.location_mode 
+        } 
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, location_id: null, location_text: '', location_details: null }));
+    }
+    setFormDirty(true);
+  }, []);
 
   const getCurrentLocation = useCallback(() => {
     if (!gpsSupported) { setSnackbar({ open: true, message: 'Geolocation is not supported', severity: 'error' }); return; }
@@ -856,25 +1267,27 @@ const handleLocationSelect = useCallback((loc) => {
     setFormDirty(true);
   }, [gpsSupported, formData.gps_latitude, getCurrentLocation]);
 
-  const handleAddCustomParticipant = useCallback(() => {
-    if (!newParticipant.name.trim()) { setSnackbar({ open: true, message: 'Participant name is required', severity: 'warning' }); return; }
-    dispatch(addCustomParticipant({ ...newParticipant, id: `temp-${Date.now()}-${Math.random()}`, is_custom: true }));
-    setNewParticipant({ name: '', email: '', telephone: '', title: '', organization: '', is_chairperson: false });
-    setShowAddParticipantDialog(false); setFormDirty(true);
-    setSnackbar({ open: true, message: 'Participant added successfully', severity: 'success' });
-  }, [dispatch, newParticipant]);
+  // Participant handlers
+  const handleAddExistingUser = useCallback((user) => {
+    dispatch(addCustomParticipant({ ...user, id: user.id, is_chairperson: false, is_existing: true }));
+    setFormDirty(true);
+    setSnackbar({ open: true, message: `Added ${user.name} to participants`, severity: 'success' });
+    setShowAddParticipantDialog(false);
+  }, [dispatch]);
 
-  const handleUseParticipantList = useCallback(() => {
-    if (selectedParticipantList) {
-      const list = participantLists.find(l => l.id === selectedParticipantList);
-      if (list?.participants) {
-        dispatch(addParticipantsFromListToMeeting({ listId: selectedParticipantList, participants: list.participants }));
-        setFormDirty(true);
-        setSnackbar({ open: true, message: `Added ${list.participants.length} participants from "${list.name}"`, severity: 'success' });
-      }
-      setSelectedParticipantList(null);
-    }
-  }, [selectedParticipantList, participantLists, dispatch]);
+  const handleAddManualParticipant = useCallback((participant) => {
+    dispatch(addCustomParticipant(participant));
+    setFormDirty(true);
+    setSnackbar({ open: true, message: `Added ${participant.name} to participants`, severity: 'success' });
+    setShowAddParticipantDialog(false);
+  }, [dispatch]);
+
+  const handleAddFromList = useCallback((participants) => {
+    participants.forEach(p => dispatch(addCustomParticipant(p)));
+    setFormDirty(true);
+    setSnackbar({ open: true, message: `Added ${participants.length} participants from list`, severity: 'success' });
+    setShowAddParticipantDialog(false);
+  }, [dispatch]);
 
   const handleSetChairperson = useCallback((pid) => { dispatch(setMeetingChairperson(pid)); setFormDirty(true); setSnackbar({ open: true, message: 'Chairperson updated', severity: 'info' }); }, [dispatch]);
   const handleRemoveParticipant = useCallback((pid) => { dispatch(removeLocalMeetingParticipant(pid)); setFormDirty(true); setSnackbar({ open: true, message: 'Participant removed', severity: 'info' }); }, [dispatch]);
@@ -909,7 +1322,6 @@ const handleLocationSelect = useCallback((loc) => {
     console.log('🚀 Starting submission...');
     console.log('isRecurring:', isRecurring);
     console.log('recurrence:', recurrence);
-    console.log('attributeMappings:', attributeMappings);
     
     try {
       const meetingDate = formData.meeting_date;
@@ -928,46 +1340,87 @@ const handleLocationSelect = useCallback((loc) => {
         location_text: formData.location_text || null, location_id: formData.location_id,
         gps_coordinates: gpsEnabled && formData.gps_latitude && formData.gps_longitude ? `${formData.gps_latitude},${formData.gps_longitude}` : null,
         agenda: formData.agenda || null, secretary_name: formData.secretary_name || null, chairperson_name: chairpersonParticipant?.name || null,
-        custom_participants: meetingParticipants.map(p => ({ name: p.name, email: p.email || null, telephone: p.telephone || null, title: p.title || null, organization: p.organization || null, is_chairperson: p.is_chairperson || false, is_secretary: p.name === formData.secretary_name })),
+        custom_participants: meetingParticipants.map(p => ({ 
+          id: p.is_existing ? p.id : undefined,
+          name: p.name, 
+          email: p.email || null, 
+          telephone: p.telephone || null, 
+          title: p.title || null, 
+          organization: p.organization || null, 
+          is_chairperson: p.is_chairperson || false, 
+          is_secretary: p.name === formData.secretary_name 
+        })),
       };
 
       if (isRecurring && recurrence) {
         console.log('📅 Creating RECURRING meeting...');
-        console.log('Recurrence type:', recurrence.type);
-        console.log('Recurrence interval:', recurrence.interval);
-        console.log('Recurrence days:', recurrence.days);
         
-        const recurrenceTypeId = attributeMappings.recurrenceTypes[recurrence.type];
-        const recurrenceDayIds = (recurrence.days || []).map(day => attributeMappings.recurrenceDays[day]).filter(id => id);
-        const statusId = attributeMappings.statuses.active;
+        // Wait for mappings if still loading
+        if (mappingsLoading) {
+          setSnackbar({ 
+            open: true, 
+            message: 'Loading recurrence settings, please wait...', 
+            severity: 'info' 
+          });
+          setIsSubmitting(false);
+          return;
+        }
         
-        console.log('Mapped recurrenceTypeId:', recurrenceTypeId);
-        console.log('Mapped recurrenceDayIds:', recurrenceDayIds);
-        console.log('Mapped statusId:', statusId);
+        // Validate recurrence data
+        if (!recurrence.type) {
+          throw new Error('Recurrence type is required');
+        }
+        
+        if ((recurrence.type === 'weekly' || recurrence.type === 'biweekly') && 
+            (!recurrence.days || recurrence.days.length === 0)) {
+          throw new Error('Please select at least one day for weekly recurrence');
+        }
+        
+        if (recurrence.type === 'monthly' && !recurrence.day_of_month) {
+          throw new Error('Please select a day of the month for monthly recurrence');
+        }
+        
+        // Get the recurrence type ID from the mapping
+        const recurrenceTypeValue = recurrence.type;
+        const recurrenceTypeId = attributeMappings.recurrenceTypes[recurrenceTypeValue];
+        
+        console.log(`Looking for recurrence type: ${recurrenceTypeValue} -> ID: ${recurrenceTypeId}`);
         
         if (!recurrenceTypeId) {
-          throw new Error(`Invalid recurrence type: ${recurrence.type}. Available types: ${Object.keys(attributeMappings.recurrenceTypes).join(', ')}`);
+          throw new Error(`Recurrence type "${recurrenceTypeValue}" is not configured. Please contact support.`);
         }
         
-        if (!statusId) {
-          throw new Error('Status mapping not found. Available statuses: ' + Object.keys(attributeMappings.statuses).join(', '));
-        }
+        // Map recurrence days to attribute IDs
+        const recurrenceDayIds = (recurrence.days || []).map(day => {
+          const dayId = attributeMappings.recurrenceDays[day];
+          if (!dayId) {
+            console.warn(`No attribute mapping found for day: ${day}`);
+          }
+          return dayId;
+        }).filter(id => id);
+        
+        // Get status ID
+        const statusId = attributeMappings.statuses.active;
+        
+        console.log('Recurrence Type ID:', recurrenceTypeId);
+        console.log('Recurrence Day IDs:', recurrenceDayIds);
+        console.log('Status ID:', statusId);
         
         const recurringPayload = {
           ...meetingPayload,
           recurrence_type_id: recurrenceTypeId,
-          recurrence_interval: recurrence.interval,
+          recurrence_interval: recurrence.interval || 1,
           recurrence_days: recurrenceDayIds,
           recurrence_day_of_month: recurrence.day_of_month === 'last' ? -1 : (recurrence.day_of_month || null),
-          recurrence_end_date: recurrence.end_date || null,
+          recurrence_end_date: recurrence.end_date ? new Date(recurrence.end_date).toISOString() : null,
           recurrence_max_occurrences: recurrence.max_occurrences || null,
           status_id: statusId,
         };
         
-        console.log('📤 Sending recurring payload:', JSON.stringify(recurringPayload, null, 2));
+        console.log('📤 Sending recurring payload:', recurringPayload);
         const response = await api.post('/recurring-meetings/', recurringPayload);
         console.log('✅ Recurring meeting created:', response.data);
-        setSnackbar({ open: true, message: 'Recurring meeting created successfully!', severity: 'success' });
+        setSnackbar({ open: true, message: 'Recurring meeting template created successfully!', severity: 'success' });
       } else if (isEditMode) { 
         console.log('📝 Updating meeting...');
         await dispatch(updateMeeting({ id, data: meetingPayload })).unwrap(); 
@@ -985,16 +1438,31 @@ const handleLocationSelect = useCallback((loc) => {
       }, 1500);
     } catch (error) {
       console.error('❌ Submit error:', error);
-      console.error('Error response:', error.response?.data);
+      
+      let errorMessage = error.message || `Failed to ${isEditMode ? 'update' : 'create'} meeting.`;
+      
+      // Handle API validation errors
+      if (error.response?.data?.detail) {
+        if (Array.isArray(error.response.data.detail)) {
+          errorMessage = error.response.data.detail.map(err => 
+            `${err.loc.join('.')}: ${err.msg}`
+          ).join(', ');
+        } else {
+          errorMessage = error.response.data.detail;
+        }
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
       setSnackbar({ 
         open: true, 
-        message: error.response?.data?.detail || error.message || `Failed to ${isEditMode ? 'update' : 'create'} meeting.`, 
+        message: errorMessage, 
         severity: 'error' 
       });
       setIsSubmitting(false); 
       setSubmitMessage('');
     }
-  }, [formData, gpsEnabled, meetingParticipants, isEditMode, id, dispatch, isValid, navigate, returnPath, isRecurring, recurrence, attributeMappings]);
+  }, [formData, gpsEnabled, meetingParticipants, isEditMode, id, dispatch, isValid, navigate, returnPath, isRecurring, recurrence, attributeMappings, mappingsLoading]);
 
   if (formLoading) {
     return (
@@ -1093,13 +1561,15 @@ const handleLocationSelect = useCallback((loc) => {
                   )}
                 </Card>
 
+                {/* Rich Text Editor for Agenda */}
                 <Box>
                   <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Agenda</Typography>
-                  <TextField
-                    fullWidth multiline rows={8} name="agenda" value={formData.agenda}
-                    onChange={handleAgendaChange} disabled={apiLoading}
+                  <RichTextEditor
+                    value={formData.agenda}
+                    onChange={handleAgendaChange}
                     placeholder="Enter meeting agenda..."
-                    helperText="Enter the meeting agenda here"
+                    minHeight={300}
+                    readOnly={apiLoading}
                   />
                 </Box>
               </Stack>
@@ -1110,30 +1580,76 @@ const handleLocationSelect = useCallback((loc) => {
               <Stack spacing={3}>
                 <Card variant="outlined">
                   <CardContent>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>📋 Add from Participant List</Typography>
-                    <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-                      <InputLabel>Select Participant List</InputLabel>
-                      <Select value={selectedParticipantList || ''} onChange={e => setSelectedParticipantList(e.target.value)} label="Select Participant List" disabled={apiLoading}>
-                        {participantLists.map(list => <MenuItem key={list.id} value={list.id}>{list.name} ({list.participants?.length || 0} participants)</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                    <Button fullWidth variant="contained" onClick={handleUseParticipantList} disabled={!selectedParticipantList || apiLoading}>Add Selected List</Button>
+                    <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                      <Tabs 
+                        value={participantTab} 
+                        onChange={(_, val) => setParticipantTab(val)}
+                        variant="fullWidth"
+                      >
+                        {PARTICIPANT_TABS.map(tab => (
+                          <Tab 
+                            key={tab.value} 
+                            value={tab.value} 
+                            label={tab.label} 
+                            icon={tab.icon}
+                            iconPosition="start"
+                          />
+                        ))}
+                      </Tabs>
+                    </Box>
+                    
+                    {participantTab === 'existing' && (
+                      <ExistingUsersSelector 
+                        onAddUser={handleAddExistingUser}
+                        existingParticipants={meetingParticipants}
+                        selectedUserIds={selectedUserIds}
+                      />
+                    )}
+                    
+                    {participantTab === 'manual' && (
+                      <ManualParticipantEntry 
+                        onAddParticipant={handleAddManualParticipant}
+                      />
+                    )}
+                    
+                    {participantTab === 'lists' && (
+                      <ParticipantListsSelector 
+                        onAddFromList={handleAddFromList}
+                        selectedParticipantIds={selectedParticipantIds}
+                      />
+                    )}
                   </CardContent>
                 </Card>
 
                 <Card variant="outlined">
                   <CardContent>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
-                      <Typography variant="subtitle1" fontWeight="bold">👤 Individual Participants ({meetingParticipants.length})</Typography>
-                      <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)} disabled={apiLoading}>Add Participant</Button>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        👤 Added Participants ({meetingParticipants.length})
+                      </Typography>
+                      <Button 
+                        variant="outlined" 
+                        startIcon={<PersonAddIcon />} 
+                        onClick={() => setShowAddParticipantDialog(true)} 
+                        disabled={apiLoading}
+                      >
+                        Add More
+                      </Button>
                     </Box>
                     {meetingParticipants.length === 0 ? (
-                      <Alert severity="info" variant="outlined">No participants added yet.</Alert>
+                      <Alert severity="info" variant="outlined">No participants added yet. Use the options above to add participants.</Alert>
                     ) : (
                       <List sx={{ maxHeight: 400, overflow: 'auto' }}>
                         {meetingParticipants.map(p => (
                           <React.Fragment key={p.id}>
-                            <ParticipantItem participant={p} onRemove={handleRemoveParticipant} onMakeChairperson={handleSetChairperson} isChairperson={p.is_chairperson} isSecretary={p.name === formData.secretary_name} showActions={!apiLoading} />
+                            <ParticipantItem 
+                              participant={p} 
+                              onRemove={handleRemoveParticipant} 
+                              onMakeChairperson={handleSetChairperson} 
+                              isChairperson={p.is_chairperson} 
+                              isSecretary={p.name === formData.secretary_name} 
+                              showActions={!apiLoading} 
+                            />
                             <Divider component="li" />
                           </React.Fragment>
                         ))}
@@ -1162,7 +1678,11 @@ const handleLocationSelect = useCallback((loc) => {
 
             {/* Step 3: Recurrence */}
             {activeStep === 2 && (
-              <RecurrenceSection recurrence={recurrence} setRecurrence={setRecurrence} />
+              <RecurrenceSection 
+                recurrence={recurrence} 
+                setRecurrence={setRecurrence} 
+                startDate={formData.start_time}
+              />
             )}
 
             {/* Step 4: Review */}
@@ -1180,11 +1700,29 @@ const handleLocationSelect = useCallback((loc) => {
                       {formData.location_details && <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Location Type:</strong> {formData.location_details.location_mode} – Level {formData.location_details.level}</Typography></Grid>}
                       {formData.meeting_date && formData.start_time && <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Date & Time:</strong> {formData.meeting_date?.toLocaleDateString()} at {formData.start_time?.toLocaleTimeString()}{formData.end_time && ` – ${formData.end_time?.toLocaleTimeString()}`}</Typography></Grid>}
                       {gpsEnabled && formData.gps_latitude && formData.gps_longitude && <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>GPS:</strong> {formData.gps_latitude}, {formData.gps_longitude}</Typography></Grid>}
-                      {isRecurring && recurrence && <Grid size={{ xs: 12 }}><Chip icon={<RepeatIcon />} label={`Recurring: ${recurrence.type} (every ${recurrence.interval})`} color="primary" size="medium" /></Grid>}
+                      {isRecurring && recurrence && <Grid size={{ xs: 12 }}>
+                        <Chip 
+                          icon={<RepeatIcon />} 
+                          label={`Recurring: ${recurrence.type} (every ${recurrence.interval} ${recurrence.type === 'daily' ? 'day(s)' : recurrence.type === 'weekly' ? 'week(s)' : 'month(s)'})`} 
+                          color="primary" 
+                          size="medium" 
+                        />
+                        {recurrence.days && recurrence.days.length > 0 && (
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                            On: {recurrence.days.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')}
+                          </Typography>
+                        )}
+                      </Grid>}
                     </Grid>
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" color="primary" gutterBottom>Agenda Preview</Typography>
-                    <Box sx={{ maxHeight: 150, overflow: 'auto', fontSize: '0.875rem', p: 1, bgcolor: 'action.hover', borderRadius: 1, whiteSpace: 'pre-wrap' }}>{formData.agenda || 'No agenda provided'}</Box>
+                    <Box sx={{ maxHeight: 300, overflow: 'auto', fontSize: '0.875rem', p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                      {formData.agenda ? (
+                        <div dangerouslySetInnerHTML={{ __html: formData.agenda }} />
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">No agenda provided</Typography>
+                      )}
+                    </Box>
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" color="primary" gutterBottom>Participants ({meetingParticipants.length})</Typography>
                     <Box component="ul" sx={{ pl: 2, mt: 1, maxHeight: 150, overflow: 'auto' }}>
@@ -1214,26 +1752,66 @@ const handleLocationSelect = useCallback((loc) => {
         </Container>
 
         {/* Add Participant Dialog */}
-        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>Add New Participant</DialogTitle>
+        <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="md" fullWidth>
+          <DialogTitle>Add Participant</DialogTitle>
           <DialogContent>
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              <TextField fullWidth label="Full Name *" value={newParticipant.name} onChange={e => setNewParticipant(prev => ({ ...prev, name: e.target.value }))} required size="small" autoFocus />
-              <TextField fullWidth label="Email" value={newParticipant.email} onChange={e => setNewParticipant(prev => ({ ...prev, email: e.target.value }))} type="email" size="small" />
-              <TextField fullWidth label="Telephone" value={newParticipant.telephone} onChange={e => setNewParticipant(prev => ({ ...prev, telephone: e.target.value }))} size="small" />
-              <TextField fullWidth label="Title" value={newParticipant.title} onChange={e => setNewParticipant(prev => ({ ...prev, title: e.target.value }))} size="small" />
-              <TextField fullWidth label="Organization" value={newParticipant.organization} onChange={e => setNewParticipant(prev => ({ ...prev, organization: e.target.value }))} size="small" />
-            </Stack>
+            <Box sx={{ mt: 2 }}>
+              <Tabs 
+                value={participantTab} 
+                onChange={(_, val) => setParticipantTab(val)}
+                variant="fullWidth"
+                sx={{ mb: 2 }}
+              >
+                {PARTICIPANT_TABS.map(tab => (
+                  <Tab 
+                    key={tab.value} 
+                    value={tab.value} 
+                    label={tab.label} 
+                    icon={tab.icon}
+                    iconPosition="start"
+                  />
+                ))}
+              </Tabs>
+              
+              {participantTab === 'existing' && (
+                <ExistingUsersSelector 
+                  onAddUser={(user) => {
+                    handleAddExistingUser(user);
+                    setShowAddParticipantDialog(false);
+                  }}
+                  existingParticipants={meetingParticipants}
+                  selectedUserIds={selectedUserIds}
+                />
+              )}
+              
+              {participantTab === 'manual' && (
+                <ManualParticipantEntry 
+                  onAddParticipant={(participant) => {
+                    handleAddManualParticipant(participant);
+                    setShowAddParticipantDialog(false);
+                  }}
+                />
+              )}
+              
+              {participantTab === 'lists' && (
+                <ParticipantListsSelector 
+                  onAddFromList={(participants) => {
+                    handleAddFromList(participants);
+                    setShowAddParticipantDialog(false);
+                  }}
+                  selectedParticipantIds={selectedParticipantIds}
+                />
+              )}
+            </Box>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setShowAddParticipantDialog(false)}>Cancel</Button>
-            <Button variant="contained" onClick={handleAddCustomParticipant} disabled={!newParticipant.name.trim()} sx={{ bgcolor: '#7C3AED' }}>Add Participant</Button>
+            <Button onClick={() => setShowAddParticipantDialog(false)}>Close</Button>
           </DialogActions>
         </Dialog>
 
         {/* Snackbar */}
         <Snackbar
-          open={snackbar.open} autoHideDuration={4000}
+          open={snackbar.open} autoHideDuration={6000}
           onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
           anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
         >

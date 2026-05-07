@@ -31,6 +31,8 @@ import { ThemeContextProvider } from './context/ThemeProvider';
 // Components
 import Layout from './components/common/Layout';
 import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
+import EditRecurringMeeting from './components/actiontracker/meetings/EditRecurringMeeting';
+
 
 // ==================== Error Boundary ====================
 
@@ -91,6 +93,9 @@ const COMPONENT_IMPORTS = {
   'EditMeeting':            () => import('./components/actiontracker/meetings/EditMeeting'),
   'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm'),
   'MeetingRecorder':        () => import('./components/actiontracker/meetings/MeetingRecorder'),
+
+  'RecurringMeetingDetail': () => import('./components/actiontracker/meetings/RecurringMeetingDetail'),
+
 
   // Actions
   'ActionsList':            () => import('./components/actiontracker/actions/ActionsList'),
@@ -184,6 +189,9 @@ const createLazyComponent = (componentName, options = {}) => {
 
   return lazy(() => loadComponent(componentName, retries, retryDelay));
 };
+
+const RecurringMeetingDetail = createLazyComponent('RecurringMeetingDetail');
+
 
 const preloadCriticalComponents = async () => {
   const critical = ['Dashboard', 'MyTasks', 'ActionsList'];
@@ -411,6 +419,14 @@ const routeConfig = {
     { path: 'meetings/:id/edit',    element: <MeetingForm /> },
   ],
 
+    // ADD RECURRING MEETING ROUTES HERE
+  recurringMeetingRoutes: [
+    { path: 'recurring-meetings',               element: <Meetings /> },  // Use same Meetings component
+    { path: 'recurring-meetings/create',        element: <MeetingForm /> }, // Use same form with recurring flag
+    { path: 'recurring-meetings/:id',           element: <RecurringMeetingDetail /> }, // Use same detail with recurring flag
+    { path: 'recurring-meetings/:id/edit',      element: <EditRecurringMeeting /> }, // Use same form with recurring flag
+  ],
+
   // Standard protected routes
   protectedRoutes: [
     { path: 'dashboard',                          element: <Dashboard /> },
@@ -565,6 +581,16 @@ const AppContent = () => {
                 key={path}
                 path={path}
                 element={<Lazy message="Loading meeting page...">{element}</Lazy>}
+              />
+            ))}
+
+
+            {/* ADD RECURRING MEETING ROUTES HERE */}
+            {routeConfig.recurringMeetingRoutes.map(({ path, element }) => (
+              <Route
+                key={path}
+                path={path}
+                element={<Lazy message="Loading recurring meeting page...">{element}</Lazy>}
               />
             ))}
 

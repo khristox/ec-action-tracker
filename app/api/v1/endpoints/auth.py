@@ -611,6 +611,100 @@ async def forgot_password(
         )
 
 
+# Add this to app/api/v1/endpoints/auth.py
+
+@router.post("/refresh", response_model=Token, operation_id="auth_refresh_token")
+async def refresh_access_token(
+    refresh_token_request: RefreshTokenRequest,
+    db: AsyncSession = Depends(deps.get_db),
+) -> Any:
+    """
+    Refresh access token using a valid refresh token.
+    Returns a new access token and refresh token.
+    """
+    try:
+        # Verify the refresh token
+        refresh_token_str = refresh_token_request.refresh_token
+        payload = verify_refresh_token(refresh_token_str)
+        
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token payload",
+            )
+        
+        # Check if refresh token exists in database and is active
+        result = await db.execute(
+            select(RefreshToken).where(
+                RefreshToken.token == refresh_token_str,
+                RefreshToken.is_active == True,
+                RefreshToken.expires_at > datetime.now(timezone.utc)
+            )
+        )
+        stored_token = result.scalar_one_or_none()
+        
+        if not stored_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token not found or expired",
+            )
+        
+        # Get the user
+        user = await user_crud.get(db, id=uuid.UUID(user_id))
+        if not user or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive",
+            )
+        
+        # Generate new tokens
+        new_access_token = create_access_token(
+            data={"sub": user.username, "user_id": str(user.id), "roles": [r.code for r in user.roles]}
+        )
+        new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
+        
+        # Deactivate old refresh token
+        stored_token.is_active = False
+        stored_token.revoked_at = datetime.now(timezone.utc)
+        
+        # Create new refresh token
+        db.add(RefreshToken(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            token=new_refresh_token,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        ))
+        
+        await db.commit()
+        
+        return {
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer",
+            "user_id": str(user.id),
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "username": user.username,
+            "email": user.email
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token refresh error: {str(e)}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to refresh token"
+        )
+    
 @router.post("/reset-password", response_model=MessageResponse, operation_id="auth_reset_password")
 async def reset_password(
     reset_data: PasswordResetRequest,

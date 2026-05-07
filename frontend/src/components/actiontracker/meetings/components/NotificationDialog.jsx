@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/components/meetings/components/NotificationDialog.jsx
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -15,7 +16,6 @@ import {
   TextField,
   Button,
   CircularProgress,
-  Alert,
   alpha,
   useTheme,
   useMediaQuery,
@@ -31,8 +31,9 @@ import {
   Person as PersonIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
+import { COLORS } from '../styles/colors';
 
-function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
+export const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isDarkMode = theme.palette.mode === 'dark';
@@ -44,21 +45,30 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
   const [selectAll, setSelectAll] = useState(false);
 
   // Get theme-based colors
-  const primaryMain = theme.palette.primary.main;
-  const primaryLight = theme.palette.primary.light;
-  const primaryDark = theme.palette.primary.dark;
-  const secondaryMain = theme.palette.secondary.main;
+  const primaryMain = theme.palette.primary.main || COLORS.primary;
+  const primaryDark = theme.palette.primary.dark || COLORS.primaryDark;
+  const secondaryMain = theme.palette.secondary?.main || COLORS.secondary;
   
   // Dialog background based on mode
   const dialogBg = isDarkMode 
     ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
     : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)';
 
+  // Reset form when dialog opens
+  useEffect(() => {
+    if (open && participants) {
+      setSelectedParticipants([]);
+      setNotificationType(['email']);
+      setCustomMessage('');
+      setSelectAll(false);
+    }
+  }, [open, participants]);
+
   // Handle select all
   useEffect(() => {
     if (selectAll && participants) {
       setSelectedParticipants(participants.map(p => p.id));
-    } else if (!selectAll) {
+    } else if (!selectAll && participants) {
       setSelectedParticipants([]);
     }
   }, [selectAll, participants]);
@@ -78,14 +88,14 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
         notification_type: notificationType,
         custom_message: customMessage
       });
-      // Reset form
+      // Reset form after successful send
       setSelectedParticipants([]);
       setNotificationType(['email']);
       setCustomMessage('');
       setSelectAll(false);
       onClose();
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error('Failed to send notifications:', error);
     } finally {
       setSending(false);
     }
@@ -100,15 +110,6 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
     onClose();
   };
 
-  const getChannelIcon = (type) => {
-    switch(type) {
-      case 'email': return <EmailIcon />;
-      case 'whatsapp': return <WhatsAppIcon />;
-      case 'sms': return <SmsIcon />;
-      default: return <SendIcon />;
-    }
-  };
-
   const getChannelColor = (type) => {
     switch(type) {
       case 'email': return '#3b82f6';
@@ -116,6 +117,27 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
       case 'sms': return '#f59e0b';
       default: return primaryMain;
     }
+  };
+
+  const formatDateTime = (dateStr, timeStr) => {
+    if (!dateStr) return 'Date TBD';
+    const date = new Date(dateStr);
+    const formattedDate = date.toLocaleDateString('en-GB', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+    
+    if (timeStr) {
+      const time = new Date(timeStr);
+      const formattedTime = time.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+      return `${formattedDate} at ${formattedTime}`;
+    }
+    
+    return formattedDate;
   };
 
   return (
@@ -180,6 +202,31 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
       
       <DialogContent sx={{ p: 3 }}>
         <Stack spacing={4}>
+          {/* Meeting Info Summary */}
+          {meeting && (
+            <Paper 
+              variant="outlined" 
+              sx={{ 
+                p: 2, 
+                borderRadius: 3,
+                bgcolor: alpha(primaryMain, 0.05),
+                borderColor: alpha(primaryMain, 0.2),
+                borderWidth: '1px'
+              }}
+            >
+              <Typography variant="caption" color="primary" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Meeting Details
+              </Typography>
+              <Typography variant="body2" fontWeight={600} sx={{ mt: 0.5 }}>
+                {meeting.title}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                📅 {formatDateTime(meeting.meeting_date, meeting.start_time)}
+                {meeting.location_text && ` • 📍 ${meeting.location_text}`}
+              </Typography>
+            </Paper>
+          )}
+
           {/* Delivery Methods */}
           <Box>
             <Typography 
@@ -255,7 +302,12 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
                 <Button
                   size="small"
                   onClick={() => setSelectAll(!selectAll)}
-                  sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+                  sx={{ 
+                    textTransform: 'none', 
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    color: primaryMain
+                  }}
                 >
                   {selectAll ? 'Deselect All' : 'Select All'}
                 </Button>
@@ -318,11 +370,11 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
                         bgcolor: alpha(primaryMain, isDarkMode ? 0.2 : 0.1), 
                         color: primaryMain 
                       }}>
-                        {p.name?.[0] || p.full_name?.[0] || <PersonIcon fontSize="small" />}
+                        {p.name?.[0] || p.full_name?.[0] || p.email?.[0] || <PersonIcon fontSize="small" />}
                       </Avatar>
                       <Box sx={{ ml: 2, flex: 1 }}>
                         <Typography variant="body2" fontWeight={700} sx={{ color: isDarkMode ? '#e2e8f0' : '#1e293b' }}>
-                          {p.name || p.full_name || 'Unnamed Participant'}
+                          {p.name || p.full_name || p.email?.split('@')[0] || 'Unnamed Participant'}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {p.email || p.phone || 'No contact info'}
@@ -339,8 +391,9 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
                 ))
               ) : (
                 <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <NotificationsIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
                   <Typography variant="body2" color="text.secondary">
-                    No participants available
+                    No participants available for this meeting
                   </Typography>
                 </Box>
               )}
@@ -361,10 +414,17 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
               '& .MuiOutlinedInput-root': { 
                 borderRadius: 3,
                 bgcolor: isDarkMode ? alpha('#0f172a', 0.4) : alpha('#ffffff', 0.4),
-                '&:hover': { bgcolor: isDarkMode ? alpha('#0f172a', 0.6) : alpha('#ffffff', 0.6) }
+                '&:hover': { bgcolor: isDarkMode ? alpha('#0f172a', 0.6) : alpha('#ffffff', 0.6) },
+                '&.Mui-focused': { 
+                  bgcolor: isDarkMode ? alpha('#0f172a', 0.6) : alpha('#ffffff', 0.8),
+                  borderColor: primaryMain
+                }
               },
               '& .MuiInputLabel-root': {
-                color: 'text.secondary'
+                color: 'text.secondary',
+                '&.Mui-focused': {
+                  color: primaryMain
+                }
               }
             }}
           />
@@ -416,6 +476,6 @@ function NotificationDialog({ open, onClose, meeting, participants, onSend }) {
       </DialogActions>
     </Dialog>
   );
-}
+};
 
 export default NotificationDialog;

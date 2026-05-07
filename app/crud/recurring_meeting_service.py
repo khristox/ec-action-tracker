@@ -1,5 +1,7 @@
 # app/crud/recurring_meeting_service.py
-from sqlalchemy import select, update, delete
+from venv import logger
+
+from sqlalchemy import desc, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
@@ -249,8 +251,10 @@ class RecurringMeetingService:
                 agenda=recurring.agenda,
                 status_id=status_id,  # Use the fetched UUID or None
                 is_recurring=True,
+                
                 recurring_meeting_id=recurring.id,
                 occurrence_number=1,
+                created_by_id=recurring.created_by_id,
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
                 is_active=True,
@@ -296,7 +300,12 @@ class RecurringMeetingService:
         recurrence_type_id: Optional[uuid.UUID] = None
     ) -> List[RecurringMeeting]:
         """Get all recurring meetings"""
+        from sqlalchemy.orm import joinedload
+        
         query = select(RecurringMeeting).where(RecurringMeeting.is_deleted == False)
+        
+        # Eager load location relationship if you want to include location details
+        query = query.options(joinedload(RecurringMeeting.location))
         
         if status_id:
             query = query.where(RecurringMeeting.status_id == status_id)
@@ -306,7 +315,8 @@ class RecurringMeetingService:
         query = query.offset(skip).limit(limit).order_by(RecurringMeeting.created_at.desc())
         
         result = await self.db.execute(query)
-        return result.scalars().all()
+        return result.unique().scalars().all()
+
     
     async def get_recurring_meeting(self, meeting_id: uuid.UUID) -> Optional[RecurringMeeting]:
         """Get a single recurring meeting"""
@@ -421,6 +431,180 @@ class RecurringMeetingService:
         
         return dates[:request.max_occurrences]
 
+    async def get_occurrences_by_meeting(
+        self, 
+        recurring_meeting_id: uuid.UUID,
+        skip: int = 0,
+        limit: int = 50
+    ) -> List[Meeting]:
+        """
+        Get all meeting occurrences for a recurring meeting.
+        Returns the actual Meeting objects (not occurrence records).
+        """
+        try:
+            # Query the Meeting table directly where recurring_meeting_id matches
+            query = select(Meeting).where(
+                Meeting.recurring_meeting_id == recurring_meeting_id,
+                Meeting.is_active == True,
+                Meeting.is_deleted == False
+            ).options(
+                selectinload(Meeting.status),
+                selectinload(Meeting.participants),
+                selectinload(Meeting.created_by)
+            ).order_by(desc(Meeting.meeting_date)).offset(skip).limit(limit)
+            
+            result = await self.db.execute(query)
+            meetings = result.scalars().all()
+            """ print(json.dumps([
+                {
+                    **{
+                        col.name: str(getattr(m, col.name))
+                        for col in m.__table__.columns
+                    },
+                    "participants_count": len(m.participants or [])
+                }
+                for m in meetings
+            ], indent=2)) """
+            
+            return meetings
+        except Exception as e:
+            logger.error(f"Error getting occurrences for recurring meeting {recurring_meeting_id}: {e}")
+            return []
+
+
+    async def get_occurrence_records_by_meeting(
+        self, 
+        recurring_meeting_id: uuid.UUID,
+        skip: int = 0,
+        limit: int = 50
+    ) -> List[RecurringMeetingOccurrence]:
+        """
+        Get all occurrence records for a recurring meeting.
+        Returns the RecurringMeetingOccurrence records.
+        """
+        try:
+            query = select(RecurringMeetingOccurrence).where(
+                RecurringMeetingOccurrence.recurring_meeting_id == recurring_meeting_id
+            ).options(
+                selectinload(RecurringMeetingOccurrence.meeting)
+            ).order_by(desc(RecurringMeetingOccurrence.scheduled_date)).offset(skip).limit(limit)
+            
+            result = await self.db.execute(query)
+            return result.scalars().all()
+        except Exception as e:
+            logger.error(f"Error getting occurrence records for recurring meeting {recurring_meeting_id}: {e}")
+            return []
+
+    async def generate_on_demand_occurrence(
+        self, 
+        recurring_meeting_id: uuid.UUID,
+        target_date: Optional[datetime] = None
+    ) -> Optional[Meeting]:
+        """
+        Generate a single occurrence on demand.
+        """
+        try:
+            from datetime import timedelta
+            import json
+            
+            # Get the recurring meeting
+            recurring = await self.get_recurring_meeting(recurring_meeting_id)
+            if not recurring:
+                return None
+            
+            # Get default status for meetings
+            status_result = await self.db.execute(
+                select(Attribute).where(
+                    Attribute.code == "MEETING_STATUS_SCHEDULED",
+                    Attribute.is_active == True
+                )
+            )
+            status_attr = status_result.scalar_one_or_none()
+            
+            if not status_attr:
+                status_result = await self.db.execute(
+                    select(Attribute).where(
+                        Attribute.group.has(code="MEETING_STATUS"),
+                        Attribute.is_active == True
+                    ).limit(1)
+                )
+                status_attr = status_result.scalar_one_or_none()
+            
+            # Determine the meeting date and time
+            if target_date:
+                meeting_datetime = target_date
+            elif recurring.next_occurrence_date:
+                meeting_datetime = recurring.next_occurrence_date
+            elif recurring.start_time:
+                meeting_datetime = recurring.start_time
+            else:
+                # Default to today at the specified start time or 9 AM
+                meeting_datetime = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+            
+            # Extract date and time components
+            meeting_date = meeting_datetime.date() if hasattr(meeting_datetime, 'date') else meeting_datetime
+            start_time = meeting_datetime if isinstance(meeting_datetime, datetime) else recurring.start_time
+            
+            # Calculate end time
+            end_time = recurring.end_time
+            if not end_time:
+                # If no end_time set, default to 1 hour after start
+                end_time = start_time + timedelta(hours=1)
+                logger.info(f"Auto-calculated end_time: {end_time}")
+            
+            # Ensure end_time is after start_time
+            if end_time <= start_time:
+                end_time = start_time + timedelta(hours=1)
+                logger.warning(f"Fixed invalid end_time, set to: {end_time}")
+            
+            # Create the meeting occurrence with proper dates
+            meeting = Meeting(
+                id=uuid.uuid4(),
+                title=recurring.title,
+                description=recurring.description,
+                meeting_date=meeting_date,
+                start_time=start_time,
+                end_time=end_time,
+                duration_minutes=recurring.duration_minutes or 60,  # Default to 60 minutes
+                location_id=recurring.location_id,
+                location_text=recurring.location_text,
+                platform=recurring.platform,
+                meeting_link=recurring.meeting_link,
+                chairperson_id=recurring.chairperson_id,
+                secretary_id=recurring.secretary_id,
+                facilitator=recurring.facilitator,
+                agenda=recurring.agenda,
+                status_id=status_attr.id if status_attr else None,
+                is_recurring=True,
+                recurring_meeting_id=recurring.id,
+                occurrence_number=(recurring.total_occurrences_generated or 0) + 1,
+                created_by_id=recurring.created_by_id,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                is_active=True,
+                is_deleted=False
+            )
+            
+            self.db.add(meeting)
+            await self.db.flush()
+            
+            # Update recurring meeting counts
+            recurring.total_occurrences_generated = (recurring.total_occurrences_generated or 0) + 1
+            recurring.occurrences_count = (recurring.occurrences_count or 0) + 1
+            recurring.last_occurrence_date = meeting_datetime
+            recurring.updated_at = datetime.now()
+            
+            await self.db.commit()
+            await self.db.refresh(meeting)
+            
+            logger.info(f"Generated occurrence {meeting.id} with date {meeting_date} and time {start_time}")
+            
+            return meeting
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error generating on-demand occurrence: {e}", exc_info=True)
+            raise
 
 # Create singleton instance
 recurring_meeting_service = None

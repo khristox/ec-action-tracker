@@ -1,711 +1,149 @@
-// src/components/meetings/Meetings.jsx - Complete with proper status handling
-
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+// src/components/actiontracker/meetings/Meetings.jsx
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
-  Box,
-  Typography,
-  Button,
-  Paper,
-  IconButton,
-  TextField,
-  InputAdornment,
-  Card,
-  CardContent,
-  Skeleton,
-  Stack,
-  Divider,
-  Menu,
-  MenuItem,
-  alpha,
-  useMediaQuery,
-  useTheme,
-  CircularProgress,
-  Chip,
-  Fade,
-  Tooltip,
-  Zoom,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  Avatar,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Checkbox,
-  FormControlLabel,
-  Snackbar,
-  Alert,
-  Fab,
-  SwipeableDrawer,
-  CardActionArea,
-  FormControl,
-  InputLabel,
-  Select,
-  OutlinedInput,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TablePagination,
-  TableSortLabel,
-  ToggleButton,
-  ToggleButtonGroup,
-  Pagination,
-  PaginationItem,
-  Grid,
-  Drawer,
-  Badge
+  Box, Typography, Button, Paper, Stack, Fab, Tabs, Tab,
+  Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
+  CircularProgress
 } from '@mui/material';
-
-import {
-  Add as AddIcon,
-  Search as SearchIcon,
-  People as PeopleIcon,
-  FilterList as FilterIcon,
-  Edit as EditIcon,
-  LocationOn as LocationIcon,
-  ArrowForward as ArrowForwardIcon,
-  Pending as PendingIcon,
-  CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
-  PlayCircle as PlayCircleIcon,
-  StopCircle as StopCircleIcon,
-  Clear as ClearIcon,
-  EventNote as EventNoteIcon,
-  Today as TodayIcon,
-  Schedule as ScheduleOutlinedIcon,
-  Close as CloseIcon,
-  MoreVert as MoreVertIcon,
-  Notifications as NotificationsIcon,
-  Email as EmailIcon,
-  WhatsApp as WhatsAppIcon,
-  Sms as SmsIcon,
-  GridView as GridViewIcon,
-  ViewList as ViewListIcon,
-  ViewModule as ViewModuleIcon,
-  ArrowUpward as ArrowUpwardIcon,
-  ArrowDownward as ArrowDownwardIcon,
-  KeyboardArrowUp as KeyboardArrowUpIcon,
-  KeyboardArrowDown as KeyboardArrowDownIcon,
-  HourglassEmpty as HourglassEmptyIcon,
-  Timer as TimerIcon,
-  Block as BlockIcon,
-  AccessTime as AccessTimeIcon
-} from '@mui/icons-material';
-
-import {
-  fetchMeetings,
-  fetchMeetingStatusOptions,
-  selectAllMeetings,
-  selectMeetingsLoading,
-  selectMeetingError,
-  selectMeetingStatusOptions,
-  selectStatusOptions,
-  selectMeetingPagination
+import AddIcon from '@mui/icons-material/Add';
+import { 
+  selectMeetingStatusOptions, 
+  selectStatusOptions, 
+  fetchMeetingStatusOptions 
 } from '../../../store/slices/actionTracker/meetingSlice';
-
 import api from '../../../services/api';
 
-const COLORS = {
-  primary: '#7C3AED',
-  primaryLight: '#A78BFA',
-  primaryDark: '#5B21B6',
-  success: '#10B981',
-  successLight: '#34D399',
-  warning: '#F59E0B',
-  warningLight: '#FBBF24',
-  danger: '#EF4444',
-  dangerLight: '#F87171',
-  info: '#3B82F6',
-  infoLight: '#60A5FA',
-  secondary: '#6B7280',
-  secondaryLight: '#9CA3AF',
-  ended: '#9E9E9E',
-  started: '#3B82F6',
-  pending: '#F59E0B',
-  scheduled: '#8B5CF6',
-  cancelled: '#EF4444',
-  completed: '#10B981',
-  ongoing: '#3B82F6',
-  in_progress: '#3B82F6',
-  awaiting: '#F97316',
-  closed: '#6B7280',
-  postponed: '#F97316',
-  gradient: {
-    primary: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-  }
+import { useMeetings } from './hooks/useMeetings';
+import { MeetingCard } from './components/MeetingCard';
+import { MeetingFilters } from './components/MeetingFilters';
+import { MeetingTableView } from './components/MeetingTableView';
+import { MobileFilterDrawer } from './components/MobileFilterDrawer';
+import { NotificationDialog } from './components/NotificationDialog';
+import { RecurringMeetingsList } from './components/RecurringMeetingsList';
+import { TabPanel } from './components/TabPanel';
+import { COLORS } from './styles/colors';
+
+// Storage keys
+const STORAGE_KEYS = {
+  SELECTED_TAB: 'meetings_selected_tab',
+  VIEW_MODE: 'meetings_view_mode',
+  SHOW_UPCOMING: 'meetings_show_upcoming',
+  SHOW_PAST: 'meetings_show_past',
+  STATUS_FILTER: 'meetings_status_filter'
 };
 
-// Comprehensive status configuration - supports both uppercase and lowercase
-const STATUS_CONFIG = {
-  // Ended states
-  'ended': { label: 'Ended', icon: <StopCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ended, bgColor: alpha(COLORS.ended, 0.1) },
-  'ENDED': { label: 'Ended', icon: <StopCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ended, bgColor: alpha(COLORS.ended, 0.1) },
-  
-  // Started/In Progress states
-  'started': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.started, bgColor: alpha(COLORS.started, 0.1) },
-  'STARTED': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.started, bgColor: alpha(COLORS.started, 0.1) },
-  'ongoing': { label: 'Ongoing', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ongoing, bgColor: alpha(COLORS.ongoing, 0.1) },
-  'ONGOING': { label: 'Ongoing', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.ongoing, bgColor: alpha(COLORS.ongoing, 0.1) },
-  'in_progress': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.in_progress, bgColor: alpha(COLORS.in_progress, 0.1) },
-  'IN_PROGRESS': { label: 'In Progress', icon: <PlayCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.in_progress, bgColor: alpha(COLORS.in_progress, 0.1) },
-  
-  // Pending/Awaiting states
-  'pending': { label: 'Pending', icon: <HourglassEmptyIcon sx={{ fontSize: 14 }} />, color: COLORS.pending, bgColor: alpha(COLORS.pending, 0.1) },
-  'PENDING': { label: 'Pending', icon: <HourglassEmptyIcon sx={{ fontSize: 14 }} />, color: COLORS.pending, bgColor: alpha(COLORS.pending, 0.1) },
-  'awaiting': { label: 'Awaiting', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.awaiting, bgColor: alpha(COLORS.awaiting, 0.1) },
-  'AWAITING': { label: 'Awaiting', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.awaiting, bgColor: alpha(COLORS.awaiting, 0.1) },
-  
-  // Scheduled state
-  'scheduled': { label: 'Scheduled', icon: <ScheduleOutlinedIcon sx={{ fontSize: 14 }} />, color: COLORS.scheduled, bgColor: alpha(COLORS.scheduled, 0.1) },
-  'SCHEDULED': { label: 'Scheduled', icon: <ScheduleOutlinedIcon sx={{ fontSize: 14 }} />, color: COLORS.scheduled, bgColor: alpha(COLORS.scheduled, 0.1) },
-  
-  // Completed/Closed states
-  'completed': { label: 'Completed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.completed, bgColor: alpha(COLORS.completed, 0.1) },
-  'COMPLETED': { label: 'Completed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.completed, bgColor: alpha(COLORS.completed, 0.1) },
-  'closed': { label: 'Closed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.closed, bgColor: alpha(COLORS.closed, 0.1) },
-  'CLOSED': { label: 'Closed', icon: <CheckCircleIcon sx={{ fontSize: 14 }} />, color: COLORS.closed, bgColor: alpha(COLORS.closed, 0.1) },
-  
-  // Cancelled/Postponed states
-  'cancelled': { label: 'Cancelled', icon: <CancelIcon sx={{ fontSize: 14 }} />, color: COLORS.cancelled, bgColor: alpha(COLORS.cancelled, 0.1) },
-  'CANCELLED': { label: 'Cancelled', icon: <CancelIcon sx={{ fontSize: 14 }} />, color: COLORS.cancelled, bgColor: alpha(COLORS.cancelled, 0.1) },
-  'postponed': { label: 'Postponed', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.postponed, bgColor: alpha(COLORS.postponed, 0.1) },
-  'POSTPONED': { label: 'Postponed', icon: <AccessTimeIcon sx={{ fontSize: 14 }} />, color: COLORS.postponed, bgColor: alpha(COLORS.postponed, 0.1) }
-};
-
-// Helper function to get status info from meeting status object
-const getStatusInfo = (status) => {
-  if (!status) {
-    return { 
-      label: 'Pending', 
-      icon: <HourglassEmptyIcon sx={{ fontSize: 14 }} />, 
-      color: COLORS.pending, 
-      bgColor: alpha(COLORS.pending, 0.1) 
-    };
-  }
-  
-  let statusCode = null;
-  
-  // Handle different status formats from API
-  if (typeof status === 'string') {
-    statusCode = status.toUpperCase();
-  } else if (status.short_name) {
-    statusCode = status.short_name.toUpperCase();
-  } else if (status.code) {
-    // Extract from code: "MEETING_STATUS_ENDED" -> "ENDED"
-    const codeParts = status.code.split('_');
-    statusCode = codeParts[codeParts.length - 1].toUpperCase();
-  } else if (status.name) {
-    // Extract from name: "Meeting Status - Ended" -> "ENDED"
-    const nameParts = status.name.split(' - ');
-    statusCode = nameParts[nameParts.length - 1].toUpperCase();
-  }
-  
-  // Lookup in config with uppercase key
-  if (statusCode && STATUS_CONFIG[statusCode]) {
-    return STATUS_CONFIG[statusCode];
-  }
-  
-  // Try lowercase lookup as fallback
-  if (statusCode && STATUS_CONFIG[statusCode.toLowerCase()]) {
-    return STATUS_CONFIG[statusCode.toLowerCase()];
-  }
-  
-  // Default return for unknown status
-  return { 
-    label: statusCode || 'Unknown', 
-    icon: <PendingIcon sx={{ fontSize: 14 }} />, 
-    color: COLORS.secondary, 
-    bgColor: alpha(COLORS.secondary, 0.1) 
-  };
-};
-
-// Status Stats Component - Shows distribution of meetings by status
-const StatusStats = ({ meetings }) => {
-  const stats = useMemo(() => {
-    const counts = {};
-    meetings.forEach(meeting => {
-      const statusInfo = getStatusInfo(meeting.status);
-      const label = statusInfo.label;
-      counts[label] = (counts[label] || 0) + 1;
-    });
-    return counts;
-  }, [meetings]);
-
-  // Order of status display
-  const statusOrder = ['Scheduled', 'In Progress', 'Ongoing', 'Awaiting', 'Pending', 'Ended', 'Completed', 'Closed', 'Cancelled', 'Postponed'];
-  
-  // Get status config for a label
-  const getConfigForLabel = (label) => {
-    for (const [key, value] of Object.entries(STATUS_CONFIG)) {
-      if (value.label === label) {
-        return value;
-      }
-    }
-    return null;
-  };
-  
-  return (
-    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 3 }} useFlexGap>
-      <Chip 
-        label={`Total: ${meetings.length}`} 
-        size="small" 
-        sx={{ fontWeight: 700, bgcolor: alpha(COLORS.primary, 0.1), color: COLORS.primary }} 
-      />
-      {statusOrder.filter(s => stats[s]).map(status => {
-        const config = getConfigForLabel(status);
-        if (!config) return null;
-        return (
-          <Chip 
-            key={status}
-            label={`${status}: ${stats[status]}`}
-            size="small"
-            icon={config.icon}
-            sx={{ fontWeight: 700, bgcolor: config.bgColor, color: config.color }}
-          />
-        );
-      })}
-    </Stack>
-  );
-};
-
-// Meeting Card Component
-const MeetingCard = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [menuAnchor, setMenuAnchor] = useState(null);
-  
-  const statusInfo = getStatusInfo(meeting.status);
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return 'Date TBD';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
-
-  const formatTime = (timeStr) => {
-    if (!timeStr) return 'TBD';
-    const date = new Date(timeStr);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const handleMenuOpen = (event) => {
-    event.stopPropagation();
-    setMenuAnchor(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setMenuAnchor(null);
-  };
-
-  return (
-    <Card elevation={0} sx={{
-      height: '100%', 
-      width: '100%', 
-      display: 'flex', 
-      flexDirection: 'column',
-      borderRadius: isMobile ? 2 : 3, 
-      border: `1px solid ${alpha(COLORS.primary, 0.1)}`,
-      bgcolor: 'background.paper', 
-      transition: 'all 0.3s ease',
-      '&:hover': { 
-        borderColor: COLORS.primary,
-        transform: isMobile ? 'none' : 'translateY(-4px)',
-        boxShadow: theme.shadows[8]
-      }
-    }}>
-      <CardActionArea onClick={() => onView(meeting.id)} sx={{ flexGrow: 1 }}>
-        <CardContent sx={{ p: isMobile ? 2 : 3 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={2}>
-            <Chip 
-              label={statusInfo.label}
-              size="small"
-              icon={statusInfo.icon}
-              sx={{ 
-                bgcolor: statusInfo.bgColor,
-                color: statusInfo.color, 
-                fontWeight: 700,
-                borderRadius: 1.5,
-                fontSize: '0.75rem',
-                height: 28,
-              }}
-            />
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
-                <EventNoteIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
-                {formatDate(meeting.meeting_date)}
-              </Typography>
-              <IconButton size="small" onClick={handleMenuOpen} sx={{ display: { xs: 'flex', sm: 'none' } }}>
-                <MoreVertIcon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Box>
-          </Stack>
-
-          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'text.primary', mb: 1.5, lineHeight: 1.3 }}>
-            {meeting.title}
-          </Typography>
-
-          <Paper elevation={0} sx={{ p: 1.5, mb: 2, bgcolor: alpha(COLORS.info, 0.04), borderRadius: 2 }}>
-            <Stack direction="row" spacing={2}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-                <TodayIcon sx={{ fontSize: 18, color: COLORS.info }} />
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Date</Typography>
-                  <Typography variant="body2" fontWeight={600}>{formatDate(meeting.meeting_date)}</Typography>
-                </Box>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-                <ScheduleOutlinedIcon sx={{ fontSize: 18, color: COLORS.info }} />
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Time</Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    {formatTime(meeting.start_time)} - {formatTime(meeting.end_time)}
-                  </Typography>
-                </Box>
-              </Box>
-            </Stack>
-          </Paper>
-
-          <Paper elevation={0} sx={{ p: 1.5, mb: 2, bgcolor: alpha(COLORS.danger, 0.04), borderRadius: 2 }}>
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <LocationIcon sx={{ fontSize: 18, color: COLORS.danger }} />
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary">Location</Typography>
-                <Typography variant="body2" fontWeight={500}>
-                  {meeting.location_text || 'No location specified'}
-                </Typography>
-              </Box>
-            </Stack>
-          </Paper>
-
-          <Stack direction="row" spacing={2}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <PeopleIcon sx={{ fontSize: 16, color: COLORS.success }} />
-              <Typography variant="body2">
-                <strong>{meeting.participants_count || 0}</strong> Participants
-              </Typography>
-            </Box>
-          </Stack>
-        </CardContent>
-      </CardActionArea>
-      
-      <Box sx={{ px: isMobile ? 2 : 3, py: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${alpha(COLORS.primary, 0.08)}` }}>
-        <Tooltip title="Edit">
-          <IconButton size="small" onClick={(e) => { e.stopPropagation(); onEdit(meeting.id); }}>
-            <EditIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Send Notifications">
-          <IconButton size="small" onClick={(e) => { e.stopPropagation(); onNotify(meeting); }}>
-            <NotificationsIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Button size="small" endIcon={<ArrowForwardIcon sx={{ fontSize: 14 }} />} onClick={(e) => { e.stopPropagation(); onView(meeting.id); }} sx={{ fontWeight: 700, textTransform: 'none' }}>
-          Details
-        </Button>
-      </Box>
-
-      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={handleMenuClose}>
-        <MenuItem onClick={() => { handleMenuClose(); onEdit(meeting.id); }}><EditIcon sx={{ fontSize: 18, mr: 1.5 }} /> Edit</MenuItem>
-        <MenuItem onClick={() => { handleMenuClose(); onNotify(meeting); }}><NotificationsIcon sx={{ fontSize: 18, mr: 1.5 }} /> Notify</MenuItem>
-        <MenuItem onClick={() => { handleMenuClose(); onView(meeting.id); }}><ArrowForwardIcon sx={{ fontSize: 18, mr: 1.5 }} /> Details</MenuItem>
-      </Menu>
-    </Card>
-  );
-};
-
-// Table Row Component
-const MeetingTableRow = ({ meeting, statusOptions, onView, onEdit, onNotify }) => {
-  const statusInfo = getStatusInfo(meeting.status);
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return 'Date TBD';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
-
-  const formatTime = (timeStr) => {
-    if (!timeStr) return 'TBD';
-    const date = new Date(timeStr);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  return (
-    <TableRow hover sx={{ '&:hover': { bgcolor: alpha(COLORS.primary, 0.05) } }}>
-      <TableCell>
-        <Typography variant="body2" fontWeight={600}>{meeting.title}</Typography>
-      </TableCell>
-      <TableCell>
-        <Chip 
-          label={statusInfo.label}
-          size="small"
-          icon={statusInfo.icon}
-          sx={{ bgcolor: statusInfo.bgColor, color: statusInfo.color, fontWeight: 600 }}
-        />
-      </TableCell>
-      <TableCell>{formatDate(meeting.meeting_date)}</TableCell>
-      <TableCell>{formatTime(meeting.start_time)}</TableCell>
-      <TableCell>{meeting.participants_count || 0}</TableCell>
-      <TableCell>
-        <Stack direction="row" spacing={0.5}>
-          <Tooltip title="View">
-            <IconButton size="small" onClick={() => onView(meeting.id)}>
-              <ArrowForwardIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Edit">
-            <IconButton size="small" onClick={() => onEdit(meeting.id)}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Notify">
-            <IconButton size="small" onClick={() => onNotify(meeting)}>
-              <NotificationsIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </TableCell>
-    </TableRow>
-  );
-};
-
-// Mobile Filter Drawer
-const MobileFilterDrawer = ({ open, onClose, statusFilter, setStatusFilter, statusOptions, searchTerm, setSearchTerm, onClearFilters }) => {
-  const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
-  const [localStatusFilter, setLocalStatusFilter] = useState(statusFilter);
-
-  useEffect(() => {
-    setLocalSearchTerm(searchTerm);
-    setLocalStatusFilter(statusFilter);
-  }, [searchTerm, statusFilter]);
-
-  const handleApply = () => {
-    setSearchTerm(localSearchTerm);
-    setStatusFilter(localStatusFilter);
-    onClose();
-  };
-
-  const handleClear = () => {
-    setLocalSearchTerm('');
-    setLocalStatusFilter('all');
-    onClearFilters();
-    onClose();
-  };
-
-  return (
-    <SwipeableDrawer anchor="bottom" open={open} onClose={onClose} onOpen={() => {}}>
-      <Box sx={{ p: 3 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-          <Typography variant="h6" fontWeight={700}>Filters</Typography>
-          <IconButton onClick={onClose}><CloseIcon /></IconButton>
-        </Stack>
-        
-        <TextField
-          fullWidth
-          size="small"
-          placeholder="Search meetings..."
-          value={localSearchTerm}
-          onChange={(e) => setLocalSearchTerm(e.target.value)}
-          sx={{ mb: 3 }}
-          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
-        />
-        
-        <Typography variant="subtitle2" fontWeight={600} gutterBottom>Status</Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 3 }}>
-          <Chip 
-            label="All" 
-            onClick={() => setLocalStatusFilter('all')} 
-            color={localStatusFilter === 'all' ? 'primary' : 'default'} 
-          />
-          {statusOptions?.map(opt => {
-            const statusInfo = getStatusInfo(opt.value);
-            return (
-              <Chip 
-                key={opt.value}
-                label={opt.label}
-                icon={statusInfo.icon}
-                onClick={() => setLocalStatusFilter(opt.value)}
-                color={localStatusFilter === opt.value ? 'primary' : 'default'}
-                sx={localStatusFilter === opt.value ? {} : { bgcolor: statusInfo.bgColor }}
-              />
-            );
-          })}
-        </Stack>
-        
-        <Stack direction="row" spacing={2}>
-          <Button fullWidth variant="outlined" onClick={handleClear}>Clear All</Button>
-          <Button fullWidth variant="contained" onClick={handleApply}>Apply Filters</Button>
-        </Stack>
-      </Box>
-    </SwipeableDrawer>
-  );
-};
-
-// Notification Dialog Component
-const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
-  const [selectedParticipants, setSelectedParticipants] = useState([]);
-  const [notificationType, setNotificationType] = useState(['email']);
-  const [customMessage, setCustomMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const [selectAll, setSelectAll] = useState(false);
-
-  useEffect(() => {
-    if (open && participants) {
-      setSelectedParticipants(participants.map(p => p.id));
-      setSelectAll(true);
-    }
-  }, [open, participants]);
-
-  const handleSend = async () => {
-    setSending(true);
-    try {
-      await onSend({
-        participant_ids: selectedParticipants,
-        notification_type: notificationType,
-        custom_message: customMessage
-      });
-      onClose();
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ bgcolor: COLORS.primary, color: 'white' }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1} alignItems="center">
-            <NotificationsIcon />
-            <Typography variant="h6">Send Notifications</Typography>
-          </Stack>
-          <IconButton onClick={onClose} sx={{ color: 'white' }}><CloseIcon /></IconButton>
-        </Stack>
-      </DialogTitle>
-      <DialogContent sx={{ mt: 2 }}>
-        <Stack spacing={2}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="subtitle2" fontWeight={700}>{meeting?.title}</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {meeting?.meeting_date && new Date(meeting.meeting_date).toLocaleString()}
-            </Typography>
-          </Paper>
-
-          <FormControl fullWidth size="small">
-            <InputLabel>Notification Type</InputLabel>
-            <Select 
-              multiple 
-              value={notificationType} 
-              label="Notification Type" 
-              onChange={(e) => setNotificationType(e.target.value)}
-              renderValue={(selected) => selected.join(', ')}
-            >
-              <MenuItem value="email"><EmailIcon sx={{ mr: 1 }} /> Email</MenuItem>
-              <MenuItem value="whatsapp"><WhatsAppIcon sx={{ mr: 1 }} /> WhatsApp</MenuItem>
-              <MenuItem value="sms"><SmsIcon sx={{ mr: 1 }} /> SMS</MenuItem>
-            </Select>
-          </FormControl>
-
-          <TextField 
-            label="Custom Message" 
-            multiline 
-            rows={3} 
-            value={customMessage} 
-            onChange={(e) => setCustomMessage(e.target.value)} 
-            fullWidth 
-          />
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleSend} disabled={sending || selectedParticipants.length === 0}>
-          {sending ? <CircularProgress size={20} /> : `Send to ${selectedParticipants.length}`}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-};
-
-// Main Meetings Component
 const Meetings = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   
-  // Redux selectors
-  const meetings = useSelector(selectAllMeetings);
-  const loading = useSelector(selectMeetingsLoading);
-  const error = useSelector(selectMeetingError);
   const statusOptions = useSelector(selectStatusOptions);
-  const pagination = useSelector(selectMeetingPagination);
+  const {
+    meetings,
+    loading,
+    pagination,
+    recurringMeetings,
+    loadingRecurring,
+    loadMeetings,
+    loadRecurringMeetings,
+    handleGenerateNextOccurrence
+  } = useMeetings();
   
-  // Local state
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [viewMode, setViewMode] = useState('grid');
-  const [orderBy, setOrderBy] = useState('meeting_date');
-  const [order, setOrder] = useState('desc');
+  const [rowsPerPage] = useState(10);
+  const [viewMode, setViewMode] = useState(() => {
+    // Load saved view mode from localStorage
+    const saved = localStorage.getItem(STORAGE_KEYS.VIEW_MODE);
+    return saved === 'table' ? 'table' : 'grid';
+  });
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [selectedMeeting, setSelectedMeeting] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [tabValue, setTabValue] = useState(() => {
+    // Load saved tab from localStorage
+    const saved = localStorage.getItem(STORAGE_KEYS.SELECTED_TAB);
+    return saved ? parseInt(saved) : 0;
+  });
+  const [showUpcoming, setShowUpcoming] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SHOW_UPCOMING);
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [showPast, setShowPast] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SHOW_PAST);
+    return saved !== null ? saved === 'true' : false;
+  });
   
-  // Load status options on mount
+  // Save preferences to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SELECTED_TAB, tabValue.toString());
+  }, [tabValue]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.VIEW_MODE, viewMode);
+  }, [viewMode]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SHOW_UPCOMING, showUpcoming.toString());
+  }, [showUpcoming]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SHOW_PAST, showPast.toString());
+  }, [showPast]);
+  
+  useEffect(() => {
+    if (statusFilter !== 'all') {
+      localStorage.setItem(STORAGE_KEYS.STATUS_FILTER, statusFilter);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.STATUS_FILTER);
+    }
+  }, [statusFilter]);
+  
+  // Load saved status filter on mount
+  useEffect(() => {
+    const savedStatus = localStorage.getItem(STORAGE_KEYS.STATUS_FILTER);
+    if (savedStatus && savedStatus !== 'all') {
+      setStatusFilter(savedStatus);
+    }
+  }, []);
+  
+  // Load data on mount
   useEffect(() => {
     dispatch(fetchMeetingStatusOptions());
-  }, [dispatch]);
+    loadRecurringMeetings();
+  }, [dispatch, loadRecurringMeetings]);
 
   // Load meetings when filters change
   useEffect(() => {
-    loadMeetings(1);
-  }, [searchTerm, statusFilter, orderBy, order]);
-
-  const loadMeetings = async (pageNum) => {
-    try {
-      const params = {
-        page: pageNum,
-        limit: rowsPerPage,
-        sortBy: orderBy,
-        sortOrder: order
-      };
-      
-      if (searchTerm) params.search = searchTerm;
-      if (statusFilter !== 'all') params.status = statusFilter;
-      
-      await dispatch(fetchMeetings(params)).unwrap();
-      setPage(pageNum);
-    } catch (err) {
-      console.error('Failed to load meetings:', err);
-    }
-  };
+    const params = {
+      page,
+      limit: rowsPerPage,
+      sortBy: 'meeting_date',
+      sortOrder: 'desc',
+      show_upcoming: showUpcoming,
+      show_past: showPast,
+    };
+    if (searchTerm) params.search = searchTerm;
+    if (statusFilter !== 'all') params.status_id = statusFilter;
+    
+    loadMeetings(params);
+  }, [page, searchTerm, statusFilter, rowsPerPage, showUpcoming, showPast, loadMeetings]);
 
   const handlePageChange = (event, newPage) => {
     setPage(newPage);
-    loadMeetings(newPage);
     window.scrollTo(0, 0);
   };
 
-  const handleRowsPerPageChange = (event) => {
-    const newRowsPerPage = parseInt(event.target.value, 10);
-    setRowsPerPage(newRowsPerPage);
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+    // Reset page when switching tabs
     setPage(1);
-    loadMeetings(1);
-  };
-
-  const handleSort = (property) => {
-    const isAsc = orderBy === property && order === 'asc';
-    setOrder(isAsc ? 'desc' : 'asc');
-    setOrderBy(property);
   };
 
   const handleNotifyClick = async (meeting) => {
@@ -729,21 +167,40 @@ const Meetings = () => {
     }
   };
 
+  const handleGenerateMeeting = async (meeting) => {
+    const result = await handleGenerateNextOccurrence(meeting);
+    setSnackbar({ open: true, message: result.message, severity: result.success ? 'success' : 'error' });
+    if (result.success) {
+      loadRecurringMeetings();
+      loadMeetings({ page, limit: rowsPerPage });
+    }
+  };
+
   const handleClearFilters = () => {
     setSearchTerm('');
     setStatusFilter('all');
+    setShowUpcoming(true);
+    setShowPast(false);
     setPage(1);
-    loadMeetings(1);
+    // Clear saved filters
+    localStorage.removeItem(STORAGE_KEYS.STATUS_FILTER);
+    localStorage.removeItem(STORAGE_KEYS.SHOW_UPCOMING);
+    localStorage.removeItem(STORAGE_KEYS.SHOW_PAST);
   };
 
-  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all';
+  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
   const totalPages = Math.ceil(pagination.total / rowsPerPage);
-
+  
+  const filteredMeetings = meetings.filter(m => {
+    if (statusFilter !== 'all') return true;
+    if (searchTerm) return m.title.toLowerCase().includes(searchTerm.toLowerCase());
+    return true;
+  });
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', pb: isMobile ? 8 : 4, bgcolor: 'background.default' }}>
       <Box sx={{ p: isMobile ? 2 : 3 }}>
         
-        {/* Header with New Meeting Button */}
+        {/* Header */}
         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={4}>
           <Box>
             <Typography variant={isMobile ? "h5" : "h4"} fontWeight={900} sx={{ background: COLORS.gradient.primary, backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' }}>
@@ -755,7 +212,7 @@ const Meetings = () => {
           <Button 
             variant="contained" 
             startIcon={<AddIcon />} 
-            onClick={() => navigate('/meetings/create')} 
+            onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')} 
             sx={{ 
               borderRadius: 2.5, 
               px: isMobile ? 2 : 4, 
@@ -765,223 +222,142 @@ const Meetings = () => {
               ml: 'auto'
             }}
           >
-            New Meeting
+            New {tabValue === 0 ? 'Meeting' : 'Recurring Series'}
           </Button>
         </Stack>
 
-        {/* Stats - Shows actual status distribution */}
-        {!loading && meetings.length > 0 && <StatusStats meetings={meetings} />}
-
-        {/* Filters and View Mode Toggle */}
-        <Paper elevation={0} sx={{ p: isMobile ? 1.5 : 2.5, mb: 4, borderRadius: 3, border: `1px solid ${alpha(COLORS.primary, 0.12)}`, bgcolor: 'background.paper' }}>
-          <Stack direction={isMobile ? 'column' : 'row'} spacing={2} alignItems="center">
-            <TextField
-              fullWidth
-              size="small"
-              placeholder="Search by title..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: COLORS.secondary }} /></InputAdornment>,
-                endAdornment: searchTerm && (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setSearchTerm('')}><ClearIcon fontSize="small" /></IconButton>
-                  </InputAdornment>
-                ),
-              }}
+        {/* Tabs with persistence */}
+        <Paper sx={{ borderRadius: 3, overflow: 'hidden', mb: 3 }}>
+          <Tabs 
+            value={tabValue} 
+            onChange={handleTabChange}
+            variant="fullWidth"
+            sx={{ 
+              bgcolor: 'background.paper',
+              '& .MuiTab-root': { py: 2, fontWeight: 600 },
+              '& .Mui-selected': { color: COLORS.primary },
+              '& .MuiTabs-indicator': { bgcolor: COLORS.primary, height: 3 }
+            }}
+          >
+            <Tab 
+              label={`Regular Meetings (${meetings.length})`} 
+              iconPosition="start"
             />
-            
-            {isMobile ? (
-              <Button fullWidth variant="outlined" startIcon={<FilterIcon />} onClick={() => setFilterDrawerOpen(true)}>
-                {statusFilter === 'all' ? 'Filter Meetings' : `Status: ${statusOptions?.find(o => o.value === statusFilter)?.label || statusFilter}`}
-              </Button>
-            ) : (
-              <FormControl sx={{ minWidth: 200 }} size="small">
-                <InputLabel>Status</InputLabel>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
-                  <MenuItem value="all">All Status</MenuItem>
-                  {statusOptions?.map(opt => {
-                    const statusInfo = getStatusInfo(opt.value);
-                    return (
-                      <MenuItem key={opt.value} value={opt.value}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {statusInfo.icon}
-                          {opt.label}
-                        </Box>
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
-            )}
-            
-            {/* View Mode Toggle */}
-            <ToggleButtonGroup
-              value={viewMode}
-              exclusive
-              onChange={(e, val) => val && setViewMode(val)}
-              size="small"
-              sx={{ ml: isMobile ? 0 : 'auto' }}
-            >
-              <ToggleButton value="grid">
-                <GridViewIcon fontSize="small" />
-              </ToggleButton>
-              <ToggleButton value="table">
-                <ViewListIcon fontSize="small" />
-              </ToggleButton>
-            </ToggleButtonGroup>
-            
-            {hasActiveFilters && !isMobile && (
-              <Button onClick={handleClearFilters} startIcon={<ClearIcon />} size="small">Clear</Button>
-            )}
-          </Stack>
+            <Tab 
+              label={`Recurring Series (${recurringMeetings.length})`}
+              iconPosition="start" 
+            />
+          </Tabs>
         </Paper>
 
-        {/* Content - Grid View */}
-        {viewMode === 'grid' && (
-          <>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-              {loading && meetings.length === 0 ? (
-                [...Array(isMobile ? 3 : 6)].map((_, i) => (
-                  <Box key={i} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)' } }}>
-                    <Skeleton variant="rounded" height={isMobile ? 420 : 400} sx={{ borderRadius: 3 }} />
-                  </Box>
-                ))
-              ) : meetings.length === 0 ? (
-                <Box sx={{ textAlign: 'center', py: 8, width: '100%' }}>
-                  <Typography variant="h6" color="text.secondary">No meetings found</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    {hasActiveFilters ? 'Try adjusting your search or filters' : 'Create your first meeting'}
-                  </Typography>
-                  {hasActiveFilters && <Button onClick={handleClearFilters} sx={{ mt: 2 }} variant="outlined">Clear Filters</Button>}
-                  {!hasActiveFilters && <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<AddIcon />}>Create Meeting</Button>}
-                </Box>
-              ) : (
-                meetings.map((meeting) => (
-                  <Box key={meeting.id} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)', lg: '1 1 calc(25% - 24px)' }, display: 'flex' }}>
-                    <MeetingCard 
-                      meeting={meeting} 
-                      statusOptions={statusOptions} 
-                      onView={(id) => navigate(`/meetings/${id}`)} 
-                      onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
-                      onNotify={handleNotifyClick} 
-                    />
-                  </Box>
-                ))
-              )}
-            </Box>
-            
-            {/* Pagination for Grid View */}
-            {!loading && pagination.total > rowsPerPage && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-                <Pagination
-                  count={totalPages}
-                  page={page}
-                  onChange={handlePageChange}
-                  color="primary"
-                  size={isMobile ? "small" : "medium"}
-                  showFirstButton
-                  showLastButton
-                  siblingCount={isMobile ? 0 : 1}
-                />
-              </Box>
-            )}
-          </>
-        )}
-
-        {/* Content - Table View */}
-        {viewMode === 'table' && (
-          <Paper elevation={0} sx={{ borderRadius: 3, overflow: 'hidden', border: `1px solid ${alpha(COLORS.primary, 0.12)}` }}>
-            <TableContainer sx={{ overflowX: 'auto' }}>
-              <Table stickyHeader size={isMobile ? "small" : "medium"}>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: 'background.default' }}>
-                    <TableCell>
-                      <TableSortLabel
-                        active={orderBy === 'title'}
-                        direction={orderBy === 'title' ? order : 'asc'}
-                        onClick={() => handleSort('title')}
-                        sx={{ fontWeight: 700 }}
-                      >
-                        Title
-                      </TableSortLabel>
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                    <TableCell>
-                      <TableSortLabel
-                        active={orderBy === 'meeting_date'}
-                        direction={orderBy === 'meeting_date' ? order : 'asc'}
-                        onClick={() => handleSort('meeting_date')}
-                        sx={{ fontWeight: 700 }}
-                      >
-                        Date
-                      </TableSortLabel>
-                    </TableCell>
-                    <TableCell>
-                      <TableSortLabel
-                        active={orderBy === 'start_time'}
-                        direction={orderBy === 'start_time' ? order : 'asc'}
-                        onClick={() => handleSort('start_time')}
-                        sx={{ fontWeight: 700 }}
-                      >
-                        Time
-                      </TableSortLabel>
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Participants</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {loading && meetings.length === 0 ? (
-                    [...Array(rowsPerPage)].map((_, i) => (
-                      <TableRow key={i}>
-                        {[...Array(6)].map((_, j) => (
-                          <TableCell key={j}><Skeleton variant="text" width="100%" /></TableCell>
-                        ))}
-                      </TableRow>
-                    ))
-                  ) : meetings.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 8 }}>
-                        <Typography variant="body1" color="text.secondary">No meetings found</Typography>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    meetings.map((meeting) => (
-                      <MeetingTableRow
-                        key={meeting.id}
-                        meeting={meeting}
-                        statusOptions={statusOptions}
-                        onView={(id) => navigate(`/meetings/${id}`)}
-                        onEdit={(id) => navigate(`/meetings/${id}/edit`)}
-                        onNotify={handleNotifyClick}
-                      />
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            
-            {/* Table Pagination */}
-            {!loading && pagination.total > 0 && (
-              <TablePagination
-                rowsPerPageOptions={[5, 10, 25, 50]}
-                component="div"
-                count={pagination.total}
-                rowsPerPage={rowsPerPage}
-                page={page - 1}
-                onPageChange={(e, newPage) => handlePageChange(e, newPage + 1)}
-                onRowsPerPageChange={handleRowsPerPageChange}
-                labelRowsPerPage="Rows per page:"
-              />
-            )}
+        {/* Regular Meetings Tab */}
+        <TabPanel value={tabValue} index={0}>
+          {/* Filters */}
+          <Paper elevation={0} sx={{ p: isMobile ? 1.5 : 2.5, mb: 4, borderRadius: 3, border: `1px solid ${COLORS.primary}20`, bgcolor: 'background.paper' }}>
+            <MeetingFilters
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              statusOptions={statusOptions}
+              showUpcoming={showUpcoming}
+              setShowUpcoming={setShowUpcoming}
+              showPast={showPast}
+              setShowPast={setShowPast}
+              viewMode={viewMode}
+              setViewMode={setViewMode}
+              onClearFilters={handleClearFilters}
+              onOpenFilterDrawer={() => setFilterDrawerOpen(true)}
+              isMobile={isMobile}
+            />
           </Paper>
-        )}
+
+          {/* Grid View */}
+          {viewMode === 'grid' && (
+            <>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                {loading && meetings.length === 0 ? (
+                  [...Array(isMobile ? 3 : 6)].map((_, i) => (
+                    <Box key={i} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)' } }}>
+                      <Skeleton variant="rounded" height={isMobile ? 420 : 400} sx={{ borderRadius: 3 }} />
+                    </Box>
+                  ))
+                ) : filteredMeetings.length === 0 ? (
+                  <Box sx={{ textAlign: 'center', py: 8, width: '100%' }}>
+                    <Typography variant="h6" color="text.secondary">No meetings found</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                      {hasActiveFilters ? 'Try adjusting your search or filters' : 'Create your first meeting'}
+                    </Typography>
+                    {hasActiveFilters && <Button onClick={handleClearFilters} sx={{ mt: 2 }} variant="outlined">Clear Filters</Button>}
+                    {!hasActiveFilters && <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<AddIcon />}>Create Meeting</Button>}
+                  </Box>
+                ) : (
+                  filteredMeetings.map((meeting) => (
+                    <Box key={meeting.id} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)', lg: '1 1 calc(25% - 24px)' }, display: 'flex' }}>
+                      <MeetingCard 
+                        meeting={meeting} 
+                        statusOptions={statusOptions} 
+                        onView={(id) => navigate(`/meetings/${id}`)} 
+                        onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
+                        onNotify={handleNotifyClick}
+                        onGenerateMeeting={handleGenerateMeeting}
+                      />
+                    </Box>
+                  ))
+                )}
+              </Box>
+              
+              {!loading && pagination.total > rowsPerPage && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                  <Pagination
+                    count={totalPages}
+                    page={page}
+                    onChange={handlePageChange}
+                    color="primary"
+                    size={isMobile ? "small" : "medium"}
+                    showFirstButton
+                    showLastButton
+                  />
+                </Box>
+              )}
+            </>
+          )}
+
+          {/* Table View */}
+          {viewMode === 'table' && (
+            <MeetingTableView 
+              meetings={filteredMeetings}
+              onView={(id) => navigate(`/meetings/${id}`)}
+              onEdit={(id) => navigate(`/meetings/${id}/edit`)}
+              onNotify={handleNotifyClick}
+            />
+          )}
+        </TabPanel>
+
+        {/* Recurring Meetings Tab */}
+        <TabPanel value={tabValue} index={1}>
+          {loadingRecurring ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <RecurringMeetingsList 
+              meetings={recurringMeetings}
+              onView={(id) => navigate(`/recurring-meetings/${id}`)}
+              onEdit={(id) => navigate(`/recurring-meetings/${id}/edit`)}
+              onGenerate={handleGenerateMeeting}
+            />
+          )}
+        </TabPanel>
       </Box>
 
       {/* Mobile FAB Button */}
       {isMobile && (
-        <Fab color="primary" sx={{ position: 'fixed', bottom: 16, right: 16 }} onClick={() => navigate('/meetings/create')}>
+        <Fab 
+          color="primary" 
+          sx={{ position: 'fixed', bottom: 16, right: 16 }} 
+          onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')}
+        >
           <AddIcon />
         </Fab>
       )}
@@ -995,6 +371,10 @@ const Meetings = () => {
         statusOptions={statusOptions}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
+        showUpcoming={showUpcoming}
+        setShowUpcoming={setShowUpcoming}
+        showPast={showPast}
+        setShowPast={setShowPast}
         onClearFilters={handleClearFilters}
       />
 

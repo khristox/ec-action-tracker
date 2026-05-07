@@ -452,8 +452,7 @@ const SignUpCard = () => {
     }
     
     try {
-      const result = await dispatch(register(registrationData)).unwrap();
-      console.log('Registration successful:', result);
+     await dispatch(register(registrationData)).unwrap();
     } catch (err) {
       console.error('Registration failed:', err);
       setIsSubmitting(false);

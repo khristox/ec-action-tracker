@@ -31,13 +31,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import deps
 from app.core.security import get_current_user
-from app.crud.action_tracker import meeting_crud, meeting_action, meeting_minutes, meeting_participant
+from app.crud.meetings.action_tracker import meeting_crud, meeting_action, meeting_minutes, meeting_participant
 from app.db.session import get_db
 from app.models.audit import AuditLog
 from app.models.general.dynamic_attribute import Attribute
 from app.models.role import Role
 from app.models.user import User
-from app.models.action_tracker import (
+from app.models.meetings.action_tracker import (
     Meeting, MeetingAction, MeetingDocument, MeetingParticipant, 
     MeetingQuery, MeetingStatus, MeetingStatusHistory, MeetingMinutes, Participant
 )

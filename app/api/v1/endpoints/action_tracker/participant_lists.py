@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.api import deps
 from app.models.user import User
-from app.crud.action_tracker import participant_list
+from app.crud.meetings.action_tracker import participant_list
 from app.schemas.action_tracker_participants import (
     AddParticipantsToListRequest,
     BulkAddParticipantsResponse,

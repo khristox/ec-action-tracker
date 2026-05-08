@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.models.user import User
-from app.models.action_tracker import Meeting, MeetingParticipant
+from app.models.meetings.action_tracker import Meeting, MeetingParticipant
 from app.db.session import get_db
 
 router = APIRouter()

@@ -65,9 +65,7 @@ export const useMeetings = () => {
         meetingsArray = [];
       }
       
-      console.log('Extracted meetings array:', meetingsArray);
-      console.log('Array length:', meetingsArray.length);
-      
+   
       if (isMountedRef.current) {
         setRecurringMeetings(meetingsArray);
       }

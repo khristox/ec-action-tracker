@@ -28,7 +28,6 @@ import {
   useTheme,
   useMediaQuery,
   Badge,
-  Collapse,
 } from '@mui/material';
 import {
   AddOutlined,
@@ -41,12 +40,9 @@ import {
   RefreshOutlined,
   SearchOutlined,
   CheckBoxOutlined,
-  CheckBoxOutlineBlankOutlined,
   CloseOutlined,
-  KeyboardArrowRightOutlined,
   DoneAllOutlined,
   RemoveDoneOutlined,
-  LockOutlined,
   FilterListOutlined,
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
@@ -60,7 +56,7 @@ import {
 } from '../../store/slices/roleSlice';
 
 // ─────────────────────────────────────────────
-// Permission Picker — standalone sub-component
+// Permission Picker
 // ─────────────────────────────────────────────
 const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
   const theme = useTheme();
@@ -68,7 +64,6 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState(null);
 
-  // Group permissions by category
   const grouped = useMemo(() => {
     return permissions.reduce((acc, perm) => {
       const cat = perm.category || 'General';
@@ -80,33 +75,32 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
 
   const categories = useMemo(() => Object.keys(grouped), [grouped]);
 
-  // Init active category
   useEffect(() => {
     if (categories.length && !activeCategory) setActiveCategory(categories[0]);
   }, [categories, activeCategory]);
 
-  // Filter permissions by search + active category
   const visiblePerms = useMemo(() => {
     const pool = search.trim()
-      ? permissions.filter(p =>
-          p.name?.toLowerCase().includes(search.toLowerCase()) ||
-          p.code?.toLowerCase().includes(search.toLowerCase())
+      ? permissions.filter(
+          p =>
+            p.name?.toLowerCase().includes(search.toLowerCase()) ||
+            p.code?.toLowerCase().includes(search.toLowerCase())
         )
       : activeCategory
-      ? (grouped[activeCategory] || [])
+      ? grouped[activeCategory] || []
       : permissions;
     return pool;
   }, [search, activeCategory, permissions, grouped]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
-  const toggle = (id) => {
+  const toggle = id => {
     const next = new Set(selectedSet);
     next.has(id) ? next.delete(id) : next.add(id);
     onChange([...next]);
   };
 
-  const toggleCategory = (cat) => {
+  const toggleCategory = cat => {
     const catIds = (grouped[cat] || []).map(p => p.id);
     const allSelected = catIds.every(id => selectedSet.has(id));
     const next = new Set(selectedSet);
@@ -116,70 +110,74 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
 
   const clearAll = () => onChange([]);
   const selectAll = () => onChange(permissions.map(p => p.id));
-
-  const catSelectedCount = (cat) =>
-    (grouped[cat] || []).filter(p => selectedSet.has(p.id)).length;
-
+  const catSelectedCount = cat => (grouped[cat] || []).filter(p => selectedSet.has(p.id)).length;
   const searchMode = search.trim().length > 0;
 
   return (
     <Box>
-      {/* ── Top bar: search + bulk actions ── */}
-      <Box sx={{ display: 'flex', gap: 1, mb: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Top bar */}
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <TextField
           size="small"
           placeholder="Search permissions…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          sx={{ flex: 1, minWidth: 180 }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
-                </InputAdornment>
-              ),
-              endAdornment: search && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSearch('')}>
-                    <CloseOutlined fontSize="small" />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            },
+          onChange={e => setSearch(e.target.value)}
+          sx={{ flex: 1, minWidth: 200 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
+              </InputAdornment>
+            ),
+            endAdornment: search && (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => setSearch('')}>
+                  <CloseOutlined fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ),
           }}
         />
-        <Tooltip title="Select all permissions">
-          <Button size="small" startIcon={<DoneAllOutlined />} onClick={selectAll} variant="outlined" sx={{ borderRadius: 1.5, whiteSpace: 'nowrap' }}>
-            All
-          </Button>
-        </Tooltip>
-        <Tooltip title="Clear all permissions">
-          <Button size="small" startIcon={<RemoveDoneOutlined />} onClick={clearAll} variant="outlined" color="inherit" sx={{ borderRadius: 1.5, whiteSpace: 'nowrap', color: 'text.secondary' }}>
-            None
-          </Button>
-        </Tooltip>
+        <Button
+          size="small"
+          startIcon={<DoneAllOutlined />}
+          onClick={selectAll}
+          variant="outlined"
+          sx={{ borderRadius: 2, px: 2 }}
+        >
+          Select All
+        </Button>
+        <Button
+          size="small"
+          startIcon={<RemoveDoneOutlined />}
+          onClick={clearAll}
+          variant="outlined"
+          color="inherit"
+          sx={{ borderRadius: 2, px: 2, color: 'text.secondary' }}
+        >
+          Clear
+        </Button>
       </Box>
 
-      {/* ── Selected chips summary ── */}
+      {/* Selected summary */}
       {selected.length > 0 && (
         <Paper
           variant="outlined"
           sx={{
-            p: 1.25,
-            mb: 1.5,
+            p: 1.5,
+            mb: 2,
             borderRadius: 2,
             borderColor: 'primary.main',
             bgcolor: alpha(theme.palette.primary.main, 0.04),
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <CheckBoxOutlined fontSize="small" color="primary" />
-            <Typography variant="caption" fontWeight={700} color="primary.main">
+            <Typography variant="body2" fontWeight={700} color="primary.main">
               {selected.length} permission{selected.length !== 1 ? 's' : ''} selected
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 80, overflowY: 'auto' }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxHeight: 72, overflowY: 'auto' }}>
             {selected.map(id => {
               const perm = permissions.find(p => p.id === id);
               if (!perm) return null;
@@ -191,7 +189,7 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
                   color="primary"
                   variant="outlined"
                   onDelete={() => toggle(id)}
-                  sx={{ fontSize: '0.7rem', height: 22 }}
+                  sx={{ fontSize: '0.7rem', height: 24 }}
                 />
               );
             })}
@@ -199,7 +197,7 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
         </Paper>
       )}
 
-      {/* ── Main picker: category sidebar + permission grid ── */}
+      {/* Category sidebar + permissions grid */}
       <Box
         sx={{
           display: 'flex',
@@ -207,45 +205,54 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
           borderColor: 'divider',
           borderRadius: 2,
           overflow: 'hidden',
-          height: { xs: 380, sm: 420 },
+          height: { xs: 400, sm: 460 },
         }}
       >
-        {/* Category sidebar — hidden in search mode on mobile */}
+        {/* Sidebar */}
         {(!searchMode || !isMobile) && (
           <Box
             sx={{
-              width: { xs: 130, sm: 170 },
+              width: { xs: 140, sm: 190 },
               flexShrink: 0,
               borderRight: '1px solid',
               borderColor: 'divider',
               overflowY: 'auto',
-              bgcolor: theme.palette.mode === 'dark'
-                ? alpha(theme.palette.common.white, 0.02)
-                : alpha(theme.palette.common.black, 0.015),
+              bgcolor:
+                theme.palette.mode === 'dark'
+                  ? alpha(theme.palette.common.white, 0.02)
+                  : alpha(theme.palette.common.black, 0.015),
             }}
           >
-            <Box sx={{ p: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.6rem' }}>
+            <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.8, fontSize: '0.6rem' }}
+              >
                 Categories
               </Typography>
             </Box>
             {categories.map(cat => {
               const count = catSelectedCount(cat);
               const total = (grouped[cat] || []).length;
-              const allSel = count === total;
+              const allSel = count === total && count > 0;
               const isActive = activeCategory === cat && !searchMode;
               return (
                 <Box
                   key={cat}
-                  onClick={() => { setActiveCategory(cat); setSearch(''); }}
+                  onClick={() => {
+                    setActiveCategory(cat);
+                    setSearch('');
+                  }}
                   sx={{
-                    px: 1.5,
-                    py: 1,
+                    px: 2,
+                    py: 1.25,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    gap: 0.5,
+                    gap: 1,
                     borderLeft: '3px solid',
                     borderColor: isActive ? 'primary.main' : 'transparent',
                     bgcolor: isActive ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
@@ -259,22 +266,25 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
                 >
                   <Box sx={{ minWidth: 0 }}>
                     <Typography
-                      variant="caption"
+                      variant="body2"
                       fontWeight={isActive ? 700 : 500}
                       color={isActive ? 'primary.main' : 'text.primary'}
                       noWrap
-                      display="block"
+                      sx={{ fontSize: '0.8rem' }}
                     >
                       {cat}
                     </Typography>
-                    <Typography variant="caption" color="text.disabled" fontSize="0.62rem">
+                    <Typography variant="caption" color="text.disabled" fontSize="0.65rem">
                       {count}/{total}
                     </Typography>
                   </Box>
                   {count > 0 && (
                     <Box
                       sx={{
-                        width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        flexShrink: 0,
                         bgcolor: allSel ? 'primary.main' : alpha(theme.palette.primary.main, 0.5),
                       }}
                     />
@@ -285,19 +295,30 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
           </Box>
         )}
 
-        {/* Permission grid */}
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5 }}>
-          {/* Category header with select-all toggle */}
+        {/* Permissions grid */}
+        <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
           {!searchMode && activeCategory && (
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.25 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.62rem' }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                mb: 1.5,
+              }}
+            >
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.65rem' }}
+              >
                 {activeCategory} · {(grouped[activeCategory] || []).length} permissions
               </Typography>
               <Button
                 size="small"
                 variant="text"
                 onClick={() => toggleCategory(activeCategory)}
-                sx={{ fontSize: '0.7rem', py: 0, px: 1, minWidth: 0, color: 'primary.main' }}
+                sx={{ fontSize: '0.72rem', py: 0, px: 1, minWidth: 0, color: 'primary.main' }}
               >
                 {catSelectedCount(activeCategory) === (grouped[activeCategory] || []).length
                   ? 'Deselect all'
@@ -307,23 +328,35 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
           )}
 
           {searchMode && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
               {visiblePerms.length} result{visiblePerms.length !== 1 ? 's' : ''} for "{search}"
             </Typography>
           )}
 
           {visiblePerms.length === 0 && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', gap: 1, opacity: 0.5 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '80%',
+                gap: 1,
+                opacity: 0.5,
+              }}
+            >
               <FilterListOutlined />
-              <Typography variant="caption" color="text.secondary">No permissions found</Typography>
+              <Typography variant="caption" color="text.secondary">
+                No permissions found
+              </Typography>
             </Box>
           )}
 
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(160px, 1fr))' },
-              gap: 0.75,
+              gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(175px, 1fr))' },
+              gap: 1,
             }}
           >
             {visiblePerms.map(perm => {
@@ -333,29 +366,32 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
                   key={perm.id}
                   onClick={() => toggle(perm.id)}
                   sx={{
-                    p: 1.25,
-                    borderRadius: 1.5,
+                    p: 1.5,
+                    borderRadius: 2,
                     border: '1.5px solid',
                     borderColor: isSelected ? 'primary.main' : 'divider',
-                    bgcolor: isSelected ? alpha(theme.palette.primary.main, 0.07) : 'background.paper',
+                    bgcolor: isSelected
+                      ? alpha(theme.palette.primary.main, 0.07)
+                      : 'background.paper',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
                     display: 'flex',
                     alignItems: 'flex-start',
-                    gap: 1,
+                    gap: 1.25,
                     '&:hover': {
-                      borderColor: isSelected ? 'primary.dark' : alpha(theme.palette.primary.main, 0.4),
+                      borderColor: isSelected
+                        ? 'primary.dark'
+                        : alpha(theme.palette.primary.main, 0.4),
                       bgcolor: isSelected
                         ? alpha(theme.palette.primary.main, 0.1)
                         : alpha(theme.palette.primary.main, 0.03),
                     },
                   }}
                 >
-                  {/* Checkbox indicator */}
                   <Box
                     sx={{
-                      width: 16,
-                      height: 16,
+                      width: 17,
+                      height: 17,
                       borderRadius: 0.5,
                       border: '1.5px solid',
                       borderColor: isSelected ? 'primary.main' : 'action.disabled',
@@ -369,31 +405,40 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
                     }}
                   >
                     {isSelected && (
-                      <Box component="span" sx={{ color: '#fff', fontSize: 11, lineHeight: 1, fontWeight: 900 }}>✓</Box>
+                      <Box
+                        component="span"
+                        sx={{ color: '#fff', fontSize: 11, lineHeight: 1, fontWeight: 900 }}
+                      >
+                        ✓
+                      </Box>
                     )}
                   </Box>
-
                   <Box sx={{ minWidth: 0 }}>
                     <Typography
-                      variant="caption"
+                      variant="body2"
                       fontWeight={isSelected ? 700 : 500}
                       color={isSelected ? 'primary.main' : 'text.primary'}
                       display="block"
                       noWrap
+                      sx={{ fontSize: '0.8rem' }}
                     >
                       {perm.name}
                     </Typography>
                     <Typography
                       variant="caption"
                       color="text.disabled"
-                      sx={{ fontSize: '0.62rem', fontFamily: 'monospace' }}
+                      sx={{ fontSize: '0.65rem', fontFamily: 'monospace' }}
                       noWrap
                       display="block"
                     >
                       {perm.code}
                     </Typography>
                     {searchMode && perm.category && (
-                      <Chip label={perm.category} size="small" sx={{ height: 14, fontSize: '0.58rem', mt: 0.25 }} />
+                      <Chip
+                        label={perm.category}
+                        size="small"
+                        sx={{ height: 16, fontSize: '0.6rem', mt: 0.5 }}
+                      />
                     )}
                   </Box>
                 </Box>
@@ -403,8 +448,7 @@ const PermissionPicker = ({ permissions = [], selected = [], onChange }) => {
         </Box>
       </Box>
 
-      {/* Footer count */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.25 }}>
         <Typography variant="caption" color="text.disabled">
           {selected.length} of {permissions.length} permissions selected
         </Typography>
@@ -420,8 +464,8 @@ const RoleManagement = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const dispatch = useDispatch();
-  const { roles, permissions, isLoading } = useSelector((state) => state.roles);
-  const { user: currentUser } = useSelector((state) => state.auth);
+  const { roles, permissions, isLoading } = useSelector(state => state.roles);
+  const { user: currentUser } = useSelector(state => state.auth);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState('create');
@@ -430,23 +474,30 @@ const RoleManagement = () => {
   const [loadingPermissions, setLoadingPermissions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [formData, setFormData] = useState({ name: '', code: '', description: '', is_active: true });
+  const [formData, setFormData] = useState({
+    name: '',
+    code: '',
+    description: '',
+    is_active: true,
+  });
   const [formErrors, setFormErrors] = useState({});
   const [selectedPermissions, setSelectedPermissions] = useState([]);
   const [rolePermissionsMap, setRolePermissionsMap] = useState({});
 
   useEffect(() => {
     loadRoles();
-    dispatch(fetchPermissions()).catch(() => {
-      setSnackbar({ open: true, message: 'Failed to load permissions', severity: 'warning' });
-    });
+    dispatch(fetchPermissions()).catch(() =>
+      setSnackbar({ open: true, message: 'Failed to load permissions', severity: 'warning' })
+    );
   }, []);
 
   const loadRoles = async () => {
     try {
       const result = await dispatch(fetchRoles()).unwrap();
       const map = {};
-      result.forEach(role => { map[role.id] = role.permissions || []; });
+      result.forEach(role => {
+        map[role.id] = role.permissions || [];
+      });
       setRolePermissionsMap(map);
     } catch (err) {
       console.error('Failed to load roles:', err);
@@ -461,23 +512,32 @@ const RoleManagement = () => {
     setDialogOpen(true);
   };
 
-  const handleOpenEditDialog = (role) => {
+  const handleOpenEditDialog = role => {
     setDialogMode('edit');
     setSelectedRole(role);
-    setFormData({ name: role.name, code: role.code, description: role.description || '', is_active: role.is_active });
-    setSelectedPermissions((rolePermissionsMap[role.id] || role.permissions || []).map(p => p.id));
+    setFormData({
+      name: role.name,
+      code: role.code,
+      description: role.description || '',
+      is_active: role.is_active,
+    });
+    setSelectedPermissions(
+      (rolePermissionsMap[role.id] || role.permissions || []).map(p => p.id)
+    );
     setFormErrors({});
     setDialogOpen(true);
   };
 
-  const handleOpenPermissionsDialog = async (role) => {
+  const handleOpenPermissionsDialog = async role => {
     setDialogMode('permissions');
     setSelectedRole(role);
     setLoadingPermissions(true);
     try {
       await loadRoles();
       const fresh = roles.find(r => r.id === role.id);
-      setSelectedPermissions((fresh?.permissions || role.permissions || []).map(p => p.id));
+      setSelectedPermissions(
+        (fresh?.permissions || role.permissions || []).map(p => p.id)
+      );
     } catch {
       setSelectedPermissions((role.permissions || []).map(p => p.id));
     } finally {
@@ -486,18 +546,20 @@ const RoleManagement = () => {
     }
   };
 
-  const handleOpenDeleteDialog = (role) => {
+  const handleOpenDeleteDialog = role => {
     setDialogMode('delete');
     setSelectedRole(role);
     setDialogOpen(true);
   };
 
-  const handleFormChange = (e) => {
+  const handleFormChange = e => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value,
-      ...(dialogMode === 'create' && name === 'name' ? { code: value.toLowerCase().replace(/\s+/g, '_') } : {}),
+      ...(dialogMode === 'create' && name === 'name'
+        ? { code: value.toLowerCase().replace(/\s+/g, '_') }
+        : {}),
     }));
     if (formErrors[name]) setFormErrors(prev => ({ ...prev, [name]: '' }));
   };
@@ -506,7 +568,8 @@ const RoleManagement = () => {
     const errors = {};
     if (!formData.name) errors.name = 'Role name is required';
     if (!formData.code) errors.code = 'Role code is required';
-    else if (!/^[a-z_]+$/.test(formData.code)) errors.code = 'Lowercase letters and underscores only';
+    else if (!/^[a-z_]+$/.test(formData.code))
+      errors.code = 'Lowercase letters and underscores only';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -516,15 +579,23 @@ const RoleManagement = () => {
     try {
       if (dialogMode === 'create') {
         if (!validateForm()) return;
-        await dispatch(createRole({ ...formData, permission_ids: selectedPermissions })).unwrap();
+        await dispatch(
+          createRole({ ...formData, permission_ids: selectedPermissions })
+        ).unwrap();
         setSnackbar({ open: true, message: 'Role created successfully', severity: 'success' });
       } else if (dialogMode === 'edit') {
         if (!validateForm()) return;
         await dispatch(updateRole({ id: selectedRole.id, ...formData })).unwrap();
         setSnackbar({ open: true, message: 'Role updated successfully', severity: 'success' });
       } else if (dialogMode === 'permissions') {
-        await dispatch(assignPermissions({ role_id: selectedRole.id, permission_ids: selectedPermissions })).unwrap();
-        setSnackbar({ open: true, message: 'Permissions updated successfully', severity: 'success' });
+        await dispatch(
+          assignPermissions({ role_id: selectedRole.id, permission_ids: selectedPermissions })
+        ).unwrap();
+        setSnackbar({
+          open: true,
+          message: 'Permissions updated successfully',
+          severity: 'success',
+        });
       } else if (dialogMode === 'delete') {
         await dispatch(deleteRole(selectedRole.id)).unwrap();
         setSnackbar({ open: true, message: 'Role deleted successfully', severity: 'success' });
@@ -532,93 +603,145 @@ const RoleManagement = () => {
       setDialogOpen(false);
       await loadRoles();
     } catch (err) {
-      setSnackbar({ open: true, message: err.detail?.message || `Failed to ${dialogMode}`, severity: 'error' });
+      setSnackbar({
+        open: true,
+        message: err.detail?.message || `Failed to ${dialogMode}`,
+        severity: 'error',
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // ── DataGrid columns ──
-  const columns = useMemo(() => [
-    {
-      field: 'name', headerName: 'Role Name', minWidth: 180, flex: 1,
-      renderCell: (params) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <ShieldOutlined fontSize="small" color={params.row.code === 'admin' ? 'error' : 'primary'} />
-          <Typography variant="body2" fontWeight={600}>{params.row.name}</Typography>
-        </Box>
-      ),
-    },
-    {
-      field: 'code', headerName: 'Code', width: 150,
-      renderCell: (params) => (
-        <Chip label={params.row.code} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }} />
-      ),
-    },
-    {
-      field: 'description', headerName: 'Description', minWidth: 200, flex: 1,
-      renderCell: (params) => (
-        <Typography variant="body2" color="text.secondary" noWrap>{params.row.description || '—'}</Typography>
-      ),
-    },
-    {
-      field: 'permissions', headerName: 'Permissions', width: 280,
-      renderCell: (params) => {
-        const perms = rolePermissionsMap[params.row.id] || params.row.permissions || [];
-        return (
-          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', py: 0.5 }}>
-            {perms.slice(0, 2).map((p, i) => (
-              <Chip key={p.id || i} label={p.code || p.name} size="small" color="primary" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
-            ))}
-            {perms.length > 2 && (
-              <Chip label={`+${perms.length - 2}`} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
-            )}
-            {perms.length === 0 && <Typography variant="caption" color="text.disabled">None</Typography>}
+  const columns = useMemo(
+    () => [
+      {
+        field: 'name',
+        headerName: 'Role Name',
+        minWidth: 180,
+        flex: 1,
+        renderCell: params => (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+            <ShieldOutlined
+              fontSize="small"
+              color={params.row.code === 'admin' ? 'error' : 'primary'}
+            />
+            <Typography variant="body2" fontWeight={600}>
+              {params.row.name}
+            </Typography>
           </Box>
-        );
+        ),
       },
-    },
-    {
-      field: 'user_count', headerName: 'Users', width: 90,
-      renderCell: (params) => (
-        <Chip label={params.row.user_count || 0} size="small" icon={<GroupOutlined />} />
-      ),
-    },
-   /*  {
-      field: 'is_active', headerName: 'Status', width: 100,
-      renderCell: (params) => (
-        <Chip
-          label={params.row.is_active ? 'Active' : 'Inactive'}
-          size="small"
-          color={params.row.is_active ? 'success' : 'default'}
-        />
-      ),
-    }, */
-    {
-      field: 'actions', headerName: 'Actions', width: 160, sortable: false,
-      renderCell: (params) => (
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
-          <Tooltip title="Edit Role">
-            <IconButton size="small" onClick={() => handleOpenEditDialog(params.row)}>
-              <EditOutlined fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Manage Permissions">
-            <IconButton size="small" color="primary" onClick={() => handleOpenPermissionsDialog(params.row)}>
-              <SecurityOutlined fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          {params.row.code !== 'admin' && params.row.code !== 'user' && (
-            <Tooltip title="Delete Role">
-              <IconButton size="small" color="error" onClick={() => handleOpenDeleteDialog(params.row)}>
-                <DeleteOutlined fontSize="small" />
+      {
+        field: 'code',
+        headerName: 'Code',
+        width: 150,
+        renderCell: params => (
+          <Chip
+            label={params.row.code}
+            size="small"
+            variant="outlined"
+            sx={{ fontFamily: 'monospace', fontSize: '0.72rem' }}
+          />
+        ),
+      },
+      {
+        field: 'description',
+        headerName: 'Description',
+        minWidth: 200,
+        flex: 1,
+        renderCell: params => (
+          <Typography variant="body2" color="text.secondary" noWrap>
+            {params.row.description || '—'}
+          </Typography>
+        ),
+      },
+      {
+        field: 'permissions',
+        headerName: 'Permissions',
+        width: 280,
+        renderCell: params => {
+          const perms =
+            rolePermissionsMap[params.row.id] || params.row.permissions || [];
+          return (
+            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', py: 0.75 }}>
+              {perms.slice(0, 2).map((p, i) => (
+                <Chip
+                  key={p.id || i}
+                  label={p.code || p.name}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{ fontSize: '0.68rem', height: 22 }}
+                />
+              ))}
+              {perms.length > 2 && (
+                <Chip
+                  label={`+${perms.length - 2}`}
+                  size="small"
+                  variant="outlined"
+                  sx={{ fontSize: '0.68rem', height: 22 }}
+                />
+              )}
+              {perms.length === 0 && (
+                <Typography variant="caption" color="text.disabled">
+                  None
+                </Typography>
+              )}
+            </Box>
+          );
+        },
+      },
+      {
+        field: 'user_count',
+        headerName: 'Users',
+        width: 90,
+        renderCell: params => (
+          <Chip
+            label={params.row.user_count || 0}
+            size="small"
+            icon={<GroupOutlined />}
+          />
+        ),
+      },
+      {
+        field: 'actions',
+        headerName: 'Actions',
+        width: 160,
+        sortable: false,
+        renderCell: params => (
+          <Box sx={{ display: 'flex', gap: 0.75 }}>
+            <Tooltip title="Edit Role">
+              <IconButton size="small" onClick={() => handleOpenEditDialog(params.row)}>
+                <EditOutlined fontSize="small" />
               </IconButton>
             </Tooltip>
-          )}
-        </Box>
-      ),
-    },
-  ], [rolePermissionsMap]);
+            <Tooltip title="Manage Permissions">
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => handleOpenPermissionsDialog(params.row)}
+              >
+                <SecurityOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            {params.row.code !== 'admin' && params.row.code !== 'user' && (
+              <Tooltip title="Delete Role">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleOpenDeleteDialog(params.row)}
+                >
+                  <DeleteOutlined fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+        ),
+      },
+    ],
+    [rolePermissionsMap]
+  );
 
   const stats = {
     total: roles?.length || 0,
@@ -628,7 +751,9 @@ const RoleManagement = () => {
 
   if (isLoading && (!roles || roles.length === 0)) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}
+      >
         <CircularProgress />
       </Box>
     );
@@ -637,21 +762,31 @@ const RoleManagement = () => {
   const isPermissionsDialog = dialogMode === 'permissions';
 
   return (
-    <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 4 } }}>
+    <Container maxWidth="xl" sx={{ py: { xs: 3, sm: 5 } }}>
       {/* Header */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <Box
+        sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+      >
         <Box>
-          <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={800} gutterBottom sx={{ letterSpacing: -0.5 }}>
+          <Typography
+            variant={isMobile ? 'h5' : 'h4'}
+            fontWeight={800}
+            gutterBottom
+            sx={{ letterSpacing: -0.5 }}
+          >
             Role Management
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Manage system roles and permissions
+            Manage system roles and their associated permissions
           </Typography>
         </Box>
         <Tooltip title="Refresh">
           <IconButton
             onClick={loadRoles}
-            sx={{ bgcolor: alpha(theme.palette.primary.main, 0.08), '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) } }}
+            sx={{
+              bgcolor: alpha(theme.palette.primary.main, 0.08),
+              '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) },
+            }}
           >
             <RefreshOutlined />
           </IconButton>
@@ -662,9 +797,9 @@ const RoleManagement = () => {
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: 'repeat(3, 1fr)', md: 'repeat(3, 200px)' },
-          gap: { xs: 1, sm: 2 },
-          mb: 3,
+          gridTemplateColumns: { xs: 'repeat(3, 1fr)', md: 'repeat(3, 220px)' },
+          gap: { xs: 1.5, sm: 2.5 },
+          mb: 4,
         }}
       >
         {[
@@ -675,12 +810,27 @@ const RoleManagement = () => {
           <Paper
             key={label}
             elevation={0}
-            sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}
+            sx={{
+              p: { xs: 2, sm: 2.5 },
+              borderRadius: 2.5,
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
           >
-            <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.62rem' }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={600}
+              sx={{ textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.65rem' }}
+            >
               {label}
             </Typography>
-            <Typography variant="h4" fontWeight={800} color={color} sx={{ mt: 0.5, lineHeight: 1 }}>
+            <Typography
+              variant="h4"
+              fontWeight={800}
+              color={color}
+              sx={{ mt: 0.75, lineHeight: 1 }}
+            >
               {value}
             </Typography>
           </Paper>
@@ -690,22 +840,36 @@ const RoleManagement = () => {
       {/* Toolbar */}
       <Paper
         elevation={0}
-        sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}
+        sx={{
+          p: { xs: 2, sm: 2.5 },
+          mb: 2,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderRadius: 2.5,
+          border: '1px solid',
+          borderColor: 'divider',
+        }}
       >
-        <Typography variant="subtitle1" fontWeight={700}>Roles</Typography>
+        <Typography variant="subtitle1" fontWeight={700}>
+          All Roles
+        </Typography>
         <Button
           variant="contained"
           startIcon={<AddOutlined />}
           onClick={handleOpenCreateDialog}
-          sx={{ borderRadius: 1.5, fontWeight: 700 }}
+          sx={{ borderRadius: 2, fontWeight: 700, px: 2.5 }}
         >
           Create Role
         </Button>
       </Paper>
 
       {/* DataGrid */}
-      <Paper elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
-        <Box sx={{ height: 500 }}>
+      <Paper
+        elevation={0}
+        sx={{ borderRadius: 2.5, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}
+      >
+        <Box sx={{ height: 520 }}>
           <DataGrid
             rows={roles || []}
             columns={columns}
@@ -719,15 +883,24 @@ const RoleManagement = () => {
             getRowHeight={() => 'auto'}
             sx={{
               border: 'none',
-              '& .MuiDataGrid-columnHeaderTitle': { fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: 0.4, color: 'text.secondary' },
-              '& .MuiDataGrid-cell': { borderColor: 'divider', py: 1 },
-              '& .MuiDataGrid-footerContainer': { borderTop: '1px solid', borderColor: 'divider' },
+              '& .MuiDataGrid-columnHeaderTitle': {
+                fontWeight: 700,
+                fontSize: '0.72rem',
+                textTransform: 'uppercase',
+                letterSpacing: 0.4,
+                color: 'text.secondary',
+              },
+              '& .MuiDataGrid-cell': { borderColor: 'divider', py: 1.25 },
+              '& .MuiDataGrid-footerContainer': {
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              },
             }}
           />
         </Box>
       </Paper>
 
-      {/* ── Dialog ── */}
+      {/* Dialog */}
       <Dialog
         open={dialogOpen}
         onClose={() => !isSubmitting && setDialogOpen(false)}
@@ -736,7 +909,7 @@ const RoleManagement = () => {
         fullScreen={isMobile && isPermissionsDialog}
         PaperProps={{
           sx: {
-            borderRadius: isMobile && isPermissionsDialog ? 0 : 2.5,
+            borderRadius: isMobile && isPermissionsDialog ? 0 : 3,
             border: isMobile && isPermissionsDialog ? 'none' : '1px solid',
             borderColor: 'divider',
           },
@@ -745,15 +918,17 @@ const RoleManagement = () => {
         <DialogTitle
           sx={{
             fontWeight: 700,
+            fontSize: '1rem',
             borderBottom: '1px solid',
             borderColor: 'divider',
-            pb: 2,
+            px: 3,
+            py: 2.25,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
             {dialogMode === 'permissions' && <SecurityOutlined color="primary" />}
             {dialogMode === 'create' && 'Create New Role'}
             {dialogMode === 'edit' && `Edit: ${selectedRole?.name}`}
@@ -765,78 +940,112 @@ const RoleManagement = () => {
           </IconButton>
         </DialogTitle>
 
-        <DialogContent sx={{ pt: 2.5, px: { xs: 2, sm: 3 } }}>
+        <DialogContent sx={{ pt: 3, px: { xs: 2.5, sm: 3.5 }, pb: 1 }}>
           {/* Create / Edit form */}
           {(dialogMode === 'create' || dialogMode === 'edit') && (
-            <Grid container spacing={2} sx={{ mt: 0.25 }}>
-              <Grid size={12}>
-                <TextField fullWidth label="Role Name" name="name" value={formData.name} onChange={handleFormChange}
-                  error={!!formErrors.name} helperText={formErrors.name} required size="small" />
-              </Grid>
-              <Grid size={12}>
-                <TextField fullWidth label="Role Code" name="code" value={formData.code} onChange={handleFormChange}
-                  error={!!formErrors.code} helperText={formErrors.code || 'Lowercase letters and underscores only'}
-                  required size="small"
-                  disabled={dialogMode === 'edit' && selectedRole?.code === 'admin'}
-                  slotProps={{ input: { sx: { fontFamily: 'monospace' } } }}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 0.5 }}>
+              <TextField
+                fullWidth
+                label="Role Name"
+                name="name"
+                value={formData.name}
+                onChange={handleFormChange}
+                error={!!formErrors.name}
+                helperText={formErrors.name}
+                required
+              />
+              <TextField
+                fullWidth
+                label="Role Code"
+                name="code"
+                value={formData.code}
+                onChange={handleFormChange}
+                error={!!formErrors.code}
+                helperText={formErrors.code || 'Lowercase letters and underscores only'}
+                required
+                disabled={dialogMode === 'edit' && selectedRole?.code === 'admin'}
+                InputProps={{ sx: { fontFamily: 'monospace' } }}
+              />
+              <TextField
+                fullWidth
+                label="Description"
+                name="description"
+                value={formData.description}
+                onChange={handleFormChange}
+                multiline
+                rows={3}
+                placeholder="Describe the purpose of this role…"
+              />
+              <Paper
+                variant="outlined"
+                sx={{ px: 2.5, py: 1.75, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <Box>
+                  <Typography variant="body2" fontWeight={600}>
+                    Active Status
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Inactive roles cannot be assigned to users
+                  </Typography>
+                </Box>
+                <Switch
+                  checked={formData.is_active}
+                  onChange={e =>
+                    setFormData(prev => ({ ...prev, is_active: e.target.checked }))
+                  }
+                  color="success"
                 />
-              </Grid>
-              <Grid size={12}>
-                <TextField fullWidth label="Description" name="description" value={formData.description}
-                  onChange={handleFormChange} multiline rows={3} size="small" />
-              </Grid>
-              <Grid size={12}>
-                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={formData.is_active}
-                        onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
-                        color="success"
-                        size="small"
-                      />
-                    }
-                    label={<Typography variant="body2">Active</Typography>}
-                  />
-                </Paper>
-              </Grid>
-            </Grid>
+              </Paper>
+            </Box>
           )}
 
           {/* Permissions picker */}
-          {dialogMode === 'permissions' && (
-            loadingPermissions ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+          {dialogMode === 'permissions' &&
+            (loadingPermissions ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
                 <CircularProgress />
               </Box>
             ) : (
-              <Box sx={{ mt: 1 }}>
+              <Box sx={{ mt: 0.5 }}>
                 <PermissionPicker
                   permissions={permissions || []}
                   selected={selectedPermissions}
                   onChange={setSelectedPermissions}
                 />
               </Box>
-            )
-          )}
+            ))}
 
           {/* Delete confirmation */}
           {dialogMode === 'delete' && (
-            <Box sx={{ mt: 2 }}>
-              <Alert severity="error" sx={{ borderRadius: 1.5 }}>
-                Are you sure you want to delete <strong>{selectedRole?.name}</strong>? This cannot be undone.
+            <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Alert severity="error" sx={{ borderRadius: 2 }}>
+                Are you sure you want to delete <strong>{selectedRole?.name}</strong>? This
+                action cannot be undone.
               </Alert>
               {selectedRole?.user_count > 0 && (
-                <Alert severity="warning" sx={{ mt: 1.5, borderRadius: 1.5 }}>
-                  This role is assigned to <strong>{selectedRole.user_count}</strong> user(s). Deleting it may affect their permissions.
+                <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                  This role is assigned to <strong>{selectedRole.user_count}</strong> user(s).
+                  Deleting it may affect their permissions.
                 </Alert>
               )}
             </Box>
           )}
         </DialogContent>
 
-        <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, borderTop: '1px solid', borderColor: 'divider', gap: 1 }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting} sx={{ borderRadius: 1.5 }}>
+        <DialogActions
+          sx={{
+            px: { xs: 2.5, sm: 3.5 },
+            py: 2.5,
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            gap: 1.25,
+          }}
+        >
+          <Button
+            onClick={() => setDialogOpen(false)}
+            disabled={isSubmitting}
+            sx={{ borderRadius: 2, px: 2.5 }}
+          >
             Cancel
           </Button>
           <Button
@@ -844,8 +1053,10 @@ const RoleManagement = () => {
             variant="contained"
             color={dialogMode === 'delete' ? 'error' : 'primary'}
             disabled={isSubmitting}
-            startIcon={isSubmitting ? null : dialogMode === 'permissions' ? <SaveOutlined /> : null}
-            sx={{ borderRadius: 1.5, minWidth: 140 }}
+            startIcon={
+              isSubmitting ? null : dialogMode === 'permissions' ? <SaveOutlined /> : null
+            }
+            sx={{ borderRadius: 2, minWidth: 155, px: 2.5 }}
           >
             {isSubmitting ? (
               <CircularProgress size={20} color="inherit" />
@@ -872,7 +1083,7 @@ const RoleManagement = () => {
           onClose={() => setSnackbar(p => ({ ...p, open: false }))}
           severity={snackbar.severity}
           variant="filled"
-          sx={{ borderRadius: 2 }}
+          sx={{ borderRadius: 2.5 }}
         >
           {snackbar.message}
         </Alert>

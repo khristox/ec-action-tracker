@@ -1,5 +1,8 @@
 # app/api/v1/endpoints/menus.py
-from fastapi import APIRouter, Depends, HTTPException, Query, logger, status
+from venv import logger
+
+from app.models.menu import Menu
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, and_, or_
 from sqlalchemy.orm import selectinload
@@ -9,7 +12,6 @@ from datetime import datetime
 from app.api import deps
 from app.models.user import User
 from app.models.role import Role
-from app.models.menu import Menu
 from app.models.role import RoleMenuPermission
 from app.crud.menu import menu, role_menu_permission
 from app.schemas.menu import (

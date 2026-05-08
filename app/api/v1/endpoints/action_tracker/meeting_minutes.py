@@ -5,7 +5,7 @@ import tempfile
 import shutil
 
 from app.api import deps
-from app.models.action_tracker import MeetingMinutes
+from app.models.meetings.action_tracker import MeetingMinutes
 from app.services.document_parser import MinutesParser
 
 router = APIRouter()

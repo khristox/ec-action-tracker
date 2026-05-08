@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional
 from app.crud.base import AuditMixin
-from app.models.action_tracker import MeetingAction
+from app.models.meetings.action_tracker import MeetingAction
 from app.schemas.action_tracker_files.action import ActionCreate, ActionUpdate
 
 class CRUDAction(AuditMixin):

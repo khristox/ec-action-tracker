@@ -55,4 +55,52 @@ api.interceptors.response.use(
   }
 );
 
+
+export const organizationAPI = {
+  // Get all nodes
+  getAll: async () => {
+    const response = await api.get('/organization/nodes');
+    return response.data;
+  },
+  
+  // Get tree structure
+  getTree: async () => {
+    const response = await api.get('/organization/tree');
+    return response.data;
+  },
+  
+  // Get single node
+  get: async (id) => {
+    const response = await api.get(`/organization/nodes/${id}`);
+    return response.data;
+  },
+  
+  // Create node
+  create: async (data) => {
+    const response = await api.post('/organization/nodes', data);
+    return response.data;
+  },
+  
+  // Update node
+  update: async (id, data) => {
+    const response = await api.put(`/organization/nodes/${id}`, data);
+    return response.data;
+  },
+  
+  // Delete node
+  delete: async (id) => {
+    const response = await api.delete(`/organization/nodes/${id}`);
+    return response.data;
+  },
+  
+  // Move node
+  move: async (id, newParentId) => {
+    const response = await api.patch(`/organization/nodes/${id}/move`, {
+      new_parent_id: newParentId
+    });
+    return response.data;
+  }
+};
+
+
 export default api;

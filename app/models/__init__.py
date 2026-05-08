@@ -24,7 +24,7 @@ from app.models.role import  RoleMenuPermission
 
 
 # Then import action tracker models
-from app.models.action_tracker import (
+from app.models.meetings.action_tracker import (
     Participant,
     ParticipantList,
     Meeting,

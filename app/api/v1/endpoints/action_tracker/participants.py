@@ -1,5 +1,6 @@
 # backend/app/api/v1/endpoints/action_tracker/participants.py
 
+from app.crud.meetings.action_tracker import participant
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,9 +11,8 @@ import io
 from fastapi.responses import StreamingResponse
 
 from app.api import deps
-from app.models.action_tracker import Participant
+from app.models.meetings.action_tracker import Participant
 from app.models.user import User
-from app.crud.action_tracker import participant, meeting_participant
 from app.schemas.action_tracker_participants import (
     PaginatedParticipantResponse,
     ParticipantBulkCreate,
@@ -25,9 +25,9 @@ from app.schemas.action_tracker_participants import (
 router = APIRouter()
 
 
-from app.models.action_tracker import participant_list_members
+from app.models.meetings.action_tracker import participant_list_members
 
-from app.models.action_tracker import Participant, ParticipantList  # Import the model, not the table
+from app.models.meetings.action_tracker import Participant, ParticipantList  # Import the model, not the table
 
 
 

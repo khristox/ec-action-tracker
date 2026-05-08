@@ -18,8 +18,8 @@ import aiofiles
 
 from app.api import deps
 from app.models.user import User
-from app.models.action_tracker import Meeting
-from app.models.meeting_recording import MeetingRecording, RecordingType, RecordingStatus
+from app.models.meetings.action_tracker import Meeting
+from app.models.meetings.meeting_recording import MeetingRecording, RecordingType, RecordingStatus
 
 router = APIRouter()
 

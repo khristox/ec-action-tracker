@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import db
 from app.api import deps
-from app.crud.action_tracker import CRUDMeeting, CRUDMeetingMinutes, meeting_action
-from app.models.action_tracker import Meeting, MeetingMinutes
+from app.crud.meetings.action_tracker import CRUDMeeting, CRUDMeetingMinutes, meeting_action
+from app.models.meetings.action_tracker import Meeting, MeetingMinutes
 # from app.crud.action_tracker import meeting, meeting_action, meeting_minutes
 
 from . import participants, participant_lists, meetings, minutes, actions, documents, dashboard, import_export

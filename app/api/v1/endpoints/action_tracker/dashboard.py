@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app.api import deps
 from app.models.user import User
-from app.models.action_tracker import Meeting, MeetingAction
+from app.models.meetings.action_tracker import Meeting, MeetingAction
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 

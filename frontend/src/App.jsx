@@ -33,6 +33,7 @@ import Layout from './components/common/Layout';
 import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
 import EditRecurringMeeting from './components/actiontracker/meetings/EditRecurringMeeting';
 
+import { AdminStructures } from './components/admin/adminStructures';
 
 // ==================== Error Boundary ====================
 
@@ -277,6 +278,7 @@ const UserManagement    = createLazyComponent('UserManagement');
 const RoleManagement    = createLazyComponent('RoleManagement');
 const RoleMenuAssignment= createLazyComponent('RoleMenuAssignment');
 const AuditLogs         = createLazyComponent('AuditLogs');
+//const AdminStructures     = createLazyComponent('AdminStructures');
 
 // Error Pages
 const NotFound  = createLazyComponent('NotFound');
@@ -468,6 +470,7 @@ const routeConfig = {
     { path: 'settings/roles',                     element: <RoleManagement /> },
     { path: 'settings/audit',                     element: <AuditLogs /> },
     { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment /> },
+    { path: 'settings/admin-structures/departments',      element: <AdminStructures /> },
   ],
 
   // Admin-only routes — these are separate from protectedRoutes above

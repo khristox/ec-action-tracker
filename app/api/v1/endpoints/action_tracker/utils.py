@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from app.models.action_tracker import Meeting
+from app.models.meetings.action_tracker import Meeting
 from app.schemas.action_tracker import MeetingResponse
 
 def validate_pagination(skip: int, limit: int) -> Tuple[int, int]:

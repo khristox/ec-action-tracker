@@ -1942,3 +1942,109 @@ CREATE INDEX idx_meetings_is_deleted ON meetings(is_deleted);
 ALTER TABLE meetings 
 ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL 
 COMMENT 'Timestamp when meeting was soft deleted';
+
+
+
+
+
+-- migrations/001_create_organization_tables_mysql.sql
+
+-- Create organization_nodes table
+CREATE TABLE IF NOT EXISTS organization_nodes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    parent_id INT NULL,
+    level INT DEFAULT 0,
+    path VARCHAR(1000) DEFAULT '',
+    `order` INT DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    -- Metadata fields
+    email VARCHAR(200),
+    phone VARCHAR(50),
+    department_code VARCHAR(50),
+    location VARCHAR(200),
+    employee_count INT DEFAULT 0,
+    budget DECIMAL(15,2) DEFAULT 0.00,
+    color VARCHAR(20) DEFAULT '#4A90E2',
+    additional_metadata JSON DEFAULT (JSON_OBJECT()),
+    
+    FOREIGN KEY (parent_id) REFERENCES organization_nodes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Create indexes
+CREATE INDEX idx_org_parent_id ON organization_nodes(parent_id);
+CREATE INDEX idx_org_path ON organization_nodes(path(255)) WHERE is_active = TRUE;
+CREATE INDEX idx_org_level ON organization_nodes(level) WHERE is_active = TRUE;
+CREATE INDEX idx_org_is_active ON organization_nodes(is_active);
+CREATE INDEX idx_org_name ON organization_nodes(name) WHERE is_active = TRUE;
+CREATE INDEX idx_org_department_code ON organization_nodes(department_code) WHERE is_active = TRUE;
+CREATE INDEX idx_org_order ON organization_nodes(`order`);
+CREATE INDEX idx_org_parent_active ON organization_nodes(parent_id, is_active);
+CREATE INDEX idx_org_level_order ON organization_nodes(level, `order`) WHERE is_active = TRUE;
+
+-- Create trigger to update path and level (MySQL)
+DELIMITER $$
+
+CREATE TRIGGER before_insert_organization_nodes
+BEFORE INSERT ON organization_nodes
+FOR EACH ROW
+BEGIN
+    DECLARE parent_path VARCHAR(1000);
+    DECLARE parent_level INT;
+    
+    IF NEW.parent_id IS NULL THEN
+        SET NEW.level = 0;
+        SET NEW.path = CONCAT('/', NEW.id);
+    ELSE
+        SELECT path, level INTO parent_path, parent_level
+        FROM organization_nodes
+        WHERE id = NEW.parent_id;
+        
+        SET NEW.level = parent_level + 1;
+        SET NEW.path = CONCAT(parent_path, '/', NEW.id);
+    END IF;
+END$$
+
+DELIMITER ;
+
+-- Create procedure to get descendants
+DELIMITER $$
+
+CREATE PROCEDURE GetNodeDescendants(IN node_id INT)
+BEGIN
+    SELECT 
+        id, name, level, path
+    FROM organization_nodes
+    WHERE path LIKE CONCAT((SELECT path FROM organization_nodes WHERE id = node_id), '%')
+        AND id != node_id
+        AND is_active = TRUE
+    ORDER BY level;
+END$$
+
+DELIMITER ;
+
+-- Create procedure to get ancestors
+DELIMITER $$
+
+CREATE PROCEDURE GetNodeAncestors(IN node_id INT)
+BEGIN
+    WITH RECURSIVE ancestors AS (
+        SELECT id, name, level, path, parent_id
+        FROM organization_nodes
+        WHERE id = node_id
+        UNION ALL
+        SELECT p.id, p.name, p.level, p.path, p.parent_id
+        FROM organization_nodes p
+        INNER JOIN ancestors a ON p.id = a.parent_id
+    )
+    SELECT id, name, level, path
+    FROM ancestors
+    WHERE id != node_id
+    ORDER BY level;
+END$$
+
+DELIMITER ;

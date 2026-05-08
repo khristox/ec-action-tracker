@@ -16,7 +16,7 @@ from pathlib import Path
 from app.api import deps
 from app.db.session import get_db
 from app.models.user import User
-from app.models.action_tracker import (
+from app.models.meetings.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction,
     MeetingParticipant, MeetingStatusHistory
 )
@@ -88,7 +88,7 @@ async def generate_meeting_report_json(
 ):
     """Generate a comprehensive meeting report in JSON format"""
 
-    from app.crud.action_tracker import meeting_crud
+    from app.crud.meetings.action_tracker import meeting_crud
     meeting = await meeting_crud.get_meeting_with_details(db, meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
@@ -100,7 +100,7 @@ async def generate_meeting_report_json(
     history_result = await db.execute(history_query)
     status_history = history_result.scalars().all()
 
-    from app.crud.action_tracker import meeting_participant
+    from app.crud.meetings.action_tracker import meeting_participant
     participants = await meeting_participant.get_by_meeting(db, meeting_id)
 
     minutes_query = select(MeetingMinutes).where(

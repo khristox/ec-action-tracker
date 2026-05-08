@@ -3,7 +3,7 @@ from select import select
 
 from sqlalchemy import select
 
-from app.models.action_tracker import Meeting, MeetingParticipant
+from app.models.meetings.action_tracker import Meeting, MeetingParticipant
 from app.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
 

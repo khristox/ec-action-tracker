@@ -6,8 +6,8 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.crud.action_tracker import MAX_LIMIT
-from app.models.action_tracker import MeetingMinutes
+from app.crud.meetings.action_tracker import MAX_LIMIT
+from app.models.meetings.action_tracker import MeetingMinutes
 from sqlalchemy.ext.asyncio import AsyncSession
 
 

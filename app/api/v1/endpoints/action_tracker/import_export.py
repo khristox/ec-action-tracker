@@ -10,7 +10,7 @@ import io
 
 from app.api import deps
 from app.models.user import User
-from app.crud.action_tracker_import import participant_import
+from app.crud.meetings.action_tracker_import import participant_import
 from app.services.csv_parser import CSVParserService
 from app.schemas.action_tracker_import import (
     BulkImportPreviewResponse,

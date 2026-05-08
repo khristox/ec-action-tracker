@@ -25,6 +25,7 @@ try:
     from app.api.v1.endpoints.action_tracker.meeting_minutes import router as meeting_minutes
     from app.api.v1.endpoints.role_menu_permissions import router as role_menu_permissions
     from app.api.v1.endpoints.action_tracker.recurring_meeting_routes import router as recurr_meetings
+    from app.api.v1.endpoints.action_tracker.organization import router as menus_organisation
 
 
     
@@ -43,6 +44,7 @@ api_router.include_router(roles_router, prefix="/roles", tags=["roles"])
 api_router.include_router(permissions_router, prefix="/permissions", tags=["permissions"])
 api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
 
+
 # System & Audit
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
 api_router.include_router(attribute_groups_router, prefix="/attribute-groups", tags=["attribute-groups"])
@@ -51,6 +53,9 @@ api_router.include_router(attributes_router, prefix="/attributes", tags=["attrib
 # Locations & Menus
 api_router.include_router(locations_router, prefix="/locations", tags=["locations"])
 api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
+
+api_router.include_router(menus_organisation, prefix="/organization", tags=["Organization"])
+
 
 api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
 

@@ -11,9 +11,9 @@ from sqlalchemy import select, desc
 
 from app.api import deps
 from app.db.base import get_db
-from app.models.action_tracker import Meeting
+from app.models.meetings.action_tracker import Meeting
 from app.models.general.dynamic_attribute import Attribute
-from app.models.recurring_meeting import RecurringMeetingOccurrence
+from app.models.meetings.recurring_meeting import RecurringMeetingOccurrence
 from app.models.user import User
 from app.schemas.recurring_meeting_schema import (
     RecurringMeetingCreate, 
@@ -22,7 +22,7 @@ from app.schemas.recurring_meeting_schema import (
     PreviewOccurrencesRequest, 
     BulkActionRequest
 )
-from app.crud.recurring_meeting_service import RecurringMeetingService
+from app.crud.meetings.recurring_meeting_service import RecurringMeetingService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

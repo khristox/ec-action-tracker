@@ -20,10 +20,10 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
-from app.crud.action_tracker import meeting_crud, meeting_document
+from app.crud.meetings.action_tracker import meeting_crud, meeting_document
 from app.models.general.dynamic_attribute import Attribute, AttributeGroup
 from app.models.user import User
-from app.models.action_tracker import MeetingDocument
+from app.models.meetings.action_tracker import MeetingDocument
 from app.schemas.action_tracker import MeetingDocumentResponse, MeetingDocumentCreate
 
 from PIL import Image

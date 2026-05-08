@@ -37,7 +37,7 @@ class ChartDataService:
     def _discover_models(self):
         """Dynamically discover the correct model from action_tracker"""
         try:
-            from app.models import action_tracker
+            from app.models.meetings import action_tracker
             
             # List of possible model names to try
             possible_names = ['ActionItem', 'ActionPlan', 'Action', 'Task', 'ActionTask', 'MyTask']

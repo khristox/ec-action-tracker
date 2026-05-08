@@ -567,7 +567,7 @@ async def get_group_attributes_internal(
         attrs = attrs[:limit]
         last_attr = attrs[-1]
         next_cursor = paginator.encode_cursor({"id": str(last_attr.id)})
-    print('Chrs',detail_level)
+    print('Chrs','Needs to work on full')
     if detail_level == "limited":
         response_items = [
             {

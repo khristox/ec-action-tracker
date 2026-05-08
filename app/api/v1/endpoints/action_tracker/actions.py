@@ -6,8 +6,8 @@ from datetime import datetime
 import logging
 
 from app.api import deps
-from app.crud.action_tracker import meeting_action, meeting_minutes
-from app.models.action_tracker import MeetingAction
+from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
+from app.models.meetings.action_tracker import MeetingAction
 from app.models.user import User
 
 from app.schemas.action_tracker import ActionCommentCreate, ActionCommentResponse, ActionProgressUpdate, ActionStatusHistoryResponse, MyTaskResponse

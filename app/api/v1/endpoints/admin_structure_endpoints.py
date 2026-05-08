@@ -1,6 +1,6 @@
 # endpoints/admin_structure_endpoints.py
 from flask import Blueprint, request, jsonify
-from crud.admin_structure_crud import admin_structure_crud
+from app.crud.meetings.admin_structure_crud import admin_structure_crud
 
 admin_structure_bp = Blueprint('admin_structures', __name__, url_prefix='/api/admin-structures')
 

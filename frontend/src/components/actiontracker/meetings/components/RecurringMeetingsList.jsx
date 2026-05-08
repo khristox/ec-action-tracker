@@ -1,30 +1,410 @@
 // src/components/actiontracker/meetings/components/RecurringMeetingsList.jsx
-import { Grid, Typography, Box, CircularProgress, Alert, Button, Stack, Paper, useMediaQuery, useTheme, Container } from '@mui/material';
-import { Refresh as RefreshIcon } from '@mui/icons-material';
+import { useState, useMemo, useRef, useCallback } from 'react';
+import {
+  Grid, Typography, Box, CircularProgress, Alert, Button, Stack, Paper,
+  useMediaQuery, useTheme, TextField, InputAdornment,
+  ToggleButton, ToggleButtonGroup, Chip, IconButton, Menu, MenuItem,
+  FormControl, InputLabel, Select, Pagination, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
+  alpha, Drawer, AppBar, Toolbar, Divider, SwipeableDrawer,
+} from '@mui/material';
+import {
+  Refresh as RefreshIcon,
+  Search as SearchIcon,
+  Clear as ClearIcon,
+  ViewModule as ViewModuleIcon,
+  ViewList as ViewListIcon,
+  FilterList as FilterListIcon,
+  CalendarToday as CalendarIcon,
+  CheckCircle as CheckCircleIcon,
+  Warning as WarningIcon,
+  Repeat as RepeatIcon,
+  TuneRounded as TuneIcon,
+  Close as CloseIcon,
+} from '@mui/icons-material';
 import { RecurringMeetingCard } from './RecurringMeetingCard';
 
-export const RecurringMeetingsList = ({ 
-  meetings = [], 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const getStatusColor = (status) => {
+  switch (status) {
+    case 'active': return 'success';
+    case 'inactive': return 'error';
+    case 'completed': return 'info';
+    default: return 'default';
+  }
+};
+
+const getStatusIcon = (status) => {
+  switch (status) {
+    case 'active': return <CheckCircleIcon fontSize="small" />;
+    case 'inactive': return <WarningIcon fontSize="small" />;
+    case 'completed': return <CheckCircleIcon fontSize="small" />;
+    default: return <RepeatIcon fontSize="small" />;
+  }
+};
+
+// ─── Mobile Filters Drawer ────────────────────────────────────────────────────
+const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, onApply }) => {
+  const theme = useTheme();
+  const [localStatus, setLocalStatus] = useState(statusFilter);
+  const [localSortBy, setLocalSortBy] = useState(sortBy);
+  const [localSortOrder, setLocalSortOrder] = useState(sortOrder);
+
+  const handleApply = () => {
+    setStatusFilter(localStatus);
+    setSortBy(localSortBy);
+    setSortOrder(localSortOrder);
+    onApply?.();
+    onClose();
+  };
+
+  const handleReset = () => {
+    setLocalStatus('all');
+    setLocalSortBy('next_date');
+    setLocalSortOrder('asc');
+  };
+
+  const statusOptions = [
+    { value: 'all', label: 'All statuses', color: 'default' },
+    { value: 'active', label: 'Active', color: 'success' },
+    { value: 'inactive', label: 'Paused', color: 'warning' },
+    { value: 'completed', label: 'Completed', color: 'info' },
+  ];
+
+  const sortOptions = [
+    { value: 'next_date', label: 'Next date' },
+    { value: 'title', label: 'Title' },
+    { value: 'created', label: 'Date created' },
+    { value: 'total', label: 'Total generated' },
+  ];
+
+  return (
+    <SwipeableDrawer
+      anchor="bottom"
+      open={open}
+      onClose={onClose}
+      onOpen={() => {}}
+      disableSwipeToOpen
+      PaperProps={{
+        sx: {
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
+          pb: 'env(safe-area-inset-bottom)',
+        }
+      }}
+    >
+      {/* Handle */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1.5, pb: 0.5 }}>
+        <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: 'divider' }} />
+      </Box>
+
+      {/* Header */}
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
+        <Typography variant="h6" fontWeight={700}>Filters & Sort</Typography>
+        <Stack direction="row" spacing={1}>
+          <Button size="small" onClick={handleReset} sx={{ textTransform: 'none', color: 'text.secondary' }}>
+            Reset
+          </Button>
+          <IconButton size="small" onClick={onClose}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Stack>
+      </Stack>
+
+      <Divider />
+
+      <Box sx={{ px: 2.5, py: 2.5, overflowY: 'auto' }}>
+        {/* Status filter */}
+        <Typography variant="overline" color="text.disabled" sx={{ letterSpacing: 1.5, fontSize: '0.65rem', display: 'block', mb: 1.5 }}>
+          Status
+        </Typography>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ gap: 1, mb: 3 }}>
+          {statusOptions.map(opt => (
+            <Chip
+              key={opt.value}
+              label={opt.label}
+              clickable
+              color={localStatus === opt.value ? opt.color || 'primary' : 'default'}
+              variant={localStatus === opt.value ? 'filled' : 'outlined'}
+              onClick={() => setLocalStatus(opt.value)}
+              sx={{ borderRadius: 2, fontWeight: localStatus === opt.value ? 700 : 400 }}
+            />
+          ))}
+        </Stack>
+
+        {/* Sort by */}
+        <Typography variant="overline" color="text.disabled" sx={{ letterSpacing: 1.5, fontSize: '0.65rem', display: 'block', mb: 1.5 }}>
+          Sort by
+        </Typography>
+        <Stack direction="column" spacing={1} sx={{ mb: 3 }}>
+          {sortOptions.map(opt => (
+            <Paper
+              key={opt.value}
+              elevation={0}
+              onClick={() => {
+                if (localSortBy === opt.value) {
+                  setLocalSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                } else {
+                  setLocalSortBy(opt.value);
+                  setLocalSortOrder('asc');
+                }
+              }}
+              sx={{
+                p: 1.5, borderRadius: 2, cursor: 'pointer',
+                border: '1px solid',
+                borderColor: localSortBy === opt.value ? 'primary.main' : 'divider',
+                bgcolor: localSortBy === opt.value ? alpha('#1976d2', 0.06) : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                transition: 'all 0.15s',
+              }}
+            >
+              <Typography variant="body2" fontWeight={localSortBy === opt.value ? 600 : 400}>
+                {opt.label}
+              </Typography>
+              {localSortBy === opt.value && (
+                <Typography variant="caption" color="primary.main" fontWeight={600}>
+                  {localSortOrder === 'asc' ? '↑ Ascending' : '↓ Descending'}
+                </Typography>
+              )}
+            </Paper>
+          ))}
+        </Stack>
+      </Box>
+
+      {/* Apply button */}
+      <Box sx={{ px: 2.5, pb: 2.5, pt: 1 }}>
+        <Button
+          variant="contained"
+          fullWidth
+          size="large"
+          onClick={handleApply}
+          sx={{ borderRadius: 3, textTransform: 'none', fontWeight: 700, py: 1.5 }}
+        >
+          Apply filters
+        </Button>
+      </Box>
+    </SwipeableDrawer>
+  );
+};
+
+// ─── Stat Pill ────────────────────────────────────────────────────────────────
+const StatPill = ({ label, value, color }) => (
+  <Box sx={{
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    px: 1.5, py: 0.75,
+    flex: 1, minWidth: 0,
+  }}>
+    <Typography variant="h6" fontWeight={800} color={color} sx={{ lineHeight: 1.1 }}>
+      {value}
+    </Typography>
+    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+      {label}
+    </Typography>
+  </Box>
+);
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+export const RecurringMeetingsList = ({
+  meetings = [],
   loading = false,
   error = null,
-  onView, 
-  onEdit, 
+  onView,
+  onEdit,
   onGenerate,
-  onRefresh 
+  onRefresh,
+  totalCount = 0,
+  onPageChange,
+  currentPage = 1,
+  rowsPerPage = 12,
 }) => {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
-  
-  // Ensure meetings is always an array
+  const isMobile = useMediaQuery('(max-width:600px)');
+  const isTablet = useMediaQuery('(max-width:960px)');
+
+  const containerRef = useRef(null);
+  // Internal page state — used when parent doesn't manage currentPage
+  const [internalPage, setInternalPage] = useState(1);
+  const activePage = onPageChange ? currentPage : internalPage;
+
+  const [viewMode, setViewMode] = useState('grid');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('next_date');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [desktopAnchorEl, setDesktopAnchorEl] = useState(null);
+
   const meetingsArray = Array.isArray(meetings) ? meetings : [];
-  
-  // Sort by next occurrence date (upcoming first)
-  const sortedMeetings = [...meetingsArray].sort((a, b) => {
-    const dateA = a.next_occurrence_date ? new Date(a.next_occurrence_date) : new Date(8640000000000000);
-    const dateB = b.next_occurrence_date ? new Date(b.next_occurrence_date) : new Date(8640000000000000);
-    return dateA - dateB;
-  });
+
+  // Filter and sort
+  const filteredAndSortedMeetings = useMemo(() => {
+    let filtered = [...meetingsArray];
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      filtered = filtered.filter(m =>
+        m.title?.toLowerCase().includes(q) ||
+        m.description?.toLowerCase().includes(q) ||
+        m.location_text?.toLowerCase().includes(q) ||
+        m.recurrence_type?.toLowerCase().includes(q)
+      );
+    }
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(m => m.status === statusFilter);
+    }
+
+    filtered.sort((a, b) => {
+      let vA, vB;
+      switch (sortBy) {
+        case 'title': vA = a.title || ''; vB = b.title || ''; break;
+        case 'created': vA = new Date(a.created_at || 0); vB = new Date(b.created_at || 0); break;
+        case 'total': vA = a.total_occurrences_generated || 0; vB = b.total_occurrences_generated || 0; break;
+        default:
+          vA = a.next_occurrence_date ? new Date(a.next_occurrence_date) : new Date(8640000000000000);
+          vB = b.next_occurrence_date ? new Date(b.next_occurrence_date) : new Date(8640000000000000);
+      }
+      return sortOrder === 'asc' ? (vA > vB ? 1 : -1) : (vA < vB ? 1 : -1);
+    });
+
+    return filtered;
+  }, [meetingsArray, searchTerm, statusFilter, sortBy, sortOrder]);
+
+  const paginatedMeetings = useMemo(() => {
+    const start = (activePage - 1) * rowsPerPage;
+    return filteredAndSortedMeetings.slice(start, start + rowsPerPage);
+  }, [filteredAndSortedMeetings, activePage, rowsPerPage]);
+
+  const totalFilteredCount = filteredAndSortedMeetings.length;
+  const totalPages = Math.ceil(totalFilteredCount / rowsPerPage);
+
+  const stats = useMemo(() => ({
+    total: meetingsArray.length,
+    active: meetingsArray.filter(m => m.status === 'active' && m.next_occurrence_date).length,
+    generated: meetingsArray.reduce((sum, m) => sum + (m.total_occurrences_generated || 0), 0),
+    completed: meetingsArray.filter(m => m.status === 'completed').length,
+    inactive: meetingsArray.filter(m => m.status === 'inactive').length,
+  }), [meetingsArray]);
+
+  // Count active filters for badge
+  const activeFilterCount = (statusFilter !== 'all' ? 1 : 0) + (sortBy !== 'next_date' ? 1 : 0);
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+    if (onPageChange) onPageChange(1);
+    else setInternalPage(1);
+  };
+
+  const clearSearch = () => {
+    setSearchTerm('');
+    if (onPageChange) onPageChange(1);
+    else setInternalPage(1);
+  };
+
+  const handlePageChange = (_, page) => {
+    if (onPageChange) onPageChange(page);
+    else setInternalPage(page);
+    // Scroll the nearest scrollable ancestor, fallback to document
+    try {
+      if (containerRef.current) {
+        containerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      // Also try scrolling any scrollable parent
+      let el = containerRef.current?.parentElement;
+      while (el) {
+        const { overflowY } = window.getComputedStyle(el);
+        if (overflowY === 'auto' || overflowY === 'scroll') {
+          el.scrollTo({ top: 0, behavior: 'smooth' });
+          break;
+        }
+        el = el.parentElement;
+      }
+    } catch (e) {
+      // fallback — do nothing
+    }
+  };
+
+  const renderTableRow = (meeting) => {
+    const nextDate = meeting.next_occurrence_date
+      ? new Date(meeting.next_occurrence_date).toLocaleDateString() : 'Ended';
+    return (
+      <TableRow key={meeting.id} hover sx={{ cursor: 'pointer' }} onClick={() => onView(meeting.id)}>
+        <TableCell>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" fontWeight={600}>{meeting.title}</Typography>
+            {meeting.description && (
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 300 }}>
+                {meeting.description}
+              </Typography>
+            )}
+          </Stack>
+        </TableCell>
+        <TableCell>
+          <Chip label={meeting.recurrence_type || 'Weekly'} size="small" variant="outlined" icon={<RepeatIcon fontSize="small" />} />
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2">{nextDate}</Typography>
+          {meeting.next_occurrence_date && (
+            <Typography variant="caption" color="text.secondary">
+              {new Date(meeting.next_occurrence_date).toLocaleTimeString()}
+            </Typography>
+          )}
+        </TableCell>
+        <TableCell>
+          <Chip label={meeting.status || 'Active'} size="small" color={getStatusColor(meeting.status)} icon={getStatusIcon(meeting.status)} />
+        </TableCell>
+        <TableCell align="center">
+          <Typography variant="body2" fontWeight={600}>{meeting.total_occurrences_generated || 0}</Typography>
+        </TableCell>
+        <TableCell align="right">
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); onGenerate(meeting.id); }}>Generate</Button>
+            <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); onEdit(meeting.id); }}>Edit</Button>
+          </Stack>
+        </TableCell>
+      </TableRow>
+    );
+  };
+
+  const renderListItem = (meeting) => {
+    const nextDate = meeting.next_occurrence_date
+      ? new Date(meeting.next_occurrence_date).toLocaleDateString() : 'Ended';
+    return (
+      <Paper key={meeting.id} sx={{
+        p: 2, mb: 1.5, borderRadius: 2.5,
+        border: '1px solid', borderColor: 'divider',
+        transition: 'all 0.2s',
+        '&:hover': { boxShadow: theme.shadows[3], transform: 'translateY(-1px)' }
+      }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
+          <Box sx={{ flex: 1 }}>
+            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ mb: 0.75 }}>
+              <Typography variant="subtitle2" fontWeight={700}>{meeting.title}</Typography>
+              <Chip label={meeting.status || 'Active'} size="small" color={getStatusColor(meeting.status)} />
+              <Chip label={meeting.recurrence_type || 'Weekly'} size="small" variant="outlined" />
+            </Stack>
+            {meeting.description && (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{meeting.description}</Typography>
+            )}
+            <Stack direction="row" spacing={2} flexWrap="wrap">
+              <Stack direction="row" spacing={0.5} alignItems="center">
+                <CalendarIcon sx={{ fontSize: 14 }} color="action" />
+                <Typography variant="caption" color="text.secondary">Next: <strong>{nextDate}</strong></Typography>
+              </Stack>
+              <Stack direction="row" spacing={0.5} alignItems="center">
+                <RepeatIcon sx={{ fontSize: 14 }} color="action" />
+                <Typography variant="caption" color="text.secondary">Generated: <strong>{meeting.total_occurrences_generated || 0}</strong></Typography>
+              </Stack>
+            </Stack>
+          </Box>
+          <Stack direction="row" spacing={1}>
+            <Button size="small" variant="outlined" onClick={() => onGenerate(meeting.id)}>Generate</Button>
+            <Button size="small" variant="contained" onClick={() => onEdit(meeting.id)}>Edit</Button>
+          </Stack>
+        </Stack>
+      </Paper>
+    );
+  };
 
   if (loading) {
     return (
@@ -33,184 +413,309 @@ export const RecurringMeetingsList = ({
       </Box>
     );
   }
-  
+
   if (error) {
     return (
       <Box sx={{ py: 4, px: isMobile ? 2 : 0 }}>
-        <Alert 
-          severity="error" 
-          action={
-            onRefresh && (
-              <Button color="inherit" size="small" onClick={onRefresh} startIcon={<RefreshIcon />}>
-                Retry
-              </Button>
-            )
-          }
-          sx={{ borderRadius: 2 }}
-        >
+        <Alert severity="error" action={onRefresh && (
+          <Button color="inherit" size="small" onClick={onRefresh} startIcon={<RefreshIcon />}>Retry</Button>
+        )} sx={{ borderRadius: 2 }}>
           {error}
         </Alert>
       </Box>
     );
   }
-  
-  if (meetingsArray.length === 0) {
-    return (
-      <Box sx={{ textAlign: 'center', py: 8, px: isMobile ? 2 : 0 }}>
-        <Box sx={{ 
-          width: isMobile ? 80 : 100, 
-          height: isMobile ? 80 : 100, 
-          mx: 'auto', 
-          mb: 2,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: '50%',
-          bgcolor: 'action.hover'
-        }}>
-          <Typography variant={isMobile ? "h3" : "h2"}>📅</Typography>
-        </Box>
-        <Typography variant={isMobile ? "h6" : "h5"} color="text.secondary" gutterBottom fontWeight={600}>
-          No recurring meetings found
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: 400, mx: 'auto' }}>
-          Create your first recurring meeting series to get started
-        </Typography>
-      </Box>
-    );
-  }
 
-  // For mobile: full width cards, no container padding
-  if (isMobile) {
-    return (
-      <Box sx={{ width: '100%', px: 0 }}>
-        {/* Header Stats for Mobile */}
-        <Stack 
-          direction="row" 
-          spacing={1} 
-          sx={{ 
-            mb: 2, 
-            p: 2, 
-            bgcolor: 'background.paper', 
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: 'divider',
-            mx: 2
-          }}
-        >
-          <Box sx={{ flex: 1, textAlign: 'center' }}>
-            <Typography variant="caption" color="text.secondary">Total</Typography>
-            <Typography variant="h6" fontWeight={700} color="primary">
-              {meetingsArray.length}
-            </Typography>
-          </Box>
-          <Box sx={{ flex: 1, textAlign: 'center' }}>
-            <Typography variant="caption" color="text.secondary">Active</Typography>
-            <Typography variant="h6" fontWeight={700} color="success.main">
-              {meetingsArray.filter(m => m.status === 'active' && m.next_occurrence_date).length}
-            </Typography>
-          </Box>
-          <Box sx={{ flex: 1, textAlign: 'center' }}>
-            <Typography variant="caption" color="text.secondary">Generated</Typography>
-            <Typography variant="h6" fontWeight={700} color="info.main">
-              {meetingsArray.reduce((sum, m) => sum + (m.total_occurrences_generated || 0), 0)}
-            </Typography>
-          </Box>
-        </Stack>
+  return (
+    <Box ref={containerRef} sx={{
+      // On mobile: fill the viewport cleanly
+      px: { xs: 0, sm: 2, md: 3 },
+      pb: { xs: 2, sm: 3 },
+      maxWidth: { sm: '100%', md: 1400 },
+      mx: 'auto',
+    }}>
 
-        {/* Mobile List - Full width cards */}
-        <Stack spacing={2} sx={{ width: '100%' }}>
-          {sortedMeetings.map((meeting, index) => (
-            <Box 
-              key={meeting.id}
-              sx={{ 
-                width: '100%',
-                px: 0, // Remove padding to allow card to be full width
-                animation: `fadeInUp 0.3s ease ${index * 0.05}s both`,
-                '@keyframes fadeInUp': {
-                  from: { opacity: 0, transform: 'translateY(20px)' },
-                  to: { opacity: 1, transform: 'translateY(0)' }
-                }
-              }}
-            >
-              <RecurringMeetingCard
-                meeting={meeting}
-                onView={onView}
-                onEdit={onEdit}
-                onGenerate={onGenerate}
-                showStats={false}
-                compact={true}
-              />
-            </Box>
-          ))}
-        </Stack>
-
-        {/* Load More Button */}
-        {meetingsArray.length > 10 && (
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', pb: 2 }}>
-            <Button 
-              variant="outlined" 
-              onClick={onRefresh}
-              startIcon={<RefreshIcon />}
-              sx={{ borderRadius: 2 }}
-            >
-              Load More
-            </Button>
-          </Box>
+      {/* ── Stats bar ── */}
+      <Box sx={{
+        mx: { xs: 1.5, sm: 0 },
+        mb: { xs: 2, sm: 2.5 },
+        p: { xs: 1.25, sm: 2 },
+        bgcolor: 'background.paper',
+        borderRadius: 3,
+        border: '1px solid', borderColor: 'divider',
+        display: 'flex',
+        alignItems: 'stretch',
+        overflow: 'hidden',
+      }}>
+        <StatPill label="Total" value={stats.total} color="primary.main" />
+        <Divider orientation="vertical" flexItem />
+        <StatPill label="Active" value={stats.active} color="success.main" />
+        <Divider orientation="vertical" flexItem />
+        <StatPill label="Generated" value={stats.generated} color="info.main" />
+        {!isMobile && (
+          <>
+            <Divider orientation="vertical" flexItem />
+            <StatPill label="Completed" value={stats.completed} color="warning.main" />
+            <Divider orientation="vertical" flexItem />
+            <StatPill label="Paused" value={stats.inactive} color="error.main" />
+          </>
         )}
       </Box>
-    );
-  }
 
-  // For tablet and desktop: grid layout with proper spacing
-  return (
-    <Container maxWidth="xl" sx={{ px: { sm: 2, md: 3 } }}>
-      {/* Header Stats for Tablet/Desktop */}
-      <Stack 
-        direction="row" 
-        spacing={2} 
-        sx={{ 
-          mb: 3, 
-          p: 2, 
-          bgcolor: 'background.paper', 
-          borderRadius: 2,
-          border: '1px solid',
-          borderColor: 'divider'
-        }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">Total:</Typography>
-          <Typography variant="h6" fontWeight={700} color="primary">{meetingsArray.length}</Typography>
+      {/* ── Search & Filter bar ── */}
+      <Box sx={{ px: { xs: 1.5, sm: 0 }, mb: { xs: 1.5, sm: 2.5 } }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {/* Search */}
+          <TextField
+            placeholder="Search meetings…"
+            value={searchTerm}
+            onChange={handleSearchChange}
+            size="small"
+            sx={{
+              flex: 1,
+              '& .MuiOutlinedInput-root': { borderRadius: 2.5 },
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
+              endAdornment: searchTerm && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={clearSearch} edge="end">
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          {/* View toggle — hidden on mobile */}
+          {!isMobile && (
+            <ToggleButtonGroup value={viewMode} exclusive onChange={(_, v) => v && setViewMode(v)} size="small">
+              <ToggleButton value="grid"><ViewModuleIcon fontSize="small" /></ToggleButton>
+              <ToggleButton value="list"><ViewListIcon fontSize="small" /></ToggleButton>
+              <ToggleButton value="table"><ViewListIcon fontSize="small" /></ToggleButton>
+            </ToggleButtonGroup>
+          )}
+
+          {/* Mobile: filter drawer trigger with badge */}
+          {isMobile ? (
+            <Box sx={{ position: 'relative' }}>
+              <IconButton
+                onClick={() => setFiltersOpen(true)}
+                sx={{
+                  borderRadius: 2,
+                  border: '1px solid',
+                  borderColor: activeFilterCount > 0 ? 'primary.main' : 'divider',
+                  bgcolor: activeFilterCount > 0 ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                  p: 1,
+                }}
+              >
+                <TuneIcon fontSize="small" color={activeFilterCount > 0 ? 'primary' : 'action'} />
+              </IconButton>
+              {activeFilterCount > 0 && (
+                <Box sx={{
+                  position: 'absolute', top: -4, right: -4,
+                  width: 16, height: 16, borderRadius: '50%',
+                  bgcolor: 'primary.main', color: 'white',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '0.6rem', fontWeight: 700,
+                }}>
+                  {activeFilterCount}
+                </Box>
+              )}
+            </Box>
+          ) : (
+            /* Desktop: status filter inline */
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); if (onPageChange) onPageChange(1); }}
+                label="Status"
+                sx={{ borderRadius: 2 }}
+              >
+                <MenuItem value="all">All statuses</MenuItem>
+                <MenuItem value="active">Active</MenuItem>
+                <MenuItem value="inactive">Paused</MenuItem>
+                <MenuItem value="completed">Completed</MenuItem>
+              </Select>
+            </FormControl>
+          )}
+        </Stack>
+
+        {/* Active filter chips (mobile) */}
+        {isMobile && (statusFilter !== 'all' || searchTerm) && (
+          <Stack direction="row" spacing={1} sx={{ mt: 1.25 }} flexWrap="wrap" useFlexGap>
+            {statusFilter !== 'all' && (
+              <Chip
+                label={statusFilter}
+                size="small"
+                color={getStatusColor(statusFilter)}
+                onDelete={() => setStatusFilter('all')}
+                sx={{ borderRadius: 1.5, textTransform: 'capitalize', fontWeight: 600 }}
+              />
+            )}
+            {searchTerm && (
+              <Chip
+                label={`"${searchTerm}"`}
+                size="small"
+                variant="outlined"
+                onDelete={clearSearch}
+                sx={{ borderRadius: 1.5 }}
+              />
+            )}
+          </Stack>
+        )}
+      </Box>
+
+      {/* ── Results summary ── */}
+      {meetingsArray.length > 0 && filteredAndSortedMeetings.length > 0 && (
+        <Typography variant="caption" color="text.disabled" sx={{ px: { xs: 1.5, sm: 0 }, mb: 1.5, display: 'block' }}>
+          {paginatedMeetings.length} of {totalFilteredCount} meetings
+          {statusFilter !== 'all' && ` · ${statusFilter}`}
+        </Typography>
+      )}
+
+      {/* ── No results ── */}
+      {meetingsArray.length > 0 && filteredAndSortedMeetings.length === 0 && (
+        <Box sx={{ textAlign: 'center', py: 8, px: 3 }}>
+          <Typography fontSize={48} mb={1}>🔍</Typography>
+          <Typography variant="h6" fontWeight={600} color="text.secondary" gutterBottom>
+            No matches found
+          </Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            Try adjusting your search or filters
+          </Typography>
+          <Button onClick={() => { clearSearch(); setStatusFilter('all'); }} variant="outlined" sx={{ borderRadius: 2 }}>
+            Clear filters
+          </Button>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">Active:</Typography>
-          <Typography variant="h6" fontWeight={700} color="success.main">
-            {meetingsArray.filter(m => m.status === 'active' && m.next_occurrence_date).length}
+      )}
+
+      {/* ── Empty state ── */}
+      {meetingsArray.length === 0 && (
+        <Box sx={{ textAlign: 'center', py: 8, px: 3 }}>
+          <Typography fontSize={56} mb={1.5}>📅</Typography>
+          <Typography variant="h6" fontWeight={600} color="text.secondary" gutterBottom>
+            No recurring meetings
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320, mx: 'auto' }}>
+            Create your first recurring meeting series to get started
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">Generated:</Typography>
-          <Typography variant="h6" fontWeight={700} color="info.main">
-            {meetingsArray.reduce((sum, m) => sum + (m.total_occurrences_generated || 0), 0)}
-          </Typography>
-        </Box>
-      </Stack>
+      )}
 
-      {/* Grid Layout */}
-      <Grid container spacing={3}>
-        {sortedMeetings.map((meeting) => (
-          <Grid item xs={12} sm={6} md={4} lg={3} key={meeting.id}>
+      {/* ── Grid View ── */}
+      {viewMode === 'grid' && filteredAndSortedMeetings.length > 0 && (
+        <Box
+          sx={{
+            px: { xs: 1.5, sm: 0 },
+            display: 'grid',
+            gridTemplateColumns: isMobile
+              ? '1fr'
+              : isTablet
+                ? 'repeat(2, 1fr)'
+                : 'repeat(3, 1fr)',
+            gap: isMobile ? 1.5 : 2.5,
+          }}
+        >
+          {paginatedMeetings.map((meeting) => (
             <RecurringMeetingCard
+              key={meeting.id}
               meeting={meeting}
               onView={onView}
               onEdit={onEdit}
               onGenerate={onGenerate}
-              showStats={true}
-              compact={false}
+              showStats
             />
-          </Grid>
-        ))}
-      </Grid>
-    </Container>
+          ))}
+        </Box>
+      )}
+
+      {/* ── List View ── */}
+      {viewMode === 'list' && filteredAndSortedMeetings.length > 0 && (
+        <Box sx={{ px: { xs: 1.5, sm: 0 } }}>
+          {paginatedMeetings.map(renderListItem)}
+        </Box>
+      )}
+
+      {/* ── Table View (desktop only) ── */}
+      {viewMode === 'table' && filteredAndSortedMeetings.length > 0 && !isMobile && (
+        <TableContainer component={Paper} sx={{ borderRadius: 3, overflowX: 'auto', border: '1px solid', borderColor: 'divider' }} elevation={0}>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
+                {[
+                  { field: 'title', label: 'Meeting', align: 'left' },
+                  { field: null, label: 'Recurrence', align: 'left' },
+                  { field: 'next_date', label: 'Next Date', align: 'left' },
+                  { field: null, label: 'Status', align: 'left' },
+                  { field: 'total', label: 'Generated', align: 'center' },
+                  { field: null, label: 'Actions', align: 'right' },
+                ].map(col => (
+                  <TableCell key={col.label} align={col.align} sx={{ fontWeight: 700, py: 1.5 }}>
+                    {col.field ? (
+                      <TableSortLabel
+                        active={sortBy === col.field}
+                        direction={sortBy === col.field ? sortOrder : 'asc'}
+                        onClick={() => {
+                          if (sortBy === col.field) setSortOrder(p => p === 'asc' ? 'desc' : 'asc');
+                          else { setSortBy(col.field); setSortOrder('asc'); }
+                        }}
+                      >
+                        {col.label}
+                      </TableSortLabel>
+                    ) : col.label}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {paginatedMeetings.map(renderTableRow)}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+
+      {/* ── Pagination ── */}
+      {totalPages > 1 && filteredAndSortedMeetings.length > 0 && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3, px: { xs: 1.5, sm: 0 } }}>
+          <Pagination
+            count={totalPages}
+            page={activePage}
+            onChange={handlePageChange}
+            color="primary"
+            size={isMobile ? 'small' : 'medium'}
+            showFirstButton
+            showLastButton
+          />
+        </Box>
+      )}
+
+      {/* ── Refresh ── */}
+      {meetingsArray.length > 0 && filteredAndSortedMeetings.length > 0 && onRefresh && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+          <Button variant="text" onClick={onRefresh} startIcon={<RefreshIcon />} size="small" sx={{ color: 'text.secondary' }}>
+            Refresh
+          </Button>
+        </Box>
+      )}
+
+      {/* ── Mobile filters drawer ── */}
+      <MobileFiltersDrawer
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        sortBy={sortBy}
+        setSortBy={setSortBy}
+        sortOrder={sortOrder}
+        setSortOrder={setSortOrder}
+        onApply={() => { if (onPageChange) onPageChange(1); }}
+      />
+    </Box>
   );
 };

@@ -1,12 +1,11 @@
-# crud/meetings/organization.py - Updated for UUID
+# crud/meetings/organization.py
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func, update
+from sqlalchemy import select, and_, or_, func, update, text
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
 import uuid
 
-from app.api import deps
 from app.models.meetings.organization import OrganizationNode
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,6 @@ class OrganizationCRUD:
     
     async def create_node(self, node_data: Dict[str, Any]) -> OrganizationNode:
         """Create a new organization node with UUID"""
-        # Generate UUID if not provided
         node_id = str(uuid.uuid4())
         
         node = OrganizationNode(
@@ -133,14 +131,9 @@ class OrganizationCRUD:
         await self.db.commit()
         await self.db.refresh(node)
         return node
-    
-    # crud/meetings/organization.py - Add these methods to your OrganizationCRUD class
 
     async def soft_delete_node(self, node_id: str, cascade: bool = True) -> bool:
         """Soft delete a node (set is_active to False)"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         node = await self.get_node(node_id, include_inactive=True)
         if not node:
             return False
@@ -161,9 +154,6 @@ class OrganizationCRUD:
 
     async def hard_delete_node(self, node_id: str) -> bool:
         """Permanently delete a node from database"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         node = await self.db.get(OrganizationNode, node_id)
         if not node:
             return False
@@ -195,66 +185,91 @@ class OrganizationCRUD:
         
         return list(result.scalars().all())
     
-    def move_node(self, node_id: int, parent_id: int, position: int = None):
-        """
-        Move an organization node to a new parent or position
+    async def move_node(self, node_id: str, new_parent_id: Optional[str] = None, new_order: Optional[int] = None) -> Optional[OrganizationNode]:
+        """Move a node to a new parent (async version)"""
+        node = await self.get_node(node_id, include_inactive=True)
+        if not node:
+            return None
         
-        Args:
-            node_id: ID of the node to move
-            parent_id: ID of the new parent (can be None for root)
-            position: Optional position index among siblings
-        """
-        try:
-            # Get the node to move
-            node = OrganizationNode.query.get(node_id)
-            if not node:
-                raise ValueError(f"Organization node with id {node_id} not found")
-            
-            # Get the new parent (if specified)
-            new_parent = None
-            if parent_id:
-                new_parent = OrganizationNode.query.get(parent_id)
-                if not new_parent:
-                    raise ValueError(f"Parent organization with id {parent_id} not found")
-            
-            # Store old path for updating children
-            old_path = node.path
-            
-            # Update parent
-            node.parent_id = parent_id
-            
-            # Update path (implement based on your tree structure)
-            if new_parent:
-                node.path = f"{new_parent.path}{node.id}/"
+        old_path = node.path
+        old_parent_id = node.parent_id
+        
+        # Update parent
+        node.parent_id = new_parent_id
+        
+        # Update path and level based on new parent
+        if new_parent_id:
+            parent_result = await self.db.execute(
+                select(OrganizationNode).filter(OrganizationNode.id == new_parent_id)
+            )
+            parent = parent_result.scalar_one_or_none()
+            if parent:
+                node.level = parent.level + 1
+                node.path = f"{parent.path}/{node.id}"
             else:
-                node.path = f"/{node.id}/"
-            
-            # Update all children paths recursively
-            self._update_children_paths(node, old_path, node.path)
-            
-            # Reorder siblings if position specified
-            if position is not None:
-                siblings = OrganizationNode.query.filter_by(parent_id=parent_id).order_by(OrganizationNode.order).all()
-                # Remove the node from siblings list if present
-                siblings = [s for s in siblings if s.id != node_id]
-                # Insert at specified position
-                siblings.insert(position, node)
-                # Update order values
-                for idx, sibling in enumerate(siblings):
-                    sibling.order = idx
-            
-            deps.db.session.commit()
-            return node
-            
-        except Exception as e:
-            deps.db.session.rollback()
-            raise e
+                node.parent_id = None
+                node.level = 0
+                node.path = f"/{node.id}"
+        else:
+            node.level = 0
+            node.path = f"/{node.id}"
+        
+        # Update all children paths
+        await self._update_children_paths(node.id, old_path, node.path)
+        
+        # Reorder siblings if new_order specified
+        if new_order is not None:
+            await self._reorder_siblings(node.parent_id, node_id, new_order)
+        
+        node.updated_at = datetime.utcnow()
+        await self.db.commit()
+        await self.db.refresh(node)
+        
+        logger.info(f"Moved node {node_id} from parent {old_parent_id} to {new_parent_id}")
+        return node
     
-    def _update_children_paths(self, node, old_path, new_path):
+    async def _update_children_paths(self, node_id: str, old_path: str, new_path: str):
         """Recursively update paths for all children"""
-        children = OrganizationNode.query.filter_by(parent_id=node.id).all()
+        result = await self.db.execute(
+            select(OrganizationNode).filter(OrganizationNode.parent_id == node_id)
+        )
+        children = result.scalars().all()
+        
         for child in children:
             child_old_path = child.path
             child_new_path = child.path.replace(old_path, new_path, 1)
             child.path = child_new_path
-            self._update_children_paths(child, child_old_path, child_new_path)
+            await self._update_children_paths(child.id, child_old_path, child_new_path)
+    
+    async def _reorder_siblings(self, parent_id: Optional[str], node_id: str, new_order: int):
+        """Reorder siblings when moving a node"""
+        query = select(OrganizationNode).filter(
+            OrganizationNode.parent_id == parent_id,
+            OrganizationNode.id != node_id
+        ).order_by(OrganizationNode.order)
+        result = await self.db.execute(query)
+        siblings = list(result.scalars().all())
+        
+        # Insert node at new position
+        siblings.insert(new_order, await self.get_node(node_id))
+        
+        # Update order values
+        for idx, sibling in enumerate(siblings):
+            sibling.order = idx
+            self.db.add(sibling)
+    
+    async def search_nodes(self, search_term: str, limit: int = 50) -> List[OrganizationNode]:
+        """Search nodes by name, title, or department code"""
+        search_pattern = f"%{search_term}%"
+        query = select(OrganizationNode).filter(
+            or_(
+                OrganizationNode.name.ilike(search_pattern),
+                OrganizationNode.title.ilike(search_pattern),
+                OrganizationNode.department_code.ilike(search_pattern),
+                OrganizationNode.location.ilike(search_pattern)
+            ),
+            OrganizationNode.is_active == True
+        ).limit(limit)
+        
+        result = await self.db.execute(query)
+        return list(result.scalars().all())

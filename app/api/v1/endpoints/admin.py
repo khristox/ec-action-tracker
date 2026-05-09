@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 import uuid
 
+from app.models.meetings.user_department import UserDepartment
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
@@ -15,7 +16,7 @@ from app.crud.user import user as user_crud
 from app.crud.role import role as role_crud
 from app.models.user import User
 from app.models.role import Role
-from app.schemas.user import UserCreate, UserUpdate, UserResponse
+from app.schemas.user import DepartmentInfo, UserCreate, UserUpdate, UserResponse
 from app.schemas.role import PermissionBrief, RoleResponse
 from app.schemas.auth import MessageResponse
 
@@ -25,77 +26,76 @@ from app.models.user import user_roles
 router = APIRouter()
 
 
-@router.get("/users", response_model=dict)
+@router.get("/users", response_model=List[UserResponse])
 async def get_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    active_only: bool = Query(True),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    include_departments: bool = Query(True),
     db: AsyncSession = Depends(deps.get_db),
-    page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
-    search: Optional[str] = None,
-    is_active: Optional[bool] = None,
-    role: Optional[str] = None,
     current_user: User = Depends(deps.get_current_admin),
-) -> Any:
-    """Get list of users with pagination and filters (admin only)."""
-    from asyncio.log import logger
+) -> List[UserResponse]:
+    """Get all users (admin only)"""
+    from sqlalchemy.orm import selectinload
     
-    # Build query with eager loading of roles
-    query = select(User).options(selectinload(User.roles))
+    filter_active = is_active if is_active is not None else active_only
     
-    # Apply filters
-    if search:
-        query = query.where(
-            or_(
-                User.username.ilike(f"%{search}%"),
-                User.email.ilike(f"%{search}%"),
-                User.first_name.ilike(f"%{search}%"),
-                User.last_name.ilike(f"%{search}%"),
-            )
+    query = select(User)
+    
+    if include_departments:
+        query = query.options(
+            selectinload(User.user_departments).selectinload(UserDepartment.department)
         )
     
-    if is_active is not None:
-        query = query.where(User.is_active == is_active)
+    if filter_active:
+        query = query.where(User.is_active == True)
     
-    if role:
-        query = query.where(User.roles.any(Role.code == role))
+    if search and len(search.strip()) >= 2:
+        t = f"%{search.strip()}%"
+        query = query.where(or_(
+            User.first_name.ilike(t), 
+            User.last_name.ilike(t),
+            User.email.ilike(t), 
+            User.username.ilike(t), 
+            User.phone.ilike(t),
+            func.concat(User.first_name, ' ', User.last_name).ilike(t)
+        ))
     
-    # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
-    total = await db.scalar(count_query)
+    query = query.offset(skip).limit(limit).order_by(User.created_at.desc())
     
-    # Apply pagination
-    query = query.offset((page - 1) * limit).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
     
-    # Convert users to response format
-    user_list = []
-    for user in users:
-        user_list.append({
-            "id": str(user.id),
-            "username": user.username,
-            "email": user.email,
-            "first_name": user.first_name or "",
-            "last_name": user.last_name or "",
-            "middle_name": getattr(user, "middle_name", "") or "",
-            "phone": user.phone or "",
-            "roles": [r.code for r in user.roles] if user.roles else [],
-            "is_active": user.is_active,
-            "is_verified": user.is_verified,
-            "is_superuser": user.is_superuser,
-            "last_login": user.last_login.isoformat() if user.last_login else None,
-            "created_at": user.created_at.isoformat() if user.created_at else None,
-            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-        })
-    
-    logger.info(f"Admin {current_user.username} fetched {len(user_list)} users")
-    
-    return {
-        "items": user_list,
-        "total": total or 0,
-        "page": page,
-        "limit": limit,
-    }
-
+    return [
+        UserResponse(
+            id=u.id,
+            email=u.email,
+            username=u.username,
+            first_name=u.first_name,
+            last_name=u.last_name,
+            middle_name=u.middle_name,
+            phone=u.phone,
+            is_active=u.is_active,
+            is_verified=u.is_verified,
+            is_superuser=u.is_superuser,
+            created_at=u.created_at,
+            updated_at=u.updated_at,
+            departments=[
+                DepartmentInfo(
+                    id=ud.department.id,
+                    name=ud.department.name,
+                    code=ud.department.department_code,
+                    role=ud.role,
+                    is_primary=ud.is_primary
+                )
+                for ud in u.user_departments 
+                if ud.department and ud.status == "active"
+            ] if include_departments else []
+        )
+        for u in users
+    ]
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_by_admin(

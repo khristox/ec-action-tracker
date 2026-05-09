@@ -51,17 +51,17 @@ class UserDepartment(Base):
     
     # Relationships - ADD overlaps parameters to fix warnings
     user = relationship(
-        "User", 
-        foreign_keys=[user_id], 
+        "User",
+        foreign_keys=[user_id],
         back_populates="user_departments",
-        overlaps="departments"  # Add this
+        overlaps="departments,assigned_users"  # expand overlaps
     )
-    
+
     department = relationship(
-        "OrganizationNode", 
-        foreign_keys=[department_id], 
+        "OrganizationNode",
+        foreign_keys=[department_id],
         back_populates="user_departments",
-        overlaps="assigned_users"  # Add this (matches the relationship name in OrganizationNode)
+        overlaps="assigned_users,departments"  # expand overlaps
     )
     
     def to_dict(self):

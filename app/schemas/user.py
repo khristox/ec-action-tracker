@@ -625,6 +625,16 @@ class ProfilePictureResponse(BaseModel):
 
 # ==================== RESPONSE SCHEMAS ====================
 
+class DepartmentInfo(BaseModel):
+    """Department information for user response"""
+    id: str
+    name: str
+    code: Optional[str] = None
+    role: str
+    is_primary: bool
+    
+    class Config:
+        from_attributes = True
 class UserResponse(BaseModel):
     """
     Schema for user response (excludes sensitive data like password)
@@ -658,7 +668,8 @@ class UserResponse(BaseModel):
     profile_picture: Optional[str] = None
     profile_picture_type: Optional[str] = None
     nationality_name: Optional[str] = None
-    
+    departments: List[DepartmentInfo] = Field(default_factory=list, description="User's department assignments")
+
     # Attribute references
     gender_attribute_id: Optional[UUID] = Field(None, description="Gender attribute ID")
     language_attribute_id: Optional[UUID] = Field(None, description="Language attribute ID")

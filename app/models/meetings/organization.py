@@ -104,10 +104,9 @@ class OrganizationNode(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
         foreign_keys="UserDepartment.department_id",
-        overlaps="assigned_users"  # Add this
+        overlaps="assigned_users,departments"  # add 'departments'
     )
-    
-    # Direct relationship to users - ADD overlaps
+
     assigned_users = relationship(
         "User",
         secondary="user_departments",
@@ -115,7 +114,7 @@ class OrganizationNode(Base):
         secondaryjoin="UserDepartment.user_id == User.id",
         viewonly=True,
         lazy="selectin",
-        overlaps="user_departments"  # Add this
+        overlaps="user_departments,departments"  # add 'departments'
     )
     
     def __init__(self, **kwargs):

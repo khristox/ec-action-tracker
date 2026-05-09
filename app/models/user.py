@@ -200,9 +200,9 @@ class User(Base):
         secondary="user_departments",
         primaryjoin="User.id == UserDepartment.user_id",
         secondaryjoin="UserDepartment.department_id == OrganizationNode.id",
-        viewonly=False,
+        viewonly=True,  # Change to True — writes go through user_departments
         lazy="selectin",
-        backref="users"
+        overlaps="user_departments,assigned_users"  # declare all overlapping relationships
     )
     
     # Primary department (convenience property)
@@ -216,10 +216,11 @@ class User(Base):
     
     @property
     def active_departments(self) -> List['OrganizationNode']:
-        """Get only active department assignments"""
-        active_ids = [ud.department_id for ud in self.user_departments 
-                     if ud.status.value == 'active' and 
-                     (ud.end_date is None or ud.end_date > datetime.utcnow())]
+        active_ids = [
+            ud.department_id for ud in self.user_departments
+            if (ud.status == 'active' or ud.status == UserDepartmentStatus.ACTIVE)
+            and (ud.end_date is None or ud.end_date > datetime.utcnow())
+        ]
         return [dept for dept in self.departments if dept.id in active_ids]
     
     # Attribute relationships - RENAMED to avoid conflict with column names

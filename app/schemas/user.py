@@ -2,6 +2,7 @@
 User schemas for Action Tracker
 Includes validation, documentation, and proper type handling
 """
+from app.models.meetings.user_department import UserDepartmentRole, UserDepartmentStatus
 from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict, model_validator
 from typing import Optional, List, Any, Dict, Union
 from uuid import UUID
@@ -893,3 +894,83 @@ def encode_profile_picture(image_data: Optional[bytes], content_type: Optional[s
 # Import here to avoid circular imports
 from app.schemas.role import RoleResponse
 UserWithRoles.model_rebuild()
+
+
+
+
+class UserDepartmentBase(BaseModel):
+    user_id: str = Field(..., description="User UUID")
+    department_id: str = Field(..., description="Department UUID")
+    role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER, description="User's role in department")
+    status: UserDepartmentStatus = Field(default=UserDepartmentStatus.ACTIVE, description="Assignment status")
+    is_primary: bool = Field(False, description="Is this the user's primary department")
+    start_date: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Assignment start date")
+    end_date: Optional[datetime] = Field(None, description="Assignment end date (if temporary)")
+    title: Optional[str] = Field(None, max_length=200, description="Custom title in department")
+    responsibilities: List[str] = Field(default_factory=list, description="List of responsibilities")
+    notes: Optional[str] = Field(None, max_length=500, description="Additional notes")
+    created_by: Optional[str] = Field(None, description="User who created this assignment")
+
+
+class UserDepartmentCreate(UserDepartmentBase):
+    """Model for creating a new user-department assignment"""
+    pass
+
+
+class UserDepartmentUpdate(BaseModel):
+    """Model for updating a user-department assignment"""
+    role: Optional[UserDepartmentRole] = None
+    status: Optional[UserDepartmentStatus] = None
+    is_primary: Optional[bool] = None
+    end_date: Optional[datetime] = None
+    title: Optional[str] = Field(None, max_length=200)
+    responsibilities: Optional[List[str]] = None
+    notes: Optional[str] = Field(None, max_length=500)
+    
+    @field_validator('end_date', mode='before')
+    @classmethod
+    def validate_end_date(cls, v, info):
+        """Validate end date is in the future"""
+        if v and v < datetime.utcnow():
+            raise ValueError("End date cannot be in the past")
+        return v
+
+
+class UserDepartmentResponse(BaseModel):
+    """Response model for user-department assignment"""
+    id: str
+    user_id: str
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    department_id: str
+    department_name: Optional[str] = None
+    department_path: Optional[str] = None
+    department_code: Optional[str] = None
+    role: str
+    status: str
+    is_primary: bool
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    title: Optional[str] = None
+    responsibilities: List[str] = []
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class BulkAssignUsersRequest(BaseModel):
+    """Bulk assign users to a department"""
+    user_ids: List[str] = Field(..., min_length=1, description="List of user UUIDs")
+    role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER)
+    is_primary: bool = False
+
+
+class BulkAssignDepartmentsRequest(BaseModel):
+    """Bulk assign departments to a user"""
+    department_ids: List[str] = Field(..., min_length=1, description="List of department UUIDs")
+    role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER)
+    is_primary: bool = False
+

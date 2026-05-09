@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 try:
     from app.api.v1.endpoints.auth import router as auth_router
     from app.api.v1.endpoints.users import router as users_router
+    from app.api.v1.endpoints.users import department_router as users_dep_router
     from app.api.v1.endpoints.roles import router as roles_router
     from app.api.v1.endpoints.permissions import router as permissions_router
     from app.api.v1.endpoints.admin import router as admin_router
@@ -26,6 +27,10 @@ try:
     from app.api.v1.endpoints.role_menu_permissions import router as role_menu_permissions
     from app.api.v1.endpoints.action_tracker.recurring_meeting_routes import router as recurr_meetings
     from app.api.v1.endpoints.action_tracker.organization import router as menus_organisation
+    from app.api.v1.endpoints.action_tracker.organization import router_departments as departments
+
+
+    
 
 
     
@@ -43,7 +48,7 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(roles_router, prefix="/roles", tags=["roles"])
 api_router.include_router(permissions_router, prefix="/permissions", tags=["permissions"])
 api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
-
+api_router.include_router(users_dep_router,prefix="/departments", tags=["Departments"])
 
 # System & Audit
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
@@ -55,6 +60,8 @@ api_router.include_router(locations_router, prefix="/locations", tags=["location
 api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 
 api_router.include_router(menus_organisation, prefix="/organization", tags=["Organization"])
+api_router.include_router(departments, prefix="/departments", tags=["Departments"])
+
 
 
 api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])

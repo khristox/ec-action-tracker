@@ -13,7 +13,11 @@ from app.db.base import Base
 from app.db.types import UUID as CustomUUID
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.meetings.user_department import UserDepartment
+    from app.models.meetings.organization import OrganizationNode
 
 
 # Association table for user roles (many-to-many)
@@ -43,12 +47,16 @@ class User(Base):
         Index('idx_user_username', 'username'),
         Index('idx_user_phone', 'phone'),
         Index('idx_user_is_active', 'is_active'),
+        Index('idx_user_is_superuser', 'is_superuser'),
         Index('idx_user_nationality', 'nationality_attribute_id'),
         Index('idx_user_gender_attribute', 'gender_attribute_id'),
         Index('idx_user_language_attribute', 'language_attribute_id'),
         Index('idx_user_currency_attribute', 'currency_attribute_id'),
         Index('idx_user_country_attribute', 'country_attribute_id'),
         Index('idx_user_location', 'location_id'),
+        Index('idx_user_created_at', 'created_at'),
+        Index('idx_user_last_login', 'last_login'),
+        Index('idx_user_verification_status', 'is_verified', 'is_active'),
         {'extend_existing': True}
     )
     
@@ -67,7 +75,7 @@ class User(Base):
     # ==================== ACCOUNT STATUS ====================
     is_active = Column(Boolean, default=True, index=True)
     is_verified = Column(Boolean, default=False)
-    is_superuser = Column(Boolean, default=False)
+    is_superuser = Column(Boolean, default=False, index=True)
     
     # ==================== STANDARD FIELDS ====================
     first_name = Column(String(100), nullable=True)
@@ -166,7 +174,7 @@ class User(Base):
     created_by = Column(CustomUUID, nullable=True)
     updated_by = Column(CustomUUID, nullable=True)
     
-    # ==================== RELATIONSHIPS (Renamed to avoid conflict) ====================
+    # ==================== RELATIONSHIPS ====================
     
     # Roles (Many-to-Many)
     roles = relationship(
@@ -177,6 +185,42 @@ class User(Base):
         primaryjoin="User.id == user_roles.c.user_id",
         secondaryjoin="Role.id == user_roles.c.role_id"
     )
+    
+    # Department relationships - FIXED
+    user_departments = relationship(
+        "UserDepartment",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        foreign_keys="UserDepartment.user_id"
+    )
+    
+    departments = relationship(
+        "OrganizationNode",
+        secondary="user_departments",
+        primaryjoin="User.id == UserDepartment.user_id",
+        secondaryjoin="UserDepartment.department_id == OrganizationNode.id",
+        viewonly=False,
+        lazy="selectin",
+        backref="users"
+    )
+    
+    # Primary department (convenience property)
+    @property
+    def primary_department(self) -> Optional['OrganizationNode']:
+        """Get user's primary department"""
+        for ud in self.user_departments:
+            if ud.is_primary and ud.status.value == 'active':
+                return ud.department
+        return self.departments[0] if self.departments else None
+    
+    @property
+    def active_departments(self) -> List['OrganizationNode']:
+        """Get only active department assignments"""
+        active_ids = [ud.department_id for ud in self.user_departments 
+                     if ud.status.value == 'active' and 
+                     (ud.end_date is None or ud.end_date > datetime.utcnow())]
+        return [dept for dept in self.departments if dept.id in active_ids]
     
     # Attribute relationships - RENAMED to avoid conflict with column names
     gender_attribute = relationship(
@@ -214,14 +258,6 @@ class User(Base):
         lazy="selectin"
     )
     
-    # Location relationship (if locations table exists)
-    # location = relationship(
-    #     "Location", 
-    #     foreign_keys=[location_id],
-    #     primaryjoin="User.location_id == Location.id",
-    #     lazy="selectin"
-    # )
-    
     # Extended user attributes
     extended_attributes = relationship(
         "UserAttribute",
@@ -258,7 +294,22 @@ class User(Base):
             )
         return None
     
-    # Attribute name properties (using renamed relationships)
+    @property
+    def department_count(self) -> int:
+        """Number of departments user belongs to"""
+        return len(self.active_departments)
+    
+    @property
+    def department_names(self) -> List[str]:
+        """List of department names"""
+        return [dept.name for dept in self.active_departments]
+    
+    @property
+    def department_codes(self) -> List[str]:
+        """List of department codes"""
+        return [dept.department_code for dept in self.active_departments if dept.department_code]
+    
+    # Attribute name properties
     @property
     def gender_name(self) -> Optional[str]:
         """Get gender name from attribute"""
@@ -294,7 +345,7 @@ class User(Base):
             return self.nationality_attribute.value_display or self.nationality_attribute.value
         return None
     
-    # Simple preference properties (no relationship needed)
+    # Simple preference properties
     @property
     def language(self) -> str:
         """Get preferred language (direct field)"""
@@ -325,7 +376,17 @@ class User(Base):
         """Set preferred currency"""
         self.preferred_currency = value
     
-    # ==================== ROLE CHECKS ====================
+    # ==================== ROLE METHODS ====================
+    
+    @property
+    def role_codes(self) -> List[str]:
+        """Get list of role codes"""
+        return [role.code for role in self.roles]
+    
+    @property
+    def role_names(self) -> List[str]:
+        """Get list of role names"""
+        return [role.name for role in self.roles]
     
     @property
     def is_student(self) -> bool:
@@ -351,6 +412,14 @@ class User(Base):
         """Check if user has a specific role"""
         return any(role.code == role_code for role in self.roles)
     
+    def has_any_role(self, role_codes: List[str]) -> bool:
+        """Check if user has any of the specified roles"""
+        return any(self.has_role(code) for code in role_codes)
+    
+    def has_all_roles(self, role_codes: List[str]) -> bool:
+        """Check if user has all specified roles"""
+        return all(self.has_role(code) for code in role_codes)
+    
     def has_permission(self, permission_code: str) -> bool:
         """Check if user has a specific permission through roles"""
         if self.is_superuser:
@@ -361,6 +430,31 @@ class User(Base):
                 if permission.code == permission_code:
                     return True
         return False
+    
+    def has_any_permission(self, permission_codes: List[str]) -> bool:
+        """Check if user has any of the specified permissions"""
+        return any(self.has_permission(code) for code in permission_codes)
+    
+    # ==================== DEPARTMENT METHODS ====================
+    
+    def is_in_department(self, department_id: str) -> bool:
+        """Check if user belongs to a specific department"""
+        return any(str(dept.id) == department_id for dept in self.active_departments)
+    
+    def get_department_role(self, department_id: str) -> Optional[str]:
+        """Get user's role in a specific department"""
+        for ud in self.user_departments:
+            if str(ud.department_id) == department_id and ud.status.value == 'active':
+                return ud.role.value
+        return None
+    
+    def is_department_head(self, department_id: str) -> bool:
+        """Check if user is head of a specific department"""
+        return self.get_department_role(department_id) == 'head'
+    
+    def is_department_manager(self, department_id: str) -> bool:
+        """Check if user is manager of a specific department"""
+        return self.get_department_role(department_id) == 'manager'
     
     # ==================== EXTENDED ATTRIBUTES ====================
     
@@ -378,6 +472,19 @@ class User(Base):
             for attr in self.extended_attributes 
             if attr.attribute
         }
+    
+    def set_extended_attribute(self, attr_code: str, value: Any) -> None:
+        """Set an extended attribute value."""
+        from app.models.user_attribute import UserAttribute
+        
+        for attr in self.extended_attributes:
+            if attr.attribute and attr.attribute.code == attr_code:
+                attr.value = value
+                return
+        
+        # Create new extended attribute if not exists
+        # Need to fetch the attribute first
+        pass
     
     # ==================== ACCOUNT METHODS ====================
     
@@ -406,18 +513,26 @@ class User(Base):
         self.lock_reason = None
         self.login_attempts = 0
     
-    def to_dict(self) -> Dict[str, Any]:
+    def update_last_login(self) -> None:
+        """Update last login timestamp"""
+        self.last_login = datetime.now()
+    
+    # ==================== SERIALIZATION ====================
+    
+    def to_dict(self, include_extended: bool = True, include_departments: bool = True) -> Dict[str, Any]:
         """Convert user to dictionary for serialization"""
-        return {
+        data = {
             "id": str(self.id),
             "email": self.email,
             "username": self.username,
             "first_name": self.first_name,
             "last_name": self.last_name,
             "middle_name": self.middle_name,
+            "full_name": self.full_name,
             "phone": self.phone,
             "alternate_phone": self.alternate_phone,
             "date_of_birth": self.date_of_birth.isoformat() if self.date_of_birth else None,
+            "age": self.age,
             "address": self.address,
             "city": self.city,
             "state": self.state,
@@ -430,10 +545,15 @@ class User(Base):
             "timezone": self.preferred_timezone,
             "preferred_currency": self.preferred_currency,
             "gender_attribute_id": str(self.gender_attribute_id) if self.gender_attribute_id else None,
+            "gender_name": self.gender_name,
             "language_attribute_id": str(self.language_attribute_id) if self.language_attribute_id else None,
+            "language_name": self.language_name,
             "currency_attribute_id": str(self.currency_attribute_id) if self.currency_attribute_id else None,
+            "currency_name": self.currency_name,
             "country_attribute_id": str(self.country_attribute_id) if self.country_attribute_id else None,
+            "country_name": self.country_name,
             "nationality_attribute_id": str(self.nationality_attribute_id) if self.nationality_attribute_id else None,
+            "nationality_name": self.nationality_name,
             "location_id": str(self.location_id) if self.location_id else None,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
@@ -441,14 +561,27 @@ class User(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "last_login": self.last_login.isoformat() if self.last_login else None,
-            "full_name": self.full_name,
-            "gender_name": self.gender_name,
-            "language_name": self.language_name,
-            "currency_name": self.currency_name,
-            "country_name": self.country_name,
-            "nationality_name": self.nationality_name,
-            "role_codes": [role.code for role in self.roles],
+            "role_codes": self.role_codes,
+            "role_names": self.role_names,
         }
+        
+        if include_departments:
+            data["departments"] = [
+                {
+                    "id": str(dept.id),
+                    "name": dept.name,
+                    "code": dept.department_code,
+                    "path": dept.path
+                }
+                for dept in self.active_departments
+            ]
+            data["department_count"] = self.department_count
+            data["primary_department_id"] = str(self.primary_department.id) if self.primary_department else None
+        
+        if include_extended:
+            data["extended_attributes"] = self.get_extended_attributes_dict()
+        
+        return data
     
     def __repr__(self) -> str:
         return f"<User {self.username_or_email}>"

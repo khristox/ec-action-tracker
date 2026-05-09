@@ -1858,7 +1858,8 @@ AND table_name IN ('recurring_meetings', 'recurring_meeting_occurrences');
 ALTER TABLE meetings 
 ADD COLUMN duration_minutes INT NULL AFTER end_time;
 
--- Add platform and meeting_link columns if they don't exist
+
+-- Add platform and meeting_link columns if they dont exist
 ALTER TABLE meetings 
 ADD COLUMN platform VARCHAR(50) DEFAULT 'physical' NULL,
 ADD COLUMN meeting_link VARCHAR(500) NULL;
@@ -1950,11 +1951,14 @@ COMMENT 'Timestamp when meeting was soft deleted';
 -- migrations/001_create_organization_tables_mysql.sql
 
 -- Create organization_nodes table
+-- migrations/001_create_organization_tables_mysql.sql
+
+-- Create organization_nodes table with UUID
 CREATE TABLE IF NOT EXISTS organization_nodes (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     name VARCHAR(200) NOT NULL,
     title VARCHAR(200) NOT NULL,
-    parent_id INT NULL,
+    parent_id CHAR(36) NULL,
     level INT DEFAULT 0,
     path VARCHAR(1000) DEFAULT '',
     `order` INT DEFAULT 0,
@@ -1972,31 +1976,37 @@ CREATE TABLE IF NOT EXISTS organization_nodes (
     color VARCHAR(20) DEFAULT '#4A90E2',
     additional_metadata JSON DEFAULT (JSON_OBJECT()),
     
-    FOREIGN KEY (parent_id) REFERENCES organization_nodes(id) ON DELETE CASCADE
+    FOREIGN KEY (parent_id) REFERENCES organization_nodes(id) ON DELETE CASCADE,
+    
+    INDEX idx_org_parent_id (parent_id),
+    INDEX idx_org_path (path(191)),
+    INDEX idx_org_level (level),
+    INDEX idx_org_is_active (is_active),
+    INDEX idx_org_name (name(191)),
+    INDEX idx_org_department_code (department_code),
+    INDEX idx_org_order (`order`),
+    INDEX idx_org_parent_active (parent_id, is_active),
+    INDEX idx_org_level_order (level, `order`),
+    INDEX idx_org_path_active (path(191), is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Create indexes
-CREATE INDEX idx_org_parent_id ON organization_nodes(parent_id);
-CREATE INDEX idx_org_path ON organization_nodes(path(255)) WHERE is_active = TRUE;
-CREATE INDEX idx_org_level ON organization_nodes(level) WHERE is_active = TRUE;
-CREATE INDEX idx_org_is_active ON organization_nodes(is_active);
-CREATE INDEX idx_org_name ON organization_nodes(name) WHERE is_active = TRUE;
-CREATE INDEX idx_org_department_code ON organization_nodes(department_code) WHERE is_active = TRUE;
-CREATE INDEX idx_org_order ON organization_nodes(`order`);
-CREATE INDEX idx_org_parent_active ON organization_nodes(parent_id, is_active);
-CREATE INDEX idx_org_level_order ON organization_nodes(level, `order`) WHERE is_active = TRUE;
-
--- Create trigger to update path and level (MySQL)
+-- Create trigger to generate UUID if not provided
 DELIMITER $$
 
 CREATE TRIGGER before_insert_organization_nodes
 BEFORE INSERT ON organization_nodes
 FOR EACH ROW
 BEGIN
+    -- Generate UUID if not provided
+    IF NEW.id IS NULL OR NEW.id = '' THEN
+        SET NEW.id = UUID();
+    END IF;
+    
+    -- Update path and level based on parent
     DECLARE parent_path VARCHAR(1000);
     DECLARE parent_level INT;
     
-    IF NEW.parent_id IS NULL THEN
+    IF NEW.parent_id IS NULL OR NEW.parent_id = '' THEN
         SET NEW.level = 0;
         SET NEW.path = CONCAT('/', NEW.id);
     ELSE
@@ -2011,40 +2021,492 @@ END$$
 
 DELIMITER ;
 
--- Create procedure to get descendants
+-- Create trigger to update children paths when parent is updated
 DELIMITER $$
 
-CREATE PROCEDURE GetNodeDescendants(IN node_id INT)
+CREATE TRIGGER after_update_organization_nodes
+AFTER UPDATE ON organization_nodes
+FOR EACH ROW
 BEGIN
-    SELECT 
-        id, name, level, path
-    FROM organization_nodes
-    WHERE path LIKE CONCAT((SELECT path FROM organization_nodes WHERE id = node_id), '%')
-        AND id != node_id
-        AND is_active = TRUE
-    ORDER BY level;
+    -- If path changed, update all children
+    IF OLD.path != NEW.path THEN
+        UPDATE organization_nodes
+        SET path = REPLACE(path, OLD.path, NEW.path),
+            level = level + (NEW.level - OLD.level)
+        WHERE path LIKE CONCAT(OLD.path, '%')
+            AND id != NEW.id;
+    END IF;
 END$$
 
 DELIMITER ;
 
--- Create procedure to get ancestors
+-- Create stored procedure to get node descendants
 DELIMITER $$
 
-CREATE PROCEDURE GetNodeAncestors(IN node_id INT)
+CREATE PROCEDURE GetNodeDescendants(IN node_id CHAR(36))
+BEGIN
+    SELECT 
+        id, 
+        name, 
+        title,
+        level, 
+        path,
+        parent_id,
+        is_active,
+        email,
+        phone,
+        department_code,
+        location,
+        employee_count,
+        budget,
+        color,
+        created_at,
+        updated_at
+    FROM organization_nodes
+    WHERE path LIKE CONCAT((SELECT path FROM organization_nodes WHERE id = node_id), '%')
+        AND id != node_id
+        AND is_active = TRUE
+    ORDER BY level, `order`;
+END$$
+
+DELIMITER ;
+
+-- Create stored procedure to get node ancestors
+DELIMITER $$
+
+CREATE PROCEDURE GetNodeAncestors(IN node_id CHAR(36))
 BEGIN
     WITH RECURSIVE ancestors AS (
-        SELECT id, name, level, path, parent_id
+        SELECT 
+            id, 
+            name, 
+            title,
+            level, 
+            path, 
+            parent_id,
+            is_active,
+            email,
+            phone,
+            department_code,
+            location,
+            employee_count,
+            budget,
+            color
         FROM organization_nodes
         WHERE id = node_id
         UNION ALL
-        SELECT p.id, p.name, p.level, p.path, p.parent_id
+        SELECT 
+            p.id, 
+            p.name, 
+            p.title,
+            p.level, 
+            p.path, 
+            p.parent_id,
+            p.is_active,
+            p.email,
+            p.phone,
+            p.department_code,
+            p.location,
+            p.employee_count,
+            p.budget,
+            p.color
         FROM organization_nodes p
         INNER JOIN ancestors a ON p.id = a.parent_id
     )
-    SELECT id, name, level, path
+    SELECT id, name, title, level, path
     FROM ancestors
     WHERE id != node_id
     ORDER BY level;
 END$$
 
 DELIMITER ;
+
+-- Create stored procedure to get root nodes
+DELIMITER $$
+
+CREATE PROCEDURE GetRootNodes()
+BEGIN
+    SELECT 
+        id, 
+        name, 
+        title,
+        level, 
+        path,
+        `order`,
+        is_active,
+        email,
+        phone,
+        department_code,
+        location,
+        employee_count,
+        budget,
+        color,
+        additional_metadata,
+        created_at,
+        updated_at
+    FROM organization_nodes
+    WHERE parent_id IS NULL AND is_active = TRUE
+    ORDER BY `order`, name;
+END$$
+
+DELIMITER ;
+
+-- Create stored procedure to get node subtree
+DELIMITER $$
+
+CREATE PROCEDURE GetNodeSubtree(IN node_id CHAR(36), IN max_depth INT)
+BEGIN
+    DECLARE start_path VARCHAR(1000);
+    DECLARE start_level INT;
+    
+    SELECT path, level INTO start_path, start_level
+    FROM organization_nodes
+    WHERE id = node_id;
+    
+    SELECT 
+        id, 
+        name, 
+        title,
+        level, 
+        path,
+        parent_id,
+        `order`,
+        is_active,
+        email,
+        phone,
+        department_code,
+        location,
+        employee_count,
+        budget,
+        color,
+        additional_metadata,
+        created_at,
+        updated_at,
+        (level - start_level) as depth
+    FROM organization_nodes
+    WHERE path LIKE CONCAT(start_path, '%')
+        AND is_active = TRUE
+        AND (max_depth IS NULL OR (level - start_level) <= max_depth)
+    ORDER BY path, `order`;
+END$$
+
+DELIMITER ;
+
+-- Create stored procedure to move node
+DELIMITER $$
+
+CREATE PROCEDURE MoveNode(
+    IN node_id CHAR(36), 
+    IN new_parent_id CHAR(36),
+    IN new_order INT
+)
+BEGIN
+    DECLARE old_path VARCHAR(1000);
+    DECLARE new_path VARCHAR(1000);
+    DECLARE new_level INT;
+    
+    -- Get current node data
+    SELECT path INTO old_path
+    FROM organization_nodes
+    WHERE id = node_id;
+    
+    -- Calculate new path and level
+    IF new_parent_id IS NULL OR new_parent_id = '' THEN
+        SET new_level = 0;
+        SET new_path = CONCAT('/', node_id);
+    ELSE
+        SELECT CONCAT(path, '/', node_id), level + 1 
+        INTO new_path, new_level
+        FROM organization_nodes
+        WHERE id = new_parent_id;
+    END IF;
+    
+    -- Update node
+    UPDATE organization_nodes
+    SET parent_id = new_parent_id,
+        level = new_level,
+        path = new_path,
+        `order` = COALESCE(new_order, `order`)
+    WHERE id = node_id;
+    
+    -- Update all descendants
+    UPDATE organization_nodes
+    SET path = REPLACE(path, old_path, new_path),
+        level = level + (new_level - (SELECT level FROM organization_nodes WHERE id = node_id) + 1)
+    WHERE path LIKE CONCAT(old_path, '%')
+        AND id != node_id;
+END$$
+
+DELIMITER ;
+
+-- Create view for flattened organization structure
+CREATE OR REPLACE VIEW organization_structure AS
+WITH RECURSIVE org_tree AS (
+    SELECT 
+        id,
+        name,
+        title,
+        parent_id,
+        level,
+        path,
+        `order`,
+        is_active,
+        email,
+        phone,
+        department_code,
+        location,
+        employee_count,
+        budget,
+        color,
+        CAST(id AS CHAR(1000)) as breadcrumb_ids,
+        CAST(name AS CHAR(1000)) as breadcrumb_names,
+        CAST(CONCAT(name, ' (Level ', level, ')') AS CHAR(1000)) as breadcrumb_titles
+    FROM organization_nodes
+    WHERE parent_id IS NULL AND is_active = TRUE
+    
+    UNION ALL
+    
+    SELECT 
+        c.id,
+        c.name,
+        c.title,
+        c.parent_id,
+        c.level,
+        c.path,
+        c.`order`,
+        c.is_active,
+        c.email,
+        c.phone,
+        c.department_code,
+        c.location,
+        c.employee_count,
+        c.budget,
+        c.color,
+        CONCAT(p.breadcrumb_ids, '/', c.id),
+        CONCAT(p.breadcrumb_names, ' > ', c.name),
+        CONCAT(p.breadcrumb_titles, ' > ', c.name, ' (Level ', c.level, ')')
+    FROM organization_nodes c
+    INNER JOIN org_tree p ON c.parent_id = p.id
+    WHERE c.is_active = TRUE
+)
+SELECT * FROM org_tree
+ORDER BY breadcrumb_ids;
+
+-- Create function to generate UUID v4 (if using MySQL 8.0)
+DELIMITER $$
+
+CREATE FUNCTION UUID_V4()
+RETURNS CHAR(36)
+DETERMINISTIC
+BEGIN
+    RETURN LOWER(CONCAT(
+        LEFT(UUID(), 8),
+        '-',
+        SUBSTR(UUID(), 10, 4),
+        '-4',
+        SUBSTR(UUID(), 15, 3),
+        '-',
+        SUBSTR(UUID(), 19, 4),
+        '-',
+        SUBSTR(UUID(), 25)
+    ));
+END$$
+
+DELIMITER ;
+
+-- Create event to cleanup old soft-deleted nodes (optional)
+-- Enable event scheduler first: SET GLOBAL event_scheduler = ON;
+DELIMITER $$
+
+CREATE EVENT IF NOT EXISTS cleanup_inactive_organization_nodes
+ON SCHEDULE EVERY 1 WEEK
+DO
+BEGIN
+    DELETE FROM organization_nodes
+    WHERE is_active = FALSE 
+        AND updated_at < DATE_SUB(NOW(), INTERVAL 90 DAY);
+END$$
+
+DELIMITER ;
+
+-- Insert sample root nodes
+INSERT INTO organization_nodes (id, name, title, parent_id, `order`, email, department_code, location) VALUES
+    (UUID_V4(), 'Corporate', 'CEO Office', NULL, 0, 'ceo@company.com', 'CORP', 'Headquarters'),
+    (UUID_V4(), 'North America', 'Regional Director', NULL, 1, 'na@company.com', 'NA', 'New York Office'),
+    (UUID_V4(), 'Europe', 'Regional Director', NULL, 2, 'eu@company.com', 'EU', 'London Office'),
+    (UUID_V4(), 'Asia Pacific', 'Regional Director', NULL, 3, 'apac@company.com', 'APAC', 'Singapore Office');
+
+-- Insert sample child nodes (get actual IDs from previous insert for parent_id references)
+-- Note: Replace actual UUIDs with the ones generated above
+-- INSERT INTO organization_nodes (name, title, parent_id, department_code, employee_count, budget) VALUES
+--     ('Engineering', 'VP of Engineering', (SELECT id FROM organization_nodes WHERE department_code = 'CORP'), 'ENG', 150, 5000000.00),
+--     ('Sales', 'VP of Sales', (SELECT id FROM organization_nodes WHERE department_code = 'CORP'), 'SALES', 75, 3000000.00),
+--     ('Marketing', 'VP of Marketing', (SELECT id FROM organization_nodes WHERE department_code = 'CORP'), 'MKTG', 50, 2000000.00);
+
+-- Create indexes for performance optimization
+CREATE INDEX idx_org_path_search ON organization_nodes(path(255)) WHERE is_active = TRUE;
+CREATE INDEX idx_org_updated_at ON organization_nodes(updated_at);
+CREATE INDEX idx_org_created_at ON organization_nodes(created_at);
+CREATE INDEX idx_org_budget ON organization_nodes(budget) WHERE budget > 0;
+CREATE INDEX idx_org_employee_count ON organization_nodes(employee_count) WHERE employee_count > 0;
+CREATE INDEX idx_org_parent_order ON organization_nodes(parent_id, `order`);
+
+-- Create fulltext indexes for search
+CREATE FULLTEXT INDEX idx_org_search ON organization_nodes(name, title, email, department_code, location);
+
+
+
+-- migrations/002_create_user_departments_table_mysql.sql
+-- migrations/002_create_user_departments_table_mysql.sql
+-- Corrected version for MariaDB/MySQL
+
+CREATE TABLE IF NOT EXISTS user_departments (
+    id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    user_id VARCHAR(36) NOT NULL,
+    department_id VARCHAR(36) NOT NULL,
+    role ENUM('head', 'manager', 'supervisor', 'member', 'temporary', 'contractor') DEFAULT 'member',
+    status ENUM('active', 'inactive', 'pending', 'transferring') DEFAULT 'active',
+    is_primary BOOLEAN DEFAULT FALSE,
+    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    end_date TIMESTAMP NULL,
+    title VARCHAR(200) NULL,
+    responsibilities JSON DEFAULT (JSON_ARRAY()),
+    notes VARCHAR(500) NULL,
+    created_by VARCHAR(36) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    -- Foreign keys
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES organization_nodes(id) ON DELETE CASCADE,
+    
+    -- Indexes (removed WHERE clauses)
+    INDEX idx_ud_user_id (user_id),
+    INDEX idx_ud_department_id (department_id),
+    INDEX idx_ud_status (status),
+    INDEX idx_ud_role (role),
+    INDEX idx_ud_user_dept (user_id, department_id),
+    INDEX idx_ud_primary (user_id, is_primary),
+    INDEX idx_ud_active (status, start_date)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Create a trigger to ensure only one primary department per user
+DELIMITER $$
+
+CREATE TRIGGER ensure_single_primary_before_insert
+BEFORE INSERT ON user_departments
+FOR EACH ROW
+BEGIN
+    IF NEW.is_primary = TRUE THEN
+        UPDATE user_departments 
+        SET is_primary = FALSE 
+        WHERE user_id = NEW.user_id AND id != NEW.id;
+    END IF;
+END$$
+
+CREATE TRIGGER ensure_single_primary_before_update
+BEFORE UPDATE ON user_departments
+FOR EACH ROW
+BEGIN
+    IF NEW.is_primary = TRUE AND OLD.is_primary != NEW.is_primary THEN
+        UPDATE user_departments 
+        SET is_primary = FALSE 
+        WHERE user_id = NEW.user_id AND id != NEW.id;
+    END IF;
+END$$
+
+DELIMITER ;
+
+-- Create a view for active assignments
+CREATE OR REPLACE VIEW active_user_departments AS
+SELECT 
+    ud.*,
+    u.name as user_name,
+    u.email as user_email,
+    on.name as department_name,
+    on.department_code,
+    on.path as department_path
+FROM user_departments ud
+LEFT JOIN users u ON ud.user_id = u.id
+LEFT JOIN organization_nodes on ON ud.department_id = on.id
+WHERE ud.status = 'active' 
+    AND (ud.end_date IS NULL OR ud.end_date > NOW());
+
+-- Create a view for department hierarchy with user counts
+-- Corrected view for department user counts
+CREATE OR REPLACE VIEW department_user_counts AS
+WITH RECURSIVE dept_tree AS (
+    SELECT 
+        id,
+        name,
+        parent_id,
+        0 as level
+    FROM organization_nodes
+    WHERE parent_id IS NULL
+    UNION ALL
+    SELECT 
+        org.id,
+        org.name,
+        org.parent_id,
+        dt.level + 1
+    FROM organization_nodes org
+    INNER JOIN dept_tree dt ON org.parent_id = dt.id
+)
+SELECT 
+    dt.id,
+    dt.name,
+    dt.parent_id,
+    dt.level,
+    COUNT(DISTINCT ud.user_id) as total_users,
+    COUNT(DISTINCT CASE WHEN ud.role = 'head' THEN ud.user_id END) as heads,
+    COUNT(DISTINCT CASE WHEN ud.role = 'manager' THEN ud.user_id END) as managers,
+    COUNT(DISTINCT CASE WHEN ud.role = 'member' THEN ud.user_id END) as members
+FROM dept_tree dt
+LEFT JOIN user_departments ud ON dt.id = ud.department_id AND ud.status = 'active'
+GROUP BY dt.id, dt.name, dt.parent_id, dt.level
+ORDER BY dt.level, dt.name;
+
+
+-- Drop existing table
+DROP TABLE IF EXISTS user_departments;
+
+-- Recreate with lowercase enums (matching Python model)
+CREATE TABLE IF NOT EXISTS user_departments (
+    id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    user_id VARCHAR(36) NOT NULL,
+    department_id VARCHAR(36) NOT NULL,
+    role ENUM('head', 'manager', 'supervisor', 'member', 'temporary', 'contractor') DEFAULT 'member',
+    status ENUM('active', 'inactive', 'pending', 'transferring') DEFAULT 'active',
+    is_primary BOOLEAN DEFAULT FALSE,
+    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    end_date TIMESTAMP NULL,
+    title VARCHAR(200) NULL,
+    responsibilities JSON DEFAULT (JSON_ARRAY()),
+    notes VARCHAR(500) NULL,
+    created_by VARCHAR(36) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES organization_nodes(id) ON DELETE CASCADE,
+    
+    INDEX idx_ud_user_id (user_id),
+    INDEX idx_ud_department_id (department_id),
+    INDEX idx_ud_status (status),
+    INDEX idx_ud_role (role),
+    INDEX idx_ud_user_dept (user_id, department_id),
+    INDEX idx_ud_primary (user_id, is_primary),
+    INDEX idx_ud_active (status, start_date)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Connect to your database and run this
+ALTER TABLE user_departments 
+MODIFY COLUMN role VARCHAR(50) DEFAULT 'member',
+MODIFY COLUMN status VARCHAR(50) DEFAULT 'active';
+
+-- Update existing records to ensure they have values
+UPDATE user_departments SET role = 'member' WHERE role IS NULL OR role = '';
+UPDATE user_departments SET status = 'active' WHERE status IS NULL OR status = '';

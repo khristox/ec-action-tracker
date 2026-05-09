@@ -964,13 +964,13 @@ export const selectMeetingPriorityOptions = (state) => state.meetings.priorityOp
 
 // Filters Selectors
 export const selectMeetingsFilters = (state) => state.meetings.filters;
-const selectPage = (state) => state.meetings.page;
-const selectLimit = (state) => state.meetings.limit;
-const selectTotal = (state) => state.meetings.total;
+const selectPage  = (state) => state.meetings.meetings.page;
+const selectLimit = (state) => state.meetings.meetings.limit;
+const selectTotal = (state) => state.meetings.meetings.total;
 
 export const selectMeetingPagination = createSelector(
   [selectPage, selectLimit, selectTotal],
-  (page, limit, total) => ({ page, limit, total }) // Only runs if inputs change
+  (page, limit, total) => ({ page, limit, total })
 );
 
 // Minutes Selectors

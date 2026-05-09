@@ -56,6 +56,8 @@ api.interceptors.response.use(
 );
 
 
+// src/services/api.js - Ensure UUIDs are handled as strings
+
 export const organizationAPI = {
   // Get all nodes
   getAll: async () => {
@@ -71,19 +73,32 @@ export const organizationAPI = {
   
   // Get single node
   get: async (id) => {
+    // id is string UUID, don't convert
     const response = await api.get(`/organization/nodes/${id}`);
     return response.data;
   },
   
   // Create node
   create: async (data) => {
-    const response = await api.post('/organization/nodes', data);
+    // Make sure parent_id is null or string, not number
+    const cleanData = {
+      ...data,
+      parent_id: data.parent_id === '' || data.parent_id === undefined ? null : data.parent_id,
+      employee_count: Number(data.employee_count) || 0,
+      budget: Number(data.budget) || 0,
+      order: Number(data.order) || 0
+    };
+    const response = await api.post('/organization/nodes', cleanData);
     return response.data;
   },
   
   // Update node
   update: async (id, data) => {
-    const response = await api.put(`/organization/nodes/${id}`, data);
+    const cleanData = {
+      ...data,
+      parent_id: data.parent_id === '' || data.parent_id === undefined ? null : data.parent_id
+    };
+    const response = await api.put(`/organization/nodes/${id}`, cleanData);
     return response.data;
   },
   
@@ -96,11 +111,10 @@ export const organizationAPI = {
   // Move node
   move: async (id, newParentId) => {
     const response = await api.patch(`/organization/nodes/${id}/move`, {
-      new_parent_id: newParentId
+      new_parent_id: newParentId === '' || newParentId === undefined ? null : newParentId
     });
     return response.data;
   }
 };
-
 
 export default api;

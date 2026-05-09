@@ -44,6 +44,7 @@ export const OrganizationChart = () => {
     setLoading(true);
     try {
       const response = await apiService.get('/organization/tree');
+      alert(response.data)
       setTreeData(response.data.data);
     } catch (error) {
       showNotification('Failed to load organization tree', 'error');

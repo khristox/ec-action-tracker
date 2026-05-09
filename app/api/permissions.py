@@ -2,7 +2,7 @@ from typing import List, Optional, Any
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.api.deps import get_current_user
+from api.deps import get_current_user
 from app.models.user import User,Permission
 from app.core.condition_checker import ConditionChecker
 from app.db.base import get_db

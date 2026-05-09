@@ -57,7 +57,6 @@ const Meetings = () => {
   const [page, setPage] = useState(1);
   const [rowsPerPage] = useState(10);
   const [viewMode, setViewMode] = useState(() => {
-    // Load saved view mode from localStorage
     const saved = localStorage.getItem(STORAGE_KEYS.VIEW_MODE);
     return saved === 'table' ? 'table' : 'grid';
   });
@@ -67,7 +66,6 @@ const Meetings = () => {
   const [participants, setParticipants] = useState([]);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [tabValue, setTabValue] = useState(() => {
-    // Load saved tab from localStorage
     const saved = localStorage.getItem(STORAGE_KEYS.SELECTED_TAB);
     return saved ? parseInt(saved) : 0;
   });
@@ -119,7 +117,7 @@ const Meetings = () => {
     loadRecurringMeetings();
   }, [dispatch, loadRecurringMeetings]);
 
-  // Load meetings when filters change
+  // Load meetings when filters/page change — all filtering is server-side
   useEffect(() => {
     const params = {
       page,
@@ -135,14 +133,18 @@ const Meetings = () => {
     loadMeetings(params);
   }, [page, searchTerm, statusFilter, rowsPerPage, showUpcoming, showPast, loadMeetings]);
 
+  // Reset to page 1 whenever filters change (but not page itself)
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter, showUpcoming, showPast]);
+
   const handlePageChange = (event, newPage) => {
     setPage(newPage);
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
-    // Reset page when switching tabs
     setPage(1);
   };
 
@@ -182,20 +184,16 @@ const Meetings = () => {
     setShowUpcoming(true);
     setShowPast(false);
     setPage(1);
-    // Clear saved filters
     localStorage.removeItem(STORAGE_KEYS.STATUS_FILTER);
     localStorage.removeItem(STORAGE_KEYS.SHOW_UPCOMING);
     localStorage.removeItem(STORAGE_KEYS.SHOW_PAST);
   };
 
   const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
-  const totalPages = Math.ceil(pagination.total / rowsPerPage);
-  
-  const filteredMeetings = meetings.filter(m => {
-    if (statusFilter !== 'all') return true;
-    if (searchTerm) return m.title.toLowerCase().includes(searchTerm.toLowerCase());
-    return true;
-  });
+
+  // Use server-driven total for pagination — do NOT re-filter client-side
+  const totalPages = Math.ceil((pagination.total || 0) / rowsPerPage);
+
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', pb: isMobile ? 8 : 4, bgcolor: 'background.default' }}>
       <Box sx={{ p: isMobile ? 2 : 3 }}>
@@ -226,7 +224,7 @@ const Meetings = () => {
           </Button>
         </Stack>
 
-        {/* Tabs with persistence */}
+        {/* Tabs */}
         <Paper sx={{ borderRadius: 3, overflow: 'hidden', mb: 3 }}>
           <Tabs 
             value={tabValue} 
@@ -239,14 +237,8 @@ const Meetings = () => {
               '& .MuiTabs-indicator': { bgcolor: COLORS.primary, height: 3 }
             }}
           >
-            <Tab 
-              label={`Regular Meetings (${meetings.length})`} 
-              iconPosition="start"
-            />
-            <Tab 
-              label={`Recurring Series (${recurringMeetings.length})`}
-              iconPosition="start" 
-            />
+            <Tab label={`Regular Meetings (${pagination.total ?? meetings.length})`} />
+            <Tab label={`Recurring Series (${recurringMeetings.length})`} />
           </Tabs>
         </Paper>
 
@@ -276,24 +268,35 @@ const Meetings = () => {
           {viewMode === 'grid' && (
             <>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                {loading && meetings.length === 0 ? (
+                {loading ? (
                   [...Array(isMobile ? 3 : 6)].map((_, i) => (
                     <Box key={i} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)' } }}>
                       <Skeleton variant="rounded" height={isMobile ? 420 : 400} sx={{ borderRadius: 3 }} />
                     </Box>
                   ))
-                ) : filteredMeetings.length === 0 ? (
+                ) : meetings.length === 0 ? (
                   <Box sx={{ textAlign: 'center', py: 8, width: '100%' }}>
                     <Typography variant="h6" color="text.secondary">No meetings found</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       {hasActiveFilters ? 'Try adjusting your search or filters' : 'Create your first meeting'}
                     </Typography>
-                    {hasActiveFilters && <Button onClick={handleClearFilters} sx={{ mt: 2 }} variant="outlined">Clear Filters</Button>}
-                    {!hasActiveFilters && <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<AddIcon />}>Create Meeting</Button>}
+                    {hasActiveFilters && (
+                      <Button onClick={handleClearFilters} sx={{ mt: 2 }} variant="outlined">
+                        Clear Filters
+                      </Button>
+                    )}
+                    {!hasActiveFilters && (
+                      <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<AddIcon />}>
+                        Create Meeting
+                      </Button>
+                    )}
                   </Box>
                 ) : (
-                  filteredMeetings.map((meeting) => (
-                    <Box key={meeting.id} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)', lg: '1 1 calc(25% - 24px)' }, display: 'flex' }}>
+                  meetings.map((meeting) => (
+                    <Box 
+                      key={meeting.id} 
+                      sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)', lg: '1 1 calc(25% - 24px)' }, display: 'flex' }}
+                    >
                       <MeetingCard 
                         meeting={meeting} 
                         statusOptions={statusOptions} 
@@ -307,7 +310,8 @@ const Meetings = () => {
                 )}
               </Box>
               
-              {!loading && pagination.total > rowsPerPage && (
+              {/* Pagination — driven by server total */}
+              {!loading && totalPages > 1 && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
                   <Pagination
                     count={totalPages}
@@ -325,12 +329,29 @@ const Meetings = () => {
 
           {/* Table View */}
           {viewMode === 'table' && (
-            <MeetingTableView 
-              meetings={filteredMeetings}
-              onView={(id) => navigate(`/meetings/${id}`)}
-              onEdit={(id) => navigate(`/meetings/${id}/edit`)}
-              onNotify={handleNotifyClick}
-            />
+            <>
+              <MeetingTableView 
+                meetings={meetings}
+                onView={(id) => navigate(`/meetings/${id}`)}
+                onEdit={(id) => navigate(`/meetings/${id}/edit`)}
+                onNotify={handleNotifyClick}
+              />
+
+              {/* Pagination for table view */}
+              {!loading && totalPages > 1 && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                  <Pagination
+                    count={totalPages}
+                    page={page}
+                    onChange={handlePageChange}
+                    color="primary"
+                    size={isMobile ? "small" : "medium"}
+                    showFirstButton
+                    showLastButton
+                  />
+                </Box>
+              )}
+            </>
           )}
         </TabPanel>
 
@@ -351,7 +372,7 @@ const Meetings = () => {
         </TabPanel>
       </Box>
 
-      {/* Mobile FAB Button */}
+      {/* Mobile FAB */}
       {isMobile && (
         <Fab 
           color="primary" 

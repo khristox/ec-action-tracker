@@ -1,469 +1,415 @@
 # routers/meetings/organization.py
-"""
-Organization Chart API Routes
-"""
-import functools
-from app.api import deps
-from app.crud.meetings.organization import OrganizationCRUD
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from app.models.meetings.organization import (
-    OrganizationNodeCreate,
-    OrganizationNodeUpdate,
-    OrganizationNodeResponse,
-    MoveNodeRequest,
-    ReorderChildrenRequest
-)
-import logging
-from datetime import datetime
+from sqlalchemy import select 
 
-# Configure logging
-logger = logging.getLogger(__name__)
+from app.models.meetings.organization import OrganizationNode
+from app.schemas.organization import OrganizationNodeCreate, OrganizationNodeResponse, OrganizationNodeUpdate, TreeNodeResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Optional, Dict, Any, Union
+from app.db.session import get_db
+from app.crud.meetings.organization import OrganizationCRUD
+from datetime import datetime
+import uuid
+
+
+# ==================== Router ====================
 
 router = APIRouter()
+router_departments = APIRouter()
 
-# ==================== Helper Functions ====================
 
-def handle_exceptions(func):
-    """Decorator for consistent exception handling"""
-    @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-        except ValueError as e:
-            logger.warning(f"Validation error in {func.__name__}: {str(e)}")
-            raise HTTPException(status_code=400, detail=str(e))
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error in {func.__name__}: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=500, 
-                detail="An internal server error occurred. Please try again later."
-            )
-    return wrapper
-
-# ==================== CRUD Operations ====================
-
-@router.get(
-    "/tree",
-    response_model=List[dict],
-    summary="Get organization tree"
-)
-@handle_exceptions
+@router.get("/tree", response_model=List[TreeNodeResponse])
 async def get_organization_tree(
-    root_id: Optional[int] = Query(None, description="Root node ID (omit for full tree)"),
-    db: Session = Depends(deps.get_db)
+    root_id: Optional[str] = Query(None, description="Root node UUID"),  # Changed to str
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get organization hierarchy as a tree structure"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async methods
-    if root_id:
-        tree = await crud.get_tree(root_id)
-    else:
-        tree = await crud.get_tree()
-    
-    return tree if tree else []
+    """Get organization tree structure"""
+    try:
+        crud = OrganizationCRUD(db)
+        tree_data = await crud.get_tree(root_id)
+        
+        # Convert to response models
+        def convert_to_response(node_dict: Dict) -> TreeNodeResponse:
+            children = [convert_to_response(child) for child in node_dict.get('children', [])]
+            return TreeNodeResponse(
+                id=str(node_dict['id']),
+                name=node_dict['name'],
+                title=node_dict['title'],
+                parent_id=str(node_dict.get('parent_id')) if node_dict.get('parent_id') else None,
+                level=node_dict.get('level', 0),
+                path=node_dict.get('path', ''),
+                order=node_dict.get('order', 0),
+                is_active=node_dict.get('is_active', True),
+                email=node_dict.get('email'),
+                phone=node_dict.get('phone'),
+                department_code=node_dict.get('department_code'),
+                location=node_dict.get('location'),
+                employee_count=node_dict.get('employee_count', 0),
+                budget=node_dict.get('budget', 0.0),
+                color=node_dict.get('color', '#4A90E2'),
+                created_at=node_dict.get('created_at'),
+                updated_at=node_dict.get('updated_at'),
+                children=children
+            )
+        
+        result = [convert_to_response(node) for node in tree_data]
+        return result
+    except Exception as e:
+        print(f"Error in get_organization_tree: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get(
-    "/nodes",
-    response_model=List[OrganizationNodeResponse],
-    summary="Get all nodes"
-)
-@handle_exceptions
+@router.get("/nodes", response_model=List[OrganizationNodeResponse])
 async def get_all_nodes(
-    include_inactive: bool = Query(False, description="Include inactive nodes"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum records to return"),
-    db: Session = Depends(deps.get_db)
+    include_inactive: bool = Query(False),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get all organization nodes as a flat list with pagination"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    nodes = await crud.get_all_nodes(
-        include_inactive=include_inactive,
-        skip=skip,
-        limit=limit
-    )
-    
-    return nodes
+    """Get all nodes as flat list"""
+    try:
+        crud = OrganizationCRUD(db)
+        nodes = await crud.get_all_nodes(include_inactive=include_inactive, skip=skip, limit=limit)
+        
+        return [
+            OrganizationNodeResponse(
+                id=str(node.id),
+                name=node.name,
+                title=node.title,
+                parent_id=str(node.parent_id) if node.parent_id else None,
+                level=node.level,
+                path=node.path,
+                order=node.order,
+                is_active=node.is_active,
+                email=node.email,
+                phone=node.phone,
+                department_code=node.department_code,
+                location=node.location,
+                employee_count=node.employee_count,
+                budget=node.budget,
+                color=node.color,
+                created_at=node.created_at.isoformat() if node.created_at else None,
+                updated_at=node.updated_at.isoformat() if node.updated_at else None
+            )
+            for node in nodes
+        ]
+    except Exception as e:
+        print(f"Error in get_all_nodes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/roots", response_model=List[OrganizationNodeResponse])
+async def get_root_nodes(db: AsyncSession = Depends(get_db)):
+    """Get all root nodes"""
+    try:
+        crud = OrganizationCRUD(db)
+        nodes = await crud.get_root_nodes()
+        
+        return [
+            OrganizationNodeResponse(
+                id=str(node.id),
+                name=node.name,
+                title=node.title,
+                parent_id=str(node.parent_id) if node.parent_id else None,
+                level=node.level,
+                path=node.path,
+                order=node.order,
+                is_active=node.is_active,
+                email=node.email,
+                phone=node.phone,
+                department_code=node.department_code,
+                location=node.location,
+                employee_count=node.employee_count,
+                budget=node.budget,
+                color=node.color,
+                created_at=node.created_at.isoformat() if node.created_at else None,
+                updated_at=node.updated_at.isoformat() if node.updated_at else None
+            )
+            for node in nodes
+        ]
+    except Exception as e:
+        print(f"Error in get_root_nodes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get(
-    "/roots",
-    response_model=List[OrganizationNodeResponse],
-    summary="Get root nodes"
-)
-@handle_exceptions
-async def get_root_nodes(db: Session = Depends(deps.get_db)):
-    """Get all root-level organization nodes"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    roots = await crud.get_root_nodes()
-    
-    return roots if roots else []
-
-
-@router.get(
-    "/nodes/{node_id}",
-    response_model=OrganizationNodeResponse,
-    summary="Get node by ID"
-)
-@handle_exceptions
+@router.get("/nodes/{node_id}", response_model=OrganizationNodeResponse)
 async def get_node(
-    node_id: int,
-    db: Session = Depends(deps.get_db)
+    node_id: str,  # Changed to str
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get a specific organization node"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    node = await crud.get_node(node_id)
-    
-    if not node:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Node with ID {node_id} not found or is inactive"
+    """Get a specific node"""
+    try:
+        crud = OrganizationCRUD(db)
+        node = await crud.get_node(node_id)
+        
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        
+        return OrganizationNodeResponse(
+            id=str(node.id),
+            name=node.name,
+            title=node.title,
+            parent_id=str(node.parent_id) if node.parent_id else None,
+            level=node.level,
+            path=node.path,
+            order=node.order,
+            is_active=node.is_active,
+            email=node.email,
+            phone=node.phone,
+            department_code=node.department_code,
+            location=node.location,
+            employee_count=node.employee_count,
+            budget=node.budget,
+            color=node.color,
+            created_at=node.created_at.isoformat() if node.created_at else None,
+            updated_at=node.updated_at.isoformat() if node.updated_at else None
         )
-    
-    return node
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_node: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post(
-    "/nodes",
-    response_model=OrganizationNodeResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create organization node"
-)
-@handle_exceptions
+@router.post("/nodes", response_model=OrganizationNodeResponse, status_code=status.HTTP_201_CREATED)
 async def create_node(
     node_data: OrganizationNodeCreate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
     """Create a new organization node"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    node = await crud.create_node(node_data)
-    
-    background_tasks.add_task(
-        logger.info, 
-        f"User {current_user.id} created node {node.id}: {node.name}"
-    )
-    
-    return node
+    try:
+        crud = OrganizationCRUD(db)
+        node = await crud.create_node(node_data.dict())
+        
+        return OrganizationNodeResponse(
+            id=str(node.id),
+            name=node.name,
+            title=node.title,
+            parent_id=str(node.parent_id) if node.parent_id else None,
+            level=node.level,
+            path=node.path,
+            order=node.order,
+            is_active=node.is_active,
+            email=node.email,
+            phone=node.phone,
+            department_code=node.department_code,
+            location=node.location,
+            employee_count=node.employee_count,
+            budget=node.budget,
+            color=node.color,
+            created_at=node.created_at.isoformat() if node.created_at else None,
+            updated_at=node.updated_at.isoformat() if node.updated_at else None
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error in create_node: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.put(
-    "/nodes/{node_id}",
-    response_model=OrganizationNodeResponse,
-    summary="Update node"
-)
-@handle_exceptions
+@router.put("/nodes/{node_id}", response_model=OrganizationNodeResponse)
 async def update_node(
-    node_id: int,
-    update_data: OrganizationNodeUpdate,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    node_id: str,  # Changed to str
+    node_data: OrganizationNodeUpdate,
+    db: AsyncSession = Depends(get_db)
 ):
-    """Update an organization node"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    node = await crud.update_node(node_id, update_data)
-    
-    if not node:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
-    background_tasks.add_task(
-        logger.info,
-        f"User {current_user.id} updated node {node.id}: {node.name}"
-    )
-    
-    return node
+    """Update a node"""
+    try:
+        crud = OrganizationCRUD(db)
+        node = await crud.update_node(node_id, node_data.dict(exclude_unset=True))
+        
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        
+        return OrganizationNodeResponse(
+            id=str(node.id),
+            name=node.name,
+            title=node.title,
+            parent_id=str(node.parent_id) if node.parent_id else None,
+            level=node.level,
+            path=node.path,
+            order=node.order,
+            is_active=node.is_active,
+            email=node.email,
+            phone=node.phone,
+            department_code=node.department_code,
+            location=node.location,
+            employee_count=node.employee_count,
+            budget=node.budget,
+            color=node.color,
+            created_at=node.created_at.isoformat() if node.created_at else None,
+            updated_at=node.updated_at.isoformat() if node.updated_at else None
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in update_node: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.delete(
-    "/nodes/{node_id}",
-    summary="Delete node"
-)
-@handle_exceptions
+@router.delete("/nodes/{node_id}")
 async def delete_node(
-    node_id: int,
-    background_tasks: BackgroundTasks,
-    cascade: bool = Query(True, description="Also delete all descendants"),
-    hard_delete: bool = Query(False, description="Permanently delete (use with caution)"),
-    db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    node_id: str,  # Changed to str
+    soft_delete: bool = Query(True),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Delete an organization node"""
-    crud = OrganizationCRUD(db)
-    
-    # Verify node exists
-    node = await crud.get_node(node_id, include_inactive=True)
-    if not node:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
-    node_name = node.name
-    
-    # CRITICAL: Must await async methods
-    if hard_delete:
-        success = await crud.hard_delete_node(node_id)
-    else:
-        success = await crud.soft_delete_node(node_id, cascade=cascade)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
-    background_tasks.add_task(
-        logger.info,
-        f"User {current_user.id} deleted node {node_id}: {node_name} (hard={hard_delete}, cascade={cascade})"
-    )
-    
-    return {
-        "message": f"Node '{node_name}' deleted successfully",
-        "node_id": node_id,
-        "hard_delete": hard_delete,
-        "cascade": cascade
-    }
+    """Delete a node"""
+    try:
+        crud = OrganizationCRUD(db)
+        
+        if soft_delete:
+            success = await crud.soft_delete_node(node_id)
+        else:
+            success = await crud.hard_delete_node(node_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Node not found")
+        
+        return {"message": "Node deleted successfully", "success": True}
+    except Exception as e:
+        print(f"Error in delete_node: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.patch(
-    "/nodes/{node_id}/move",
-    response_model=OrganizationNodeResponse,
-    summary="Move node"
-)
-@handle_exceptions
+@router.patch("/nodes/{node_id}/move", response_model=OrganizationNodeResponse)
 async def move_node(
-    node_id: int,
-    move_request: MoveNodeRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
+    node_id: str,  # Changed to str
+    new_parent_id: Optional[str] = Query(None, description="New parent department UUID"),
+    new_order: Optional[int] = Query(None, ge=0),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Move a node to a new parent"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    moved_node = await crud.move_node(node_id, move_request.new_parent_id, move_request.new_order)
-    
-    if not moved_node:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
-    background_tasks.add_task(
-        logger.info,
-        f"User {current_user.id} moved node {node_id} to parent {move_request.new_parent_id}"
-    )
-    
-    return moved_node
+    """Move node to new parent"""
+    try:
+        crud = OrganizationCRUD(db)
+        node = await crud.move_node(node_id, new_parent_id, new_order)
+        if not node:
+            raise HTTPException(status_code=404, detail="Node not found")
+        
+        return OrganizationNodeResponse(
+            id=str(node.id),
+            name=node.name,
+            title=node.title,
+            parent_id=str(node.parent_id) if node.parent_id else None,
+            level=node.level,
+            path=node.path,
+            order=node.order,
+            is_active=node.is_active,
+            email=node.email,
+            phone=node.phone,
+            department_code=node.department_code,
+            location=node.location,
+            employee_count=node.employee_count,
+            budget=node.budget,
+            color=node.color,
+            created_at=node.created_at.isoformat() if node.created_at else None,
+            updated_at=node.updated_at.isoformat() if node.updated_at else None
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error in move_node: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get(
-    "/nodes/{node_id}/descendants",
-    response_model=List[OrganizationNodeResponse],
-    summary="Get descendants"
-)
-@handle_exceptions
-async def get_descendants(
-    node_id: int,
-    include_self: bool = Query(False, description="Include the node itself"),
-    max_depth: Optional[int] = Query(None, ge=1, description="Maximum depth"),
-    db: Session = Depends(deps.get_db)
-):
-    """Get all descendant nodes in the hierarchy"""
-    crud = OrganizationCRUD(db)
-    
-    # Verify node exists
-    node = await crud.get_node(node_id)
-    if not node:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
-    # CRITICAL: Must await async method
-    descendants = await crud.get_descendants(node_id, include_self=include_self, max_depth=max_depth)
-    
-    return descendants
-
-
-@router.get(
-    "/nodes/{node_id}/ancestors",
-    response_model=List[OrganizationNodeResponse],
-    summary="Get ancestors"
-)
-@handle_exceptions
-async def get_ancestors(
-    node_id: int,
-    include_self: bool = Query(False, description="Include the node itself"),
-    db: Session = Depends(deps.get_db)
-):
-    """Get all ancestor nodes in the hierarchy chain"""
-    crud = OrganizationCRUD(db)
-    
-    # Verify node exists
-    node = await crud.get_node(node_id)
-    if not node:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
-    
-    # CRITICAL: Must await async method
-    ancestors = await crud.get_ancestors(node_id, include_self=include_self)
-    
-    return ancestors
-
-
-@router.get(
-    "/search",
-    response_model=List[OrganizationNodeResponse],
-    summary="Search nodes"
-)
-@handle_exceptions
+@router.get("/search", response_model=List[OrganizationNodeResponse])
 async def search_nodes(
-    q: str = Query(..., min_length=1, max_length=100, description="Search term"),
-    limit: int = Query(50, ge=1, le=200, description="Maximum results"),
-    include_inactive: bool = Query(False, description="Include inactive nodes"),
-    db: Session = Depends(deps.get_db)
+    q: str = Query(..., min_length=2, description="Search term"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Search for organization nodes"""
-    crud = OrganizationCRUD(db)
+    """Search nodes by name, title, or department code"""
+    try:
+        crud = OrganizationCRUD(db)
+        nodes = await crud.search_nodes(q, limit)
+        
+        return [
+            OrganizationNodeResponse(
+                id=str(node.id),
+                name=node.name,
+                title=node.title,
+                parent_id=str(node.parent_id) if node.parent_id else None,
+                level=node.level,
+                path=node.path,
+                order=node.order,
+                is_active=node.is_active,
+                email=node.email,
+                phone=node.phone,
+                department_code=node.department_code,
+                location=node.location,
+                employee_count=node.employee_count,
+                budget=node.budget,
+                color=node.color,
+                created_at=node.created_at.isoformat() if node.created_at else None,
+                updated_at=node.updated_at.isoformat() if node.updated_at else None
+            )
+            for node in nodes
+        ]
+    except Exception as e:
+        print(f"Error in search_nodes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     
-    # CRITICAL: Must await async method
-    nodes = await crud.search_nodes(q, limit, include_inactive=include_inactive)
-    
-    return nodes
 
-
-@router.get(
-    "/summary",
-    summary="Get organization summary"
-)
-@handle_exceptions
-async def get_organization_summary(db: Session = Depends(deps.get_db)):
-    """Get organization hierarchy summary statistics"""
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    summary = await crud.get_hierarchy_summary()
-    
-    return {
-        "success": True,
-        "data": summary
-    }
-
-
-@router.patch(
-    "/nodes/reorder",
-    summary="Reorder children"
-)
-@handle_exceptions
-async def reorder_children(
-    request: ReorderChildrenRequest,
-    parent_id: Optional[int] = Query(None, description="Parent node ID"),
-    db: Session = Depends(deps.get_db)
+@router.get("/", response_model=List[OrganizationNodeResponse])
+@router_departments.get("", response_model=List[OrganizationNodeResponse])
+async def get_organization_nodes(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    is_active: Optional[bool] = Query(None),
+    parent_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Reorder child nodes under a parent"""
-    if not request.ordered_ids:
-        raise HTTPException(status_code=400, detail="ordered_ids cannot be empty")
+    """Get all organization nodes with optional filtering"""
+    query = select(OrganizationNode)
     
-    crud = OrganizationCRUD(db)
+    if is_active is not None:
+        query = query.where(OrganizationNode.is_active == is_active)
     
-    # CRITICAL: Must await async method
-    await crud.reorder_children(parent_id, request.ordered_ids)
+    if parent_id is not None:
+        query = query.where(OrganizationNode.parent_id == parent_id)
     
-    return {
-        "message": "Children reordered successfully",
-        "parent_id": parent_id,
-        "ordered_count": len(request.ordered_ids)
-    }
+    query = query.offset(skip).limit(limit).order_by(OrganizationNode.order, OrganizationNode.name)
+    
+    result = await db.execute(query)
+    nodes = result.scalars().all()
+    
+    return [node.to_dict() for node in nodes]
 
-
-@router.post(
-    "/nodes/bulk",
-    response_model=List[OrganizationNodeResponse],
-    status_code=status.HTTP_201_CREATED,
-    summary="Bulk create nodes"
-)
-@handle_exceptions
-async def bulk_create_nodes(
-    nodes_data: List[OrganizationNodeCreate],
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(deps.get_db),
-    current_user = Depends(deps.get_current_user)
-):
-    """Create multiple organization nodes in a single request"""
-    if not nodes_data:
-        raise HTTPException(status_code=400, detail="nodes_data cannot be empty")
-    
-    if len(nodes_data) > 100:
-        raise HTTPException(status_code=400, detail="Maximum 100 nodes per bulk operation")
-    
-    crud = OrganizationCRUD(db)
-    
-    # CRITICAL: Must await async method
-    created_nodes = await crud.bulk_create_nodes(nodes_data)
-    
-    background_tasks.add_task(
-        logger.info,
-        f"User {current_user.id} bulk created {len(created_nodes)} nodes"
-    )
-    
-    return created_nodes
-
-
-@router.get(
-    "/path/{node_id}",
-    summary="Get node path"
-)
-@handle_exceptions
-async def get_node_path(
+@router.get("/{node_id}", response_model=OrganizationNodeResponse)
+@router_departments.get("/{node_id}", response_model=OrganizationNodeResponse)
+async def get_organization_node(
     node_id: int,
-    db: Session = Depends(deps.get_db)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get the complete path from root to the specified node"""
-    crud = OrganizationCRUD(db)
+    """Get a specific organization node by ID"""
+    query = select(OrganizationNode).where(OrganizationNode.id == node_id)
+    result = await db.execute(query)
+    node = result.scalar_one_or_none()
     
-    node = await crud.get_node(node_id)
     if not node:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+        raise HTTPException(status_code=404, detail="Organization node not found")
     
-    ancestors = await crud.get_ancestors(node_id, include_self=True)
-    
-    return {
-        "node_id": node_id,
-        "node_name": node.name,
-        "path": [{"id": n.id, "name": n.name, "level": n.level} for n in ancestors],
-        "depth": len(ancestors) - 1
-    }
+    return node.to_dict()
 
-
-@router.get(
-    "/export",
-    summary="Export organization data"
-)
-@handle_exceptions
-async def export_organization(
-    format: str = Query("json", regex="^(json|tree)$", description="Export format"),
-    db: Session = Depends(deps.get_db)
+@router.get("/{node_id}/ancestors", response_model=List[OrganizationNodeResponse])
+@router_departments.get("/{node_id}/ancestors", response_model=List[OrganizationNodeResponse])
+async def get_node_ancestors(
+    node_id: int,
+    db: AsyncSession = Depends(get_db)
 ):
-    """Export organization data in various formats"""
-    crud = OrganizationCRUD(db)
+    """Get all ancestors of a node (parents, grandparents, etc.)"""
+    # Execute the stored procedure or recursive query
+    from sqlalchemy import text
+    query = text("CALL GetNodeAncestors(:node_id)")
+    result = await db.execute(query, {"node_id": node_id})
+    ancestors = result.fetchall()
     
-    if format == "json":
-        nodes = await crud.get_all_nodes()
-        return {
-            "export_date": datetime.utcnow().isoformat(),
-            "total_nodes": len(nodes),
-            "data": [node.to_dict() for node in nodes]
-        }
-    else:  # tree format
-        tree = await crud.get_tree()
-        return {
-            "export_date": datetime.utcnow().isoformat(),
-            "format": "tree",
-            "data": tree
-        }
+    return [dict(ancestor._mapping) for ancestor in ancestors]
+
+
+@router.get("/{node_id}/descendants", response_model=List[OrganizationNodeResponse])
+@router_departments.get("/{node_id}/descendants", response_model=List[OrganizationNodeResponse])
+async def get_node_descendants(
+    node_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all descendants of a node (children, grandchildren, etc.)"""
+    from sqlalchemy import text
+    query = text("CALL GetNodeDescendants(:node_id)")
+    result = await db.execute(query, {"node_id": node_id})
+    descendants = result.fetchall()
+    
+    return [dict(descendant._mapping) for descendant in descendants]

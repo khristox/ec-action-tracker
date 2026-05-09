@@ -1,613 +1,588 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
-  Paper,
-  Typography,
-  TextField,
-  Button,
-  Grid,
-  Avatar,
-  CircularProgress,
-  Divider,
-  IconButton,
-  Chip,
-  Stack,
-  FormControlLabel,
-  Switch,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  OutlinedInput,
-  Checkbox,
-  ListItemText,
-  Tooltip,
-  Alert,
-  Slide,
-  useTheme,
-  useMediaQuery,
-  alpha,
+  Box, Card, CardContent, Typography, Avatar, Chip, IconButton,
+  Divider, Stack, Button, Dialog, DialogTitle, DialogContent,
+  DialogActions, TextField, Alert, CircularProgress, alpha,
+  useTheme, Tooltip, Grid, Paper, Skeleton
 } from '@mui/material';
 import {
-  Edit,
-  Save,
-  Close,
-  PersonOutline,
-  EmailOutlined,
-  PhoneOutlined,
-  AdminPanelSettingsOutlined,
-  VerifiedUserOutlined,
-  LockOpenOutlined,
-  LockOutlined,
-  ArrowBack,
-  BadgeOutlined,
-  CalendarTodayOutlined,
-  AccessTimeOutlined,
+  CloseOutlined, EditOutlined, LockOutlined, EmailOutlined,
+  PhoneOutlined, BusinessOutlined, VerifiedUserOutlined,
+  LockOpenOutlined, AdminPanelSettingsOutlined, GroupsOutlined,
+  ApartmentOutlined, LinkOutlined, PersonOutlineOutlined,
+  AccessTimeOutlined, BadgeOutlined
 } from '@mui/icons-material';
-import { useDispatch, useSelector } from 'react-redux';
-import { updateUser, updateUserRoles } from '../../store/slices/adminSlice';
-import { fetchRoles, selectAllRoles, selectRolesLoading } from '../../store/slices/roleSlice';
+import { useDispatch } from 'react-redux';
+import { updateUser, resetUserPassword } from '../../store/slices/adminSlice';
+import api from '../../services/api';
 
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = {
-  PaperProps: {
-    style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 },
-  },
+// Role color mapping
+const ROLE_COLORS = {
+  admin: 'error',
+  manager: 'warning',
+  supervisor: 'info',
+  user: 'default',
+  head: 'error',
+  member: 'default',
 };
 
-// Read-only info row
-const InfoRow = ({ icon: Icon, label, value, mono = false }) => {
+const UserDetailPanel = ({ user, onClose, onUpdated, departmentAssignments = [] }) => {
   const theme = useTheme();
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 1.5,
-        py: 1.25,
-        px: 1.5,
-        borderRadius: 1.5,
-        transition: 'background 0.15s',
-        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.04) },
-      }}
-    >
-      <Icon
-        fontSize="small"
-        sx={{ mt: 0.25, color: 'text.secondary', flexShrink: 0 }}
-      />
-      <Box sx={{ minWidth: 0 }}>
-        <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 0.25, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: '0.65rem' }}>
-          {label}
-        </Typography>
-        <Typography
-          variant="body2"
-          color="text.primary"
-          sx={{ fontFamily: mono ? 'monospace' : 'inherit', wordBreak: 'break-all' }}
-        >
-          {value || '—'}
-        </Typography>
-      </Box>
-    </Box>
-  );
-};
-
-const UserDetailPanel = ({ user, onClose, onUpdated }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const dispatch = useDispatch();
-
-  const rolesList = useSelector(selectAllRoles);
-  const rolesLoading = useSelector(selectRolesLoading);
-
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [formErrors, setFormErrors] = useState({});
-
+  const [editMode, setEditMode] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    email: '',
-    username: '',
     first_name: '',
     last_name: '',
+    email: '',
     phone: '',
-    roles: [],
-    is_active: true,
-    is_verified: false,
   });
+  const [passwordData, setPasswordData] = useState({
+    password: '',
+    confirm_password: '',
+  });
+  const [error, setError] = useState('');
+  const [loadingDepts, setLoadingDepts] = useState(false);
+  const [departmentsWithDetails, setDepartmentsWithDetails] = useState([]);
 
+  // Fetch department details if not provided
   useEffect(() => {
-    dispatch(fetchRoles());
-  }, [dispatch]);
+    const fetchDepartmentDetails = async () => {
+      if (!departmentAssignments || departmentAssignments.length === 0) {
+        setDepartmentsWithDetails([]);
+        return;
+      }
 
+      setLoadingDepts(true);
+      try {
+        // Fetch all departments to get names
+        const response = await api.get('/departments');
+        const allDepartments = response.data || [];
+        
+        // Map assignments with department details
+        const enriched = departmentAssignments.map(assignment => {
+          const dept = allDepartments.find(d => d.id === assignment.department_id);
+          return {
+            ...assignment,
+            department_name: dept?.name || assignment.department_name || 'Unknown Department',
+            department_description: dept?.description,
+            is_active: dept?.is_active !== false,
+          };
+        });
+        
+        setDepartmentsWithDetails(enriched);
+      } catch (error) {
+        console.error('Error fetching department details:', error);
+        // Fallback to provided data
+        setDepartmentsWithDetails(departmentAssignments);
+      } finally {
+        setLoadingDepts(false);
+      }
+    };
+
+    fetchDepartmentDetails();
+  }, [departmentAssignments]);
+
+  // Initialize form data when user changes
   useEffect(() => {
     if (user) {
       setFormData({
-        email: user.email || '',
-        username: user.username || '',
         first_name: user.first_name || '',
         last_name: user.last_name || '',
+        email: user.email || '',
         phone: user.phone || '',
-        roles: [...(user.roles || [])],
-        is_active: user.is_active ?? true,
-        is_verified: user.is_verified ?? false,
       });
-      setIsEditing(false);
-      setError('');
-      setSuccess('');
-      setFormErrors({});
     }
   }, [user]);
 
-  if (!user) return null;
-
-  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username;
-  const initials = (user.first_name?.[0] || user.username?.[0] || 'U').toUpperCase();
-
-  const getRoleDetails = (roleCode) => {
-    const role = rolesList?.find(r => r.code === roleCode);
-    return {
-      name: role?.name || roleCode,
-      color: roleCode === 'admin' ? 'error' : roleCode === 'manager' ? 'warning' : 'primary',
-    };
+  const handleEdit = () => {
+    setEditMode(true);
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    if (formErrors[name]) setFormErrors(prev => ({ ...prev, [name]: '' }));
-  };
-
-  const handleRoleChange = (e) => {
-    setFormData(prev => ({ ...prev, roles: [...e.target.value] }));
-  };
-
-  const validate = () => {
-    const errs = {};
-    if (!formData.email) errs.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(formData.email)) errs.email = 'Email is invalid';
-    if (!formData.username) errs.username = 'Username is required';
-    else if (formData.username.length < 3) errs.username = 'At least 3 characters';
-    setFormErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const handleSave = async () => {
-    if (!validate()) return;
-    setIsSubmitting(true);
+  const handleCancelEdit = () => {
+    setEditMode(false);
+    setFormData({
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      email: user.email || '',
+      phone: user.phone || '',
+    });
     setError('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!formData.email) {
+      setError('Email is required');
+      return;
+    }
+    
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      setError('Invalid email format');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    
     try {
       await dispatch(updateUser({
         id: user.id,
-        email: formData.email,
-        username: formData.username,
         first_name: formData.first_name,
         last_name: formData.last_name,
+        email: formData.email,
         phone: formData.phone,
-        is_active: formData.is_active,
-        is_verified: formData.is_verified,
+        is_active: user.is_active,
+        is_verified: user.is_verified,
+        is_superuser: user.is_superuser,
       })).unwrap();
-
-      const currentRoles = [...(user.roles || [])].sort();
-      const newRoles = [...(formData.roles || [])].sort();
-      if (JSON.stringify(currentRoles) !== JSON.stringify(newRoles)) {
-        await dispatch(updateUserRoles({ id: user.id, roles: [...newRoles] })).unwrap();
-      }
-
-      setSuccess('User updated successfully');
-      setIsEditing(false);
+      
+      setEditMode(false);
       if (onUpdated) onUpdated();
     } catch (err) {
       setError(err.message || 'Failed to update user');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const handleCancel = () => {
-    setFormData({
-      email: user.email || '',
-      username: user.username || '',
-      first_name: user.first_name || '',
-      last_name: user.last_name || '',
-      phone: user.phone || '',
-      roles: [...(user.roles || [])],
-      is_active: user.is_active ?? true,
-      is_verified: user.is_verified ?? false,
-    });
-    setFormErrors({});
+  const handleResetPassword = async () => {
+    if (!passwordData.password) {
+      setError('Password is required');
+      return;
+    }
+    
+    if (passwordData.password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    
+    if (passwordData.password !== passwordData.confirm_password) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    setLoading(true);
     setError('');
-    setIsEditing(false);
+    
+    try {
+      await dispatch(resetUserPassword({
+        user_id: user.id,
+        new_password: passwordData.password,
+      })).unwrap();
+      
+      setResetDialogOpen(false);
+      setPasswordData({ password: '', confirm_password: '' });
+      if (onUpdated) onUpdated();
+    } catch (err) {
+      setError(err.message || 'Failed to reset password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!user) {
+    return null;
+  }
+
+  // Get role details
+  const getRoleDetails = (roleCode) => {
+    const roleNames = {
+      admin: 'Administrator',
+      manager: 'Manager',
+      supervisor: 'Supervisor',
+      user: 'User',
+      head: 'Department Head',
+      member: 'Member',
+    };
+    return {
+      name: roleNames[roleCode] || roleCode,
+      color: ROLE_COLORS[roleCode] || 'default',
+    };
+  };
+
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Never';
+    return new Date(dateString).toLocaleString();
   };
 
   return (
-    <Slide direction="left" in mountOnEnter unmountOnExit>
-      <Paper
-        elevation={0}
+    <Card
+      elevation={0}
+      sx={{
+        borderRadius: 2.5,
+        border: '1px solid',
+        borderColor: 'divider',
+        overflow: 'visible',
+        position: 'relative',
+        bgcolor: 'background.paper',
+      }}
+    >
+      {/* Close button */}
+      <IconButton
+        onClick={onClose}
         sx={{
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          borderRadius: 2,
-          border: '1px solid',
-          borderColor: 'divider',
-          bgcolor: 'background.paper',
-          overflow: 'hidden',
+          position: 'absolute',
+          right: 8,
+          top: 8,
+          zIndex: 1,
+          bgcolor: (t) => alpha(t.palette.common.black, 0.05),
+          '&:hover': { bgcolor: (t) => alpha(t.palette.common.black, 0.1) },
         }}
+        size="small"
       >
-        {/* ── Header Banner ── */}
-        <Box
-          sx={{
-            position: 'relative',
-            background: theme.palette.mode === 'dark'
-              ? `linear-gradient(135deg, ${alpha(theme.palette.primary.dark, 0.6)} 0%, ${alpha(theme.palette.secondary.dark, 0.4)} 100%)`
-              : `linear-gradient(135deg, ${alpha(theme.palette.primary.light, 0.3)} 0%, ${alpha(theme.palette.secondary.light, 0.2)} 100%)`,
-            pt: 4,
-            pb: 7,
-            px: 3,
-          }}
-        >
-          <IconButton
-            onClick={onClose}
-            size="small"
-            sx={{
-              position: 'absolute',
-              top: 12,
-              right: 12,
-              bgcolor: alpha(theme.palette.background.paper, 0.7),
-              backdropFilter: 'blur(4px)',
-              '&:hover': { bgcolor: alpha(theme.palette.error.main, 0.15), color: 'error.main' },
-            }}
-          >
-            <Close fontSize="small" />
-          </IconButton>
+        <CloseOutlined fontSize="small" />
+      </IconButton>
 
-          <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 1.5, fontSize: '0.65rem' }}>
-            User Detail
-          </Typography>
-          <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight={700} color="text.primary" sx={{ mt: 0.5 }}>
-            {fullName}
-          </Typography>
-        </Box>
-
-        {/* ── Avatar (overlapping banner) ── */}
-        <Box sx={{ px: 3, mt: -5, mb: 1, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+      <CardContent sx={{ p: 3 }}>
+        {/* Header with avatar */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
           <Avatar
             sx={{
-              width: 80,
-              height: 80,
+              width: 64,
+              height: 64,
+              bgcolor: user.is_superuser ? 'warning.main' : 'primary.main',
               fontSize: 28,
               fontWeight: 700,
-              bgcolor: 'primary.main',
-              color: 'primary.contrastText',
-              border: '3px solid',
-              borderColor: 'background.paper',
-              boxShadow: theme.shadows[4],
             }}
           >
-            {initials}
+            {user.first_name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase() || 'U'}
           </Avatar>
-          <Box sx={{ pb: 0.5 }}>
-            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+          
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="h6" fontWeight={700}>
+              {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              @{user.username}
+            </Typography>
+            <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }}>
+              {user.is_superuser && (
+                <Chip
+                  label="Super Admin"
+                  size="small"
+                  color="warning"
+                  icon={<AdminPanelSettingsOutlined sx={{ fontSize: 14 }} />}
+                  sx={{ height: 20, fontSize: '0.7rem' }}
+                />
+              )}
               <Chip
                 label={user.is_active ? 'Active' : 'Inactive'}
                 size="small"
                 color={user.is_active ? 'success' : 'default'}
-                icon={user.is_active ? <LockOpenOutlined /> : <LockOutlined />}
-                sx={{ fontWeight: 600 }}
+                icon={user.is_active ? <LockOpenOutlined sx={{ fontSize: 14 }} /> : <LockOutlined sx={{ fontSize: 14 }} />}
+                sx={{ height: 20, fontSize: '0.7rem' }}
               />
               {user.is_verified && (
                 <Chip
                   label="Verified"
                   size="small"
                   color="info"
-                  icon={<VerifiedUserOutlined />}
-                  sx={{ fontWeight: 600 }}
+                  icon={<VerifiedUserOutlined sx={{ fontSize: 14 }} />}
+                  sx={{ height: 20, fontSize: '0.7rem' }}
                 />
               )}
             </Stack>
           </Box>
         </Box>
 
-        {/* ── Scrollable body ── */}
-        <Box sx={{ flex: 1, overflowY: 'auto', px: 2, pb: 3 }}>
+        <Divider sx={{ my: 2 }} />
 
-          {/* Alerts */}
-          {error && (
-            <Alert severity="error" sx={{ mb: 2, borderRadius: 1.5 }} onClose={() => setError('')}>
-              {error}
-            </Alert>
-          )}
-          {success && (
-            <Alert severity="success" sx={{ mb: 2, borderRadius: 1.5 }} onClose={() => setSuccess('')}>
-              {success}
-            </Alert>
-          )}
+        {/* User Information */}
+        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <PersonOutlineOutlined fontSize="small" />
+          User Information
+        </Typography>
 
-          {/* ── Edit toggle ── */}
-          {!isEditing ? (
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+        {editMode ? (
+          <Stack spacing={2}>
+            <TextField
+              label="First Name"
+              value={formData.first_name}
+              onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Last Name"
+              value={formData.last_name}
+              onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              size="small"
+              fullWidth
+              required
+              error={!!error && !formData.email}
+            />
+            <TextField
+              label="Phone"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              size="small"
+              fullWidth
+            />
+            
+            {error && (
+              <Alert severity="error" sx={{ py: 0 }}>
+                {error}
+              </Alert>
+            )}
+            
+            <Stack direction="row" spacing={1}>
               <Button
                 variant="contained"
+                onClick={handleSaveEdit}
+                disabled={loading}
                 size="small"
-                startIcon={<Edit />}
-                onClick={() => setIsEditing(true)}
-                sx={{ borderRadius: 2 }}
               >
-                Edit User
+                {loading ? <CircularProgress size={20} /> : 'Save'}
               </Button>
-            </Box>
-          ) : (
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 2 }}>
-              <Button size="small" variant="outlined" onClick={handleCancel} disabled={isSubmitting} sx={{ borderRadius: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={handleCancelEdit}
+                disabled={loading}
+                size="small"
+              >
                 Cancel
               </Button>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={isSubmitting ? <CircularProgress size={14} /> : <Save />}
-                onClick={handleSave}
-                disabled={isSubmitting}
-                sx={{ borderRadius: 2 }}
-              >
-                Save Changes
-              </Button>
+            </Stack>
+          </Stack>
+        ) : (
+          <Stack spacing={1.5}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <EmailOutlined fontSize="small" sx={{ color: 'text.secondary', width: 20 }} />
+              <Typography variant="body2">{user.email}</Typography>
             </Box>
+            
+            {user.phone && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <PhoneOutlined fontSize="small" sx={{ color: 'text.secondary', width: 20 }} />
+                <Typography variant="body2">{user.phone}</Typography>
+              </Box>
+            )}
+            
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <BadgeOutlined fontSize="small" sx={{ color: 'text.secondary', width: 20 }} />
+              <Typography variant="body2">
+                Created: {formatDate(user.created_at)}
+              </Typography>
+            </Box>
+            
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AccessTimeOutlined fontSize="small" sx={{ color: 'text.secondary', width: 20 }} />
+              <Typography variant="body2">
+                Last login: {formatDate(user.last_login)}
+              </Typography>
+            </Box>
+            
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<EditOutlined />}
+                onClick={handleEdit}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                color="warning"
+                startIcon={<LockOutlined />}
+                onClick={() => setResetDialogOpen(true)}
+              >
+                Reset Password
+              </Button>
+            </Stack>
+          </Stack>
+        )}
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* Roles */}
+        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <GroupsOutlined fontSize="small" />
+          Roles & Permissions
+        </Typography>
+        
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+          {user.roles && user.roles.length > 0 ? (
+            user.roles.map((role) => {
+              const { name, color } = getRoleDetails(role);
+              return (
+                <Chip
+                  key={role}
+                  label={name}
+                  size="small"
+                  color={color}
+                  variant={role === 'admin' ? 'filled' : 'outlined'}
+                  sx={{ fontWeight: 600 }}
+                />
+              );
+            })
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              No roles assigned
+            </Typography>
           )}
+        </Stack>
 
-          {/* ── VIEW MODE ── */}
-          {!isEditing && (
-            <>
-              <Typography variant="overline" sx={{ color: 'text.disabled', px: 1.5, fontSize: '0.65rem', letterSpacing: 1 }}>
-                Identity
-              </Typography>
-              <Paper variant="outlined" sx={{ borderRadius: 1.5, mb: 2, overflow: 'hidden', bgcolor: alpha(theme.palette.background.default, 0.5) }}>
-                <InfoRow icon={PersonOutline} label="Full Name" value={fullName} />
-                <Divider />
-                <InfoRow icon={BadgeOutlined} label="Username" value={`@${user.username}`} mono />
-                <Divider />
-                <InfoRow icon={EmailOutlined} label="Email" value={user.email} />
-                {user.phone && (
-                  <>
-                    <Divider />
-                    <InfoRow icon={PhoneOutlined} label="Phone" value={user.phone} />
-                  </>
-                )}
-              </Paper>
+        <Divider sx={{ my: 2 }} />
 
-              <Typography variant="overline" sx={{ color: 'text.disabled', px: 1.5, fontSize: '0.65rem', letterSpacing: 1 }}>
-                Roles & Permissions
-              </Typography>
-              <Paper variant="outlined" sx={{ borderRadius: 1.5, mb: 2, p: 1.5, bgcolor: alpha(theme.palette.background.default, 0.5) }}>
-                {(user.roles || []).length === 0 ? (
-                  <Typography variant="body2" color="text.disabled" sx={{ px: 0.5 }}>No roles assigned</Typography>
-                ) : (
-                  <Stack direction="row" flexWrap="wrap" useFlexGap spacing={0.75}>
-                    {(user.roles || []).map(roleCode => {
-                      const { name, color } = getRoleDetails(roleCode);
-                      return (
-                        <Chip
-                          key={roleCode}
-                          label={name}
-                          size="small"
-                          color={color}
-                          icon={<AdminPanelSettingsOutlined />}
-                          variant="outlined"
-                          sx={{ fontWeight: 600 }}
-                        />
-                      );
-                    })}
-                  </Stack>
-                )}
-              </Paper>
-
-              <Typography variant="overline" sx={{ color: 'text.disabled', px: 1.5, fontSize: '0.65rem', letterSpacing: 1 }}>
-                Activity
-              </Typography>
-              <Paper variant="outlined" sx={{ borderRadius: 1.5, overflow: 'hidden', bgcolor: alpha(theme.palette.background.default, 0.5) }}>
-                <InfoRow
-                  icon={CalendarTodayOutlined}
-                  label="Joined"
-                  value={user.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'}
-                />
-                <Divider />
-                <InfoRow
-                  icon={AccessTimeOutlined}
-                  label="Last Login"
-                  value={user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
-                />
-              </Paper>
-            </>
+        {/* Department Assignments */}
+        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <ApartmentOutlined fontSize="small" />
+          Department Assignments
+          {departmentsWithDetails.length > 0 && (
+            <Chip
+              label={departmentsWithDetails.length}
+              size="small"
+              color="primary"
+              sx={{ ml: 0.5, height: 18, fontSize: '0.65rem' }}
+            />
           )}
+        </Typography>
 
-          {/* ── EDIT MODE ── */}
-          {isEditing && (
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="First Name"
-                  name="first_name"
-                  value={formData.first_name}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  size="small"
-                  InputProps={{ startAdornment: <PersonOutline sx={{ mr: 1, color: 'text.disabled', fontSize: 18 }} /> }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Last Name"
-                  name="last_name"
-                  value={formData.last_name}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  size="small"
-                  InputProps={{ startAdornment: <PersonOutline sx={{ mr: 1, color: 'text.disabled', fontSize: 18 }} /> }}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Username"
-                  name="username"
-                  value={formData.username}
-                  onChange={handleChange}
-                  error={!!formErrors.username}
-                  helperText={formErrors.username}
-                  disabled={isSubmitting}
-                  required
-                  size="small"
-                  InputProps={{ startAdornment: <BadgeOutlined sx={{ mr: 1, color: 'text.disabled', fontSize: 18 }} /> }}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Email"
-                  name="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  error={!!formErrors.email}
-                  helperText={formErrors.email}
-                  disabled={isSubmitting}
-                  required
-                  size="small"
-                  InputProps={{ startAdornment: <EmailOutlined sx={{ mr: 1, color: 'text.disabled', fontSize: 18 }} /> }}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Phone"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  size="small"
-                  InputProps={{ startAdornment: <PhoneOutlined sx={{ mr: 1, color: 'text.disabled', fontSize: 18 }} /> }}
-                />
-              </Grid>
-
-              {/* Roles */}
-              <Grid item xs={12}>
-                <FormControl fullWidth size="small" disabled={isSubmitting}>
-                  <InputLabel>Roles</InputLabel>
-                  <Select
-                    multiple
-                    value={formData.roles || []}
-                    onChange={handleRoleChange}
-                    input={<OutlinedInput label="Roles" />}
-                    renderValue={(selected) => (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                        {(selected || []).map(roleCode => {
-                          const { name, color } = getRoleDetails(roleCode);
-                          return <Chip key={roleCode} label={name} size="small" color={color} />;
-                        })}
-                      </Box>
-                    )}
-                    MenuProps={MenuProps}
-                  >
-                    {rolesLoading ? (
-                      <MenuItem disabled>
-                        <CircularProgress size={18} sx={{ mr: 1 }} /> Loading…
-                      </MenuItem>
-                    ) : (
-                      rolesList?.map(role => (
-                        <MenuItem key={role.id} value={role.code}>
-                          <Checkbox checked={(formData.roles || []).includes(role.code)} size="small" />
-                          <ListItemText primary={role.name || role.code} secondary={role.description} />
-                        </MenuItem>
-                      ))
-                    )}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              {/* Toggles */}
-              <Grid item xs={6}>
+        {loadingDepts ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : departmentsWithDetails.length > 0 ? (
+          <Stack spacing={1}>
+            {departmentsWithDetails.map((assignment) => {
+              const roleConfig = ROLE_PALETTE?.[assignment.role] || ROLE_PALETTE?.member;
+              return (
                 <Paper
-                  variant="outlined"
+                  key={assignment.department_id}
+                  elevation={0}
                   sx={{
-                    px: 2, py: 1.5, borderRadius: 1.5,
-                    borderColor: formData.is_active ? 'success.main' : 'divider',
-                    bgcolor: formData.is_active ? alpha(theme.palette.success.main, 0.05) : 'transparent',
-                    transition: 'all 0.2s',
+                    p: 1.5,
+                    bgcolor: alpha(theme.palette.primary.main, 0.02),
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1.5,
                   }}
                 >
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={formData.is_active}
-                        onChange={e => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
-                        disabled={isSubmitting}
-                        color="success"
-                        size="small"
-                      />
-                    }
-                    label={
-                      <Typography variant="body2" fontWeight={500}>
-                        Active
-                      </Typography>
-                    }
-                    sx={{ m: 0 }}
-                  />
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                    <Typography variant="body2" fontWeight={600}>
+                      {assignment.department_name}
+                    </Typography>
+                    <Chip
+                      label={roleConfig?.label || assignment.role || 'Member'}
+                      size="small"
+                      sx={{
+                        bgcolor: roleConfig?.bgColor || '#f0f0f0',
+                        color: roleConfig?.textColor || '#666',
+                        fontWeight: 600,
+                        height: 22,
+                        fontSize: '0.7rem',
+                      }}
+                    />
+                  </Box>
+                  {assignment.department_description && (
+                    <Typography variant="caption" color="text.secondary">
+                      {assignment.department_description}
+                    </Typography>
+                  )}
+                  {assignment.is_active === false && (
+                    <Chip
+                      label="Inactive Department"
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      sx={{ mt: 0.5, height: 18, fontSize: '0.6rem' }}
+                    />
+                  )}
                 </Paper>
-              </Grid>
-              <Grid item xs={6}>
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    px: 2, py: 1.5, borderRadius: 1.5,
-                    borderColor: formData.is_verified ? 'info.main' : 'divider',
-                    bgcolor: formData.is_verified ? alpha(theme.palette.info.main, 0.05) : 'transparent',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={formData.is_verified}
-                        onChange={e => setFormData(prev => ({ ...prev, is_verified: e.target.checked }))}
-                        disabled={isSubmitting}
-                        color="info"
-                        size="small"
-                      />
-                    }
-                    label={
-                      <Typography variant="body2" fontWeight={500}>
-                        Verified
-                      </Typography>
-                    }
-                    sx={{ m: 0 }}
-                  />
-                </Paper>
-              </Grid>
+              );
+            })}
+          </Stack>
+        ) : (
+          <Box
+            sx={{
+              py: 3,
+              textAlign: 'center',
+              bgcolor: alpha(theme.palette.common.black, 0.02),
+              borderRadius: 1.5,
+            }}
+          >
+            <BusinessOutlined sx={{ fontSize: 32, color: 'text.disabled', mb: 1 }} />
+            <Typography variant="body2" color="text.secondary">
+              No department assignments
+            </Typography>
+            <Typography variant="caption" color="text.disabled">
+              This user is not assigned to any department
+            </Typography>
+          </Box>
+        )}
+      </CardContent>
 
-              {/* Read-only activity info */}
-              <Grid item xs={12}>
-                <Divider sx={{ my: 0.5 }} />
-                <Typography variant="overline" sx={{ color: 'text.disabled', fontSize: '0.65rem', letterSpacing: 1 }}>
-                  Activity (read-only)
-                </Typography>
-                <Stack spacing={0.5} sx={{ mt: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Joined: {user.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown'}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Last Login: {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
-                  </Typography>
-                </Stack>
-              </Grid>
-            </Grid>
-          )}
-        </Box>
-      </Paper>
-    </Slide>
+      {/* Reset Password Dialog */}
+      <Dialog open={resetDialogOpen} onClose={() => !loading && setResetDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Reset Password
+          <Typography variant="caption" color="text.secondary" display="block">
+            For {user.first_name || user.username}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="New Password"
+              type="password"
+              value={passwordData.password}
+              onChange={(e) => setPasswordData({ ...passwordData, password: e.target.value })}
+              fullWidth
+              size="small"
+              helperText="Minimum 8 characters"
+            />
+            <TextField
+              label="Confirm Password"
+              type="password"
+              value={passwordData.confirm_password}
+              onChange={(e) => setPasswordData({ ...passwordData, confirm_password: e.target.value })}
+              fullWidth
+              size="small"
+            />
+            {error && (
+              <Alert severity="error" sx={{ py: 0 }}>
+                {error}
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetDialogOpen(false)} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleResetPassword}
+            variant="contained"
+            color="warning"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={20} /> : 'Reset Password'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Card>
   );
+};
+
+// ROLE_PALETTE for department role styling
+const ROLE_PALETTE = {
+  head:       { color: 'error',   label: 'Head',       bgColor: '#fef2f2', borderColor: '#fca5a5', textColor: '#b91c1c' },
+  manager:    { color: 'warning', label: 'Manager',    bgColor: '#fffbeb', borderColor: '#fcd34d', textColor: '#92400e' },
+  supervisor: { color: 'info',    label: 'Supervisor', bgColor: '#eff6ff', borderColor: '#93c5fd', textColor: '#1d4ed8' },
+  member:     { color: 'default', label: 'Member',     bgColor: '#f9fafb', borderColor: '#d1d5db', textColor: '#374151' },
+  temporary:  { color: 'warning', label: 'Temp',       bgColor: '#fffbeb', borderColor: '#fcd34d', textColor: '#92400e' },
+  contractor: { color: 'default', label: 'Contractor', bgColor: '#f9fafb', borderColor: '#d1d5db', textColor: '#374151' },
 };
 
 export default UserDetailPanel;

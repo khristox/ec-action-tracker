@@ -15,11 +15,8 @@ import {
   useTheme,
   useMediaQuery,
   Drawer,
-  Card,
-  CardContent,
   TextField,
   Fade,
-  Grow,
   Snackbar,
   Divider,
 } from '@mui/material';
@@ -28,10 +25,6 @@ import {
   ChevronRight as ChevronRightIcon,
   Today as TodayIcon,
   Event as EventIcon,
-  CheckCircle as CheckCircleIcon,
-  Pending as PendingIcon,
-  Cancel as CancelIcon,
-  Schedule as ScheduleIcon,
   Search as SearchIcon,
   Close as CloseIcon,
   CalendarMonth as CalendarMonthIcon,
@@ -40,7 +33,6 @@ import {
   Refresh as RefreshIcon,
   LocationOn as LocationIcon,
   Person as PersonIcon,
-  HourglassEmpty as HourglassEmptyIcon,
 } from '@mui/icons-material';
 import {
   format,
@@ -64,16 +56,10 @@ const CACHE_DURATION = 5 * 60 * 1000;
 const CACHE_KEY = 'calendar_meetings_cache';
 
 // ==================== Date Helpers ====================
-/**
- * Safely parse any date value — handles ISO strings, Date objects, timestamps.
- * Returns null if unparseable.
- */
 const safeDate = (value) => {
   if (!value) return null;
   try {
-    // Already a Date
     if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
-    // ISO string or numeric string
     const d = typeof value === 'string' ? parseISO(value) : new Date(value);
     return isNaN(d.getTime()) ? null : d;
   } catch {
@@ -81,19 +67,6 @@ const safeDate = (value) => {
   }
 };
 
-const safeFormat = (value, fmt = 'h:mm a') => {
-  const d = safeDate(value);
-  if (!d) return '—';
-  try { return format(d, fmt); } catch { return '—'; }
-};
-
-/**
- * PRIMARY FIX: resolve the canonical meeting date from whatever shape the API
- * returns.  Priority order:
- *   1. meeting_date   ← the correct field per MeetingReportResponse schema
- *   2. start_date     ← legacy / action-item wrapper
- *   3. date           ← fallback
- */
 const getMeetingDate = (meeting) => {
   if (!meeting) return null;
   return safeDate(meeting.meeting_date)
@@ -115,17 +88,11 @@ const getEndTime = (meeting) => {
 };
 
 // ==================== Meeting Extraction ====================
-/**
- * Normalise whatever the API returns into a flat meeting object.
- * Handles both direct meeting objects and action-item wrappers.
- */
 const normaliseMeeting = (raw) => {
   if (!raw) return null;
-  // Action-item wrapper: { meeting: {...}, description: '...' }
   const m = raw.meeting ?? raw;
   return {
     ...m,
-    // Always expose a reliable _date field for the calendar
     _date: getMeetingDate(m),
     _startTime: getStartTime(m),
     _endTime: getEndTime(m),
@@ -142,13 +109,13 @@ const getStatusConfig = (status) => {
     code = (status.code || status.short_name || status.name || '').toLowerCase();
 
   if (code.includes('ended') || code.includes('completed') || code.includes('closed') || code.includes('finished'))
-    return { label: 'Ended',       color: 'success', dot: '#10B981' };
+    return { label: 'Ended', color: 'success', dot: '#10B981' };
   if (code.includes('in_progress') || code.includes('ongoing') || code.includes('started'))
-    return { label: 'In Progress', color: 'info',    dot: '#3B82F6' };
+    return { label: 'In Progress', color: 'info', dot: '#3B82F6' };
   if (code.includes('cancelled') || code.includes('canceled'))
-    return { label: 'Cancelled',   color: 'error',   dot: '#EF4444' };
+    return { label: 'Cancelled', color: 'error', dot: '#EF4444' };
   if (code.includes('pending') || code.includes('awaiting'))
-    return { label: 'Pending',     color: 'warning', dot: '#F59E0B' };
+    return { label: 'Pending', color: 'warning', dot: '#F59E0B' };
 
   return { label: 'Draft', color: 'default', dot: '#9CA3AF' };
 };
@@ -157,10 +124,10 @@ const getStatusConfig = (status) => {
 const getCachedData = () => {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    const ts  = localStorage.getItem(`${CACHE_KEY}_time`);
+    const ts = localStorage.getItem(`${CACHE_KEY}_time`);
     if (raw && ts && Date.now() - parseInt(ts) < CACHE_DURATION)
       return JSON.parse(raw);
-  } catch { /* ignore */ }
+  } catch { }
   return null;
 };
 
@@ -168,14 +135,14 @@ const setCachedData = (data) => {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(data));
     localStorage.setItem(`${CACHE_KEY}_time`, Date.now().toString());
-  } catch { /* ignore */ }
+  } catch { }
 };
 
 // ==================== Day Cell ====================
 const DayCell = React.memo(({ date, meetings, isCurrentMonth, onMeetingClick }) => {
-  const theme  = useTheme();
+  const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
-  const today  = date ? isToday(date) : false;
+  const today = date ? isToday(date) : false;
 
   const dayMeetings = useMemo(() => {
     if (!date || !Array.isArray(meetings)) return [];
@@ -205,7 +172,6 @@ const DayCell = React.memo(({ date, meetings, isCurrentMonth, onMeetingClick }) 
         '&:hover': { bgcolor: alpha(isDark ? '#A78BFA' : '#7C3AED', 0.04) },
       }}
     >
-      {/* Day number */}
       <Typography
         variant="caption"
         sx={{
@@ -227,7 +193,6 @@ const DayCell = React.memo(({ date, meetings, isCurrentMonth, onMeetingClick }) 
         {format(date, 'd')}
       </Typography>
 
-      {/* Meeting pills */}
       {dayMeetings.length > 0 && (
         <Stack spacing={0.3} sx={{ mt: 2.5 }}>
           {dayMeetings.slice(0, 3).map((m, idx) => {
@@ -251,23 +216,17 @@ const DayCell = React.memo(({ date, meetings, isCurrentMonth, onMeetingClick }) 
                     overflow: 'hidden',
                   }}
                 >
-                  <Typography
-                    component="span"
-                    sx={{ fontSize: '0.65rem', fontWeight: 600, color: sc.dot, flexShrink: 0, lineHeight: 1.4 }}
-                  >
+                  <Typography component="span" sx={{ fontSize: '0.65rem', fontWeight: 600, color: sc.dot, flexShrink: 0, lineHeight: 1.4 }}>
                     {time}
                   </Typography>
-                  <Typography
-                    component="span"
-                    sx={{
-                      fontSize: '0.65rem',
-                      color: isDark ? '#D1D5DB' : '#374151',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      lineHeight: 1.4,
-                    }}
-                  >
+                  <Typography component="span" sx={{
+                    fontSize: '0.65rem',
+                    color: isDark ? '#D1D5DB' : '#374151',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.4,
+                  }}>
                     {m._title}
                   </Typography>
                 </Box>
@@ -275,10 +234,7 @@ const DayCell = React.memo(({ date, meetings, isCurrentMonth, onMeetingClick }) 
             );
           })}
           {dayMeetings.length > 3 && (
-            <Typography
-              variant="caption"
-              sx={{ fontSize: '0.62rem', color: 'text.secondary', pl: 0.5, lineHeight: 1.4 }}
-            >
+            <Typography variant="caption" sx={{ fontSize: '0.62rem', color: 'text.secondary', pl: 0.5, lineHeight: 1.4 }}>
               +{dayMeetings.length - 3} more
             </Typography>
           )}
@@ -291,7 +247,7 @@ DayCell.displayName = 'DayCell';
 
 // ==================== Meeting Detail Drawer ====================
 const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) => {
-  const theme  = useTheme();
+  const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   if (!meeting) return null;
 
@@ -311,7 +267,6 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
       }}
     >
       <Box sx={{ p: 2.5 }}>
-        {/* Header */}
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={2}>
           <Typography variant="subtitle1" fontWeight={700} sx={{ flex: 1, pr: 1, color: isDark ? '#FFFFFF' : '#111827' }}>
             {meeting._title}
@@ -321,16 +276,9 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
           </IconButton>
         </Stack>
 
-        <Chip
-          size="small"
-          label={sc.label}
-          color={sc.color}
-          sx={{ mb: 2, fontWeight: 600, fontSize: '0.72rem' }}
-        />
-
+        <Chip size="small" label={sc.label} color={sc.color} sx={{ mb: 2, fontWeight: 600, fontSize: '0.72rem' }} />
         <Divider sx={{ mb: 2 }} />
 
-        {/* Date */}
         <Stack spacing={1.5}>
           {meeting._date && (
             <Stack direction="row" spacing={1.5} alignItems="center">
@@ -344,7 +292,6 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
             </Stack>
           )}
 
-          {/* Time */}
           {meeting._startTime && (
             <Stack direction="row" spacing={1.5} alignItems="center">
               <AccessTimeIcon sx={{ fontSize: 16, color: isDark ? '#A78BFA' : '#7C3AED', flexShrink: 0 }} />
@@ -358,7 +305,6 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
             </Stack>
           )}
 
-          {/* Location */}
           {(meeting.location_text || meeting.venue || meeting.location) && (
             <Stack direction="row" spacing={1.5} alignItems="flex-start">
               <LocationIcon sx={{ fontSize: 16, color: isDark ? '#A78BFA' : '#7C3AED', flexShrink: 0, mt: 0.25 }} />
@@ -371,7 +317,6 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
             </Stack>
           )}
 
-          {/* Chairperson */}
           {meeting.chairperson_name && (
             <Stack direction="row" spacing={1.5} alignItems="center">
               <PersonIcon sx={{ fontSize: 16, color: isDark ? '#A78BFA' : '#7C3AED', flexShrink: 0 }} />
@@ -382,7 +327,6 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
             </Stack>
           )}
 
-          {/* Secretary */}
           {meeting.facilitator && (
             <Stack direction="row" spacing={1.5} alignItems="center">
               <PersonIcon sx={{ fontSize: 16, color: isDark ? '#A78BFA' : '#7C3AED', flexShrink: 0 }} />
@@ -393,16 +337,13 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
             </Stack>
           )}
 
-          {/* Description */}
           {meeting.description && (
             <>
               <Divider />
               <Box>
                 <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>Description</Typography>
                 <Typography variant="body2" sx={{ color: isDark ? '#D1D5DB' : '#374151', lineHeight: 1.6 }}>
-                  {meeting.description.length > 200
-                    ? `${meeting.description.substring(0, 200)}…`
-                    : meeting.description}
+                  {meeting.description.length > 200 ? `${meeting.description.substring(0, 200)}…` : meeting.description}
                 </Typography>
               </Box>
             </>
@@ -432,12 +373,12 @@ MeetingDetailDrawer.displayName = 'MeetingDetailDrawer';
 
 // ==================== Loading Skeleton ====================
 const LoadingSkeleton = () => {
-  const theme  = useTheme();
+  const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   return (
     <Stack spacing={2} sx={{ p: 3 }}>
-      <Skeleton variant="rectangular" height={80}  sx={{ borderRadius: 2, bgcolor: isDark ? '#374151' : undefined }} />
-      <Skeleton variant="rectangular" height={48}  sx={{ borderRadius: 2, bgcolor: isDark ? '#374151' : undefined }} />
+      <Skeleton variant="rectangular" height={80} sx={{ borderRadius: 2, bgcolor: isDark ? '#374151' : undefined }} />
+      <Skeleton variant="rectangular" height={48} sx={{ borderRadius: 2, bgcolor: isDark ? '#374151' : undefined }} />
       <Skeleton variant="rectangular" height={460} sx={{ borderRadius: 2, bgcolor: isDark ? '#374151' : undefined }} />
     </Stack>
   );
@@ -445,7 +386,7 @@ const LoadingSkeleton = () => {
 
 // ==================== Empty State ====================
 const EmptyState = ({ searchTerm, onClearSearch }) => {
-  const theme  = useTheme();
+  const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   return (
     <Fade in timeout={400}>
@@ -459,9 +400,7 @@ const EmptyState = ({ searchTerm, onClearSearch }) => {
           {searchTerm ? `No results for "${searchTerm}"` : 'No meetings this month'}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {searchTerm
-            ? 'Try a different search term.'
-            : 'Navigate to another month or check back later.'}
+          {searchTerm ? 'Try a different search term.' : 'Navigate to another month or check back later.'}
         </Typography>
         {searchTerm && (
           <Button size="small" startIcon={<CloseIcon />} onClick={onClearSearch} sx={{ mt: 2 }}>
@@ -475,29 +414,53 @@ const EmptyState = ({ searchTerm, onClearSearch }) => {
 
 // ==================== Main Component ====================
 const MeetingCalendar = ({ userId }) => {
-  const theme   = useTheme();
+  const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isDark  = theme.palette.mode === 'dark';
+  const isDark = theme.palette.mode === 'dark';
   const navigate = useNavigate();
   const currentUser = useAppSelector(state => state.auth?.user);
   const currentUserEmail = currentUser?.email;
 
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [meetings, setMeetings]       = useState([]);   // normalised
-  const [loading, setLoading]         = useState(true);
-  const [refreshing, setRefreshing]   = useState(false);
-  const [error, setError]             = useState(null);
-  const [searchTerm, setSearchTerm]   = useState('');
-  const [selected, setSelected]       = useState(null);
-  const [drawerOpen, setDrawerOpen]   = useState(false);
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const abortRef = useRef(null);
 
-  // ── Fetch ──────────────────────────────────────────────────
-  const fetchMeetings = useCallback(async (forceRefresh = false) => {
-    if (!currentUserEmail) { setLoading(false); return; }
+  // Helper to format error messages
+  const formatErrorMessage = (err) => {
+    if (typeof err === 'string') return err;
+    if (err?.response?.data?.detail) {
+      const detail = err.response.data.detail;
+      if (Array.isArray(detail)) {
+        return detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+      }
+      return String(detail);
+    }
+    if (err?.message) return err.message;
+    if (typeof err === 'object') {
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return 'An unknown error occurred';
+      }
+    }
+    return 'Failed to load meetings';
+  };
 
-    // Serve cache immediately, still refresh in background
+  // ── Fetch Meetings using a simple approach ──
+  const fetchMeetings = useCallback(async (forceRefresh = false) => {
+    if (!currentUserEmail) { 
+      setLoading(false); 
+      return; 
+    }
+
+    // Serve cache immediately
     if (!forceRefresh) {
       const cached = getCachedData();
       if (cached?.length) {
@@ -512,60 +475,51 @@ const MeetingCalendar = ({ userId }) => {
     setError(null);
 
     try {
-      const response = await api.get('/action-tracker/meetings/participant/action-items', {
+      // Try with minimal parameters first
+      const response = await api.get('/action-tracker/meetings/', {
         params: {
-          email: currentUserEmail,
-          upcoming_only: false,
-          overdue_only: false,
-          include_completed: true,
-          limit: 200,
+          page: 1,
+          limit: 100,
         },
         signal: abortRef.current.signal,
       });
 
-      // ── Normalise response shape ──
+      // Parse response
       let raw = [];
-      if (response.data?.action_items) raw = response.data.action_items;
-      else if (Array.isArray(response.data)) raw = response.data;
+      if (response.data?.items) {
+        raw = response.data.items;
+      } else if (Array.isArray(response.data)) {
+        raw = response.data;
+      }
 
-      // De-duplicate by meeting ID
-      const seen = new Map();
-      raw.forEach(item => {
-        const m = normaliseMeeting(item);
-        if (m && m.id && !seen.has(m.id)) seen.set(m.id, m);
-        else if (m && !m.id) seen.set(Symbol(), m); // no ID — keep anyway
-      });
-
-      const list = Array.from(seen.values());
+      const list = raw.map(normaliseMeeting).filter(Boolean);
       setMeetings(list);
       setCachedData(list);
     } catch (err) {
       if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
       console.error('Calendar fetch error:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to load meetings.');
+      setError(formatErrorMessage(err));
     } finally {
       setRefreshing(false);
       setLoading(false);
     }
-  }, [currentUser?.email]);
+  }, [currentUserEmail]);
 
   useEffect(() => {
     fetchMeetings();
     return () => abortRef.current?.abort();
   }, [fetchMeetings]);
 
-  // ── Calendar helpers ───────────────────────────────────────
+  // ── Calendar helpers ──
   const daysInMonth = useMemo(() => {
     return eachDayOfInterval({ start: startOfMonth(currentDate), end: endOfMonth(currentDate) });
   }, [currentDate]);
 
-  // Leading empty cells so the grid starts on the correct weekday (Mon = 0)
   const leadingEmpties = useMemo(() => {
-    const dow = getDay(startOfMonth(currentDate)); // 0=Sun
+    const dow = getDay(startOfMonth(currentDate));
     return dow === 0 ? 6 : dow - 1;
   }, [currentDate]);
 
-  // ── Filtered meetings ──────────────────────────────────────
   const filteredMeetings = useMemo(() => {
     if (!searchTerm) return meetings;
     const t = searchTerm.toLowerCase();
@@ -576,7 +530,6 @@ const MeetingCalendar = ({ userId }) => {
     );
   }, [meetings, searchTerm]);
 
-  // ── Stats ──────────────────────────────────────────────────
   const stats = useMemo(() => {
     const now = new Date();
     return {
@@ -587,8 +540,11 @@ const MeetingCalendar = ({ userId }) => {
     };
   }, [filteredMeetings, currentDate]);
 
-  // ── Handlers ───────────────────────────────────────────────
-  const handleMeetingClick = (m) => { setSelected(m); setDrawerOpen(true); };
+  const handleMeetingClick = (m) => { 
+    setSelected(m); 
+    setDrawerOpen(true); 
+  };
+  
   const handleViewFull = () => {
     if (selected?.id) {
       setDrawerOpen(false);
@@ -596,32 +552,38 @@ const MeetingCalendar = ({ userId }) => {
     }
   };
 
-  // ── Early returns ──────────────────────────────────────────
   if (loading) return <LoadingSkeleton />;
 
   if (error && meetings.length === 0) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="error" action={<Button size="small" onClick={() => fetchMeetings(true)}>Retry</Button>}>
+        <Alert 
+          severity="error" 
+          action={<Button size="small" onClick={() => fetchMeetings(true)}>Retry</Button>}
+        >
           {error}
         </Alert>
       </Box>
     );
   }
 
-  // ── Render ─────────────────────────────────────────────────
   return (
     <Box sx={{ p: isMobile ? 1.5 : 2.5 }}>
-
-      {/* ── Header ── */}
+      {/* Header */}
       <Paper elevation={0} sx={{
         px: 2, py: 1.5, mb: 2, borderRadius: 2,
         bgcolor: isDark ? '#1F2937' : '#FFFFFF',
         border: `1px solid ${isDark ? '#374151' : '#E5E7EB'}`,
       }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={1.5}>
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: { xs: 'column', sm: 'row' }, 
+          justifyContent: 'space-between', 
+          alignItems: { xs: 'flex-start', sm: 'center' }, 
+          gap: 1.5 
+        }}>
           {/* Title + stats chips */}
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" gap={0.5}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
             <CalendarMonthIcon sx={{ color: isDark ? '#A78BFA' : '#7C3AED', fontSize: 20 }} />
             <Typography variant="subtitle1" fontWeight={700} sx={{ color: isDark ? '#FFFFFF' : '#111827' }}>
               My Meetings Calendar
@@ -629,22 +591,24 @@ const MeetingCalendar = ({ userId }) => {
             <Chip size="small" label={`${stats.total} total`} sx={{ height: 20, fontSize: '0.68rem', bgcolor: alpha('#7C3AED', 0.12), color: '#7C3AED', fontWeight: 600 }} />
             {stats.today > 0 && <Chip size="small" label={`${stats.today} today`} color="warning" sx={{ height: 20, fontSize: '0.68rem', fontWeight: 600 }} />}
             {stats.thisMonth > 0 && <Chip size="small" label={`${stats.thisMonth} this month`} variant="outlined" sx={{ height: 20, fontSize: '0.68rem' }} />}
-          </Stack>
+          </Box>
 
           {/* Search + refresh */}
-          <Stack direction="row" spacing={0.75} alignItems="center">
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             <TextField
               size="small"
               placeholder="Search…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               sx={{ width: isMobile ? 140 : 180 }}
-              InputProps={{
-                sx: { fontSize: '0.8rem', height: 32 },
-                startAdornment: <SearchIcon sx={{ fontSize: 16, mr: 0.5, color: 'text.disabled' }} />,
-                endAdornment: searchTerm
-                  ? <IconButton size="small" sx={{ p: 0.25 }} onClick={() => setSearchTerm('')}><CloseIcon sx={{ fontSize: 14 }} /></IconButton>
-                  : null,
+              slotProps={{
+                input: {
+                  sx: { fontSize: '0.8rem', height: 32 },
+                  startAdornment: <SearchIcon sx={{ fontSize: 16, mr: 0.5, color: 'text.disabled' }} />,
+                  endAdornment: searchTerm
+                    ? <IconButton size="small" sx={{ p: 0.25 }} onClick={() => setSearchTerm('')}><CloseIcon sx={{ fontSize: 14 }} /></IconButton>
+                    : null,
+                }
               }}
             />
             <Tooltip title={refreshing ? 'Refreshing…' : 'Refresh'}>
@@ -654,18 +618,18 @@ const MeetingCalendar = ({ userId }) => {
                 </IconButton>
               </span>
             </Tooltip>
-          </Stack>
-        </Stack>
+          </Box>
+        </Box>
       </Paper>
 
-      {/* ── Month navigator ── */}
+      {/* Month navigator - No Stack with justifyContent/alignItems */}
       <Paper elevation={0} sx={{
         px: 1.5, py: 0.75, mb: 2, borderRadius: 2,
         bgcolor: isDark ? '#1F2937' : '#FFFFFF',
         border: `1px solid ${isDark ? '#374151' : '#E5E7EB'}`,
       }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={0.5} alignItems="center">
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <IconButton size="small" onClick={() => setCurrentDate(d => subMonths(d, 1))}>
               <ChevronLeftIcon fontSize="small" />
             </IconButton>
@@ -675,7 +639,7 @@ const MeetingCalendar = ({ userId }) => {
             <IconButton size="small" onClick={() => setCurrentDate(d => addMonths(d, 1))}>
               <ChevronRightIcon fontSize="small" />
             </IconButton>
-          </Stack>
+          </Box>
           <Button
             size="small"
             startIcon={<TodayIcon sx={{ fontSize: 15 }} />}
@@ -684,17 +648,16 @@ const MeetingCalendar = ({ userId }) => {
           >
             Today
           </Button>
-        </Stack>
+        </Box>
       </Paper>
 
-      {/* ── Calendar grid ── */}
+      {/* Calendar grid */}
       {filteredMeetings.length > 0 || daysInMonth.length > 0 ? (
         <Paper elevation={0} sx={{
           borderRadius: 2, overflow: 'hidden',
           bgcolor: isDark ? '#1F2937' : '#FFFFFF',
           border: `1px solid ${isDark ? '#374151' : '#E5E7EB'}`,
         }}>
-          {/* Weekday labels */}
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: `1px solid ${isDark ? '#374151' : '#E5E7EB'}` }}>
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
               <Box key={day} sx={{ py: 1, textAlign: 'center', bgcolor: isDark ? '#111827' : '#F9FAFB' }}>
@@ -705,13 +668,10 @@ const MeetingCalendar = ({ userId }) => {
             ))}
           </Box>
 
-          {/* Day cells */}
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-            {/* Leading empties */}
             {Array.from({ length: leadingEmpties }).map((_, i) => (
               <DayCell key={`e-${i}`} date={null} meetings={[]} isCurrentMonth={false} onMeetingClick={() => {}} />
             ))}
-            {/* Actual days */}
             {daysInMonth.map(day => (
               <DayCell
                 key={day.toISOString()}
@@ -727,7 +687,7 @@ const MeetingCalendar = ({ userId }) => {
         <EmptyState searchTerm={searchTerm} onClearSearch={() => setSearchTerm('')} />
       )}
 
-      {/* ── Detail Drawer ── */}
+      {/* Detail Drawer */}
       <MeetingDetailDrawer
         meeting={selected}
         open={drawerOpen}
@@ -735,7 +695,7 @@ const MeetingCalendar = ({ userId }) => {
         onViewFull={handleViewFull}
       />
 
-      {/* ── Error Snackbar ── */}
+      {/* Error Snackbar */}
       <Snackbar open={!!error && meetings.length > 0} autoHideDuration={5000} onClose={() => setError(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
         <Alert severity="warning" variant="filled" onClose={() => setError(null)} sx={{ fontSize: '0.8rem' }}>
           {error}

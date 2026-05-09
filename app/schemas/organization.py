@@ -175,22 +175,31 @@ def node_to_response(node) -> OrganizationNodeResponse:
 router = APIRouter()
 router_departments = APIRouter()
 
-
 @router.get("/", response_model=List[OrganizationNodeResponse])
 @router_departments.get("/", response_model=List[OrganizationNodeResponse])
 async def get_organization_nodes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    is_active: Optional[bool] = Query(None),
+    is_active: Optional[bool] = Query(True, description="Filter by active status. Defaults to True (active only)"),
     parent_id: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, min_length=1, description="Search by name or code"),
+    search_fields: Optional[str] = Query("name,code", description="Comma-separated fields to search in (name, code, description)"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all organization nodes with optional filtering"""
+    """Get all organization nodes with optional filtering.
+    
+    By default, only active nodes are returned. Set is_active=None to get all nodes.
+    Search supports partial matching on specified fields.
+    """
     try:
         query = select(OrganizationNode)
         
+        # Default to active nodes only
         if is_active is not None:
             query = query.where(OrganizationNode.is_active == is_active)
+        else:
+            # When is_active is explicitly None, return all (no filter)
+            pass
         
         if parent_id is not None:
             # Validate UUID format
@@ -199,6 +208,27 @@ async def get_organization_nodes(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid UUID format: {parent_id}")
             query = query.where(OrganizationNode.parent_id == parent_id)
+        
+        # Search functionality
+        if search:
+            search_term = f"%{search}%"
+            search_conditions = []
+            
+            # Parse search fields
+            fields = [field.strip() for field in search_fields.split(",") if field.strip()]
+            
+            # Build search conditions based on available fields
+            if "name" in fields:
+                search_conditions.append(OrganizationNode.name.ilike(search_term))
+            if "code" in fields:
+                search_conditions.append(OrganizationNode.code.ilike(search_term))
+            if "description" in fields:
+                if hasattr(OrganizationNode, 'description'):  # Check if field exists
+                    search_conditions.append(OrganizationNode.description.ilike(search_term))
+            
+            if search_conditions:
+                from sqlalchemy import or_
+                query = query.where(or_(*search_conditions))
         
         query = query.offset(skip).limit(limit).order_by(OrganizationNode.order, OrganizationNode.name)
         
@@ -212,7 +242,7 @@ async def get_organization_nodes(
     except Exception as e:
         logger.error(f"Error in get_organization_nodes: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
+    
 
 @router.get("/{node_id}", response_model=OrganizationNodeResponse)
 async def get_organization_node(

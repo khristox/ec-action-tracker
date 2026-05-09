@@ -507,49 +507,456 @@ def _build_notification_result(participant, notif_type: str, success: bool, erro
     return result
 
 
-# ==================== MEETING CRUD OPERATIONS ====================
+# ==================== STATIC ROUTES (MUST COME FIRST) ====================
+# These routes have specific paths and should NOT be interpreted as UUID parameters
 
-@router.post("/", response_model=MeetingCreateResponse, status_code=status.HTTP_201_CREATED)
-async def create_meeting(
-    meeting_in: MeetingCreate,
+@router.get("/status-options")
+async def get_meeting_status_options(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Create a new meeting with audit fields"""
-    try:
-        logger.debug(f"Creating meeting for user: {current_user.id}")
-        
-        result = await meeting_crud.create_with_participants(db, meeting_in, current_user.id)
-        
-        return MeetingCreateResponse(
-            id=result.id,
-            title=result.title,
-            description=result.description,
-            meeting_date=result.meeting_date,
-            start_time=result.start_time,
-            end_time=result.end_time,
-            location_text=result.location_text,
-            agenda=result.agenda,
-            facilitator=result.facilitator,
-            chairperson_name=result.chairperson_name,
-            status_id=result.status_id,
-            created_by_id=result.created_by_id,
-            created_by_name=current_user.username,
-            created_at=result.created_at,
-            updated_by_id=None,
-            updated_by_name=None,
-            updated_at=None,
-            is_active=result.is_active,
-            message="Meeting created successfully"
-        )
-    except Exception as e:
-        logger.error(f"Error creating meeting: {type(e).__name__}: {str(e)}")
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create meeting: {str(e)}"
-        )
+    """Get all available meeting statuses for filtering"""
+    
+    result = await db.execute(
+        select(MeetingStatus).where(MeetingStatus.is_active == True)
+        .order_by(MeetingStatus.sort_order, MeetingStatus.name)
+    )
+    statuses = result.scalars().all()
+    
+    return {
+        "options": [
+            {
+                "value": str(status.id),
+                "label": status.name,
+                "short_name": status.short_name,
+                "code": status.code,
+                "color": getattr(status, 'color', '#808080'),
+                "description": status.description
+            }
+            for status in statuses
+        ],
+        "default": "all"
+    }
 
+
+@router.get("/statuses")
+async def get_all_statuses(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get all meeting statuses with counts"""
+    
+    # Get all statuses
+    result = await db.execute(
+        select(MeetingStatus).where(MeetingStatus.is_active == True)
+        .order_by(MeetingStatus.sort_order, MeetingStatus.name)
+    )
+    statuses = result.scalars().all()
+    
+    today = date.today()
+    
+    # Get counts for each status
+    status_data = []
+    for status in statuses:
+        # Count all meetings with this status
+        total_count_result = await db.execute(
+            select(func.count(Meeting.id)).where(
+                Meeting.status_id == status.id,
+                Meeting.is_active == True
+            )
+        )
+        total_count = total_count_result.scalar() or 0
+        
+        # Count upcoming meetings with this status
+        upcoming_count_result = await db.execute(
+            select(func.count(Meeting.id)).where(
+                Meeting.status_id == status.id,
+                Meeting.is_active == True,
+                Meeting.meeting_date >= today
+            )
+        )
+        upcoming_count = upcoming_count_result.scalar() or 0
+        
+        # Count past meetings with this status
+        past_count_result = await db.execute(
+            select(func.count(Meeting.id)).where(
+                Meeting.status_id == status.id,
+                Meeting.is_active == True,
+                Meeting.meeting_date < today
+            )
+        )
+        past_count = past_count_result.scalar() or 0
+        
+        status_data.append({
+            "id": str(status.id),
+            "name": status.name,
+            "short_name": status.short_name,
+            "code": status.code,
+            "color": getattr(status, 'color', '#808080'),
+            "description": status.description,
+            "counts": {
+                "total": total_count,
+                "upcoming": upcoming_count,
+                "past": past_count
+            }
+        })
+    
+    return {
+        "statuses": status_data,
+        "total_meetings": sum(s["counts"]["total"] for s in status_data)
+    }
+
+
+@router.get("/filter-options")
+async def get_filter_options(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Get all available filter options for the meetings dropdown"""
+    
+    today = date.today()
+    
+    # Get all active statuses
+    status_result = await db.execute(
+        select(MeetingStatus).where(MeetingStatus.is_active == True)
+        .order_by(MeetingStatus.name)
+    )
+    statuses = status_result.scalars().all()
+    
+    # Get unique locations
+    location_result = await db.execute(
+        select(distinct(Meeting.location_text))
+        .where(Meeting.is_active == True, Meeting.location_text.isnot(None))
+        .order_by(Meeting.location_text)
+    )
+    locations = [loc for loc in location_result.scalars().all() if loc]
+    
+    # Get unique districts
+    district_result = await db.execute(
+        select(distinct(Meeting.district_office))
+        .where(Meeting.is_active == True, Meeting.district_office.isnot(None))
+        .order_by(Meeting.district_office)
+    )
+    districts = [dist for dist in district_result.scalars().all() if dist]
+    
+    # Get unique regions
+    region_result = await db.execute(
+        select(distinct(Meeting.region))
+        .where(Meeting.is_active == True, Meeting.region.isnot(None))
+        .order_by(Meeting.region)
+    )
+    regions = [reg for reg in region_result.scalars().all() if reg]
+    
+    # Get date range
+    date_range_result = await db.execute(
+        select(
+            func.min(Meeting.meeting_date).label("min_date"),
+            func.max(Meeting.meeting_date).label("max_date")
+        ).where(Meeting.is_active == True)
+    )
+    date_range = date_range_result.one()
+    
+    return {
+        "statuses": [
+            {
+                "value": str(s.id),
+                "label": s.name,
+                "short_name": s.short_name,
+                "color": getattr(s, 'color', '#808080')
+            }
+            for s in statuses
+        ],
+        "locations": locations,
+        "districts": districts,
+        "regions": regions,
+        "date_range": {
+            "min": date_range.min_date.isoformat() if date_range.min_date else None,
+            "max": date_range.max_date.isoformat() if date_range.max_date else None
+        },
+        "defaults": {
+            "show_upcoming": True,
+            "show_past": False,
+            "limit": DEFAULT_PAGINATION_LIMIT
+        }
+    }
+
+
+@router.get("/participant/check")
+async def check_if_participant(
+    meeting_id: int = Query(..., description="Meeting ID to check"),
+    user_id: Optional[int] = Query(None, description="User ID to check"),
+    email: Optional[str] = Query(None, description="User email to check"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Check if a user is a participant in a specific meeting."""
+    target_email = None
+    
+    if user_id is not None:
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        target_email = user.email
+    elif email is not None:
+        target_email = email
+    else:
+        target_email = current_user.email
+    
+    meeting_result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    meeting = meeting_result.scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail=f"Meeting with ID {meeting_id} not found")
+    
+    is_participant = any(p.email == target_email for p in meeting.participants)
+    
+    return {
+        "meeting_id": meeting_id,
+        "user_email": target_email,
+        "is_participant": is_participant,
+        "meeting_title": meeting.title,
+        "meeting_status": meeting.status.value if meeting.status else "scheduled"
+    }
+
+
+@router.get("/participant/detailed", response_model=List[ParticipantMeetingSummarySchema])
+async def get_meetings_as_participant_detailed(
+    user_id: Optional[int] = Query(None, description="User ID to filter meetings where user is a participant"),
+    email: Optional[str] = Query(None, description="Email address to filter meetings where user is a participant"),
+    status: Optional[str] = Query(None, description="Filter by meeting status: scheduled, in_progress, completed, cancelled"),
+    upcoming_only: bool = Query(False, description="Only show upcoming meetings"),
+    past_only: bool = Query(False, description="Only show past meetings"),
+    include_actions: bool = Query(True, description="Include action items assigned to user"),
+    include_minutes: bool = Query(True, description="Include meeting minutes"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all meetings where the specified user is a participant with detailed information."""
+    
+    # Resolve target user
+    target_user = await _resolve_target_user_simple(user_id, email, current_user, db)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    target_email = target_user.email
+    
+    # Build query
+    query = select(Meeting).join(
+        Meeting.participants
+    ).where(
+        Meeting.participants.any(email=target_email)
+    ).options(
+        selectinload(Meeting.participants),
+        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.overall_status),
+        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_to)
+    )
+    
+    if status:
+        valid_statuses = [s.value for s in MeetingStatus] if hasattr(MeetingStatus, 'value') else []
+        if status.lower() not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        query = query.where(Meeting.status == status.lower())
+    
+    now = datetime.utcnow()
+    if upcoming_only:
+        query = query.where(Meeting.meeting_date >= now)
+    if past_only:
+        query = query.where(Meeting.meeting_date < now)
+    
+    query = query.order_by(Meeting.meeting_date.asc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    meetings = result.scalars().all()
+    
+    # Build response
+    response = []
+    for meeting in meetings:
+        minutes = meeting.minutes if include_minutes else []
+        
+        user_action_items = []
+        if include_actions:
+            for minute in minutes:
+                for action in minute.actions:
+                    if action.assigned_to_id == target_user.id:
+                        status_name = "pending"
+                        if action.overall_status:
+                            if hasattr(action.overall_status, 'shortname'):
+                                status_name = action.overall_status.shortname
+                            elif hasattr(action.overall_status, 'name'):
+                                status_name = action.overall_status.name
+                        
+                        user_action_items.append({
+                            "id": action.id,
+                            "description": action.description,
+                            "assigned_to_id": action.assigned_to_id,
+                            "assigned_to_name": action.assigned_to.full_name or action.assigned_to.name if action.assigned_to else None,
+                            "due_date": action.due_date,
+                            "status": status_name,
+                            "priority": action.priority,
+                            "remarks": action.remarks,
+                            "completed_at": action.completed_at,
+                            "overall_progress_percentage": action.overall_progress_percentage,
+                            "assigned_to": {
+                                "id": action.assigned_to.id,
+                                "full_name": action.assigned_to.full_name,
+                                "name": action.assigned_to.name,
+                                "email": action.assigned_to.email
+                            } if action.assigned_to else None
+                        })
+        
+        formatted_minutes = []
+        for minute in minutes:
+            minute_actions = []
+            for action in minute.actions:
+                action_status = "pending"
+                if action.overall_status:
+                    if hasattr(action.overall_status, 'shortname'):
+                        action_status = action.overall_status.shortname
+                    elif hasattr(action.overall_status, 'name'):
+                        action_status = action.overall_status.name
+                
+                minute_actions.append({
+                    "id": action.id,
+                    "description": action.description,
+                    "assigned_to_id": action.assigned_to_id,
+                    "assigned_to_name": action.assigned_to.full_name or action.assigned_to.name if action.assigned_to else None,
+                    "due_date": action.due_date,
+                    "status": action_status,
+                    "priority": action.priority,
+                    "remarks": action.remarks,
+                    "completed_at": action.completed_at,
+                    "overall_progress_percentage": action.overall_progress_percentage
+                })
+            
+            formatted_minutes.append({
+                "id": minute.id,
+                "topic": minute.topic,
+                "discussion": minute.discussion,
+                "decisions": minute.decisions,
+                "created_at": minute.created_at,
+                "actions": minute_actions
+            })
+        
+        participants = []
+        for participant in meeting.participants:
+            participants.append({
+                "id": participant.id,
+                "name": participant.name,
+                "email": participant.email,
+                "is_current_user": participant.email == target_email
+            })
+        
+        action_items_count = len(user_action_items)
+        pending_actions_count = len([a for a in user_action_items if a.get("status") == "pending"])
+        in_progress_actions_count = len([a for a in user_action_items if a.get("status") == "in_progress"])
+        completed_actions_count = len([a for a in user_action_items if a.get("status") == "completed"])
+        overdue_actions_count = len([
+            a for a in user_action_items 
+            if a.get("due_date") and a.get("due_date") < now and a.get("status") != "completed"
+        ])
+        
+        response.append({
+            "meeting": {
+                "id": meeting.id,
+                "title": meeting.title,
+                "description": meeting.description,
+                "start_date": meeting.meeting_date,
+                "end_date": meeting.meeting_date,
+                "location": meeting.location,
+                "meeting_link": meeting.meeting_link,
+                "status": meeting.status.value if meeting.status else "scheduled",
+                "is_virtual": getattr(meeting, 'is_virtual', False),
+                "created_by": meeting.created_by,
+                "created_at": meeting.created_at,
+                "updated_at": meeting.updated_at,
+                "participants": participants,
+                "minutes": formatted_minutes if include_minutes else []
+            },
+            "user_info": {
+                "id": target_user.id,
+                "email": target_email,
+                "name": target_user.full_name or target_user.name if target_user else None
+            },
+            "user_action_items": user_action_items,
+            "minutes_count": len(minutes),
+            "action_items_count": action_items_count,
+            "pending_actions_count": pending_actions_count,
+            "in_progress_actions_count": in_progress_actions_count,
+            "completed_actions_count": completed_actions_count,
+            "overdue_actions_count": overdue_actions_count
+        })
+
+    return response
+
+
+@router.post("/create-zoom-meeting")
+async def create_zoom_meeting(
+    meeting_data: ZoomMeetingCreate,
+    db: AsyncSession = Depends(deps.get_db)
+):
+    """Create a Zoom meeting using Zoom API"""
+    # TODO: Implement actual Zoom API integration
+    return {
+        "join_url": "https://zoom.us/j/123456789",
+        "id": "123456789",
+        "password": "123456"
+    }
+
+
+@router.get("/documents/document/{document_id}/download")
+async def download_document(
+    document_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Download a document by its ID"""
+    query = select(MeetingDocument).where(
+        MeetingDocument.id == document_id,
+        MeetingDocument.is_active == True
+    )
+    result = await db.execute(query)
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    file_path = Path(document.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    
+    return FileResponse(
+        path=file_path,
+        filename=document.file_name,
+        media_type=document.mime_type or "application/octet-stream"
+    )
+
+
+@router.delete("/documents/document/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Delete a document (soft delete)"""
+    query = select(MeetingDocument).where(
+        MeetingDocument.id == document_id,
+        MeetingDocument.is_active == True
+    )
+    result = await db.execute(query)
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    document.is_active = False
+    document.updated_by_id = current_user.id
+    document.updated_at = datetime.now()
+    
+    await db.commit()
+
+
+# ==================== MAIN MEETINGS CRUD ROUTES ====================
 
 @router.get("/", response_model=MeetingPaginationResponse)
 async def get_meetings(
@@ -727,175 +1134,49 @@ async def get_meetings(
         )
 
 
-@router.get("/status-options")
-async def get_meeting_status_options(
+@router.post("/", response_model=MeetingCreateResponse, status_code=status.HTTP_201_CREATED)
+async def create_meeting(
+    meeting_in: MeetingCreate,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Get all available meeting statuses for filtering"""
-    
-    result = await db.execute(
-        select(MeetingStatus).where(MeetingStatus.is_active == True)
-        .order_by(MeetingStatus.sort_order, MeetingStatus.name)
-    )
-    statuses = result.scalars().all()
-    
-    return {
-        "options": [
-            {
-                "value": str(status.id),
-                "label": status.name,
-                "short_name": status.short_name,
-                "code": status.code,
-                "color": getattr(status, 'color', '#808080'),
-                "description": status.description
-            }
-            for status in statuses
-        ],
-        "default": "all"
-    }
-
-
-@router.get("/statuses")
-async def get_all_statuses(
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Get all meeting statuses with counts"""
-    
-    # Get all statuses
-    result = await db.execute(
-        select(MeetingStatus).where(MeetingStatus.is_active == True)
-        .order_by(MeetingStatus.sort_order, MeetingStatus.name)
-    )
-    statuses = result.scalars().all()
-    
-    today = date.today()
-    
-    # Get counts for each status
-    status_data = []
-    for status in statuses:
-        # Count all meetings with this status
-        total_count_result = await db.execute(
-            select(func.count(Meeting.id)).where(
-                Meeting.status_id == status.id,
-                Meeting.is_active == True
-            )
-        )
-        total_count = total_count_result.scalar() or 0
+    """Create a new meeting with audit fields"""
+    try:
+        logger.debug(f"Creating meeting for user: {current_user.id}")
         
-        # Count upcoming meetings with this status
-        upcoming_count_result = await db.execute(
-            select(func.count(Meeting.id)).where(
-                Meeting.status_id == status.id,
-                Meeting.is_active == True,
-                Meeting.meeting_date >= today
-            )
-        )
-        upcoming_count = upcoming_count_result.scalar() or 0
+        result = await meeting_crud.create_with_participants(db, meeting_in, current_user.id)
         
-        # Count past meetings with this status
-        past_count_result = await db.execute(
-            select(func.count(Meeting.id)).where(
-                Meeting.status_id == status.id,
-                Meeting.is_active == True,
-                Meeting.meeting_date < today
-            )
+        return MeetingCreateResponse(
+            id=result.id,
+            title=result.title,
+            description=result.description,
+            meeting_date=result.meeting_date,
+            start_time=result.start_time,
+            end_time=result.end_time,
+            location_text=result.location_text,
+            agenda=result.agenda,
+            facilitator=result.facilitator,
+            chairperson_name=result.chairperson_name,
+            status_id=result.status_id,
+            created_by_id=result.created_by_id,
+            created_by_name=current_user.username,
+            created_at=result.created_at,
+            updated_by_id=None,
+            updated_by_name=None,
+            updated_at=None,
+            is_active=result.is_active,
+            message="Meeting created successfully"
         )
-        past_count = past_count_result.scalar() or 0
-        
-        status_data.append({
-            "id": str(status.id),
-            "name": status.name,
-            "short_name": status.short_name,
-            "code": status.code,
-            "color": getattr(status, 'color', '#808080'),
-            "description": status.description,
-            "counts": {
-                "total": total_count,
-                "upcoming": upcoming_count,
-                "past": past_count
-            }
-        })
-    
-    return {
-        "statuses": status_data,
-        "total_meetings": sum(s["counts"]["total"] for s in status_data)
-    }
+    except Exception as e:
+        logger.error(f"Error creating meeting: {type(e).__name__}: {str(e)}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create meeting: {str(e)}"
+        )
 
 
-@router.get("/filter-options")
-async def get_filter_options(
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Get all available filter options for the meetings dropdown"""
-    
-    today = date.today()
-    
-    # Get all active statuses
-    status_result = await db.execute(
-        select(MeetingStatus).where(MeetingStatus.is_active == True)
-        .order_by(MeetingStatus.name)
-    )
-    statuses = status_result.scalars().all()
-    
-    # Get unique locations
-    location_result = await db.execute(
-        select(distinct(Meeting.location_text))
-        .where(Meeting.is_active == True, Meeting.location_text.isnot(None))
-        .order_by(Meeting.location_text)
-    )
-    locations = [loc for loc in location_result.scalars().all() if loc]
-    
-    # Get unique districts
-    district_result = await db.execute(
-        select(distinct(Meeting.district_office))
-        .where(Meeting.is_active == True, Meeting.district_office.isnot(None))
-        .order_by(Meeting.district_office)
-    )
-    districts = [dist for dist in district_result.scalars().all() if dist]
-    
-    # Get unique regions
-    region_result = await db.execute(
-        select(distinct(Meeting.region))
-        .where(Meeting.is_active == True, Meeting.region.isnot(None))
-        .order_by(Meeting.region)
-    )
-    regions = [reg for reg in region_result.scalars().all() if reg]
-    
-    # Get date range
-    date_range_result = await db.execute(
-        select(
-            func.min(Meeting.meeting_date).label("min_date"),
-            func.max(Meeting.meeting_date).label("max_date")
-        ).where(Meeting.is_active == True)
-    )
-    date_range = date_range_result.one()
-    
-    return {
-        "statuses": [
-            {
-                "value": str(s.id),
-                "label": s.name,
-                "short_name": s.short_name,
-                "color": getattr(s, 'color', '#808080')
-            }
-            for s in statuses
-        ],
-        "locations": locations,
-        "districts": districts,
-        "regions": regions,
-        "date_range": {
-            "min": date_range.min_date.isoformat() if date_range.min_date else None,
-            "max": date_range.max_date.isoformat() if date_range.max_date else None
-        },
-        "defaults": {
-            "show_upcoming": True,
-            "show_past": False,
-            "limit": DEFAULT_PAGINATION_LIMIT
-        }
-    }
+# ==================== DYNAMIC ROUTES (WITH PATH PARAMETERS - GO LAST) ====================
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(
@@ -976,8 +1257,6 @@ async def delete_meeting(
     
     await db.commit()
 
-
-# ==================== MEETING PARTICIPANTS ====================
 
 @router.post("/{meeting_id}/members")
 async def add_participant(
@@ -1117,8 +1396,6 @@ async def update_participant_attendance(
     return participant
 
 
-# ==================== MEETING MINUTES ====================
-
 @router.post("/{meeting_id}/minutes", response_model=MeetingMinutesResponse, status_code=status.HTTP_201_CREATED)
 async def add_meeting_minutes(
     meeting_id: UUID,
@@ -1158,8 +1435,6 @@ async def get_meeting_minutes(
     
     return [build_minutes_response(minute) for minute in minutes_list]
 
-
-# ==================== MEETING STATUS HISTORY ====================
 
 @router.get("/{meeting_id}/history", response_model=List[MeetingStatusHistoryResponse])
 async def get_meeting_status_history(
@@ -1218,72 +1493,6 @@ async def get_latest_meeting_status_history(
     return build_status_history_response(history) if history else None
 
 
-# ==================== MEETING NOTIFICATIONS ====================
-
-async def send_email_notification(to_email: str, meeting, custom_message: str = "", participant_name: str = "") -> bool:
-    """Send email notification using existing email service"""
-    try:
-        meeting_time = f"{meeting.start_time} - {meeting.end_time}" if meeting.start_time else "Time TBD"
-        meeting_date = meeting.meeting_date.strftime("%A, %B %d, %Y") if meeting.meeting_date else "Date TBD"
-        
-        is_online = getattr(meeting, 'platform', None) and meeting.platform != 'physical'
-        location_text = meeting.location_text or "Location TBD"
-        meeting_link = getattr(meeting, 'meeting_link', '')
-        
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="UTF-8"><title>Meeting Notification</title></head>
-        <body style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
-                <h2>📋 Meeting Invitation</h2>
-            </div>
-            <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <p>Dear <strong>{participant_name or 'Participant'}</strong>,</p>
-                <p>You have been invited to:</p>
-                <h3>{meeting.title}</h3>
-                <p><strong>Date:</strong> {meeting_date}</p>
-                <p><strong>Time:</strong> {meeting_time}</p>
-                <p><strong>{'Online Meeting' if is_online else 'Location'}:</strong> {location_text}</p>
-                {f'<p><strong>Join Link:</strong> <a href="{meeting_link}">{meeting_link}</a></p>' if meeting_link else ''}
-                {f'<p><strong>Additional Information:</strong></p><p>{custom_message}</p>' if custom_message else ''}
-                <hr>
-                <p style="font-size: 12px; color: #999;">This is an automated notification from the Meeting Management System.</p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        if hasattr(email_service, 'is_configured') and email_service.is_configured():
-            return await email_service.send_email(
-                to_email=to_email,
-                subject=f"📅 Meeting Invitation: {meeting.title}",
-                html_content=html_content
-            )
-        else:
-            logger.warning(f"Email service not configured, would send to {to_email}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error sending email to {to_email}: {e}")
-        return False
-
-
-async def _send_notification_by_type(notif_type: str, participant, meeting, custom_message: str) -> bool:
-    """Helper to send notification based on type"""
-    if notif_type == 'email' and participant.email:
-        return await send_email_notification(
-            to_email=participant.email,
-            meeting=meeting,
-            custom_message=custom_message,
-            participant_name=participant.name
-        )
-    elif notif_type in ['whatsapp', 'sms'] and participant.telephone:
-        logger.info(f"Sending {notif_type.upper()} to {participant.telephone} for meeting {meeting.title}")
-        return True
-    return False
-
-
 @router.post("/{meeting_id}/notify-participants")
 async def notify_meeting_participants(
     meeting_id: str,
@@ -1331,8 +1540,6 @@ async def notify_meeting_participants(
         "meeting_title": meeting.title
     }
 
-
-# ==================== MEETING DOCUMENTS ====================
 
 @router.get("/{meeting_id}/documents")
 async def get_meeting_documents(
@@ -1429,76 +1636,6 @@ async def upload_meeting_document(
         "message": "Document uploaded successfully"
     }
 
-
-@router.get("/documents/document/{document_id}/download")
-async def download_document(
-    document_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Download a document by its ID"""
-    query = select(MeetingDocument).where(
-        MeetingDocument.id == document_id,
-        MeetingDocument.is_active == True
-    )
-    result = await db.execute(query)
-    document = result.scalar_one_or_none()
-    
-    if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    
-    file_path = Path(document.file_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    
-    return FileResponse(
-        path=file_path,
-        filename=document.file_name,
-        media_type=document.mime_type or "application/octet-stream"
-    )
-
-
-@router.delete("/documents/document/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_document(
-    document_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """Delete a document (soft delete)"""
-    query = select(MeetingDocument).where(
-        MeetingDocument.id == document_id,
-        MeetingDocument.is_active == True
-    )
-    result = await db.execute(query)
-    document = result.scalar_one_or_none()
-    
-    if not document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    
-    document.is_active = False
-    document.updated_by_id = current_user.id
-    document.updated_at = datetime.now()
-    
-    await db.commit()
-
-
-# ==================== ZOOM INTEGRATION ====================
-
-@router.post("/create-zoom-meeting")
-async def create_zoom_meeting(
-    meeting_data: ZoomMeetingCreate,
-    db: AsyncSession = Depends(deps.get_db)
-):
-    """Create a Zoom meeting using Zoom API"""
-    # TODO: Implement actual Zoom API integration
-    return {
-        "join_url": "https://zoom.us/j/123456789",
-        "id": "123456789",
-        "password": "123456"
-    }
-
-
-# ==================== MEETING AUDIT LOGS ====================
 
 @router.get("/{meeting_id}/audit-logs")
 async def get_meeting_audit_logs(
@@ -1791,217 +1928,6 @@ async def get_audit_log_filters(
     }
 
 
-# ==================== PARTICIPANT MEETING ENDPOINTS ====================
-
-@router.get("/participant/check")
-async def check_if_participant(
-    meeting_id: int = Query(..., description="Meeting ID to check"),
-    user_id: Optional[int] = Query(None, description="User ID to check"),
-    email: Optional[str] = Query(None, description="User email to check"),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Check if a user is a participant in a specific meeting."""
-    target_email = None
-    
-    if user_id is not None:
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
-        target_email = user.email
-    elif email is not None:
-        target_email = email
-    else:
-        target_email = current_user.email
-    
-    meeting_result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
-    meeting = meeting_result.scalar_one_or_none()
-    if not meeting:
-        raise HTTPException(status_code=404, detail=f"Meeting with ID {meeting_id} not found")
-    
-    is_participant = any(p.email == target_email for p in meeting.participants)
-    
-    return {
-        "meeting_id": meeting_id,
-        "user_email": target_email,
-        "is_participant": is_participant,
-        "meeting_title": meeting.title,
-        "meeting_status": meeting.status.value if meeting.status else "scheduled"
-    }
-
-
-@router.get("/participant/detailed", response_model=List[ParticipantMeetingSummarySchema])
-async def get_meetings_as_participant_detailed(
-    user_id: Optional[int] = Query(None, description="User ID to filter meetings where user is a participant"),
-    email: Optional[str] = Query(None, description="Email address to filter meetings where user is a participant"),
-    status: Optional[str] = Query(None, description="Filter by meeting status: scheduled, in_progress, completed, cancelled"),
-    upcoming_only: bool = Query(False, description="Only show upcoming meetings"),
-    past_only: bool = Query(False, description="Only show past meetings"),
-    include_actions: bool = Query(True, description="Include action items assigned to user"),
-    include_minutes: bool = Query(True, description="Include meeting minutes"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get all meetings where the specified user is a participant with detailed information."""
-    
-    # Resolve target user
-    target_user = await _resolve_target_user_simple(user_id, email, current_user, db)
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    target_email = target_user.email
-    
-    # Build query
-    query = select(Meeting).join(
-        Meeting.participants
-    ).where(
-        Meeting.participants.any(email=target_email)
-    ).options(
-        selectinload(Meeting.participants),
-        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.overall_status),
-        selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions).selectinload(MeetingAction.assigned_to)
-    )
-    
-    if status:
-        valid_statuses = [s.value for s in MeetingStatus] if hasattr(MeetingStatus, 'value') else []
-        if status.lower() not in valid_statuses:
-            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
-        query = query.where(Meeting.status == status.lower())
-    
-    now = datetime.utcnow()
-    if upcoming_only:
-        query = query.where(Meeting.meeting_date >= now)
-    if past_only:
-        query = query.where(Meeting.meeting_date < now)
-    
-    query = query.order_by(Meeting.meeting_date.asc()).offset(offset).limit(limit)
-    result = await db.execute(query)
-    meetings = result.scalars().all()
-    
-    # Build response
-    response = []
-    for meeting in meetings:
-        minutes = meeting.minutes if include_minutes else []
-        
-        user_action_items = []
-        if include_actions:
-            for minute in minutes:
-                for action in minute.actions:
-                    if action.assigned_to_id == target_user.id:
-                        status_name = "pending"
-                        if action.overall_status:
-                            if hasattr(action.overall_status, 'shortname'):
-                                status_name = action.overall_status.shortname
-                            elif hasattr(action.overall_status, 'name'):
-                                status_name = action.overall_status.name
-                        
-                        user_action_items.append({
-                            "id": action.id,
-                            "description": action.description,
-                            "assigned_to_id": action.assigned_to_id,
-                            "assigned_to_name": action.assigned_to.full_name or action.assigned_to.name if action.assigned_to else None,
-                            "due_date": action.due_date,
-                            "status": status_name,
-                            "priority": action.priority,
-                            "remarks": action.remarks,
-                            "completed_at": action.completed_at,
-                            "overall_progress_percentage": action.overall_progress_percentage,
-                            "assigned_to": {
-                                "id": action.assigned_to.id,
-                                "full_name": action.assigned_to.full_name,
-                                "name": action.assigned_to.name,
-                                "email": action.assigned_to.email
-                            } if action.assigned_to else None
-                        })
-        
-        formatted_minutes = []
-        for minute in minutes:
-            minute_actions = []
-            for action in minute.actions:
-                action_status = "pending"
-                if action.overall_status:
-                    if hasattr(action.overall_status, 'shortname'):
-                        action_status = action.overall_status.shortname
-                    elif hasattr(action.overall_status, 'name'):
-                        action_status = action.overall_status.name
-                
-                minute_actions.append({
-                    "id": action.id,
-                    "description": action.description,
-                    "assigned_to_id": action.assigned_to_id,
-                    "assigned_to_name": action.assigned_to.full_name or action.assigned_to.name if action.assigned_to else None,
-                    "due_date": action.due_date,
-                    "status": action_status,
-                    "priority": action.priority,
-                    "remarks": action.remarks,
-                    "completed_at": action.completed_at,
-                    "overall_progress_percentage": action.overall_progress_percentage
-                })
-            
-            formatted_minutes.append({
-                "id": minute.id,
-                "topic": minute.topic,
-                "discussion": minute.discussion,
-                "decisions": minute.decisions,
-                "created_at": minute.created_at,
-                "actions": minute_actions
-            })
-        
-        participants = []
-        for participant in meeting.participants:
-            participants.append({
-                "id": participant.id,
-                "name": participant.name,
-                "email": participant.email,
-                "is_current_user": participant.email == target_email
-            })
-        
-        action_items_count = len(user_action_items)
-        pending_actions_count = len([a for a in user_action_items if a.get("status") == "pending"])
-        in_progress_actions_count = len([a for a in user_action_items if a.get("status") == "in_progress"])
-        completed_actions_count = len([a for a in user_action_items if a.get("status") == "completed"])
-        overdue_actions_count = len([
-            a for a in user_action_items 
-            if a.get("due_date") and a.get("due_date") < now and a.get("status") != "completed"
-        ])
-        
-        response.append({
-            "meeting": {
-                "id": meeting.id,
-                "title": meeting.title,
-                "description": meeting.description,
-                "start_date": meeting.meeting_date,
-                "end_date": meeting.meeting_date,
-                "location": meeting.location,
-                "meeting_link": meeting.meeting_link,
-                "status": meeting.status.value if meeting.status else "scheduled",
-                "is_virtual": getattr(meeting, 'is_virtual', False),
-                "created_by": meeting.created_by,
-                "created_at": meeting.created_at,
-                "updated_at": meeting.updated_at,
-                "participants": participants,
-                "minutes": formatted_minutes if include_minutes else []
-            },
-            "user_info": {
-                "id": target_user.id,
-                "email": target_email,
-                "name": target_user.full_name or target_user.name if target_user else None
-            },
-            "user_action_items": user_action_items,
-            "minutes_count": len(minutes),
-            "action_items_count": action_items_count,
-            "pending_actions_count": pending_actions_count,
-            "in_progress_actions_count": in_progress_actions_count,
-            "completed_actions_count": completed_actions_count,
-            "overdue_actions_count": overdue_actions_count
-        })
-
-    return response
-
-
 async def _resolve_target_user_simple(user_id, email, current_user, db):
     """Simple user resolution"""
     if user_id:
@@ -2011,3 +1937,67 @@ async def _resolve_target_user_simple(user_id, email, current_user, db):
         result = await db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
     return current_user
+
+
+async def _send_notification_by_type(notif_type: str, participant, meeting, custom_message: str) -> bool:
+    """Helper to send notification based on type"""
+    if notif_type == 'email' and participant.email:
+        return await send_email_notification(
+            to_email=participant.email,
+            meeting=meeting,
+            custom_message=custom_message,
+            participant_name=participant.name
+        )
+    elif notif_type in ['whatsapp', 'sms'] and participant.telephone:
+        logger.info(f"Sending {notif_type.upper()} to {participant.telephone} for meeting {meeting.title}")
+        return True
+    return False
+
+
+async def send_email_notification(to_email: str, meeting, custom_message: str = "", participant_name: str = "") -> bool:
+    """Send email notification using existing email service"""
+    try:
+        meeting_time = f"{meeting.start_time} - {meeting.end_time}" if meeting.start_time else "Time TBD"
+        meeting_date = meeting.meeting_date.strftime("%A, %B %d, %Y") if meeting.meeting_date else "Date TBD"
+        
+        is_online = getattr(meeting, 'platform', None) and meeting.platform != 'physical'
+        location_text = meeting.location_text or "Location TBD"
+        meeting_link = getattr(meeting, 'meeting_link', '')
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><title>Meeting Notification</title></head>
+        <body style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                <h2>📋 Meeting Invitation</h2>
+            </div>
+            <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <p>Dear <strong>{participant_name or 'Participant'}</strong>,</p>
+                <p>You have been invited to:</p>
+                <h3>{meeting.title}</h3>
+                <p><strong>Date:</strong> {meeting_date}</p>
+                <p><strong>Time:</strong> {meeting_time}</p>
+                <p><strong>{'Online Meeting' if is_online else 'Location'}:</strong> {location_text}</p>
+                {f'<p><strong>Join Link:</strong> <a href="{meeting_link}">{meeting_link}</a></p>' if meeting_link else ''}
+                {f'<p><strong>Additional Information:</strong></p><p>{custom_message}</p>' if custom_message else ''}
+                <hr>
+                <p style="font-size: 12px; color: #999;">This is an automated notification from the Meeting Management System.</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        if hasattr(email_service, 'is_configured') and email_service.is_configured():
+            return await email_service.send_email(
+                to_email=to_email,
+                subject=f"📅 Meeting Invitation: {meeting.title}",
+                html_content=html_content
+            )
+        else:
+            logger.warning(f"Email service not configured, would send to {to_email}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error sending email to {to_email}: {e}")
+        return False

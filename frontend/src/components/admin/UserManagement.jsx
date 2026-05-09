@@ -6,7 +6,7 @@ import {
   Grid, FormControl, InputLabel, Select, MenuItem, Switch,
   FormControlLabel, Alert, Snackbar, CircularProgress, InputAdornment,
   Tooltip, Card, CardContent, Stack, Divider, useTheme, useMediaQuery,
-  Collapse, Badge, alpha, Autocomplete, Fade, Slide,
+  Collapse, Badge, alpha, Autocomplete, Fade,
 } from '@mui/material';
 import {
   SearchOutlined, EditOutlined, DeleteOutlined, LockOutlined,
@@ -16,7 +16,9 @@ import {
   ShieldOutlined, PeopleAltOutlined, FilterListOutlined, CloseOutlined,
   BusinessOutlined, LinkOutlined, LinkOffOutlined, ApartmentOutlined,
   AccountTreeOutlined, SupervisorAccountOutlined, CheckCircleOutlined,
-  CancelOutlined, TuneOutlined,
+  CancelOutlined, TuneOutlined, ChevronRightOutlined, FolderOutlined,
+  FolderOpenOutlined, SwapHorizOutlined, CheckBoxOutlined,
+  CheckBoxOutlineBlankOutlined,
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -29,13 +31,15 @@ import UserDetailPanel from './UserDetailPanel';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const ROLE_PALETTE = {
-  head:        { color: 'error',   label: 'Head' },
-  manager:     { color: 'warning', label: 'Manager' },
-  supervisor:  { color: 'info',    label: 'Supervisor' },
-  member:      { color: 'default', label: 'Member' },
-  temporary:   { color: 'warning', label: 'Temp' },
-  contractor:  { color: 'default', label: 'Contractor' },
+  head:       { color: 'error',   label: 'Head',       bgColor: '#fef2f2', borderColor: '#fca5a5', textColor: '#b91c1c' },
+  manager:    { color: 'warning', label: 'Manager',    bgColor: '#fffbeb', borderColor: '#fcd34d', textColor: '#92400e' },
+  supervisor: { color: 'info',    label: 'Supervisor', bgColor: '#eff6ff', borderColor: '#93c5fd', textColor: '#1d4ed8' },
+  member:     { color: 'default', label: 'Member',     bgColor: '#f9fafb', borderColor: '#d1d5db', textColor: '#374151' },
+  temporary:  { color: 'warning', label: 'Temp',       bgColor: '#fffbeb', borderColor: '#fcd34d', textColor: '#92400e' },
+  contractor: { color: 'default', label: 'Contractor', bgColor: '#f9fafb', borderColor: '#d1d5db', textColor: '#374151' },
 };
+
+const ASSIGNABLE_ROLES = ['member', 'supervisor', 'manager', 'head'];
 
 // ─── Tiny helpers ─────────────────────────────────────────────────────────────
 const initials = (u) =>
@@ -44,11 +48,75 @@ const initials = (u) =>
 const fullName = (u) =>
   [u?.first_name, u?.last_name].filter(Boolean).join(' ') || u?.username || '—';
 
+/**
+ * Groups a flat department list into a tree structure.
+ * Supports multiple levels of nesting.
+ */
+const buildDeptTree = (departments = []) => {
+  if (!departments.length) return [];
+  
+  // Create a map of all departments
+  const map = {};
+  const roots = [];
+  
+  // First, create a map with all departments
+  departments.forEach((dept) => {
+    map[dept.id] = { 
+      ...dept, 
+      children: [],
+      level: 0
+    };
+  });
+  
+  // Build the tree structure
+  departments.forEach((dept) => {
+    const node = map[dept.id];
+    
+    if (dept.parent_id && map[dept.parent_id]) {
+      // Has a valid parent - add as child
+      map[dept.parent_id].children.push(node);
+      node.level = map[dept.parent_id].level + 1;
+    } else if (!dept.parent_id) {
+      // No parent - this is a root node
+      roots.push(node);
+    } else {
+      // Parent_id exists but parent not found - add as root with warning
+      console.warn(`Department ${dept.id} (${dept.name}) has parent_id ${dept.parent_id} but parent not found`);
+      roots.push(node);
+    }
+  });
+  
+  // Sort children by order or name
+  const sortChildren = (node) => {
+    if (node.children && node.children.length) {
+      node.children.sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) {
+          return a.order - b.order;
+        }
+        return a.name.localeCompare(b.name);
+      });
+      node.children.forEach(sortChildren);
+    }
+  };
+  
+  roots.forEach(sortChildren);
+  
+  // Sort roots as well
+  roots.sort((a, b) => {
+    if (a.order !== undefined && b.order !== undefined) {
+      return a.order - b.order;
+    }
+    return a.name.localeCompare(b.name);
+  });
+  
+  return roots;
+};
+
 // ─── Inline department pill with unlink ──────────────────────────────────────
 const DeptPill = ({ assignment, onUnlink, compact = false }) => {
   const cfg = ROLE_PALETTE[assignment.role] || ROLE_PALETTE.member;
   return (
-    <Tooltip title={`${assignment.department_name} · ${assignment.role}`} arrow>
+    <Tooltip title={`${assignment.department_name} · ${cfg.label}`} arrow>
       <Chip
         label={compact ? assignment.department_name?.split(' ')[0] : assignment.department_name}
         size="small"
@@ -93,19 +161,382 @@ const StatCard = ({ label, value, icon, color }) => (
   </Paper>
 );
 
-// ─── Department link dialog ───────────────────────────────────────────────────
+// ─── Role chip (inline selector) ─────────────────────────────────────────────
+const RoleChip = ({ role, onChange, disabled }) => {
+  const cfg = ROLE_PALETTE[role] || ROLE_PALETTE.member;
+  return (
+    <FormControl size="small" sx={{ minWidth: 110 }} disabled={disabled}>
+      <Select
+        value={role}
+        onChange={(e) => onChange(e.target.value)}
+        variant="outlined"
+        sx={{
+          height: 26,
+          fontSize: '0.72rem',
+          fontWeight: 600,
+          color: cfg.textColor,
+          bgcolor: cfg.bgColor,
+          '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: cfg.borderColor,
+          },
+          '&:hover .MuiOutlinedInput-notchedOutline': {
+            borderColor: cfg.textColor,
+          },
+          '& .MuiSelect-icon': { color: cfg.textColor, fontSize: 16 },
+          borderRadius: 1,
+        }}
+        MenuProps={{ PaperProps: { sx: { mt: 0.5, borderRadius: 1.5 } } }}
+      >
+        {ASSIGNABLE_ROLES.map((r) => {
+          const c = ROLE_PALETTE[r];
+          return (
+            <MenuItem key={r} value={r} sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
+              <Box
+                component="span"
+                sx={{
+                  display: 'inline-block',
+                  width: 8, height: 8, borderRadius: '50%',
+                  bgcolor: c.textColor, mr: 1, flexShrink: 0,
+                }}
+              />
+              {c.label}
+            </MenuItem>
+          );
+        })}
+      </Select>
+    </FormControl>
+  );
+};
+
+// ─── Recursive Department Tree Node ────────────────────────────────────────
+const DeptTreeNode = ({ 
+  node, 
+  level = 0, 
+  selectedMap, 
+  onToggleChild, 
+  onRoleChange,
+  searchTerm = '',
+  defaultOpen = false 
+}) => {
+  const theme = useTheme();
+  const [open, setOpen] = useState(defaultOpen);
+  const hasChildren = node.children && node.children.length > 0;
+  const isSelected = !!selectedMap[node.id];
+  const selectedChildrenCount = node.children?.filter(c => selectedMap[c.id]).length || 0;
+  
+  // Auto-open if any child selected or if search matches
+  useEffect(() => {
+    if (selectedChildrenCount > 0 || (searchTerm && node.name.toLowerCase().includes(searchTerm.toLowerCase()))) {
+      setOpen(true);
+    }
+  }, [selectedChildrenCount, searchTerm, node.name]);
+  
+  // Check if this node or any children match search
+  const matchesSearch = !searchTerm || node.name.toLowerCase().includes(searchTerm.toLowerCase());
+  const hasMatchingChildren = node.children?.some(child => 
+    child.name.toLowerCase().includes(searchTerm?.toLowerCase() || '')
+  );
+  
+  if (searchTerm && !matchesSearch && !hasMatchingChildren) {
+    return null;
+  }
+  
+  return (
+    <Box sx={{ position: 'relative' }}>
+      {/* Tree connector lines for non-root nodes */}
+      {level > 0 && (
+        <>
+          <Box
+            sx={{
+              position: 'absolute',
+              left: level * 16 - 8,
+              top: 0,
+              bottom: '50%',
+              width: '1px',
+              bgcolor: 'divider',
+            }}
+          />
+          <Box
+            sx={{
+              position: 'absolute',
+              left: level * 16 - 8,
+              top: '50%',
+              width: 10,
+              height: '1px',
+              bgcolor: 'divider',
+            }}
+          />
+        </>
+      )}
+      
+      {/* Node row */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          px: 1.5,
+          py: 1,
+          ml: level * 2,
+          borderRadius: 1.5,
+          cursor: 'pointer',
+          transition: 'background 0.13s',
+          bgcolor: isSelected ? alpha(theme.palette.primary.main, 0.06) : 'transparent',
+          '&:hover': {
+            bgcolor: isSelected 
+              ? alpha(theme.palette.primary.main, 0.09)
+              : alpha(theme.palette.action.hover, 0.6),
+          },
+        }}
+        onClick={() => {
+          if (hasChildren) {
+            setOpen(v => !v);
+          } else {
+            onToggleChild(node.id);
+          }
+        }}
+      >
+        {/* Expand/Collapse icon */}
+        <Box sx={{ color: 'text.disabled', display: 'flex', flexShrink: 0, width: 20 }}>
+          {hasChildren ? (
+            <ChevronRightOutlined
+              sx={{
+                fontSize: 18,
+                transition: 'transform 0.18s',
+                transform: open ? 'rotate(90deg)' : 'none',
+              }}
+            />
+          ) : (
+            <Box sx={{ width: 18 }} />
+          )}
+        </Box>
+        
+        {/* Checkbox or selection indicator */}
+        <Box 
+          sx={{ 
+            color: isSelected ? 'primary.main' : 'text.disabled', 
+            display: 'flex', 
+            flexShrink: 0 
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleChild(node.id);
+          }}
+        >
+          {isSelected
+            ? <CheckBoxOutlined sx={{ fontSize: 18 }} />
+            : <CheckBoxOutlineBlankOutlined sx={{ fontSize: 18 }} />}
+        </Box>
+        
+        {/* Icon based on node type */}
+        <Box sx={{ color: open ? 'primary.main' : 'text.secondary', display: 'flex', flexShrink: 0 }}>
+          {hasChildren ? (
+            open ? <FolderOpenOutlined sx={{ fontSize: 18 }} /> : <FolderOutlined sx={{ fontSize: 18 }} />
+          ) : (
+            <ApartmentOutlined sx={{ fontSize: 16 }} />
+          )}
+        </Box>
+        
+        {/* Node info */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography 
+            variant="body2" 
+            fontWeight={isSelected ? 600 : 400}
+            color={isSelected ? 'primary.main' : 'text.primary'}
+            noWrap 
+            sx={{ fontSize: '0.82rem' }}
+          >
+            {node.name}
+          </Typography>
+          {node.description && (
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: '0.7rem' }}>
+              {node.description}
+            </Typography>
+          )}
+        </Box>
+        
+        {/* Member count badge */}
+        {node.member_count != null && node.member_count > 0 && (
+          <Chip
+            label={`${node.member_count}`}
+            size="small"
+            variant="outlined"
+            sx={{ height: 18, fontSize: '0.65rem' }}
+          />
+        )}
+        
+        {/* Selection count badge for folders */}
+        {hasChildren && selectedChildrenCount > 0 && (
+          <Chip
+            label={`${selectedChildrenCount} selected`}
+            size="small"
+            color="primary"
+            sx={{ height: 18, fontSize: '0.65rem', fontWeight: 600 }}
+          />
+        )}
+        
+        {/* Role selector - only visible when selected (leaf nodes) */}
+        {isSelected && !hasChildren && (
+          <Box onClick={(e) => e.stopPropagation()}>
+            <RoleChip 
+              role={selectedMap[node.id] || 'member'} 
+              onChange={(r) => onRoleChange(node.id, r)} 
+            />
+          </Box>
+        )}
+      </Box>
+      
+      {/* Children */}
+      {hasChildren && (
+        <Collapse in={open}>
+          <Box sx={{ pl: 0.5 }}>
+            {node.children.map((child) => (
+              <DeptTreeNode
+                key={child.id}
+                node={child}
+                level={level + 1}
+                selectedMap={selectedMap}
+                onToggleChild={onToggleChild}
+                onRoleChange={onRoleChange}
+                searchTerm={searchTerm}
+                defaultOpen={defaultOpen}
+              />
+            ))}
+          </Box>
+        </Collapse>
+      )}
+      
+      {/* Divider between root nodes */}
+      {level === 0 && <Divider sx={{ mt: 0.5, opacity: 0.5 }} />}
+    </Box>
+  );
+};
+
+// ─── Diff preview row ─────────────────────────────────────────────────────────
+const DiffRow = ({ icon, color, children }) => (
+  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+    <Box sx={{ color, display: 'flex', flexShrink: 0 }}>{icon}</Box>
+    <Typography variant="caption" color={color} sx={{ fontSize: '0.75rem' }}>
+      {children}
+    </Typography>
+  </Box>
+);
+
+// ─── Enhanced Department Dialog ───────────────────────────────────────────────
+// ─── Enhanced Department Dialog ───────────────────────────────────────────────
 const DepartmentDialog = ({
   open, onClose, user, departments, currentAssignments, onSave, saving,
 }) => {
-  const [selected, setSelected] = useState([]);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
+  // selectedMap: { [deptId]: role }
+  const [selectedMap, setSelectedMap] = useState({});
+  const [search, setSearch] = useState('');
+  const searchRef = useRef(null);
+
+  // Filter to only active departments
+  const activeDepartments = useMemo(() => {
+    return departments.filter(dept => dept.is_active !== false);
+  }, [departments]);
+
+  // Build tree from active departments list
+  const deptTree = useMemo(() => buildDeptTree(activeDepartments), [activeDepartments]);
+
+  // Create a quick lookup map for department names (for diff preview)
+  const deptNameMap = useMemo(() => {
+    const map = {};
+    const buildMap = (nodes) => {
+      nodes.forEach(node => {
+        map[node.id] = node.name;
+        if (node.children && node.children.length) {
+          buildMap(node.children);
+        }
+      });
+    };
+    buildMap(deptTree);
+    return map;
+  }, [deptTree]);
+
+  // Initialize from current assignments on open
   useEffect(() => {
-    if (open) setSelected(currentAssignments.map((a) => a.department_id));
+    if (open) {
+      const initial = {};
+      currentAssignments.forEach((a) => {
+        initial[a.department_id] = a.role || 'member';
+      });
+      setSelectedMap(initial);
+      setSearch('');
+      setTimeout(() => searchRef.current?.focus(), 120);
+    }
   }, [open, currentAssignments]);
 
-  const selectedObjs = departments.filter((d) => selected.includes(d.id));
-  const toAdd    = selected.filter((id) => !currentAssignments.find((a) => a.department_id === id));
-  const toRemove = currentAssignments.filter((a) => !selected.includes(a.department_id));
+  // Filter tree by search
+  const filteredTree = useMemo(() => {
+    if (!search.trim()) return deptTree;
+    const q = search.toLowerCase();
+    
+    const filterNode = (node) => {
+      const matchesName = node.name.toLowerCase().includes(q);
+      const filteredChildren = node.children.filter(filterNode);
+      
+      if (matchesName || filteredChildren.length > 0) {
+        return {
+          ...node,
+          children: filteredChildren
+        };
+      }
+      return null;
+    };
+    
+    return deptTree.map(filterNode).filter(Boolean);
+  }, [deptTree, search]);
+
+  const handleToggleChild = useCallback((deptId) => {
+    setSelectedMap((prev) => {
+      if (prev[deptId]) {
+        const next = { ...prev };
+        delete next[deptId];
+        return next;
+      }
+      return { ...prev, [deptId]: 'member' };
+    });
+  }, []);
+
+  const handleRoleChange = useCallback((deptId, role) => {
+    setSelectedMap((prev) => ({ ...prev, [deptId]: role }));
+  }, []);
+
+  // Compute diff
+  const { toAdd, toRemove, toChange } = useMemo(() => {
+    const prevMap = {};
+    currentAssignments.forEach((a) => { 
+      prevMap[a.department_id] = a.role || 'member'; 
+    });
+
+    const toAdd = Object.keys(selectedMap).filter((id) => !prevMap[id]);
+    const toRemove = Object.keys(prevMap).filter((id) => !selectedMap[id]);
+    const toChange = Object.keys(selectedMap).filter(
+      (id) => prevMap[id] && prevMap[id] !== selectedMap[id],
+    );
+
+    return { toAdd, toRemove, toChange };
+  }, [selectedMap, currentAssignments]);
+
+  const hasChanges = toAdd.length + toRemove.length + toChange.length > 0;
+  const selectedCount = Object.keys(selectedMap).length;
+
+  // Get department name from the map (much faster and reliable)
+  const getDeptName = (id) => {
+    return deptNameMap[id] || id;
+  };
+
+  const handleSave = () => {
+    const removeIds = toRemove;
+    const addEntries = toAdd.map((id) => ({ id, role: selectedMap[id] }));
+    const changeEntries = toChange.map((id) => ({ id, role: selectedMap[id] }));
+    onSave({ addEntries, changeEntries, removeIds, selectedMap });
+  };
 
   return (
     <Dialog
@@ -113,91 +544,252 @@ const DepartmentDialog = ({
       onClose={() => !saving && onClose()}
       maxWidth="sm"
       fullWidth
+      fullScreen={isMobile}
       TransitionComponent={Fade}
-      PaperProps={{ sx: { borderRadius: 2.5 } }}
+      PaperProps={{
+        sx: {
+          borderRadius: isMobile ? 0 : 2.5,
+          overflow: 'hidden',
+        },
+      }}
     >
-      <DialogTitle sx={{ pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+      {/* ── Header ── */}
+      <DialogTitle
+        sx={{
+          pb: 1.5,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          bgcolor: (t) => alpha(t.palette.primary.main, 0.03),
+        }}
+      >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box
             sx={{
-              width: 36, height: 36, borderRadius: 1.5,
+              width: 40, height: 40, borderRadius: 1.5,
               bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
-            <BusinessOutlined color="primary" fontSize="small" />
+            <AccountTreeOutlined color="primary" />
           </Box>
-          <Box>
-            <Typography fontWeight={700}>Department access</Typography>
-            <Typography variant="caption" color="text.secondary">
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography fontWeight={700} noWrap>Department access</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
               {fullName(user)} · @{user?.username}
             </Typography>
           </Box>
+
+          {/* Selected count badge */}
+          <Chip
+            icon={<ApartmentOutlined sx={{ fontSize: '14px !important' }} />}
+            label={`${selectedCount} assigned`}
+            size="small"
+            color={selectedCount > 0 ? 'primary' : 'default'}
+            variant="outlined"
+            sx={{ fontWeight: 700, fontSize: '0.72rem', flexShrink: 0 }}
+          />
+
+          {isMobile && (
+            <IconButton size="small" onClick={onClose} disabled={saving}>
+              <CloseOutlined fontSize="small" />
+            </IconButton>
+          )}
         </Box>
       </DialogTitle>
 
-      <DialogContent sx={{ pt: 2.5, pb: 1 }}>
-        <Autocomplete
-          multiple
-          options={departments}
-          getOptionLabel={(o) => o.name}
-          isOptionEqualToValue={(o, v) => o.id === v.id}
-          value={selectedObjs}
-          onChange={(_, newVal) => setSelected(newVal.map((d) => d.id))}
-          renderInput={(params) => (
-            <TextField {...params} label="Select departments" placeholder="Search…" size="small" />
-          )}
-          renderTags={(value, getTagProps) =>
-            value.map((opt, i) => (
-              <Chip
-                key={opt.id}
-                label={opt.name}
-                size="small"
-                color="primary"
-                variant="outlined"
-                {...getTagProps({ index: i })}
-              />
-            ))
-          }
-          fullWidth
-        />
+      <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-        {/* Diff preview */}
-        {(toAdd.length > 0 || toRemove.length > 0) && (
-          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-            {toAdd.map((id) => {
-              const d = departments.find((x) => x.id === id);
-              return (
-                <Box key={id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CheckCircleOutlined sx={{ fontSize: 15, color: 'success.main' }} />
-                  <Typography variant="caption" color="success.main">
-                    Add: {d?.name}
-                  </Typography>
-                </Box>
-              );
-            })}
-            {toRemove.map((a) => (
-              <Box key={a.department_id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CancelOutlined sx={{ fontSize: 15, color: 'error.main' }} />
-                <Typography variant="caption" color="error.main">
-                  Remove: {a.department_name}
+        {/* ── Search ── */}
+        <Box sx={{ px: 2.5, pt: 2, pb: 1.5 }}>
+          <TextField
+            inputRef={searchRef}
+            fullWidth
+            size="small"
+            placeholder="Search active departments…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
+                </InputAdornment>
+              ),
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearch('')}>
+                    <CloseOutlined sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+          />
+        </Box>
+
+        {/* ── Legend ── */}
+        <Box
+          sx={{
+            px: 2.5, pb: 1,
+            display: 'flex', alignItems: 'center', gap: 2,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+            Roles:
+          </Typography>
+          {ASSIGNABLE_ROLES.map((r) => {
+            const cfg = ROLE_PALETTE[r];
+            return (
+              <Box
+                key={r}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 0.5,
+                  px: 0.75, py: 0.25, borderRadius: 0.75,
+                  bgcolor: cfg.bgColor,
+                  border: `1px solid ${cfg.borderColor}`,
+                }}
+              >
+                <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: cfg.textColor }} />
+                <Typography sx={{ fontSize: '0.68rem', fontWeight: 600, color: cfg.textColor }}>
+                  {cfg.label}
                 </Typography>
               </Box>
-            ))}
+            );
+          })}
+        </Box>
+
+        {/* Info alert about active departments only */}
+        {activeDepartments.length !== departments.length && (
+          <Box sx={{ px: 2.5, pb: 1 }}>
+            <Alert severity="info" icon={<BusinessOutlined />} sx={{ py: 0, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
+              Showing only active departments ({activeDepartments.length} of {departments.length})
+            </Alert>
+          </Box>
+        )}
+
+        <Divider />
+
+        {/* ── Department Tree ── */}
+        <Box
+          sx={{
+            flex: 1,
+            overflowY: 'auto',
+            px: 1.5,
+            py: 1,
+            minHeight: 260,
+            maxHeight: isMobile ? 'calc(100vh - 480px)' : 340,
+          }}
+        >
+          {filteredTree.length === 0 ? (
+            <Box sx={{ py: 4, textAlign: 'center' }}>
+              <Typography color="text.disabled" variant="body2">
+                {search ? 'No matching departments found' : 'No active departments available'}
+              </Typography>
+            </Box>
+          ) : (
+            filteredTree.map((node) => (
+              <DeptTreeNode
+                key={node.id}
+                node={node}
+                level={0}
+                selectedMap={selectedMap}
+                onToggleChild={handleToggleChild}
+                onRoleChange={handleRoleChange}
+                searchTerm={search}
+                defaultOpen={!!search || node.children?.some(c => selectedMap[c.id])}
+              />
+            ))
+          )}
+        </Box>
+
+        <Divider />
+
+        {/* ── Diff preview ── */}
+        {hasChanges && (
+          <Box
+            sx={{
+              px: 2.5,
+              py: 1.5,
+              bgcolor: (t) => alpha(t.palette.background.default, 0.5),
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={700}
+              sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.65rem', mb: 0.75, display: 'block' }}
+            >
+              Pending changes ({toAdd.length + toRemove.length + toChange.length})
+            </Typography>
+            <Stack spacing={0.5}>
+              {toAdd.map((id) => (
+                <DiffRow
+                  key={id}
+                  icon={<CheckCircleOutlined sx={{ fontSize: 14 }} />}
+                  color="success.main"
+                >
+                  Add: <strong>{getDeptName(id)}</strong> as {ROLE_PALETTE[selectedMap[id]]?.label}
+                </DiffRow>
+              ))}
+              {toRemove.map((id) => (
+                <DiffRow
+                  key={id}
+                  icon={<CancelOutlined sx={{ fontSize: 14 }} />}
+                  color="error.main"
+                >
+                  Remove: <strong>{getDeptName(id)}</strong>
+                </DiffRow>
+              ))}
+              {toChange.map((id) => (
+                <DiffRow
+                  key={id}
+                  icon={<SwapHorizOutlined sx={{ fontSize: 14 }} />}
+                  color="warning.main"
+                >
+                  <strong>{getDeptName(id)}</strong>: role → {ROLE_PALETTE[selectedMap[id]]?.label}
+                </DiffRow>
+              ))}
+            </Stack>
           </Box>
         )}
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid', borderColor: 'divider', gap: 1 }}>
-        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+      {/* ── Actions ── */}
+      <DialogActions
+        sx={{
+          px: 2.5, py: 2,
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          gap: 1,
+          bgcolor: (t) => alpha(t.palette.background.paper, 0.9),
+        }}
+      >
+        <Button onClick={onClose} disabled={saving} sx={{ borderRadius: 1.5 }}>
+          Cancel
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="caption" color="text.secondary">
+          {selectedCount} department{selectedCount !== 1 ? 's' : ''} selected
+        </Typography>
         <Button
-          onClick={() => onSave(selected, toRemove.map((a) => a.department_id))}
+          onClick={handleSave}
           variant="contained"
-          disabled={saving || (toAdd.length === 0 && toRemove.length === 0)}
-          startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <LinkOutlined />}
-          sx={{ minWidth: 130 }}
+          disabled={saving || !hasChanges}
+          startIcon={
+            saving
+              ? <CircularProgress size={16} color="inherit" />
+              : <LinkOutlined />
+          }
+          sx={{ minWidth: 150, borderRadius: 1.5, fontWeight: 700 }}
         >
-          {saving ? 'Saving…' : `Save (${toAdd.length + toRemove.length} change${toAdd.length + toRemove.length !== 1 ? 's' : ''})`}
+          {saving
+            ? 'Saving…'
+            : hasChanges
+              ? `Save ${toAdd.length + toRemove.length + toChange.length} change${toAdd.length + toRemove.length + toChange.length !== 1 ? 's' : ''}`
+              : 'No changes'}
         </Button>
       </DialogActions>
     </Dialog>
@@ -255,8 +847,11 @@ const UserManagement = () => {
   const fetchDepartments = useCallback(async () => {
     try {
       const r = await api.get('/departments');
+      console.log('Departments loaded:', r.data);
       setDepartments(r.data || []);
-    } catch { setDepartments([]); }
+    } catch { 
+      setDepartments([]); 
+    }
   }, []);
 
   const fetchUserDepts = useCallback(async (userId, force = false) => {
@@ -292,31 +887,44 @@ const UserManagement = () => {
     }
   }, [users]);
 
-  // ── Department save handler ──────────────────────────────────────────────────
-  const handleSaveDepartments = async (selectedIds, removeIds) => {
+  // ── Enhanced department save handler ─────────────────────────────────────────
+  const handleSaveDepartments = async ({ addEntries, changeEntries, removeIds }) => {
     if (!deptDialogUser) return;
     setSavingDepts(true);
     try {
-      const currentIds = (userDepartmentsMap[deptDialogUser.id] || []).map((a) => a.department_id);
-      const toAdd    = selectedIds.filter((id) => !currentIds.includes(id));
-
-      // Add new ones in bulk
-      if (toAdd.length > 0) {
+      // Add new assignments (with individual roles)
+      for (const { id, role } of addEntries) {
         await api.post(`/users/${deptDialogUser.id}/departments`, {
-          department_ids: toAdd,
-          role: 'member',
+          department_ids: [id],
+          role,
         });
       }
-      // Remove individually
+
+      // Update role for existing assignments
+      for (const { id, role } of changeEntries) {
+        await api.patch(`/users/${deptDialogUser.id}/departments/${id}`, { role });
+      }
+
+      // Remove unlinked departments
       for (const deptId of removeIds) {
         await api.delete(`/users/${deptDialogUser.id}/departments/${deptId}`);
       }
 
       await fetchUserDepts(deptDialogUser.id, true);
-      setSnackbar({ open: true, message: 'Department access updated', severity: 'success' });
+
+      const total = addEntries.length + changeEntries.length + removeIds.length;
+      setSnackbar({
+        open: true,
+        message: `Department access updated (${total} change${total !== 1 ? 's' : ''})`,
+        severity: 'success',
+      });
       setDeptDialogOpen(false);
     } catch (e) {
-      setSnackbar({ open: true, message: e.response?.data?.detail || 'Failed to update departments', severity: 'error' });
+      setSnackbar({
+        open: true,
+        message: e.response?.data?.detail || 'Failed to update departments',
+        severity: 'error',
+      });
     } finally {
       setSavingDepts(false);
     }
@@ -463,7 +1071,7 @@ const UserManagement = () => {
           <Tooltip title="Manage departments">
             <IconButton size="small" color="primary"
               onClick={(e) => { e.stopPropagation(); setDeptDialogUser(row); setDeptDialogOpen(true); }}>
-              <BusinessOutlined fontSize="small" />
+              <AccountTreeOutlined fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip title="View details">
@@ -650,7 +1258,7 @@ const UserManagement = () => {
               <Tooltip title="Manage departments">
                 <IconButton size="small" color="primary"
                   onClick={() => { setDeptDialogUser(user); setDeptDialogOpen(true); }}>
-                  <BusinessOutlined fontSize="small" />
+                  <AccountTreeOutlined fontSize="small" />
                 </IconButton>
               </Tooltip>
               <Tooltip title="View details">
@@ -905,7 +1513,7 @@ const UserManagement = () => {
         )}
       </Box>
 
-      {/* Department dialog */}
+      {/* ── Enhanced Department Hierarchy Dialog ── */}
       <DepartmentDialog
         open={deptDialogOpen}
         onClose={() => setDeptDialogOpen(false)}
@@ -1011,6 +1619,7 @@ const UserManagement = () => {
                 </Select>
               </FormControl>
 
+              {/* Department selector inside create/edit uses flat Autocomplete (simpler context) */}
               <Autocomplete
                 multiple
                 options={departments}

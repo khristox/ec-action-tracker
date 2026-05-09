@@ -1,4 +1,4 @@
-// src/components/meetings/MeetingForm.jsx - IMPROVED with RichTextEditor and Proper Recurring Meeting Handling
+// src/components/meetings/MeetingForm.jsx - IMPROVED with Department Restriction and Organization Tracking
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -27,7 +27,8 @@ import {
   Visibility as VisibilityIcon, Update as UpdateIcon, Person as PersonIcon,
   DomainOutlined as StructureIcon, Repeat as RepeatIcon, Info as InfoIcon,
   Preview as PreviewIcon, Today as TodayIcon, GroupAdd as GroupAddIcon,
-  ListAlt as ListAltIcon, PersonSearch as PersonSearchIcon
+  ListAlt as ListAltIcon, PersonSearch as PersonSearchIcon, Lock as LockIcon,
+  Public as PublicIcon2, Domain as DepartmentIcon, Organization as OrgIcon
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -93,6 +94,12 @@ const END_OPTIONS = [
   { value: 'never', label: 'Never' },
   { value: 'after', label: 'After X occurrences' },
   { value: 'on', label: 'On date' }
+];
+
+// Meeting visibility options
+const VISIBILITY_OPTIONS = [
+  { value: 'open', label: 'Open to All', icon: <PublicIcon2 />, description: 'Anyone can view and join this meeting', color: '#4CAF50' },
+  { value: 'department', label: 'Department Only', icon: <DepartmentIcon />, description: 'Restricted to selected department only', color: '#FF9800' }
 ];
 
 const steps = [
@@ -267,6 +274,180 @@ const HierarchyNode = React.memo(({ node, depth, locationMode, onSelect, selecte
     </Box>
   );
 });
+
+// ─── DepartmentSelector Component ─────────────────────────────────────────────
+const DepartmentSelector = ({ value, onChange, disabled }) => {
+  const [departments, setDepartments] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      setLoading(true);
+      try {
+        const response = await api.get('/organizations/departments/', {
+          params: { limit: 100, active_only: true }
+        });
+        setDepartments(response.data?.items || response.data || []);
+      } catch (error) {
+        console.error('Error fetching departments:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchDepartments();
+  }, []);
+
+  const filteredDepartments = departments.filter(dept =>
+    dept.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    dept.code?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <FormControl fullWidth disabled={disabled}>
+      <InputLabel>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <DepartmentIcon fontSize="small" />
+          <span>Restrict to Department (Optional)</span>
+        </Stack>
+      </InputLabel>
+      <Select
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        label="Restrict to Department (Optional)"
+        renderValue={(selected) => {
+          const dept = departments.find(d => d.id === selected);
+          return dept ? dept.name : '';
+        }}
+      >
+        <MenuItem value="">
+          <em>None (Open to all departments)</em>
+        </MenuItem>
+        {filteredDepartments.map(dept => (
+          <MenuItem key={dept.id} value={dept.id}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <DepartmentIcon fontSize="small" sx={{ color: '#FF9800' }} />
+              <Box>
+                <Typography variant="body2">{dept.name}</Typography>
+                {dept.code && (
+                  <Typography variant="caption" color="text.secondary">
+                    Code: {dept.code}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          </MenuItem>
+        ))}
+      </Select>
+      <FormHelperText>
+        {value 
+          ? "This meeting is restricted to the selected department only" 
+          : "Leave blank to make this meeting open to all departments"}
+      </FormHelperText>
+    </FormControl>
+  );
+};
+
+// ─── OrganizationSelector Component ───────────────────────────────────────────
+const OrganizationSelector = ({ value, onChange, disabled }) => {
+  const [organizations, setOrganizations] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    const fetchOrganizations = async () => {
+      setLoading(true);
+      try {
+        const response = await api.get('/organizations/', {
+          params: { limit: 100, active_only: true }
+        });
+        setOrganizations(response.data?.items || response.data || []);
+      } catch (error) {
+        console.error('Error fetching organizations:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchOrganizations();
+  }, []);
+
+  const filteredOrganizations = organizations.filter(org =>
+    org.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    org.code?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <FormControl fullWidth disabled={disabled} required>
+      <InputLabel>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <OrgIcon fontSize="small" />
+          <span>Organization *</span>
+        </Stack>
+      </InputLabel>
+      <Select
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        label="Organization *"
+        renderValue={(selected) => {
+          const org = organizations.find(o => o.id === selected);
+          return org ? org.name : '';
+        }}
+      >
+        {filteredOrganizations.map(org => (
+          <MenuItem key={org.id} value={org.id}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <OrgIcon fontSize="small" sx={{ color: '#2196F3' }} />
+              <Box>
+                <Typography variant="body2">{org.name}</Typography>
+                {org.code && (
+                  <Typography variant="caption" color="text.secondary">
+                    Code: {org.code}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          </MenuItem>
+        ))}
+      </Select>
+      <FormHelperText>Select the organization this meeting belongs to</FormHelperText>
+    </FormControl>
+  );
+};
+
+// ─── VisibilitySelector Component ────────────────────────────────────────────
+const VisibilitySelector = ({ value, onChange, disabled }) => {
+  return (
+    <FormControl fullWidth disabled={disabled}>
+      <InputLabel>Meeting Visibility</InputLabel>
+      <Select
+        value={value || 'open'}
+        onChange={(e) => onChange(e.target.value)}
+        label="Meeting Visibility"
+      >
+        {VISIBILITY_OPTIONS.map(option => (
+          <MenuItem key={option.value} value={option.value}>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              {option.icon}
+              <Box>
+                <Typography variant="body2" fontWeight={500}>
+                  {option.label}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {option.description}
+                </Typography>
+              </Box>
+            </Stack>
+          </MenuItem>
+        ))}
+      </Select>
+      <FormHelperText>
+        {value === 'open' 
+          ? "Anyone can view and join this meeting" 
+          : "Only members of the selected department can access this meeting"}
+      </FormHelperText>
+    </FormControl>
+  );
+};
 
 // ─── LocationSearch Component ─────────────────────────────────────────────────
 const LocationSearch = React.memo(({ value, onChange, onClear }) => {
@@ -1002,6 +1183,11 @@ const MeetingForm = () => {
   const [recurrence, setRecurrence] = useState(null);
   const [mappingsLoading, setMappingsLoading] = useState(true);
   
+  // New state variables for department restriction and organization
+  const [visibility, setVisibility] = useState('open');
+  const [restrictedDepartmentId, setRestrictedDepartmentId] = useState(null);
+  const [organizationId, setOrganizationId] = useState('');
+  
   // Attribute mappings state
   const [attributeMappings, setAttributeMappings] = useState({
     recurrenceTypes: {},
@@ -1021,7 +1207,10 @@ const MeetingForm = () => {
   const pageTitle = isEditMode ? 'Edit Meeting' : 'Create New Meeting';
   const pageSubtitle = isEditMode ? 'Update meeting details' : 'Fill in the details to schedule a new meeting';
   const isRecurring = useMemo(() => recurrence?.enabled === true, [recurrence]);
-  const isValid = useMemo(() => formData.title.trim() && formData.meeting_date && formData.start_time, [formData.title, formData.meeting_date, formData.start_time]);
+  const isValid = useMemo(() => 
+    formData.title.trim() && formData.meeting_date && formData.start_time && organizationId,
+    [formData.title, formData.meeting_date, formData.start_time, organizationId]
+  );
   
   // Track selected user IDs to prevent duplicates
   const selectedUserIds = useMemo(() => 
@@ -1172,6 +1361,12 @@ const MeetingForm = () => {
               gps_latitude: meeting.gps_coordinates?.split(',')[0] || '', gps_longitude: meeting.gps_coordinates?.split(',')[1] || '',
             });
             if (meeting.gps_coordinates) setGpsEnabled(true);
+            
+            // Load department restriction and organization
+            setVisibility(meeting.visibility || 'open');
+            setRestrictedDepartmentId(meeting.restricted_department_id || null);
+            setOrganizationId(meeting.organization_id || '');
+            
             dispatch(clearMeetingParticipants());
             if (meeting.participants?.length) {
               meeting.participants.forEach(p => dispatch(addCustomParticipant({ 
@@ -1293,7 +1488,10 @@ const MeetingForm = () => {
   const handleRemoveParticipant = useCallback((pid) => { dispatch(removeLocalMeetingParticipant(pid)); setFormDirty(true); setSnackbar({ open: true, message: 'Participant removed', severity: 'info' }); }, [dispatch]);
 
   const handleNext = useCallback(() => {
-    if (activeStep === 0 && !isValid) { setSnackbar({ open: true, message: 'Please fill in all required fields', severity: 'warning' }); return; }
+    if (activeStep === 0 && !isValid) { 
+      setSnackbar({ open: true, message: 'Please fill in all required fields (Title, Date, Time, and Organization)', severity: 'warning' }); 
+      return; 
+    }
     setActiveStep(prev => prev + 1);
     safeScrollToTop();
   }, [activeStep, isValid]);
@@ -1311,17 +1509,27 @@ const MeetingForm = () => {
 
   const handleSubmit = useCallback(async () => {
     if (!isValid) { 
-      setSnackbar({ open: true, message: 'Please fill in all required fields', severity: 'warning' }); 
+      setSnackbar({ open: true, message: 'Please fill in all required fields (Title, Date, Time, and Organization)', severity: 'warning' }); 
       setActiveStep(0); 
       safeScrollToTop(); 
       return; 
     }
+    
+    // Validate department restriction consistency
+    if (visibility === 'department' && !restrictedDepartmentId) {
+      setSnackbar({ open: true, message: 'Please select a department for restricted meeting access', severity: 'warning' }); 
+      return;
+    }
+    
     setIsSubmitting(true);
     setSubmitMessage(isEditMode ? 'Updating meeting...' : isRecurring ? 'Creating recurring meeting...' : 'Creating meeting...');
     
     console.log('🚀 Starting submission...');
     console.log('isRecurring:', isRecurring);
     console.log('recurrence:', recurrence);
+    console.log('visibility:', visibility);
+    console.log('restrictedDepartmentId:', restrictedDepartmentId);
+    console.log('organizationId:', organizationId);
     
     try {
       const meetingDate = formData.meeting_date;
@@ -1335,11 +1543,20 @@ const MeetingForm = () => {
 
       const chairpersonParticipant = meetingParticipants.find(p => p.is_chairperson === true);
       const meetingPayload = {
-        title: formData.title, description: formData.description || null,
-        meeting_date: startDateTime.toISOString(), start_time: startDateTime.toISOString(), end_time: endDateTime?.toISOString() || null,
-        location_text: formData.location_text || null, location_id: formData.location_id,
+        title: formData.title, 
+        description: formData.description || null,
+        meeting_date: startDateTime.toISOString(), 
+        start_time: startDateTime.toISOString(), 
+        end_time: endDateTime?.toISOString() || null,
+        location_text: formData.location_text || null, 
+        location_id: formData.location_id,
         gps_coordinates: gpsEnabled && formData.gps_latitude && formData.gps_longitude ? `${formData.gps_latitude},${formData.gps_longitude}` : null,
-        agenda: formData.agenda || null, secretary_name: formData.secretary_name || null, chairperson_name: chairpersonParticipant?.name || null,
+        agenda: formData.agenda || null, 
+        secretary_name: formData.secretary_name || null, 
+        chairperson_name: chairpersonParticipant?.name || null,
+        organization_id: organizationId,
+        visibility: visibility,
+        restricted_department_id: visibility === 'department' ? restrictedDepartmentId : null,
         custom_participants: meetingParticipants.map(p => ({ 
           id: p.is_existing ? p.id : undefined,
           name: p.name, 
@@ -1462,7 +1679,7 @@ const MeetingForm = () => {
       setIsSubmitting(false); 
       setSubmitMessage('');
     }
-  }, [formData, gpsEnabled, meetingParticipants, isEditMode, id, dispatch, isValid, navigate, returnPath, isRecurring, recurrence, attributeMappings, mappingsLoading]);
+  }, [formData, gpsEnabled, meetingParticipants, isEditMode, id, dispatch, isValid, navigate, returnPath, isRecurring, recurrence, attributeMappings, mappingsLoading, visibility, restrictedDepartmentId, organizationId]);
 
   if (formLoading) {
     return (
@@ -1515,15 +1732,23 @@ const MeetingForm = () => {
             {/* Step 1: Meeting Details */}
             {activeStep === 0 && (
               <Stack spacing={2.5}>
+                <OrganizationSelector 
+                  value={organizationId} 
+                  onChange={setOrganizationId} 
+                  disabled={apiLoading || isEditMode}
+                />
+                
                 <TextField
                   fullWidth label="Meeting Title *" name="title" required
                   value={formData.title} onChange={handleChange} disabled={apiLoading}
                   slotProps={{ input: { startAdornment: <InputAdornment position="start"><EventIcon color="action" /></InputAdornment> } }}
                 />
+                
                 <TextField
                   fullWidth label="Description" name="description" multiline rows={isMobile ? 2 : 3}
                   value={formData.description} onChange={handleChange} disabled={apiLoading}
                 />
+                
                 <Grid container spacing={2}>
                   <Grid size={{ xs: 12, sm: 6 }}>
                     <DatePicker label="Meeting Date *" value={formData.meeting_date} onChange={handleDateChange} slotProps={{ textField: { fullWidth: true, required: true } }} />
@@ -1535,6 +1760,29 @@ const MeetingForm = () => {
                     <TimePicker label="End Time" value={formData.end_time} onChange={handleEndTimeChange} slotProps={{ textField: { fullWidth: true } }} />
                   </Grid>
                 </Grid>
+
+                <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                  <CardContent>
+                    <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+                      <LockIcon sx={{ mr: 1, verticalAlign: 'middle', fontSize: 20 }} />
+                      Access & Visibility
+                    </Typography>
+                    
+                    <VisibilitySelector 
+                      value={visibility} 
+                      onChange={setVisibility} 
+                      disabled={apiLoading}
+                    />
+                    
+                    <Collapse in={visibility === 'department'} sx={{ mt: 2 }}>
+                      <DepartmentSelector 
+                        value={restrictedDepartmentId} 
+                        onChange={setRestrictedDepartmentId} 
+                        disabled={apiLoading}
+                      />
+                    </Collapse>
+                  </CardContent>
+                </Card>
 
                 <LocationSearch value={formData.location_details} onChange={handleLocationSelect} onClear={() => handleLocationSelect(null)} />
 
@@ -1700,6 +1948,11 @@ const MeetingForm = () => {
                       {formData.location_details && <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Location Type:</strong> {formData.location_details.location_mode} – Level {formData.location_details.level}</Typography></Grid>}
                       {formData.meeting_date && formData.start_time && <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Date & Time:</strong> {formData.meeting_date?.toLocaleDateString()} at {formData.start_time?.toLocaleTimeString()}{formData.end_time && ` – ${formData.end_time?.toLocaleTimeString()}`}</Typography></Grid>}
                       {gpsEnabled && formData.gps_latitude && formData.gps_longitude && <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>GPS:</strong> {formData.gps_latitude}, {formData.gps_longitude}</Typography></Grid>}
+                      <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Visibility:</strong> {visibility === 'open' ? 'Open to All' : `Restricted to Department`}</Typography></Grid>
+                      {visibility === 'department' && restrictedDepartmentId && (
+                        <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Restricted Department ID:</strong> {restrictedDepartmentId}</Typography></Grid>
+                      )}
+                      <Grid size={{ xs: 12 }}><Typography variant="body2"><strong>Organization ID:</strong> {organizationId}</Typography></Grid>
                       {isRecurring && recurrence && <Grid size={{ xs: 12 }}>
                         <Chip 
                           icon={<RepeatIcon />} 

@@ -2510,3 +2510,85 @@ MODIFY COLUMN status VARCHAR(50) DEFAULT 'active';
 -- Update existing records to ensure they have values
 UPDATE user_departments SET role = 'member' WHERE role IS NULL OR role = '';
 UPDATE user_departments SET status = 'active' WHERE status IS NULL OR status = '';
+
+
+
+
+-- Create staging table
+CREATE TABLE org_nodes_updates (
+    node_id CHAR(36) PRIMARY KEY,
+    new_parent_id CHAR(36),
+    new_level INT,
+    new_path VARCHAR(500),
+    processed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- After update trigger that inserts into staging
+DELIMITER $$
+
+CREATE TRIGGER org_nodes_after_update
+AFTER UPDATE ON organization_nodes
+FOR EACH ROW
+BEGIN
+    IF OLD.parent_id != NEW.parent_id OR OLD.path != NEW.path THEN
+        INSERT INTO org_nodes_updates (node_id, new_parent_id, new_level, new_path)
+        VALUES (NEW.id, NEW.parent_id, NEW.level, NEW.path)
+        ON DUPLICATE KEY UPDATE
+            new_parent_id = VALUES(new_parent_id),
+            new_level = VALUES(new_level),
+            new_path = VALUES(new_path),
+            processed = FALSE;
+    END IF;
+END$$
+
+-- Stored procedure to process updates safely
+CREATE PROCEDURE process_org_updates()
+BEGIN
+    DECLARE v_node_id CHAR(36);
+    DECLARE v_new_path VARCHAR(500);
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE cur CURSOR FOR 
+        SELECT node_id, new_path FROM org_nodes_updates WHERE processed = FALSE;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+    
+    OPEN cur;
+    
+    read_loop: LOOP
+        FETCH cur INTO v_node_id, v_new_path;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+        
+        -- Update children (this won't trigger the cursor again)
+        UPDATE organization_nodes 
+        SET path = CONCAT(v_new_path, SUBSTRING_INDEX(path, '/', -1))
+        WHERE parent_id = v_node_id;
+        
+        UPDATE org_nodes_updates SET processed = TRUE WHERE node_id = v_node_id;
+    END LOOP;
+    
+    CLOSE cur;
+END$$
+
+DELIMITER ;
+
+-- Create an event to process updates every 5 seconds
+CREATE EVENT process_org_updates_event
+ON SCHEDULE EVERY 5 SECOND
+DO
+CALL process_org_updates();
+
+
+
+-- Drop ALL triggers that update the same table
+DROP TRIGGER IF EXISTS update_organization_nodes_path;
+DROP TRIGGER IF EXISTS after_update_organization_nodes;
+DROP TRIGGER IF EXISTS organization_nodes_after_update;
+
+-- If you want to keep the staging table approach, keep org_nodes_after_update
+-- Otherwise, drop it too:
+DROP TRIGGER IF EXISTS org_nodes_after_update;
+
+-- Keep only the safe timestamp trigger
+-- organization_nodes_before_update is safe (only sets NEW.updated_at)

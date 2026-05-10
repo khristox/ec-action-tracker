@@ -113,6 +113,8 @@ class Meeting(Base):
         Index('ix_meetings_updated_by', 'updated_by_id'),
         Index('ix_meetings_is_recurring', 'is_recurring'),
         Index('ix_meetings_recurring_meeting_id', 'recurring_meeting_id'),
+        Index('ix_meetings_department_id', 'department_id'),
+        Index('ix_meetings_restricted_department', 'restricted_department_id'),
     )
     
     # Primary Key
@@ -122,20 +124,26 @@ class Meeting(Base):
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     
+    # Department Information
+    department_id = Column(String(36), ForeignKey("organization_nodes.id"), nullable=True)
+    
     # Location Information
     location_id = Column(CustomUUID, ForeignKey('locations.id', ondelete='SET NULL'), nullable=True)
     location_text = Column(String(500), nullable=True)
     gps_coordinates = Column(String(100), nullable=True)
-    
-    # Meeting Platform (for recurring meetings)
-    platform = Column(String(50), default='physical', nullable=True)
-    meeting_link = Column(String(500), nullable=True)
     
     # Date and Time
     meeting_date = Column(DateTime(timezone=True), nullable=False)
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=True)
     duration_minutes = Column(Integer, nullable=True)  # Calculated field
+
+    # Meeting platform fields
+    platform = Column(String(100), nullable=True)
+    meeting_link = Column(String(500), nullable=True)
+    meeting_id_online = Column(String(255), nullable=True)  # Add this field
+    passcode = Column(String(100), nullable=True)
+    dial_in_numbers = Column(JSON, nullable=True)
     
     # Meeting Content
     agenda = Column(Text, nullable=True)
@@ -153,6 +161,10 @@ class Meeting(Base):
     is_recurring = Column(Boolean, default=False, nullable=False)
     recurring_meeting_id = Column(CustomUUID, ForeignKey('recurring_meetings.id', ondelete='SET NULL'), nullable=True)
     occurrence_number = Column(Integer, nullable=True)  # Which occurrence number this is
+    
+    # Visibility fields (organization_id REMOVED)
+    visibility = Column(String(50), default="open", nullable=False)
+    restricted_department_id = Column(String(36), ForeignKey("organization_nodes.id"), nullable=True)
     
     # Audit fields
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
@@ -183,6 +195,21 @@ class Meeting(Base):
         foreign_keys="MeetingParticipant.meeting_id",
         back_populates="meeting",
         cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    
+    # Department relationships with explicit foreign_keys
+    department = relationship(
+        "OrganizationNode",
+        foreign_keys=[department_id],
+        backref="meetings_as_department",
+        lazy="selectin"
+    )
+    
+    restricted_department = relationship(
+        "OrganizationNode",
+        foreign_keys=[restricted_department_id],
+        backref="meetings_as_restricted",
         lazy="selectin"
     )
     
@@ -311,6 +338,7 @@ class Meeting(Base):
             "id": str(self.id),
             "title": self.title,
             "description": self.description,
+            "department_id": str(self.department_id) if self.department_id else None,
             "location_id": str(self.location_id) if self.location_id else None,
             "location_text": self.location_text,
             "gps_coordinates": self.gps_coordinates,
@@ -330,6 +358,8 @@ class Meeting(Base):
             "is_recurring": self.is_recurring,
             "recurring_meeting_id": str(self.recurring_meeting_id) if self.recurring_meeting_id else None,
             "occurrence_number": self.occurrence_number,
+            "visibility": self.visibility,
+            "restricted_department_id": str(self.restricted_department_id) if self.restricted_department_id else None,
             "created_by_id": str(self.created_by_id) if self.created_by_id else None,
             "created_by_name": self.created_by_name,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -349,8 +379,6 @@ class Meeting(Base):
     
     def __repr__(self):
         return f"<Meeting id={self.id} title='{self.title[:50]}' date={self.meeting_date}>"
-# app/models/action_tracker.py
-
 class MeetingStatus(Base):
     """Meeting status lookup table"""
     __tablename__ = "meeting_statuses"

@@ -50,7 +50,7 @@ export const OrganizationChart = () => {
       showNotification('Failed to load organization tree', 'error');
     }
     setLoading(false);
-  };
+  };    
 
   const fetchParentOptions = async () => {
     try {

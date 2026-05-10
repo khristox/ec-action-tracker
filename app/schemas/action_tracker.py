@@ -15,6 +15,25 @@ class ORMBase(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+# ==================== Meeting Visibility Enum ====================
+
+class MeetingVisibility(str, Enum):
+    """Meeting visibility options - matches database values"""
+    OPEN = "open"
+    DEPARTMENT = "department"
+    PRIVATE = "private"
+    
+    @classmethod
+    def _missing_(cls, value):
+        """Handle case-insensitive matching"""
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for member in cls:
+                if member.value == value_lower:
+                    return member
+        return super()._missing_(value)
+
+
 # ==================== Assigned To JSON Schema ====================
 
 class AssignedToInfo(BaseModel):
@@ -66,8 +85,8 @@ class MeetingParticipantResponse(MeetingParticipantBase):
     extra_metadata: Optional[dict] = None
     color: Optional[str] = None
     sort_order: Optional[int] = None
-    group_id: Optional[UUID] = None  # Add this field
-    created_at: Optional[datetime] = None  # Add this field
+    group_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     is_active: Optional[bool] = True
 
@@ -84,10 +103,10 @@ class AttributeResponse(ORMBase):
     extra_metadata: Optional[dict] = None
     color: Optional[str] = None
     sort_order: Optional[int] = None
-    group_id: Optional[UUID] = None  # ADD THIS FIELD
-    created_at: Optional[datetime] = None  # ADD THIS FIELD
-    updated_at: Optional[datetime] = None  # ADD THIS FIELD
-    is_active: Optional[bool] = True  # ADD THIS FIELD
+    group_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    is_active: Optional[bool] = True
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -95,21 +114,24 @@ class AttributeResponse(ORMBase):
 # ==================== Meeting Schemas ====================
 
 class MeetingBase(ORMBase):
-    """Input-only base"""
+    """Input-only base with department fields"""
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
+    department_id: Optional[UUID] = Field(None, description="Department ID the meeting belongs to")
     location_id: Optional[UUID] = None
     location_text: Optional[str] = Field(None, max_length=500)
     gps_coordinates: Optional[str] = Field(None, max_length=100)
     meeting_date: datetime
     start_time: datetime
-    end_time: Optional[datetime] = None  # Keep as Optional
+    end_time: Optional[datetime] = None
     agenda: Optional[str] = None
     facilitator: Optional[str] = Field(None, max_length=255)
     chairperson_name: Optional[str] = Field(None, max_length=255)
     status_id: Optional[UUID] = None
-
     
+    # NEW: Department restriction fields (NO organization_id)
+    restricted_department_id: Optional[UUID] = Field(None, description="Department ID for restricted access (when visibility is 'department')")
+    visibility: MeetingVisibility = Field(MeetingVisibility.OPEN, description="Meeting visibility: open | department | private")
 
 
 class MeetingCreate(MeetingBase):
@@ -135,6 +157,7 @@ class MeetingCreate(MeetingBase):
 class MeetingUpdate(ORMBase):
     title: Optional[str] = None
     description: Optional[str] = None
+    department_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
     location_text: Optional[str] = None
     
@@ -174,6 +197,10 @@ class MeetingUpdate(ORMBase):
     status_comment: Optional[str] = Field(None, description="Comment explaining the status change")
     status_date: Optional[datetime] = Field(None, description="Effective date of the status change")
     custom_participants: Optional[List[Dict[str, Any]]] = None
+    
+    # Department restriction fields (can be updated)
+    restricted_department_id: Optional[UUID] = Field(None, description="Department ID for restricted access")
+    visibility: Optional[MeetingVisibility] = Field(None, description="Meeting visibility: open | department | private")
 
     @field_validator('platform', 'meeting_link', 'meeting_id_online', 'passcode', mode='before')
     @classmethod
@@ -219,6 +246,11 @@ class MeetingCreateResponse(ORMBase):
     updated_at: Optional[datetime] = None
     is_active: bool = True
     message: str = "Meeting created successfully"
+    
+    # Department fields in response
+    department_id: Optional[UUID] = None
+    restricted_department_id: Optional[UUID] = None
+    visibility: str = "open"
 
 
 class MeetingListResponse(ORMBase):
@@ -248,10 +280,20 @@ class MeetingListResponse(ORMBase):
     minutes_count: int = 0
     actions_count: int = 0
     documents_count: int = 0
+    
+    # Department fields
+    department_id: Optional[UUID] = None
+    department_name: Optional[str] = None
+    restricted_department_id: Optional[UUID] = None
+    restricted_department_name: Optional[str] = None
+    visibility: str = "open"
+
+
+# app/schemas/action_tracker.py
 
 
 class MeetingResponse(MeetingBase):
-    """Full detail response with nested relationships"""
+    """Full detail response with nested relationships and department info"""
     id: UUID
     created_by_id: UUID
     created_by_name: Optional[str] = None
@@ -292,37 +334,28 @@ class MeetingResponse(MeetingBase):
     location_name: Optional[str] = None
     status: Optional[AttributeResponse] = None
     
+    # ========== ADD THESE DEPARTMENT FIELDS ==========
+    # Department ID (the department the meeting belongs to)
+    department_id: Optional[UUID] = Field(None, description="Department ID the meeting belongs to")
+    
+    # Department display fields
+    department_name: Optional[str] = Field(None, description="Department name")
+    department_path: Optional[str] = Field(None, description="Department path")
+    department_code: Optional[str] = Field(None, description="Department code")
+    
+    # Visibility fields
+    visibility: str = Field(default="open", description="Meeting visibility: open, department, private")
+    restricted_department_id: Optional[UUID] = Field(None, description="Department ID for restricted access")
+    restricted_department_name: Optional[str] = Field(None, description="Restricted department name")
+    
     # Relationships
     participants: List[MeetingParticipantResponse] = Field(default_factory=list)
     minutes: List['MeetingMinutesResponse'] = Field(default_factory=list)
     documents: List['MeetingDocumentResponse'] = Field(default_factory=list)
-
-    @field_validator('status', mode='before')
-    @classmethod
-    def coerce_status(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        if isinstance(v, dict):
-            return v
-        try:
-            return {
-                'id': getattr(v, 'id', None),
-                'code': getattr(v, 'code', None),
-                'name': getattr(v, 'name', None),
-                'short_name': getattr(v, 'short_name', None),
-                'description': getattr(v, 'description', None),
-                'extra_metadata': getattr(v, 'extra_metadata', None),
-            }
-        except Exception:
-            return None
-
-    @model_validator(mode='after')
-    def sync_status_name(self) -> 'MeetingResponse':
-        if self.status and not self.status_name:
-            self.status_name = self.status.name
-        return self
-
-
+    
+    class Config:
+        from_attributes = True
+        populate_by_name = True
 class MeetingPaginationResponse(ORMBase):
     items: List[MeetingListResponse]
     total: int

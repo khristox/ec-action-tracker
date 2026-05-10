@@ -4,24 +4,24 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   Box, Typography, Paper, Grid, Button, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, TextField,
-  Chip, CircularProgress, Alert, Card, CardContent, CardActions,
+  Chip, CircularProgress, Alert, Card, CardContent,
   Stack, Avatar, Tooltip, useMediaQuery, useTheme, Divider,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Breadcrumbs, Link, alpha, Fab, Zoom, Snackbar
-} from '@mui/material';
+  Breadcrumbs, Link, alpha, Fab,
+  Snackbar, AvatarGroup, Badge
+} from '@mui/material';  // Make sure all MUI imports are from here
 import {
   Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon,
   People as PeopleIcon, PersonAdd as PersonAddIcon,
   Refresh as RefreshIcon, Group as GroupIcon,
-  Visibility as VisibilityIcon, Email as EmailIcon,
-  Phone as PhoneIcon, Business as BusinessIcon,
   Home as HomeIcon, ChevronRight as ChevronRightIcon,
-  Close as CloseIcon
+  Close as CloseIcon, Visibility as VisibilityIcon,
+  Email as EmailIcon, Phone as PhoneIcon, Business as BusinessIcon
 } from '@mui/icons-material';
 import {
   fetchParticipantLists, createParticipantList,
   updateParticipantList, deleteParticipantList,
-  fetchListMembers, clearError,removeMemberFromList
+  fetchListMembers, clearError, removeMemberFromList
 } from '../../../store/slices/actionTracker/participantSlice';
 import AddParticipantsToList from './AddParticipantsToList';
 
@@ -35,8 +35,15 @@ const ListFormDialog = ({ open, onClose, onSuccess, editList }) => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (editList) setForm({ name: editList.name, description: editList.description, is_global: editList.is_global });
-    else setForm({ name: '', description: '', is_global: false });
+    if (editList) {
+      setForm({ 
+        name: editList.name, 
+        description: editList.description || '', 
+        is_global: editList.is_global || false 
+      });
+    } else {
+      setForm({ name: '', description: '', is_global: false });
+    }
   }, [editList, open]);
 
   const handleSubmit = async () => {
@@ -46,9 +53,12 @@ const ListFormDialog = ({ open, onClose, onSuccess, editList }) => {
     }
     setSaving(true);
     try {
-      if (editList) await dispatch(updateParticipantList({ id: editList.id, data: form })).unwrap();
-      else await dispatch(createParticipantList(form)).unwrap();
-      onSuccess(); 
+      if (editList) {
+        await dispatch(updateParticipantList({ id: editList.id, data: form })).unwrap();
+      } else {
+        await dispatch(createParticipantList(form)).unwrap();
+      }
+      onSuccess();
       onClose();
     } catch (err) { 
       setError(err.message || 'Failed to save list'); 
@@ -65,7 +75,6 @@ const ListFormDialog = ({ open, onClose, onSuccess, editList }) => {
           backgroundImage: 'none',
           bgcolor: isDark ? '#0F172A' : 'background.paper',
           borderRadius: 4,
-          border: isDark ? `1px solid ${alpha(theme.palette.primary.main, 0.1)}` : 'none',
         }
       }}
     >
@@ -79,9 +88,11 @@ const ListFormDialog = ({ open, onClose, onSuccess, editList }) => {
             value={form.name} 
             variant="filled"
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            InputProps={{ 
-              disableUnderline: true, 
-              sx: { borderRadius: 3, bgcolor: isDark ? alpha('#fff', 0.03) : alpha('#000', 0.03) } 
+            slotProps={{ 
+              input: { 
+                disableUnderline: true, 
+                sx: { borderRadius: 3, bgcolor: isDark ? alpha('#fff', 0.03) : alpha('#000', 0.03) } 
+              }
             }}
           />
           <TextField
@@ -92,9 +103,11 @@ const ListFormDialog = ({ open, onClose, onSuccess, editList }) => {
             multiline 
             rows={3}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
-            InputProps={{ 
-              disableUnderline: true, 
-              sx: { borderRadius: 3, bgcolor: isDark ? alpha('#fff', 0.03) : alpha('#000', 0.03) } 
+            slotProps={{ 
+              input: { 
+                disableUnderline: true, 
+                sx: { borderRadius: 3, bgcolor: isDark ? alpha('#fff', 0.03) : alpha('#000', 0.03) } 
+              }
             }}
           />
         </Stack>
@@ -158,12 +171,22 @@ const DeleteConfirmDialog = ({ open, onClose, onConfirm, listName, deleting }) =
 const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefresh, onDeleteMember }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  const memberArray = React.useMemo(() => {
+    if (Array.isArray(members)) return members;
+    if (members?.items) return members.items;
+    if (members?.data) return members.data;
+    return [];
+  }, [members]);
 
   return (
     <Box>
       <Breadcrumbs separator={<ChevronRightIcon fontSize="small" />} sx={{ mb: 4 }}>
         <Link 
-          underline="none" color="primary" onClick={onBack}
+          underline="none" 
+          color="primary" 
+          onClick={onBack}
           sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5, fontWeight: 700 }}
         >
           <HomeIcon fontSize="inherit" /> Directory
@@ -171,12 +194,15 @@ const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefre
         <Typography color="text.primary" fontWeight={700}>{list?.name}</Typography>
       </Breadcrumbs>
 
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={5} flexWrap="wrap" gap={2}>
+      {/* Use Box with sx instead of Stack for flexbox to avoid prop warnings */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h3" fontWeight={900} sx={{ letterSpacing: '-0.04em' }}>{list?.name}</Typography>
-          <Typography variant="body1" color="text.secondary">{list?.description || 'Public List'} • {members?.length} Members</Typography>
+          <Typography variant="body1" color="text.secondary">
+            {list?.description || 'No description'} • {memberArray.length} Member{memberArray.length !== 1 ? 's' : ''}
+          </Typography>
         </Box>
-        <Stack direction="row" spacing={2}>
+        <Box sx={{ display: 'flex', gap: 2 }}>
           <IconButton onClick={onRefresh} sx={{ bgcolor: isDark ? alpha('#fff', 0.03) : alpha('#000', 0.03) }}>
             <RefreshIcon />
           </IconButton>
@@ -188,12 +214,14 @@ const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefre
           >
             Add Members
           </Button>
-        </Stack>
-      </Stack>
+        </Box>
+      </Box>
 
       {loading ? (
-        <Box display="flex" justifyContent="center" py={10}><CircularProgress /></Box>
-      ) : members.length === 0 ? (
+        <Box display="flex" justifyContent="center" py={10}>
+          <CircularProgress />
+        </Box>
+      ) : memberArray.length === 0 ? (
         <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 6, bgcolor: isDark ? '#0F172A' : '#fff' }}>
           <PeopleIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
           <Typography variant="h6" fontWeight={700} gutterBottom>No Members Yet</Typography>
@@ -205,42 +233,75 @@ const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefre
           </Button>
         </Paper>
       ) : (
-        <TableContainer component={Paper} sx={{ borderRadius: 6, backgroundImage: 'none', bgcolor: isDark ? '#0F172A' : '#fff', border: isDark ? `1px solid ${alpha('#fff', 0.05)}` : 'none' }}>
-          <Table>
+        <TableContainer 
+          component={Paper} 
+          sx={{ 
+            borderRadius: 6, 
+            backgroundImage: 'none', 
+            bgcolor: isDark ? '#0F172A' : '#fff', 
+            border: isDark ? `1px solid ${alpha('#fff', 0.05)}` : 'none',
+            overflowX: 'auto'
+          }}
+        >
+          <Table sx={{ minWidth: isMobile ? 600 : 'auto' }}>
             <TableHead>
               <TableRow sx={{ bgcolor: isDark ? alpha('#fff', 0.02) : '#F8FAFC' }}>
-                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }}>Member</TableCell>
-                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }}>Contact</TableCell>
-                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }}>Organization</TableCell>
-                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }} align="center">Actions</TableCell>
+                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }}>
+                  Member
+                </TableCell>
+                {!isMobile && (
+                  <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }}>
+                    Contact
+                  </TableCell>
+                )}
+                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }}>
+                  Organization
+                </TableCell>
+                <TableCell sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.1em' }} align="center">
+                  Actions
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {members.map((member) => (
-                <TableRow key={member.id} hover>
+              {memberArray.map((member, index) => (
+                <TableRow key={member.id || index} hover>
                   <TableCell>
-                    <Stack direction="row" alignItems="center" spacing={2}>
-                      <Avatar sx={{ bgcolor: isDark ? alpha(theme.palette.primary.main, 0.2) : 'primary.light', color: 'primary.main', fontWeight: 800 }}>
-                        {member.name?.charAt(0)?.toUpperCase()}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.2), color: 'primary.main', fontWeight: 800 }}>
+                        {member.name?.charAt(0)?.toUpperCase() || member.email?.charAt(0)?.toUpperCase() || '?'}
                       </Avatar>
-                      <Typography variant="body2" fontWeight={800}>{member.name}</Typography>
-                    </Stack>
+                      <Box>
+                        <Typography variant="body2" fontWeight={800}>{member.name || 'Unnamed'}</Typography>
+                        {isMobile && member.email && (
+                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                            <EmailIcon sx={{ fontSize: 12 }} /> {member.email}
+                          </Typography>
+                        )}
+                        {isMobile && member.telephone && (
+                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <PhoneIcon sx={{ fontSize: 12 }} /> {member.telephone}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
                   </TableCell>
-                  <TableCell>
-                    {member.email && (
-                      <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <EmailIcon sx={{ fontSize: 12 }} /> {member.email}
-                      </Typography>
-                    )}
-                    {member.telephone && (
-                      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                        <PhoneIcon sx={{ fontSize: 12 }} /> {member.telephone}
-                      </Typography>
-                    )}
-                  </TableCell>
+                  {!isMobile && (
+                    <TableCell>
+                      {member.email && (
+                        <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <EmailIcon sx={{ fontSize: 12 }} /> {member.email}
+                        </Typography>
+                      )}
+                      {member.telephone && (
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                          <PhoneIcon sx={{ fontSize: 12 }} /> {member.telephone}
+                        </Typography>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Typography variant="body2" color="text.secondary" fontWeight={600}>
-                      {member.organization || '—'}
+                      {member.organization || member.department || member.title || '—'}
                     </Typography>
                   </TableCell>
                   <TableCell align="center">
@@ -285,7 +346,7 @@ const ParticipantListsManager = () => {
   const fetchLists = useCallback(async () => {
     try {
       const result = await dispatch(fetchParticipantLists()).unwrap();
-      // The result might be an array or a paginated object
+      console.log('Fetched lists:', result);
     } catch (err) {
       console.error('Failed to fetch lists:', err);
       setSnackbar({ open: true, message: 'Failed to load lists', severity: 'error' });
@@ -299,8 +360,10 @@ const ParticipantListsManager = () => {
   const handleViewList = async (list) => {
     setViewingList(list);
     try {
-      await dispatch(fetchListMembers({ listId: list.id, params: { limit: 100 } })).unwrap();
+      const result = await dispatch(fetchListMembers({ listId: list.id, params: { limit: 100 } })).unwrap();
+      console.log('Fetched members:', result);
     } catch (err) {
+      console.error('Failed to load members:', err);
       setSnackbar({ open: true, message: 'Failed to load members', severity: 'error' });
     }
   };
@@ -326,7 +389,6 @@ const ParticipantListsManager = () => {
     if (!window.confirm(`Remove "${member.name}" from this list?`)) return;
     
     try {
-      // You'll need to implement this API endpoint
       await dispatch(removeMemberFromList({ listId: viewingList.id, participantId: member.id })).unwrap();
       setSnackbar({ open: true, message: `"${member.name}" removed from list`, severity: 'success' });
       // Refresh members
@@ -342,14 +404,29 @@ const ParticipantListsManager = () => {
   };
 
   // Get lists array - handle both response formats
-  const listsArray = Array.isArray(lists) ? lists : (lists?.items || []);
+  const listsArray = React.useMemo(() => {
+    if (Array.isArray(lists)) return lists;
+    if (lists?.items) return lists.items;
+    if (lists?.data) return lists.data;
+    return [];
+  }, [lists]);
+
+  // Get members for the current viewed list
+  const currentMembers = React.useMemo(() => {
+    if (!viewingList) return [];
+    const membersData = listMembers[viewingList.id];
+    if (Array.isArray(membersData)) return membersData;
+    if (membersData?.items) return membersData.items;
+    if (membersData?.data) return membersData.data;
+    return [];
+  }, [listMembers, viewingList]);
 
   if (viewingList) {
     return (
       <Box sx={{ p: isMobile ? 2 : 4, minHeight: '100vh', bgcolor: isDark ? '#020617' : '#F8FAFC' }}>
         <ViewMembersView
           list={viewingList} 
-          members={listMembers[viewingList.id]?.items || listMembers[viewingList.id] || []}
+          members={currentMembers}
           loading={loading}
           onBack={() => setViewingList(null)} 
           onRefresh={() => handleViewList(viewingList)}
@@ -369,7 +446,8 @@ const ParticipantListsManager = () => {
 
   return (
     <Box sx={{ p: isMobile ? 2 : 4, minHeight: '100vh', bgcolor: isDark ? '#020617' : '#F8FAFC' }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={6} flexWrap="wrap" gap={2}>
+      {/* Header - using Box with flex instead of Stack */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 6, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h3" fontWeight={900} sx={{ letterSpacing: '-0.04em' }}>Group Lists</Typography>
           <Typography variant="body1" color="text.secondary">Organize and manage participant clusters</Typography>
@@ -377,7 +455,7 @@ const ParticipantListsManager = () => {
         <Fab color="primary" variant="extended" onClick={() => setCreateDialogOpen(true)} sx={{ px: 4, borderRadius: 4, fontWeight: 800 }}>
           <AddIcon sx={{ mr: 1 }} /> Create List
         </Fab>
-      </Stack>
+      </Box>
 
       {loading && listsArray.length === 0 ? (
         <Box display="flex" justifyContent="center" py={10}><CircularProgress /></Box>
@@ -399,7 +477,7 @@ const ParticipantListsManager = () => {
       ) : (
         <Grid container spacing={3}>
           {listsArray.map((list) => (
-            <Grid item xs={12} sm={6} md={4} key={list.id}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={list.id}>
               <Card 
                 onClick={() => handleViewList(list)}
                 sx={{ 
@@ -419,7 +497,7 @@ const ParticipantListsManager = () => {
                     <Box sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1), p: 1, borderRadius: 2 }}>
                       <GroupIcon color="primary" />
                     </Box>
-                    <Stack direction="row">
+                    <Box sx={{ display: 'flex' }}>
                       <IconButton 
                         size="small" 
                         onClick={(e) => { e.stopPropagation(); setEditingList(list); setCreateDialogOpen(true); }}
@@ -434,20 +512,20 @@ const ParticipantListsManager = () => {
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
-                    </Stack>
+                    </Box>
                   </Box>
                   <Typography variant="h6" fontWeight={800} gutterBottom>{list.name}</Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ minHeight: 40 }}>
                     {list.description || 'No description provided.'}
                   </Typography>
-                  <Stack direction="row" spacing={1} mt={3}>
+                  <Box sx={{ display: 'flex', gap: 1, mt: 3 }}>
                     <Chip 
                       label={`${list.participant_count || list.member_count || 0} Members`} 
                       size="small" 
                       sx={{ fontWeight: 800, bgcolor: isDark ? alpha('#fff', 0.05) : alpha('#000', 0.05) }} 
                     />
                     {list.is_global && <Chip label="Global" color="primary" size="small" sx={{ fontWeight: 800 }} />}
-                  </Stack>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>

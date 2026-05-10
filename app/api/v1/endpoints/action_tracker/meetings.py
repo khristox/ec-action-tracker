@@ -251,85 +251,7 @@ def build_status_history_response(history: MeetingStatusHistory) -> MeetingStatu
     )
 
 
-def build_meeting_response(meeting_obj: Meeting) -> Optional[MeetingResponse]:
-    """Build detailed meeting response"""
-    if not meeting_obj:
-        return None
     
-    participants = []
-    for p in meeting_obj.participants:
-        participants.append(MeetingParticipantResponse(
-            id=p.id,
-            meeting_id=p.meeting_id,
-            name=p.name,
-            email=p.email,
-            telephone=p.telephone,
-            title=p.title,
-            organization=p.organization,
-            is_chairperson=p.is_chairperson,
-            is_secretary=getattr(p, 'is_secretary', False),
-            apology_comment=p.apology_comment,
-            created_by_id=p.created_by_id,
-            created_by_name=p.created_by.username if p.created_by else None,
-            created_at=p.created_at,
-            updated_by_id=p.updated_by_id,
-            updated_by_name=p.updated_by.username if p.updated_by else None,
-            updated_at=p.updated_at,
-            is_active=p.is_active
-        ))
-    
-    return MeetingResponse(
-        id=meeting_obj.id,
-        title=meeting_obj.title,
-        description=meeting_obj.description,
-        location_id=meeting_obj.location_id,
-        location_text=meeting_obj.location_text,
-        gps_coordinates=meeting_obj.gps_coordinates,
-        meeting_date=meeting_obj.meeting_date,
-        start_time=meeting_obj.start_time,
-        end_time=meeting_obj.end_time,
-        agenda=meeting_obj.agenda,
-        facilitator=meeting_obj.facilitator,
-        chairperson_name=meeting_obj.chairperson_name,
-        status_id=meeting_obj.status_id,
-        created_by_id=meeting_obj.created_by_id,
-        created_by_name=meeting_obj.created_by.username if meeting_obj.created_by else None,
-        created_at=meeting_obj.created_at,
-        platform=getattr(meeting_obj, 'platform', None),
-        meeting_link=getattr(meeting_obj, 'meeting_link', None),
-        meeting_id_online=getattr(meeting_obj, 'meeting_id_online', None),
-        passcode=getattr(meeting_obj, 'passcode', None),
-        has_online_meeting=getattr(meeting_obj, 'has_online_meeting', False),
-        has_physical_meeting=getattr(meeting_obj, 'has_physical_meeting', True),
-        venue=getattr(meeting_obj, 'venue', None),
-        address=getattr(meeting_obj, 'address', None),
-        location_instructions=getattr(meeting_obj, 'location_instructions', None),
-        chairperson_id=getattr(meeting_obj, 'chairperson_id', None),
-        secretary_id=getattr(meeting_obj, 'secretary_id', None),
-        dial_in_numbers=getattr(meeting_obj, 'dial_in_numbers', None),
-        send_reminders=getattr(meeting_obj, 'send_reminders', True),
-        reminder_minutes_before=getattr(meeting_obj, 'reminder_minutes_before', 30),
-        updated_by_id=meeting_obj.updated_by_id,
-        updated_by_name=meeting_obj.updated_by.username if meeting_obj.updated_by else None,
-        updated_at=meeting_obj.updated_at,
-        is_active=meeting_obj.is_active,
-        status_comment=getattr(meeting_obj, 'status_comment', None),
-        status_date=getattr(meeting_obj, 'status_date', None),
-        status_name=None,
-        location_name=getattr(meeting_obj, 'location_name', None),
-        status={
-            "id": meeting_obj.status.id,
-            "code": meeting_obj.status.code,
-            "name": meeting_obj.status.name,
-            "short_name": meeting_obj.status.short_name,
-            "color": getattr(meeting_obj.status, 'color', None),
-        } if meeting_obj.status else None,
-        participants=participants,
-        minutes=[],
-        documents=[]
-    )
-
-
 async def sync_meeting_participants(
     db: AsyncSession,
     meeting_id: UUID,
@@ -1144,7 +1066,25 @@ async def create_meeting(
     try:
         logger.debug(f"Creating meeting for user: {current_user.id}")
         
-        result = await meeting_crud.create_with_participants(db, meeting_in, current_user.id)
+        # Convert to dict and remove problematic fields
+        meeting_dict = meeting_in.model_dump(exclude_unset=True)
+        
+        # List of fields that don't exist in your Meeting model
+        fields_to_remove = [
+            'has_online_meeting', 'has_physical_meeting', 'platform',
+            'meeting_link', 'passcode', 'dial_in_numbers', 'venue',
+            'address', 'location_instructions', 'send_reminders',
+            'reminder_minutes_before', 'meeting_id_online', 'meeting_id',
+            'status', 'participant_list_id'
+        ]
+        
+        for field in fields_to_remove:
+            meeting_dict.pop(field, None)
+        
+        # Log what we're actually sending to CRUD
+        logger.info(f"Creating meeting with data: {meeting_dict}")
+        
+        result = await meeting_crud.create_with_participants(db, meeting_dict, current_user.id)
         
         return MeetingCreateResponse(
             id=result.id,
@@ -1175,27 +1115,24 @@ async def create_meeting(
             detail=f"Failed to create meeting: {str(e)}"
         )
 
-
 # ==================== DYNAMIC ROUTES (WITH PATH PARAMETERS - GO LAST) ====================
+
+
+# In your meetings.py - CORRECT version
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.get_current_user)
 ):
-    """Get meeting by ID with minutes and actions loaded"""
     meeting = await meeting_crud.get_meeting_with_details(db, meeting_id)
-    
     if not meeting:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+        raise HTTPException(status_code=404, detail="Meeting not found")
     
-    response = build_meeting_response(meeting)
-    if not response:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build meeting response")
-    
+    # MUST have await here
+    response =  utils_build_meeting_response(meeting, db)
     return response
-
 
 @router.put("/{meeting_id}", response_model=MeetingResponse)
 async def update_meeting(
@@ -1207,7 +1144,7 @@ async def update_meeting(
     """Full update meeting with audit fields and participant management"""
     update_data = meeting_in.model_dump(exclude_unset=True)
     updated_meeting = await update_meeting_common(db, meeting_id, update_data, current_user, "PUT")
-    return build_meeting_response(updated_meeting)
+    return utils_build_meeting_response(updated_meeting)
 
 
 @router.patch("/{meeting_id}", response_model=MeetingResponse)
@@ -1220,7 +1157,7 @@ async def partial_update_meeting(
     """Partial update meeting - only update provided fields"""
     update_data = meeting_in.model_dump(exclude_unset=True)
     updated_meeting = await update_meeting_common(db, meeting_id, update_data, current_user, "PATCH")
-    return build_meeting_response(updated_meeting)
+    return utils_build_meeting_response(updated_meeting)
 
 
 @router.patch("/{meeting_id}/status", response_model=MeetingResponse)

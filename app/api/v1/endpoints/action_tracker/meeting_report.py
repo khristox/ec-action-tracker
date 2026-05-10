@@ -146,7 +146,7 @@ async def generate_meeting_report_json(
         gps_coordinates=meeting.gps_coordinates,
         platform=getattr(meeting, 'platform', None),
         meeting_link=getattr(meeting, 'meeting_link', None),
-        meeting_id_online=getattr(meeting, 'meeting_id_online', None),
+        #meeting_id_online=getattr(meeting, 'meeting_id_online', None),
         passcode=getattr(meeting, 'passcode', None),
         chairperson_name=meeting.chairperson_name,
         facilitator=meeting.facilitator,

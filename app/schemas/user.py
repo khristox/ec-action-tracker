@@ -789,6 +789,7 @@ class UserWithRoles(UserResponse):
     )
 
 
+
 # ==================== PASSWORD SCHEMAS ====================
 
 class UserPasswordChange(BaseModel):
@@ -968,6 +969,14 @@ class UserDepartmentResponse(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     
+    @field_validator('id', 'user_id', 'department_id', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        """Convert UUID objects to strings"""
+        if hasattr(v, 'hex'):  # Check if it's a UUID object
+            return str(v)
+        return v
+    
     class Config:
         from_attributes = True
 
@@ -985,3 +994,16 @@ class BulkAssignDepartmentsRequest(BaseModel):
     role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER)
     is_primary: bool = False
 
+
+
+class DepartmentResponse(BaseModel):
+    """Response model for user departments endpoint"""
+    success: bool
+    data: List[Dict[str, Any]]
+    total: int
+
+
+class UserRegisterResponse(UserResponse):
+    """Extended response for registration"""
+    verification_email_sent: bool
+    warning: Optional[str] = None

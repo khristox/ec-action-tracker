@@ -2560,7 +2560,7 @@ BEGIN
             LEAVE read_loop;
         END IF;
         
-        -- Update children (this won't trigger the cursor again)
+        -- Update children (this wont trigger the cursor again)
         UPDATE organization_nodes 
         SET path = CONCAT(v_new_path, SUBSTRING_INDEX(path, '/', -1))
         WHERE parent_id = v_node_id;
@@ -2592,3 +2592,67 @@ DROP TRIGGER IF EXISTS org_nodes_after_update;
 
 -- Keep only the safe timestamp trigger
 -- organization_nodes_before_update is safe (only sets NEW.updated_at)
+
+
+-- Add department_id column to meetings table
+ALTER TABLE meetings 
+ADD COLUMN department_id CHAR(36) NULL,
+ADD CONSTRAINT fk_meetings_department 
+FOREIGN KEY (department_id) REFERENCES organization_nodes(id) ON DELETE SET NULL;
+
+-- Add index for better performance
+CREATE INDEX idx_meetings_department_id ON meetings(department_id);
+
+
+
+-- Add visibility column (controls meeting access: open, department, private)
+ALTER TABLE meetings 
+ADD COLUMN visibility VARCHAR(50) NOT NULL DEFAULT 'open';
+
+-- Add restricted_department_id column (for department-restricted meetings)
+ALTER TABLE meetings 
+ADD COLUMN restricted_department_id CHAR(36) NULL,
+ADD CONSTRAINT fk_meetings_restricted_department 
+FOREIGN KEY (restricted_department_id) REFERENCES organization_nodes(id) ON DELETE SET NULL;
+
+-- Step 1: Add platform column
+ALTER TABLE meetings 
+ADD COLUMN platform VARCHAR(100) NULL;
+
+-- Step 2: Add meeting_link column
+ALTER TABLE meetings 
+ADD COLUMN meeting_link VARCHAR(500) NULL;
+
+-- Step 3: Add meeting_id_online column
+ALTER TABLE meetings 
+ADD COLUMN meeting_id_online VARCHAR(255) NULL;
+
+-- Step 4: Add passcode column
+ALTER TABLE meetings 
+ADD COLUMN passcode VARCHAR(100) NULL;
+
+-- Step 5: Add dial_in_numbers column (JSON)
+ALTER TABLE meetings 
+ADD COLUMN dial_in_numbers JSON NULL;
+
+
+
+-- Add department_id, visibility, and restricted_department_id to recurring_meetings table
+ALTER TABLE recurring_meetings 
+ADD COLUMN department_id CHAR(36) NULL,
+ADD COLUMN visibility VARCHAR(50) NOT NULL DEFAULT 'open',
+ADD COLUMN restricted_department_id CHAR(36) NULL;
+
+-- Add foreign key constraints
+ALTER TABLE recurring_meetings 
+ADD CONSTRAINT fk_recurring_meetings_department 
+FOREIGN KEY (department_id) REFERENCES organization_nodes(id) ON DELETE SET NULL;
+
+ALTER TABLE recurring_meetings 
+ADD CONSTRAINT fk_recurring_meetings_restricted_department 
+FOREIGN KEY (restricted_department_id) REFERENCES organization_nodes(id) ON DELETE SET NULL;
+
+-- Add indexes for better performance
+CREATE INDEX idx_recurring_meetings_department ON recurring_meetings(department_id);
+CREATE INDEX idx_recurring_meetings_visibility ON recurring_meetings(visibility);
+CREATE INDEX idx_recurring_meetings_restricted_department ON recurring_meetings(restricted_department_id);

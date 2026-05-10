@@ -30,7 +30,7 @@ const Settings = () => {
           {/* Profile Tab */}
           {tabValue === 0 && (
             <Grid container spacing={3}>
-              <Grid item xs={12} display="flex" justifyContent="center">
+              <Grid size={12} sx={{ display: 'flex', justifyContent: 'center' }}>
                 <Box position="relative">
                   <Avatar sx={{ width: 100, height: 100, bgcolor: 'primary.main' }}>
                     A
@@ -43,16 +43,16 @@ const Settings = () => {
                   </IconButton>
                 </Box>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <TextField fullWidth label="Full Name" defaultValue="Admin User" />
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <TextField fullWidth label="Email" defaultValue="admin@ecactiontracker.com" />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={12}>
                 <TextField fullWidth label="Username" defaultValue="admin" />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={12}>
                 <Divider sx={{ my: 2 }} />
                 <Button variant="contained">Save Changes</Button>
               </Grid>
@@ -62,16 +62,16 @@ const Settings = () => {
           {/* Security Tab */}
           {tabValue === 1 && (
             <Grid container spacing={3}>
-              <Grid item xs={12}>
+              <Grid size={12}>
                 <TextField fullWidth type="password" label="Current Password" />
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <TextField fullWidth type="password" label="New Password" />
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <TextField fullWidth type="password" label="Confirm New Password" />
               </Grid>
-              <Grid item xs={12}>
+              <Grid size={12}>
                 <Button variant="contained">Update Password</Button>
               </Grid>
             </Grid>

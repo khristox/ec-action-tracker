@@ -21,7 +21,6 @@ const StatCard = ({ title, value, icon, color, subtitle }) => {
         height: '100%', 
         transition: 'transform 0.2s', 
         '&:hover': { transform: 'translateY(-4px)' },
-        // Use a subtle border in dark mode instead of heavy shadows
         border: isDarkMode ? `1px solid ${theme.palette.divider}` : 'none',
         bgcolor: 'background.paper',
       }}
@@ -30,7 +29,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => {
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ flex: 1 }}>
             <Typography 
-              color="text.secondary" // Use semantic text colors
+              color="text.secondary"
               gutterBottom 
               variant="subtitle2"
               sx={{ fontWeight: 600, letterSpacing: 0.5 }}
@@ -40,7 +39,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => {
             <Typography 
               variant="h4" 
               fontWeight="bold"
-              sx={{ color: 'text.primary' }} // Ensures visibility in both modes
+              sx={{ color: 'text.primary' }}
             >
               {value}
             </Typography>
@@ -52,7 +51,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => {
           </Box>
           <Avatar 
             sx={{ 
-              bgcolor: color, // Passed from parent (should use theme keys)
+              bgcolor: color,
               width: 56, height: 56,
               boxShadow: isDarkMode ? '0 0 15px rgba(0,0,0,0.5)' : 2
             }}
@@ -96,7 +95,7 @@ const ActionItem = ({ action }) => {
               sx={{ 
                 height: 20, 
                 fontSize: '0.65rem', 
-                bgcolor: `${getStatusColor(action.status)}22`, // Subtle transparent bg
+                bgcolor: `${getStatusColor(action.status)}22`,
                 color: getStatusColor(action.status),
                 border: `1px solid ${getStatusColor(action.status)}44`
               }}
@@ -142,7 +141,7 @@ const Dashboard = () => {
         </Typography>
       </Box>
 
-      {/* Stats Grid */}
+      {/* Stats Grid - Kept as is (4 columns) */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
@@ -182,46 +181,44 @@ const Dashboard = () => {
         </Grid>
       </Grid>
 
-      {/* Content Section */}
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
-          <Paper 
-            elevation={0}
-            sx={{ 
-              p: 3, 
-              borderRadius: 4, 
-              border: `1px solid ${theme.palette.divider}`,
-              bgcolor: 'background.paper'
-            }}
-          >
-            <Typography variant="h6" fontWeight={700} gutterBottom>Pending Actions</Typography>
-            <Divider sx={{ mb: 2 }} />
-            <List disablePadding>
-              <ActionItem action={{ title: "Review voter data", status: "overdue", due_date: "2024-12-10", progress: 0 }} />
-              <ActionItem action={{ title: "Prepare report", status: "in_progress", due_date: "2024-12-20", progress: 45 }} />
-            </List>
-          </Paper>
-        </Grid>
+      {/* Content Section - Now full width, no grid columns */}
+      
+      {/* Pending Actions - Full width */}
+      <Paper 
+        elevation={0}
+        sx={{ 
+          p: 3, 
+          borderRadius: 4, 
+          border: `1px solid ${theme.palette.divider}`,
+          bgcolor: 'background.paper',
+          mb: 3
+        }}
+      >
+        <Typography variant="h6" fontWeight={700} gutterBottom>Pending Actions</Typography>
+        <Divider sx={{ mb: 2 }} />
+        <List disablePadding>
+          <ActionItem action={{ title: "Review voter data", status: "overdue", due_date: "2024-12-10", progress: 0 }} />
+          <ActionItem action={{ title: "Prepare report", status: "in_progress", due_date: "2024-12-20", progress: 45 }} />
+        </List>
+      </Paper>
 
-        <Grid item xs={12} md={6}>
-          <Paper 
-            elevation={0}
-            sx={{ 
-              p: 3, 
-              borderRadius: 4, 
-              border: `1px solid ${theme.palette.divider}`,
-              bgcolor: 'background.paper'
-            }}
-          >
-            <Typography variant="h6" fontWeight={700} gutterBottom>Upcoming Meetings</Typography>
-            <Divider sx={{ mb: 2 }} />
-            <Box sx={{ py: 4, textAlign: 'center' }}>
-              <EventIcon color="disabled" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">Next meeting scheduled for tomorrow</Typography>
-            </Box>
-          </Paper>
-        </Grid>
-      </Grid>
+      {/* Upcoming Meetings - Full width */}
+      <Paper 
+        elevation={0}
+        sx={{ 
+          p: 3, 
+          borderRadius: 4, 
+          border: `1px solid ${theme.palette.divider}`,
+          bgcolor: 'background.paper'
+        }}
+      >
+        <Typography variant="h6" fontWeight={700} gutterBottom>Upcoming Meetings</Typography>
+        <Divider sx={{ mb: 2 }} />
+        <Box sx={{ py: 4, textAlign: 'center' }}>
+          <EventIcon color="disabled" sx={{ fontSize: 40, mb: 1 }} />
+          <Typography variant="body2" color="text.secondary">Next meeting scheduled for tomorrow</Typography>
+        </Box>
+      </Paper>
     </Container>
   );
 };

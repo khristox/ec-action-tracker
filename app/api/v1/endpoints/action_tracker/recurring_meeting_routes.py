@@ -337,6 +337,7 @@ async def generate_on_demand_occurrence(
             id=uuid.uuid4(),
             title=meeting.title,
             description=meeting.description,
+            department_id=meeting.department_id,
             meeting_date=next_date.date() if hasattr(next_date, 'date') else next_date,
             start_time=next_date if isinstance(next_date, datetime) else meeting.start_time,
             end_time=meeting.end_time,

@@ -38,6 +38,7 @@ from app.schemas.action_tracker import ActionCommentCreate, ActionCommentUpdate,
 from sqlalchemy import or_
 from app.schemas.action_tracker import MeetingCreate, MeetingUpdate
 
+from app.models.meetings.action_tracker import participant_list_members
 
 # ============================================================================
 # CONSTANTS
@@ -1364,10 +1365,45 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
 # MEETING CRUD
 # ============================================================================
 
-class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
-    """CRUD operations for Meeting entity"""
+# ============================================================================
+# MEETING CRUD (FIXED - removed organization references)
+# ============================================================================
 
+class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
+    """CRUD operations for Meeting entity with department visibility fields"""
+
+    async def validate_department(self, db: AsyncSession, department_id: Optional[str]) -> bool:
+        """Validate that department exists and is active"""
+        if not department_id:
+            return True
+        
+        try:
+            from app.models.meetings.organization import OrganizationNode
+            result = await db.execute(
+                select(OrganizationNode).where(
+                    OrganizationNode.id == department_id,
+                    OrganizationNode.is_active == True
+                )
+            )
+            department = result.scalar_one_or_none()
+            return department is not None
+        except Exception:
+            return False
     
+    async def get_department_name(self, db: AsyncSession, department_id: Optional[str]) -> Optional[str]:
+        """Get department name by ID"""
+        if not department_id:
+            return None
+        
+        try:
+            from app.models.meetings.organization import OrganizationNode
+            result = await db.execute(
+                select(OrganizationNode.name).where(OrganizationNode.id == department_id)
+            )
+            return result.scalar_one_or_none()
+        except Exception:
+            return None
+
     async def add_minutes(
         self, 
         db: AsyncSession, 
@@ -1383,7 +1419,7 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
                 raise ValueError(f"Meeting with id {meeting_id} not found")
             
             # Create minutes
-            minutes_data = minutes_in.dict()
+            minutes_data = minutes_in.model_dump() if hasattr(minutes_in, 'model_dump') else minutes_in.dict()
             minutes = MeetingMinutes(
                 meeting_id=meeting_id,
                 **minutes_data
@@ -1399,55 +1435,52 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
             await db.rollback()
             raise ValueError(f"Failed to add minutes: {str(e)}")
         
+# In your CRUDMeeting class
+
     async def create_with_participants(
         self,
         db: AsyncSession,
-        obj_in: MeetingCreate,
+        meeting_data: Dict[str, Any],  # This is a dict now
         user_id: UUID,
     ) -> Meeting:
         """Create a meeting with participants"""
         try:
-            # Create meeting
+            # Create meeting object directly from dict values
             meeting = Meeting(
-                title=obj_in.title,
-                description=obj_in.description,
-                meeting_date=obj_in.meeting_date,
-                start_time=obj_in.start_time,
-                end_time=obj_in.end_time,
-                location_text=obj_in.location_text,
-                gps_coordinates=obj_in.gps_coordinates,
-                agenda=obj_in.agenda,
-                facilitator=obj_in.facilitator,
-                chairperson_name=obj_in.chairperson_name,
+                title=meeting_data.get('title'),
+                description=meeting_data.get('description'),
+                meeting_date=meeting_data.get('meeting_date'),
+                start_time=meeting_data.get('start_time'),
+                end_time=meeting_data.get('end_time'),
+                location_text=meeting_data.get('location_text'),
+                location_id=meeting_data.get('location_id'),
+                gps_coordinates=meeting_data.get('gps_coordinates'),
+                agenda=meeting_data.get('agenda'),
+                facilitator=meeting_data.get('facilitator'),
+                chairperson_name=meeting_data.get('chairperson_name'),
+                status_id=meeting_data.get('status_id'),
+                visibility=meeting_data.get('visibility', 'open'),
+                restricted_department_id=meeting_data.get('restricted_department_id'),
                 created_by_id=user_id,
                 created_at=datetime.now(),
                 is_active=True
             )
+            
             db.add(meeting)
             await db.flush()
             
-            # Add participants - Convert to dict if needed
-            participants = getattr(obj_in, 'custom_participants', [])
+            # Add participants
+            participants = meeting_data.get('custom_participants', [])
             for participant_data in participants:
-                # Check if it's a dict or Pydantic model
-                if hasattr(participant_data, 'model_dump'):
-                    # It's a Pydantic model - convert to dict
-                    p = participant_data.model_dump()
-                elif hasattr(participant_data, 'dict'):
-                    # Older Pydantic version
-                    p = participant_data.dict()
-                else:
-                    # Assume it's already a dict
-                    p = participant_data
-                
                 participant = MeetingParticipant(
                     meeting_id=meeting.id,
-                    name=p.get('name'),
-                    email=p.get('email'),
-                    telephone=p.get('telephone'),
-                    title=p.get('title'),
-                    organization=p.get('organization'),
-                    is_chairperson=p.get('is_chairperson', False),
+                    name=participant_data.get('name'),
+                    email=participant_data.get('email'),
+                    telephone=participant_data.get('telephone'),
+                    title=participant_data.get('title'),
+                    organization=participant_data.get('organization'),
+                    is_chairperson=participant_data.get('is_chairperson', False),
+                    is_secretary=participant_data.get('is_secretary', False),
                     created_by_id=user_id,
                     created_at=datetime.now(),
                     is_active=True
@@ -1461,9 +1494,10 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
         except Exception as e:
             await db.rollback()
             raise ValueError(f"Failed to create meeting: {str(e)}")
-        
+    # In your CRUDMeeting class
     async def get_meeting_with_details(self, db: AsyncSession, meeting_id: UUID) -> Optional[Meeting]:
-        """Get meeting with all relationships loaded"""
+        """Get meeting with all relationships loaded including department fields"""
+        # Don't use selectinload for simple columns - they should load automatically
         result = await db.execute(
             select(Meeting)
             .where(Meeting.id == meeting_id, Meeting.is_active == True)
@@ -1474,27 +1508,39 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
                 selectinload(Meeting.status_history),
                 selectinload(Meeting.created_by),
                 selectinload(Meeting.updated_by),
-                selectinload(Meeting.location)
+                selectinload(Meeting.location),
+                # These are relationships, not columns
+                selectinload(Meeting.department),
+                selectinload(Meeting.restricted_department)
             )
         )
-        return result.scalar_one_or_none()
-    
-    async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
-        """Get a meeting by ID"""
-        result = await db.execute(
-            select(Meeting)
-            .where(Meeting.id == id, Meeting.is_active == True)
-        )
-        return result.scalar_one_or_none()
+        meeting = result.scalar_one_or_none()
+        
+        # Debug: Print the actual values from the ORM object
+        if meeting:
+            print(f"=== ORM Meeting Object ===")
+            print(f"  visibility: {meeting.visibility}")
+            print(f"  restricted_department_id: {meeting.restricted_department_id}")
+            print(f"  department_id: {meeting.department_id}")
+            print(f"  Has attribute 'visibility': {hasattr(meeting, 'visibility')}")
+            print(f"  Has attribute 'restricted_department_id': {hasattr(meeting, 'restricted_department_id')}")
+        
+        return meeting
+
+
 
     async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
         """Get a meeting by ID"""
         result = await db.execute(
             select(Meeting)
             .where(Meeting.id == id, Meeting.is_active == True)
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.department),
+                selectinload(Meeting.restricted_department)
+            )
         )
         return result.scalar_one_or_none()
-        
 
     async def create(
         self, db: AsyncSession, meeting_data: Dict[str, Any], created_by_id: UUID
@@ -1512,20 +1558,15 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
             await db.rollback()
             raise ValueError(f"Failed to create meeting: {str(e)}")
     
-    async def get(self, db: AsyncSession, id: UUID) -> Optional[Meeting]:
-        """Get a meeting by ID"""
-        result = await db.execute(
-            select(Meeting)
-            .options(selectinload(Meeting.participants))
-            .where(Meeting.id == id, Meeting.is_active == True)
-        )
-        return result.scalar_one_or_none()
-    
     async def get_multi(
         self, db: AsyncSession, skip: int = DEFAULT_SKIP, limit: int = DEFAULT_LIMIT, include_inactive: bool = False
     ) -> List[Meeting]:
         """Get multiple meetings"""
-        query = select(Meeting).options(selectinload(Meeting.participants))
+        query = select(Meeting).options(
+            selectinload(Meeting.participants),
+            selectinload(Meeting.department),
+            selectinload(Meeting.restricted_department)
+        )
         if not include_inactive:
             query = query.where(Meeting.is_active == True)
         query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(Meeting.meeting_date.desc())
@@ -1535,11 +1576,20 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
     async def update(
         self, db: AsyncSession, id: UUID, update_data: Dict[str, Any], updated_by_id: UUID
     ) -> Optional[Meeting]:
-        """Update a meeting"""
+        """Update a meeting including department visibility fields"""
         try:
             db_obj = await self.get(db, id)
             if not db_obj:
                 return None
+            
+            # Validate restricted department if visibility is being set to 'department'
+            new_visibility = update_data.get('visibility', db_obj.visibility)
+            new_restricted_dept = update_data.get('restricted_department_id', db_obj.restricted_department_id)
+            
+            if new_visibility == 'department' and new_restricted_dept:
+                is_valid = await self.validate_department(db, str(new_restricted_dept))
+                if not is_valid:
+                    raise ValueError(f"Restricted department {new_restricted_dept} not found or inactive")
             
             for field, value in update_data.items():
                 if value is not None:
@@ -1566,8 +1616,39 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
         except Exception as e:
             await db.rollback()
             raise ValueError(f"Failed to delete meeting: {str(e)}")
-
-
+    
+    async def get_meetings_by_department(
+        self,
+        db: AsyncSession,
+        department_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        include_restricted: bool = False
+    ) -> List[Meeting]:
+        """Get meetings for a specific department"""
+        try:
+            conditions = [Meeting.is_active == True]
+            
+            if include_restricted:
+                conditions.append(
+                    or_(
+                        Meeting.department_id == department_id,
+                        Meeting.restricted_department_id == department_id
+                    )
+                )
+            else:
+                conditions.append(Meeting.department_id == department_id)
+            
+            query = select(Meeting).where(and_(*conditions))
+            query = query.offset(skip).limit(limit).order_by(Meeting.meeting_date.desc())
+            
+            result = await db.execute(query)
+            return result.scalars().all()
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by department {department_id}: {str(e)}")
+            return []
+        
 # ============================================================================
 # MEETING DOCUMENT CRUD
 # ============================================================================

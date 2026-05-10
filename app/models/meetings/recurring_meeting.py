@@ -15,11 +15,16 @@ class RecurringMeeting(Base):
 
     id = Column(CustomUUID, primary_key=True, default=uuid.uuid4, index=True)
     
-    # Basic Information
+    # ==================== Basic Information ====================
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     
-    # Recurrence Settings (UUID references to attributes table)
+    # ==================== Department & Visibility Fields ====================
+    department_id = Column(CustomUUID, ForeignKey("organization_nodes.id", ondelete="SET NULL"), nullable=True)
+    visibility = Column(String(50), nullable=False, default="open")
+    restricted_department_id = Column(CustomUUID, ForeignKey("organization_nodes.id", ondelete="SET NULL"), nullable=True)
+    
+    # ==================== Recurrence Settings ====================
     recurrence_type_id = Column(CustomUUID, ForeignKey("attributes.id", ondelete="RESTRICT"), nullable=False)
     recurrence_interval = Column(Integer, default=1)
     recurrence_days = Column(JSON, nullable=True)  # Array of attribute UUIDs
@@ -30,51 +35,65 @@ class RecurringMeeting(Base):
     recurrence_max_occurrences = Column(Integer, nullable=True)
     recurrence_end_after_occurrences = Column(Integer, nullable=True)
     
-    # Meeting Template
+    # ==================== Meeting Template ====================
     meeting_template_id = Column(CustomUUID, ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True)
     
-    # Timing
+    # ==================== Timing ====================
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=True)
     duration_minutes = Column(Integer, nullable=True)
     
-    # Location
+    # ==================== Location ====================
     location_id = Column(CustomUUID, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
     location_text = Column(String(500), nullable=True)
     platform = Column(String(50), default="physical")
     meeting_link = Column(String(500), nullable=True)
     
-    # Leadership
+    # ==================== Leadership ====================
     chairperson_id = Column(CustomUUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     secretary_id = Column(CustomUUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     facilitator = Column(String(255), nullable=True)
     
-    # Participants
+    # ==================== Participants ====================
     default_participant_ids = Column(JSON, nullable=True)  # Array of user UUIDs
     
-    # Agenda
+    # ==================== Content ====================
     agenda = Column(Text, nullable=True)
     additional_info = Column(JSON, nullable=True)
     
-    # Status
+    # ==================== Status ====================
     status_id = Column(CustomUUID, ForeignKey("attributes.id", ondelete="RESTRICT"), nullable=False)
     
-    # Tracking
+    # ==================== Tracking ====================
     last_occurrence_date = Column(DateTime, nullable=True)
     next_occurrence_date = Column(DateTime, nullable=True)
     occurrences_count = Column(Integer, default=0)
     total_occurrences_generated = Column(Integer, default=0)
     
-    # Audit
+    # ==================== Audit ====================
     created_by_id = Column(CustomUUID, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # Soft delete
+    # ==================== Soft Delete ====================
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime, nullable=True)
     
     # ==================== Relationships ====================
+    
+    # Department relationships
+    department = relationship(
+        "OrganizationNode",
+        foreign_keys=[department_id],
+        lazy="joined",
+        backref="recurring_meetings_as_department"
+    )
+    restricted_department = relationship(
+        "OrganizationNode",
+        foreign_keys=[restricted_department_id],
+        lazy="joined",
+        backref="recurring_meetings_as_restricted"
+    )
     
     # Attribute relationships
     recurrence_type = relationship(
@@ -153,6 +172,7 @@ class RecurringMeeting(Base):
         viewonly=False
     )
     
+    # ==================== Indexes ====================
     __table_args__ = (
         Index("ix_recurring_meetings_status_next_date", "status_id", "next_occurrence_date"),
         Index("ix_recurring_meetings_created_by", "created_by_id"),
@@ -160,6 +180,9 @@ class RecurringMeeting(Base):
         Index("ix_recurring_meetings_is_deleted", "is_deleted"),
         Index("ix_recurring_meetings_created_at", "created_at"),
         Index("ix_recurring_meetings_next_occurrence", "next_occurrence_date"),
+        Index("ix_recurring_meetings_department", "department_id"),
+        Index("ix_recurring_meetings_visibility", "visibility"),
+        Index("ix_recurring_meetings_restricted_department", "restricted_department_id"),
     )
     
     # ==================== Properties ====================
@@ -198,6 +221,26 @@ class RecurringMeeting(Base):
         return self.status_value == 'active' and not self.is_deleted
     
     @property
+    def department_name(self) -> Optional[str]:
+        """Get department name from relationship"""
+        return self.department.name if self.department else None
+    
+    @property
+    def restricted_department_name(self) -> Optional[str]:
+        """Get restricted department name from relationship"""
+        return self.restricted_department.name if self.restricted_department else None
+    
+    @property
+    def visibility_display(self) -> str:
+        """Get human-readable visibility"""
+        visibility_map = {
+            'open': 'Open to All',
+            'department': 'Department Restricted',
+            'private': 'Private'
+        }
+        return visibility_map.get(self.visibility, 'Open to All')
+    
+    @property
     def recurrence_description(self) -> str:
         """Get human-readable recurrence description"""
         type_value = self.recurrence_type_value
@@ -207,10 +250,22 @@ class RecurringMeeting(Base):
             return f"Every {interval} day(s)"
         elif type_value == 'weekly':
             days = self.get_recurrence_days_values()
-            return f"Every {interval} week(s) on {', '.join(days)}"
+            days_str = ', '.join(days) if days else 'selected days'
+            return f"Every {interval} week(s) on {days_str}"
         elif type_value == 'monthly':
             if self.recurrence_day_of_month:
-                return f"Every {interval} month(s) on day {self.recurrence_day_of_month}"
+                day_suffix = 'th'
+                if self.recurrence_day_of_month == 1:
+                    day_suffix = 'st'
+                elif self.recurrence_day_of_month == 2:
+                    day_suffix = 'nd'
+                elif self.recurrence_day_of_month == 3:
+                    day_suffix = 'rd'
+                return f"Every {interval} month(s) on the {self.recurrence_day_of_month}{day_suffix} day"
+            elif self.recurrence_week_of_month_id and self.recurrence_day_of_week_id:
+                week = self.get_week_of_month_value() or 'selected'
+                day = self.get_day_of_week_value() or 'selected day'
+                return f"Every {interval} month(s) on the {week} {day}"
             return f"Every {interval} month(s)"
         elif type_value == 'yearly':
             return f"Every {interval} year(s)"
@@ -226,6 +281,32 @@ class RecurringMeeting(Base):
         # This would need to fetch attribute values from the database
         # For now, return the stored values
         return self.recurrence_days if isinstance(self.recurrence_days, list) else []
+    
+    def get_week_of_month_value(self) -> Optional[str]:
+        """Get week of month value from attribute"""
+        if self.recurrence_week_of_month and self.recurrence_week_of_month.extra_metadata:
+            import json
+            metadata = self.recurrence_week_of_month.extra_metadata
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    pass
+            return metadata.get('value')
+        return None
+    
+    def get_day_of_week_value(self) -> Optional[str]:
+        """Get day of week value from attribute"""
+        if self.recurrence_day_of_week and self.recurrence_day_of_week.extra_metadata:
+            import json
+            metadata = self.recurrence_day_of_week.extra_metadata
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    pass
+            return metadata.get('value')
+        return None
     
     def get_next_occurrence_date(self) -> Optional[datetime]:
         """Calculate next occurrence date based on pattern"""
@@ -288,6 +369,14 @@ class RecurringMeeting(Base):
             "id": str(self.id),
             "title": self.title,
             "description": self.description,
+            # Department fields
+            "department_id": str(self.department_id) if self.department_id else None,
+            "department_name": self.department_name,
+            "visibility": self.visibility,
+            "visibility_display": self.visibility_display,
+            "restricted_department_id": str(self.restricted_department_id) if self.restricted_department_id else None,
+            "restricted_department_name": self.restricted_department_name,
+            # Recurrence
             "recurrence_type": {
                 "id": str(self.recurrence_type_id),
                 "value": self.recurrence_type_value

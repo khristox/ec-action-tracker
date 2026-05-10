@@ -52,7 +52,7 @@ class MeetingReportResponse(BaseModel):
     # Online Meeting Info
     platform: Optional[str] = None
     meeting_link: Optional[str] = None
-    meeting_id_online: Optional[str] = None
+    #meeting_id_online: Optional[str] = None
     passcode: Optional[str] = None
     
     # Roles

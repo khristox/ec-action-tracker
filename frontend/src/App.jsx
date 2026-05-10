@@ -92,7 +92,7 @@ const COMPONENT_IMPORTS = {
   'CreateMeeting':          () => import('./components/actiontracker/meetings/CreateMeeting'),
   'MeetingDetail':          () => import('./components/actiontracker/meetings/MeetingDetail'),
   'EditMeeting':            () => import('./components/actiontracker/meetings/EditMeeting'),
-  'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm'),
+  'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm/MeetingForm'),
   'MeetingRecorder':        () => import('./components/actiontracker/meetings/MeetingRecorder'),
 
   'RecurringMeetingDetail': () => import('./components/actiontracker/meetings/RecurringMeetingDetail'),

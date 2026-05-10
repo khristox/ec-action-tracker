@@ -1,10 +1,10 @@
-# models/meetings/user_department.py
+import datetime
 import uuid
 from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, JSON, Enum as SQLAEnum, TypeDecorator
 from sqlalchemy.orm import relationship
-from datetime import datetime
 from app.db.base import Base
 import enum
+from app.db.types import UUID as CustomUUID
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -31,22 +31,22 @@ class UserDepartmentStatus(str, enum.Enum):
 class UserDepartment(Base):
     __tablename__ = 'user_departments'
     
-    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
-    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    department_id = Column(String(36), ForeignKey('organization_nodes.id', ondelete='CASCADE'), nullable=False)
+    id = Column(CustomUUID, primary_key=True, default=generate_uuid, index=True)
+    user_id = Column(CustomUUID, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    department_id = Column(CustomUUID, ForeignKey('organization_nodes.id', ondelete='CASCADE'), nullable=False)
     
     # Use String instead of Enum
     role = Column(String(50), default='member', nullable=False)
     status = Column(String(50), default='active', nullable=False)
     
     is_primary = Column(Boolean, default=False)
-    start_date = Column(DateTime, default=datetime.utcnow)
+    start_date = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
     end_date = Column(DateTime, nullable=True)
     title = Column(String(200), nullable=True)
     responsibilities = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by = Column(String(36), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
+    updated_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc), onupdate=datetime.datetime.now(datetime.timezone.utc))
+    created_by = Column(CustomUUID, nullable=True)
     notes = Column(String(500), nullable=True)
     
     # Relationships - ADD overlaps parameters to fix warnings

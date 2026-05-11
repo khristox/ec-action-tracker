@@ -12,7 +12,7 @@ from datetime import datetime
 from venv import logger
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select, and_, or_, func, case, update
+from sqlalchemy import String, delete, select, and_, or_, func, case, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1863,121 +1863,201 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
 
     
     async def get_actions_assigned_to_user(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        user_email: Optional[str] = None,
-        user_phone: Optional[str] = None,
-        skip: int = 0,
-        limit: int = 100,
-        search: Optional[str] = None,
-        status: Optional[str] = None,
-        priority: Optional[int] = None,
-        is_overdue: Optional[bool] = None,
-        include_completed: bool = False,
-    ) -> List[MeetingAction]:
-        """Get actions assigned to user with filtering
-        
-        Checks both:
-        1. assigned_to_id matches the user_id directly
-        2. assigned_to_name JSON contains user's email or phone (for legacy/imported data)
-        """
-        from sqlalchemy import or_, and_
-        from sqlalchemy.sql import case
-        from sqlalchemy.dialects.postgresql import JSONB
-        
-        query = select(MeetingAction).options(
-            selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
-            selectinload(MeetingAction.assigned_to),
-            selectinload(MeetingAction.assigned_by)
-        )
-
-        # Build conditions for matching assignments
-        conditions = []
-        
-        # Condition 1: Direct user ID match
-        conditions.append(MeetingAction.assigned_to_id == user_id)
-        
-        # Condition 2: Match by email or phone in assigned_to_name JSON (for legacy/imported data)
-        if user_email or user_phone:
-            name_conditions = []
+            self,
+            db: AsyncSession,
+            user_id: UUID,
+            user_email: Optional[str] = None,
+            user_phone: Optional[str] = None,
+            skip: int = 0,
+            limit: int = 100,
+            search: Optional[str] = None,
+            status: Optional[str] = None,
+            priority: Optional[int] = None,
+            is_overdue: Optional[bool] = None,
+            include_completed: bool = False,
+        ) -> List[MeetingAction]:
+            """Get actions assigned to user with filtering for MySQL"""
+            from sqlalchemy import or_, and_, func
+            from sqlalchemy.sql import case
             
-            # For PostgreSQL with JSONB
-            if user_email:
-                # Check if assigned_to_name is JSON and contains the email
-                name_conditions.append(
-                    MeetingAction.assigned_to_name['email'].astext.ilike(f"%{user_email}%")
-                )
-            
-            if user_phone:
-                # Check if assigned_to_name is JSON and contains the phone
-                name_conditions.append(
-                    MeetingAction.assigned_to_name['phone'].astext.ilike(f"%{user_phone}%")
-                )
-            
-            # Also check if assigned_to_name is a string (legacy) and contains the email/phone
-            if user_email:
-                name_conditions.append(
-                    MeetingAction.assigned_to_name.cast(String).ilike(f"%{user_email}%")
-                )
-            if user_phone:
-                name_conditions.append(
-                    MeetingAction.assigned_to_name.cast(String).ilike(f"%{user_phone}%")
-                )
-            
-            if name_conditions:
-                conditions.append(or_(*name_conditions))
-        
-        # Apply the OR condition
-        if conditions:
-            query = query.where(or_(*conditions), MeetingAction.is_active == True)
-        else:
-            query = query.where(MeetingAction.is_active == True)
-
-        # Filter by completion status
-        if not include_completed:
-            query = query.where(MeetingAction.completed_at.is_(None))
-
-        # Search filter
-        if search and search.strip():
-            term = f"%{search.strip()}%"
-            query = query.where(MeetingAction.description.ilike(term))
-
-        # Status filter
-        if status:
-            query = query.where(MeetingAction.overall_status_name == status)
-
-        # Priority filter
-        if priority is not None:
-            query = query.where(MeetingAction.priority == priority)
-
-        # Overdue filter
-        if is_overdue is True:
-            query = query.where(
-                and_(
-                    MeetingAction.due_date.is_not(None),
-                    MeetingAction.due_date < datetime.now(),
-                    MeetingAction.completed_at.is_(None)
-                )
+            query = select(MeetingAction).options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by)
             )
 
-        # Sort with NULL due_dates at the end
-        query = query.order_by(
-            case(
-                (MeetingAction.due_date.is_(None), 1),
-                else_=0
-            ),
-            MeetingAction.due_date.asc(),
-            MeetingAction.created_at.desc()
-        ).offset(skip).limit(min(limit, MAX_LIMIT))
+            # Build conditions for matching assignments
+            conditions = [MeetingAction.assigned_to_id == user_id]
+            
+            # Condition for MySQL JSON field
+            if user_email:
+                conditions.append(
+                    func.json_unquote(
+                        func.json_extract(MeetingAction.assigned_to_name, '$.email')
+                    ).like(f"%{user_email}%")
+                )
+            
+            if user_phone:
+                conditions.append(
+                    func.json_unquote(
+                        func.json_extract(MeetingAction.assigned_to_name, '$.phone')
+                    ).like(f"%{user_phone}%")
+                )
+            
+            # Apply OR condition
+            query = query.where(or_(*conditions))
+            
+            # Only active actions
+            query = query.where(MeetingAction.is_active == True)
 
-        result = await db.execute(query)
-        return result.scalars().all()
+            # Filter by completion status
+            if not include_completed:
+                query = query.where(MeetingAction.completed_at.is_(None))
 
-    
+            # Search filter - use .like() not .ilike() for MySQL
+            if search and search.strip():
+                term = f"%{search.strip()}%"
+                query = query.where(MeetingAction.description.like(term))
+
+            # Status filter
+            if status:
+                query = query.where(MeetingAction.overall_status_name == status)
+
+            # Priority filter
+            if priority is not None:
+                query = query.where(MeetingAction.priority == priority)
+
+            # Overdue filter
+            if is_overdue is True:
+                query = query.where(
+                    and_(
+                        MeetingAction.due_date.is_not(None),
+                        MeetingAction.due_date < datetime.now(),
+                        MeetingAction.completed_at.is_(None)
+                    )
+                )
+
+            # Sort with NULL due_dates at the end
+            query = query.order_by(
+                case(
+                    (MeetingAction.due_date.is_(None), 1),
+                    else_=0
+                ),
+                MeetingAction.due_date.asc(),
+                MeetingAction.created_at.desc()
+            ).offset(skip).limit(min(limit, MAX_LIMIT))
+
+            result = await db.execute(query)
+            return result.scalars().all()
+
+    async def get_actions_assigned_to_user1(
+            self,
+            db: AsyncSession,
+            user_id: UUID,
+            user_email: Optional[str] = None,
+            user_phone: Optional[str] = None,
+            skip: int = 0,
+            limit: int = 100,
+            search: Optional[str] = None,
+            status: Optional[str] = None,
+            priority: Optional[int] = None,
+            is_overdue: Optional[bool] = None,
+            include_completed: bool = False,
+        ) -> List[MeetingAction]:
+            """Get actions assigned to user with filtering for MySQL"""
+            from sqlalchemy import or_, and_, func
+            from sqlalchemy.sql import case
+            import logging
+            
+            # Enable SQL logging
+            logging.basicConfig()
+            logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+            
+            query = select(MeetingAction).options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by)
+            )
+
+            # Build conditions for matching assignments
+            conditions = [MeetingAction.assigned_to_id == user_id]
+            
+            # Condition for MySQL JSON field
+            if user_email:
+                conditions.append(
+                    func.json_unquote(
+                        func.json_extract(MeetingAction.assigned_to_name, '$.email')
+                    ).like(f"%{user_email}%")
+                )
+            
+            if user_phone:
+                conditions.append(
+                    func.json_unquote(
+                        func.json_extract(MeetingAction.assigned_to_name, '$.phone')
+                    ).like(f"%{user_phone}%")
+                )
+            
+            # Apply OR condition
+            query = query.where(or_(*conditions))
+            
+            # Only active actions
+            query = query.where(MeetingAction.is_active == True)
+
+            # Filter by completion status
+            if not include_completed:
+                query = query.where(MeetingAction.completed_at.is_(None))
+
+            # Search filter - use .like() not .ilike() for MySQL
+            if search and search.strip():
+                term = f"%{search.strip()}%"
+                query = query.where(MeetingAction.description.like(term))
+
+            # Status filter
+            if status:
+                query = query.where(MeetingAction.overall_status_name == status)
+
+            # Priority filter
+            if priority is not None:
+                query = query.where(MeetingAction.priority == priority)
+
+            # Overdue filter
+            if is_overdue is True:
+                query = query.where(
+                    and_(
+                        MeetingAction.due_date.is_not(None),
+                        MeetingAction.due_date < datetime.now(),
+                        MeetingAction.completed_at.is_(None)
+                    )
+                )
+
+            # Sort with NULL due_dates at the end
+            query = query.order_by(
+                case(
+                    (MeetingAction.due_date.is_(None), 1),
+                    else_=0
+                ),
+                MeetingAction.due_date.asc(),
+                MeetingAction.created_at.desc()
+            ).offset(skip).limit(min(limit, MAX_LIMIT))
+
+            # DEBUG: Print the compiled SQL query
+            compiled_query = query.compile(compile_kwargs={"literal_binds": True})
+            print("=" * 80)
+            print("SQL QUERY:")
+            print(compiled_query)
+            print("=" * 80)
+            
+            # Also show parameters
+            print(f"Parameters: user_id={user_id}, user_email={user_email}, user_phone={user_phone}")
+            
+            result = await db.execute(query)
+            return result.scalars().all()
+
+
     async def get_my_tasks(self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100):
         """Alias for get_actions_assigned_to_user"""
         return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
+    
     
 
 # In app/crud/action_tracker/meeting_action.py

@@ -82,6 +82,8 @@ async def get_my_tasks(
         actions = await meeting_action.get_actions_assigned_to_user(
             db=db,
             user_id=current_user.id,
+            user_email=current_user.email,  # Add this
+            user_phone=current_user.phone,  # Add this (if available)
             skip=skip,
             limit=limit,
             search=search,

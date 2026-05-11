@@ -594,7 +594,6 @@ const buildMeetingPayload = useCallback(() => {
           return;
         }
         const recurringPayload = buildRecurringPayload(basePayload);
-        console.log('📤 Creating recurring meeting:', recurringPayload);
          await api.post('/recurring-meetings/', recurringPayload);
         setSnackbar({ open: true, message: 'Recurring meeting created successfully!', severity: 'success' });
       } 

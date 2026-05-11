@@ -1420,7 +1420,7 @@ const CreateMeeting = () => {
                     disabled={apiLoading}
                     sx={{ bgcolor: '#7C3AED', '&:hover': { bgcolor: '#6D28D9' } }}
                   >
-                    {apiLoading ? <CircularProgress size={24} /> : (isRecurring ? 'Create Recurring Meeting' : 'Create Meeting s')}
+                    {apiLoading ? <CircularProgress size={24} /> : (isRecurring ? 'Create Recurring Meeting' : 'Create Meeting')}
                   </Button>
                 </Stack>
               </Grow>

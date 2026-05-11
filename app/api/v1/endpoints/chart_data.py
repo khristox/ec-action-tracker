@@ -31,6 +31,8 @@ async def get_weekly_activity(
     async def compute():
         return await service.get_weekly_activity(
             user_id=current_user.id if not is_admin(current_user) else None,
+            user_email=current_user.email,  # Add this
+            user_phone=getattr(current_user, 'phone', None) ,
             days=days
         )
     
@@ -50,8 +52,11 @@ async def get_status_distribution(
     
     async def compute():
         return await service.get_status_distribution(
-            user_id=current_user.id if not is_admin(current_user) else None
+            user_id=current_user.id if not is_admin(current_user) else None,
+            user_email=current_user.email,  # Add this
+            user_phone=getattr(current_user, 'phone', None)  # Add this
         )
+    
     
     # ADD AWAIT HERE
     data = await service.get_cached_or_compute(cache_key, compute, ttl_minutes=15)
@@ -71,6 +76,8 @@ async def get_monthly_trend(
     async def compute():
         return await service.get_monthly_trend(
             user_id=current_user.id if not is_admin(current_user) else None,
+            user_email=getattr(current_user, 'email', None),
+            user_phone=getattr(current_user, 'phone', None),
             months=months
         )
     

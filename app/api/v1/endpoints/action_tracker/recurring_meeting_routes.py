@@ -2,16 +2,16 @@
 
 import uuid
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import UUID, or_, select, desc
 
 from app.api import deps
 from app.db.base import get_db
-from app.models.meetings.action_tracker import Meeting
+from app.models.meetings.action_tracker import Meeting, MeetingParticipant
 from app.models.general.dynamic_attribute import Attribute
 from app.models.meetings.recurring_meeting import RecurringMeetingOccurrence
 from app.models.user import User
@@ -430,16 +430,282 @@ async def preview_occurrences(
 
 @router.get("/upcoming")
 async def get_upcoming_occurrences(
-    days_ahead: int = Query(30, ge=1, le=365),
-    db: AsyncSession = Depends(get_db),
+    days_ahead: int = Query(30, ge=1, le=365, description="Number of days to look ahead"),
+    include_past: bool = Query(False, description="Include past occurrences"),
     current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get all upcoming occurrences across all recurring meetings."""
-    # TODO: Implement
+    """
+    Get all upcoming occurrences across all recurring meetings where the user is a participant.
+    """
+    user_email = current_user.email
+    user_telephone = getattr(current_user, 'telephone', None) or getattr(current_user, 'phone', None)
+    
+    # Find all meetings where the user is a participant
+    conditions = [MeetingParticipant.email == user_email]
+    if user_telephone:
+        conditions.append(MeetingParticipant.telephone == user_telephone)
+    
+    result = await db.execute(
+        select(MeetingParticipant).where(or_(*conditions))
+    )
+    participants = result.scalars().all()
+    
+    meeting_ids = list(set([p.meeting_id for p in participants]))
+    
+    if not meeting_ids:
+        return {
+            "success": True,
+            "data": {
+                "upcoming_occurrences": [],
+                "total": 0,
+                "recurring_meetings": []
+            }
+        }
+    
+    # Get all recurring meetings (meetings with recurrence rules)
+    now = datetime.utcnow()
+    future_date = now + timedelta(days=days_ahead)
+    
+    # Build query for recurring meetings only
+    query = (
+        select(Meeting)
+        .options(
+            selectinload(Meeting.status),
+            selectinload(Meeting.participants)
+        )
+        .where(
+            Meeting.id.in_(meeting_ids),
+            Meeting.is_recurring == True,
+            Meeting.is_active == True
+        )
+    )
+    
+    result = await db.execute(query)
+    recurring_meetings = result.scalars().all()
+    
+    # Generate occurrences for each recurring meeting
+    all_occurrences = []
+    
+    for meeting in recurring_meetings:
+        # Find user's participant record
+        user_participant = None
+        for p in meeting.participants:
+            if (p.email == user_email or 
+                (user_telephone and p.telephone == user_telephone)):
+                user_participant = p
+                break
+        
+        # Generate occurrence dates based on recurrence interval
+        start_date = now if not include_past else now - timedelta(days=7)
+        occurrences = await _generate_occurrence_dates_simple(
+            meeting=meeting,
+            start_date=start_date,
+            end_date=future_date
+        )
+        
+        # Build status info
+        status_info = None
+        if meeting.status:
+            status_info = {
+                "id": str(meeting.status.id),
+                "code": meeting.status.code,
+                "name": meeting.status.name,
+                "short_name": meeting.status.short_name,
+                "color": getattr(meeting.status, 'color', None),
+                "description": getattr(meeting.status, 'description', None)
+            }
+        
+        # Create occurrence objects
+        for occurrence_date in occurrences:
+            all_occurrences.append({
+                "meeting_id": str(meeting.id),
+                "occurrence_id": f"{meeting.id}_{occurrence_date.isoformat()}",
+                "title": meeting.title,
+                "description": meeting.description,
+                "meeting_date": occurrence_date.isoformat(),
+                "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+                "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+                "location": meeting.location_text,
+                "attendance_status": user_participant.attendance_status if user_participant else "pending",
+                "is_chairperson": user_participant.is_chairperson if user_participant else False,
+                "is_secretary": user_participant.is_secretary if user_participant else False,
+                "status": status_info,
+                "status_code": meeting.status.code if meeting.status else None,
+                "status_name": meeting.status.name if meeting.status else None,
+                "is_recurring": True,
+                "recurrence_interval": meeting.recurrence_interval,
+                "is_cancelled": False,
+                "is_exception": False
+            })
+    
+    # Sort by date
+    all_occurrences.sort(key=lambda x: x["meeting_date"])
+    
+    # Limit to days_ahead
+    filtered_occurrences = [
+        occ for occ in all_occurrences 
+        if datetime.fromisoformat(occ["meeting_date"]) <= future_date
+    ]
+    
     return {
         "success": True,
-        "data": [],
-        "message": "Not implemented yet"
+        "data": {
+            "upcoming_occurrences": filtered_occurrences[:50],
+            "total": len(filtered_occurrences),
+            "recurring_meetings": [
+                {
+                    "id": str(m.id),
+                    "title": m.title,
+                    "recurrence_interval": m.recurrence_interval,
+                    "next_occurrence": filtered_occurrences[0]["meeting_date"] if filtered_occurrences else None
+                }
+                for m in recurring_meetings
+            ]
+        }
+    }
+
+
+async def _generate_occurrence_dates_simple(
+    meeting: Meeting,
+    start_date: datetime,
+    end_date: datetime
+) -> List[datetime]:
+    """
+    Simple occurrence date generator using recurrence_interval (weeks).
+    """
+    occurrences = []
+    
+    # Start from the meeting's next occurrence date or meeting date
+    current_date = meeting.next_occurrence_date or meeting.meeting_date or start_date
+    
+    if not current_date:
+        return occurrences
+    
+    # Ensure current_date is datetime
+    if isinstance(current_date, date) and not isinstance(current_date, datetime):
+        current_date = datetime.combine(current_date, datetime.min.time())
+    
+    # Use recurrence_interval (in weeks)
+    interval_weeks = meeting.recurrence_interval or 1
+    interval_days = interval_weeks * 7
+    
+    while current_date <= end_date:
+        if current_date >= start_date:
+            occurrences.append(current_date)
+        current_date += timedelta(days=interval_days)
+    
+    return occurrences
+
+
+# ==================== Alternative: Simplified Version ====================
+
+@router.get("/upcoming/simple")
+async def get_upcoming_occurrences_simple(
+    days_ahead: int = Query(30, ge=1, le=365),
+    current_user: User = Depends(deps.get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Simplified version that returns recurring meetings with their next occurrence dates
+    without generating all individual occurrences.
+    """
+    user_email = current_user.email
+    user_telephone = getattr(current_user, 'telephone', None) or getattr(current_user, 'phone', None)
+    
+    # Find participant meetings
+    conditions = [MeetingParticipant.email == user_email]
+    if user_telephone:
+        conditions.append(MeetingParticipant.telephone == user_telephone)
+    
+    result = await db.execute(
+        select(MeetingParticipant).where(or_(*conditions))
+    )
+    participants = result.scalars().all()
+    
+    meeting_ids = list(set([p.meeting_id for p in participants]))
+    
+    if not meeting_ids:
+        return {
+            "success": True,
+            "data": {
+                "recurring_meetings": [],
+                "total": 0
+            }
+        }
+    
+    # Get recurring meetings
+    query = (
+        select(Meeting)
+        .options(selectinload(Meeting.status), selectinload(Meeting.participants))
+        .where(
+            Meeting.id.in_(meeting_ids),
+            Meeting.is_recurring == True,
+            Meeting.is_active == True
+        )
+    )
+    
+    result = await db.execute(query)
+    recurring_meetings = result.scalars().all()
+    
+    # Calculate next occurrence for each recurring meeting
+    now = datetime.utcnow()
+    future_date = now + timedelta(days=days_ahead)
+    
+    meeting_list = []
+    for meeting in recurring_meetings:
+        # Find user's participant record
+        user_participant = None
+        for p in meeting.participants:
+            if (p.email == user_email or 
+                (user_telephone and p.telephone == user_telephone)):
+                user_participant = p
+                break
+        
+        # Calculate next occurrence date (simplified)
+        next_occurrence = meeting.meeting_date
+        while next_occurrence and next_occurrence < now:
+            if meeting.recurrence_rule:
+                interval = meeting.recurrence_rule.interval or 1
+                if meeting.recurrence_rule.pattern == "weekly":
+                    next_occurrence += timedelta(days=7 * interval)
+                elif meeting.recurrence_rule.pattern == "daily":
+                    next_occurrence += timedelta(days=interval)
+                elif meeting.recurrence_rule.pattern == "monthly":
+                    # Simplified: add month
+                    if next_occurrence.month == 12:
+                        next_occurrence = next_occurrence.replace(year=next_occurrence.year + 1, month=1)
+                    else:
+                        next_occurrence = next_occurrence.replace(month=next_occurrence.month + interval)
+            else:
+                break
+        
+        if next_occurrence and next_occurrence <= future_date:
+            meeting_list.append({
+                "id": str(meeting.id),
+                "title": meeting.title,
+                "description": meeting.description,
+                "next_occurrence_date": next_occurrence.isoformat() if next_occurrence else None,
+                "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+                "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+                "location": meeting.location_text,
+                "attendance_status": user_participant.attendance_status if user_participant else "pending",
+                "is_chairperson": user_participant.is_chairperson if user_participant else False,
+                "is_secretary": user_participant.is_secretary if user_participant else False,
+                "recurrence_pattern": meeting.recurrence_rule.pattern if meeting.recurrence_rule else None,
+                "recurrence_interval": meeting.recurrence_rule.interval if meeting.recurrence_rule else None,
+                "status_code": meeting.status.code if meeting.status else None,
+                "status_name": meeting.status.name if meeting.status else None
+            })
+    
+    meeting_list.sort(key=lambda x: x["next_occurrence_date"])
+    
+    return {
+        "success": True,
+        "data": {
+            "recurring_meetings": meeting_list,
+            "total": len(meeting_list)
+        }
     }
 
 

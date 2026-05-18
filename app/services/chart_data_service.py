@@ -8,6 +8,8 @@ import logging
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from functools import wraps
 
+from app.models.meetings.action_tracker import Meeting, MeetingAction, MeetingParticipant
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,10 +31,59 @@ def retry_on_error(max_retries: int = 2):
 
 
 class ChartDataService:
-    def __init__(self, db: AsyncSession):
-        self.db = db
-        self.task_model = None
-        self._discover_models()
+    def __init__(self, db_session):
+        self.db = db_session
+        # Use MeetingAction for tasks, NOT ActionComment
+        self.task_model = MeetingAction  # This was incorrectly set to ActionComment
+        self.meeting_model = Meeting
+        self.participant_model = MeetingParticipant
+
+    def _get_empty_monthly_trend(self, months: int) -> Dict[str, Any]:
+        """Return empty monthly trend data structure"""
+        end_date = datetime.utcnow()
+        month_range = []
+        for i in range(months-1, -1, -1):
+            month_date = end_date - timedelta(days=30*i)
+            month_range.append(month_date.strftime("%b"))
+        
+        return {
+            "labels": month_range,
+            "datasets": [
+                {
+                    "label": "Tasks Created",
+                    "data": [0] * months,
+                    "borderColor": "#1976d2",
+                    "backgroundColor": "rgba(25, 118, 210, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Tasks Completed",
+                    "data": [0] * months,
+                    "borderColor": "#2e7d32",
+                    "backgroundColor": "rgba(46, 125, 50, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Meetings Attended",
+                    "data": [0] * months,
+                    "borderColor": "#ed6c02",
+                    "backgroundColor": "rgba(237, 108, 2, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Meetings Organized",
+                    "data": [0] * months,
+                    "borderColor": "#9c27b0",
+                    "backgroundColor": "rgba(156, 39, 176, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                }
+            ]
+        }
+
     
     def _discover_models(self):
         """Dynamically discover the correct model from action_tracker"""
@@ -706,28 +757,29 @@ class ChartDataService:
 
     @retry_on_error(max_retries=2)
     async def get_monthly_trend(self, user_id: str = None, user_email: str = None, user_phone: str = None, months: int = 6) -> Dict[str, Any]:
-        """Get monthly task trends for tasks assigned to user
+        """Get monthly task and meeting trends for user
         
         Checks both:
-        1. assigned_to_id matches the user_id directly
-        2. assigned_to_name JSON contains user's email or phone (for legacy/imported data)
+        1. Tasks: assigned_to_id matches user_id OR assigned_to_name JSON contains user's email/phone
+        2. Meetings: user is participant OR is the creator of the meeting
         """
         from sqlalchemy import or_, func
+        from app.models.meetings.action_tracker import Meeting, MeetingParticipant
         
         if not self.task_model:
             return self._get_empty_monthly_trend(months)
         
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=months*30)
+
         
-        query = select(self.task_model).limit(2000)
+        # ========== TASKS QUERY ==========
+        task_query = select(self.task_model).limit(2000)
         
-        # Apply user filter with both ID and JSON matching
+        # Apply user filter for tasks
         if user_id:
-            # Build conditions for matching assignments
             conditions = [self.task_model.assigned_to_id == user_id]
             
-            # Add JSON conditions if email or phone provided
             if user_email:
                 email_condition = func.json_unquote(
                     func.json_extract(self.task_model.assigned_to_name, '$.email')
@@ -740,20 +792,60 @@ class ChartDataService:
                 ).like(f"%{user_phone}%")
                 conditions.append(phone_condition)
             
-            # Apply OR condition
             if conditions:
-                query = query.where(or_(*conditions))
+                task_query = task_query.where(or_(*conditions))
         
-        # Apply date filter
         if self._has_attribute(self.task_model, 'created_at'):
-            query = query.where(self.task_model.created_at >= start_date)
+            task_query = task_query.where(self.task_model.created_at >= start_date)
         
+        # ========== MEETINGS QUERY ==========
+        meeting_ids = set()
+        
+        # Find meetings where user is a participant
+        if user_email or user_phone:
+            participant_conditions = []
+            if user_email:
+                participant_conditions.append(MeetingParticipant.email == user_email)
+            if user_phone:
+                participant_conditions.append(MeetingParticipant.telephone == user_phone)
+            
+            participant_result = await self.db.execute(
+                select(MeetingParticipant.meeting_id).where(or_(*participant_conditions))
+            )
+            participant_meeting_ids = participant_result.scalars().all()
+            meeting_ids.update(participant_meeting_ids)
+
+        
+        
+        # Find meetings where user is the creator
+        if user_id:
+            creator_result = await self.db.execute(
+                select(Meeting.id).where(
+                    Meeting.created_by_id == user_id,
+                    Meeting.is_active == True
+                )
+            )
+            creator_meeting_ids = creator_result.scalars().all()
+            meeting_ids.update(creator_meeting_ids)
+        
+        # Query meetings
+        meetings = []
+        if meeting_ids:
+            meeting_query = select(Meeting).where(
+                Meeting.id.in_(list(meeting_ids)),
+                Meeting.is_active == True,
+                Meeting.created_at >= start_date
+            )
+            meeting_result = await self.db.execute(meeting_query)
+            meetings = meeting_result.scalars().all()
+        
+        # ========== PROCESS TASKS ==========
         try:
-            result = await self.db.execute(query)
-            tasks = result.scalars().all()
+            task_result = await self.db.execute(task_query)
+            tasks = task_result.scalars().all()
         except Exception as e:
-            logger.error(f"Error executing monthly trend query: {e}")
-            return self._get_empty_monthly_trend(months)
+            logger.error(f"Error executing monthly trend query for tasks: {e}")
+            tasks = []
         
         # Prepare month range (last N months)
         month_range = []
@@ -763,28 +855,46 @@ class ChartDataService:
             month_range.append(month_date.strftime("%b"))
             month_keys.append(month_date.strftime("%Y-%m"))
         
-        # Count per month
-        created_counts = defaultdict(int)
-        completed_counts = defaultdict(int)
+        # Count tasks per month
+        tasks_created_counts = defaultdict(int)
+        tasks_completed_counts = defaultdict(int)
         
         for task in tasks:
             if self._has_attribute(task, 'created_at') and task.created_at:
                 month_key = task.created_at.strftime("%Y-%m")
-                created_counts[month_key] += 1
+                tasks_created_counts[month_key] += 1
             
             if self._has_attribute(task, 'completed_at') and task.completed_at:
                 month_key = task.completed_at.strftime("%Y-%m")
-                completed_counts[month_key] += 1
+                tasks_completed_counts[month_key] += 1
         
-        created_data = [created_counts.get(key, 0) for key in month_keys]
-        completed_data = [completed_counts.get(key, 0) for key in month_keys]
+        # Count meetings per month
+        meetings_created_counts = defaultdict(int)
+        meetings_completed_counts = defaultdict(int)
+        
+        for meeting in meetings:
+            if hasattr(meeting, 'created_at') and meeting.created_at:
+                month_key = meeting.created_at.strftime("%Y-%m")
+                meetings_created_counts[month_key] += 1
+            
+            # For meetings, "completed" could mean meetings that have passed or have status "completed"
+            if hasattr(meeting, 'meeting_date') and meeting.meeting_date:
+                if meeting.meeting_date < datetime.utcnow():
+                    month_key = meeting.meeting_date.strftime("%Y-%m")
+                    meetings_completed_counts[month_key] += 1
+        
+        # Build datasets
+        tasks_created_data = [tasks_created_counts.get(key, 0) for key in month_keys]
+        tasks_completed_data = [tasks_completed_counts.get(key, 0) for key in month_keys]
+        meetings_created_data = [meetings_created_counts.get(key, 0) for key in month_keys]
+        meetings_completed_data = [meetings_completed_counts.get(key, 0) for key in month_keys]
         
         return {
             "labels": month_range,
             "datasets": [
                 {
                     "label": "Tasks Created",
-                    "data": created_data,
+                    "data": tasks_created_data,
                     "borderColor": "#1976d2",
                     "backgroundColor": "rgba(25, 118, 210, 0.1)",
                     "fill": True,
@@ -792,15 +902,76 @@ class ChartDataService:
                 },
                 {
                     "label": "Tasks Completed",
-                    "data": completed_data,
+                    "data": tasks_completed_data,
                     "borderColor": "#2e7d32",
                     "backgroundColor": "rgba(46, 125, 50, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Meetings Attended",
+                    "data": meetings_completed_data,
+                    "borderColor": "#ed6c02",
+                    "backgroundColor": "rgba(237, 108, 2, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Meetings Organized",
+                    "data": meetings_created_data,
+                    "borderColor": "#9c27b0",
+                    "backgroundColor": "rgba(156, 39, 176, 0.1)",
                     "fill": True,
                     "tension": 0.4
                 }
             ]
         }
 
+    def _get_empty_monthly_trend(self, months: int) -> Dict[str, Any]:
+        """Return empty monthly trend data structure"""
+        end_date = datetime.utcnow()
+        month_range = []
+        for i in range(months-1, -1, -1):
+            month_date = end_date - timedelta(days=30*i)
+            month_range.append(month_date.strftime("%b"))
+        
+        return {
+            "labels": month_range,
+            "datasets": [
+                {
+                    "label": "Tasks Created",
+                    "data": [0] * months,
+                    "borderColor": "#1976d2",
+                    "backgroundColor": "rgba(25, 118, 210, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Tasks Completed",
+                    "data": [0] * months,
+                    "borderColor": "#2e7d32",
+                    "backgroundColor": "rgba(46, 125, 50, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Meetings Attended",
+                    "data": [0] * months,
+                    "borderColor": "#ed6c02",
+                    "backgroundColor": "rgba(237, 108, 2, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                },
+                {
+                    "label": "Meetings Organized",
+                    "data": [0] * months,
+                    "borderColor": "#9c27b0",
+                    "backgroundColor": "rgba(156, 39, 176, 0.1)",
+                    "fill": True,
+                    "tension": 0.4
+                }
+            ]
+        }
     
     @retry_on_error(max_retries=2)
     async def get_priority_distribution(self, user_id: str = None) -> Dict[str, Any]:

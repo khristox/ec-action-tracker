@@ -2790,22 +2790,225 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
 class CRUDMeetingParticipant(AuditMixin):
     """CRUD operations for MeetingParticipant entity"""
     
+# Update your CRUDMeetingParticipant class in action_tracker.py
+
+class CRUDMeetingParticipant(AuditMixin):
+    """CRUD operations for MeetingParticipant entity"""
+    
     async def get_by_meeting(
-        self, db: AsyncSession, meeting_id: UUID, skip: int = DEFAULT_SKIP, limit: int = DEFAULT_LIMIT
+        self, 
+        db: AsyncSession, 
+        meeting_id: UUID, 
+        search: Optional[str] = None,
+        skip: int = DEFAULT_SKIP, 
+        limit: int = DEFAULT_LIMIT,
+        include_inactive: bool = False
     ) -> List[MeetingParticipant]:
-        """Get all participants for a meeting"""
+        """Get all participants for a meeting with optional search and pagination"""
+        try:
+            query = select(MeetingParticipant).where(
+                MeetingParticipant.meeting_id == meeting_id
+            )
+            
+            if not include_inactive:
+                query = query.where(MeetingParticipant.is_active == True)
+            
+            if search and search.strip():
+                search_term = f"%{search.strip()}%"
+                query = query.where(
+                    or_(
+                        MeetingParticipant.name.ilike(search_term),
+                        MeetingParticipant.email.ilike(search_term),
+                        MeetingParticipant.organization.ilike(search_term)
+                    )
+                )
+            
+            query = query.offset(skip).limit(min(limit, MAX_LIMIT)).order_by(
+                MeetingParticipant.is_chairperson.desc(), 
+                MeetingParticipant.name
+            )
+            
+            result = await db.execute(query)
+            return result.scalars().all()
+            
+        except Exception as e:
+            logger.error(f"Error fetching participants for meeting {meeting_id}: {str(e)}")
+            return []
+    
+    async def get_by_meeting_with_count(
+        self, 
+        db: AsyncSession, 
+        meeting_id: UUID, 
+        search: Optional[str] = None,
+        include_inactive: bool = False
+    ) -> Tuple[List[MeetingParticipant], int]:
+        """Get participants with total count for pagination"""
+        try:
+            # Build base query
+            base_query = select(MeetingParticipant).where(
+                MeetingParticipant.meeting_id == meeting_id
+            )
+            
+            if not include_inactive:
+                base_query = base_query.where(MeetingParticipant.is_active == True)
+            
+            if search and search.strip():
+                search_term = f"%{search.strip()}%"
+                base_query = base_query.where(
+                    or_(
+                        MeetingParticipant.name.ilike(search_term),
+                        MeetingParticipant.email.ilike(search_term),
+                        MeetingParticipant.organization.ilike(search_term)
+                    )
+                )
+            
+            # Get total count
+            count_query = select(func.count()).select_from(base_query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Get paginated results
+            query = base_query.order_by(
+                MeetingParticipant.is_chairperson.desc(), 
+                MeetingParticipant.name
+            )
+            
+            result = await db.execute(query)
+            participants = result.scalars().all()
+            
+            return participants, total
+            
+        except Exception as e:
+            logger.error(f"Error fetching participants for meeting {meeting_id}: {str(e)}")
+            return [], 0
+
+    async def update_attendance(
+        self, 
+        db: AsyncSession, 
+        participant_id: UUID, 
+        attendance_status: str, 
+        user_id: UUID,
+        apology_comment: str = None,
+        ip_address: str = None,
+        user_agent: str = None,
+        endpoint: str = None,
+        request_id: str = None
+    ) -> Optional[MeetingParticipant]:
+        """Update participant attendance status with audit logging"""
+        
+        # Get old data and meeting_id
         result = await db.execute(
-            select(MeetingParticipant)
-            .where(
-                MeetingParticipant.meeting_id == meeting_id,
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == participant_id,
                 MeetingParticipant.is_active == True
             )
-            .offset(skip)
-            .limit(min(limit, MAX_LIMIT))
-            .order_by(MeetingParticipant.is_chairperson.desc(), MeetingParticipant.name)
         )
-        return result.scalars().all()
-
+        old_participant = result.scalar_one_or_none()
+        
+        if not old_participant:
+            await log_audit(
+                db=db, 
+                action="UPDATE_ATTENDANCE", 
+                table_name="meeting_participants",
+                record_id=str(participant_id), 
+                user_id=str(user_id) if user_id else None, 
+                status="failure",
+                error_message="Participant not found", 
+                ip_address=ip_address,
+                user_agent=user_agent, 
+                endpoint=endpoint, 
+                request_id=request_id
+            )
+            raise ValueError(f"Participant with id {participant_id} not found")
+        
+        # Store meeting_id
+        meeting_id = str(old_participant.meeting_id)
+        
+        old_values = {
+            "attendance_status": old_participant.attendance_status,
+            "apology_comment": old_participant.apology_comment if hasattr(old_participant, 'apology_comment') else None
+        }
+        
+        try:
+            # Prepare update values
+            update_values = {
+                "attendance_status": attendance_status,
+                "updated_at": datetime.now(),
+                "updated_by_id": user_id
+            }
+            
+            if apology_comment is not None:
+                update_values["apology_comment"] = apology_comment
+            
+            # Execute update
+            await db.execute(
+                update(MeetingParticipant)
+                .where(
+                    MeetingParticipant.id == participant_id,
+                    MeetingParticipant.is_active == True
+                )
+                .values(**update_values)
+            )
+            
+            # Get updated record
+            result = await db.execute(
+                select(MeetingParticipant).where(
+                    MeetingParticipant.id == participant_id,
+                    MeetingParticipant.is_active == True
+                )
+            )
+            updated_participant = result.scalar_one_or_none()
+            
+            new_values = {
+                "attendance_status": updated_participant.attendance_status if updated_participant else attendance_status,
+                "apology_comment": updated_participant.apology_comment if updated_participant and hasattr(updated_participant, 'apology_comment') else apology_comment
+            }
+            
+            # Log success
+            await log_audit(
+                db=db,
+                action="UPDATE_ATTENDANCE", 
+                table_name="meeting_participants",
+                record_id=str(participant_id), 
+                user_id=str(user_id) if user_id else None,
+                old_values=old_values, 
+                new_values=new_values, 
+                status="success",
+                ip_address=ip_address, 
+                user_agent=user_agent, 
+                endpoint=endpoint,
+                request_id=request_id, 
+                meeting_id=meeting_id
+            )
+            
+            # Commit the main transaction
+            await db.commit()
+            
+            return updated_participant
+            
+        except Exception as e:
+            await db.rollback()
+            
+            # Log failure
+            await log_audit(
+                db=db,
+                action="UPDATE_ATTENDANCE", 
+                table_name="meeting_participants",
+                record_id=str(participant_id), 
+                user_id=str(user_id) if user_id else None,
+                old_values=old_values, 
+                status="failure", 
+                error_message=str(e),
+                ip_address=ip_address, 
+                user_agent=user_agent, 
+                endpoint=endpoint,
+                request_id=request_id, 
+                meeting_id=meeting_id
+            )
+            await db.commit()
+            
+            raise ValueError(f"Failed to update attendance: {str(e)}")
+        
     async def update_attendance(
         self, 
         db: AsyncSession, 

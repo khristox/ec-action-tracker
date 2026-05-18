@@ -344,53 +344,80 @@ async def get_my_weekly_meetings_chart(
 async def get_my_upcoming_meetings(
     days: int = Query(30, ge=1, le=90, description="Number of days to look ahead"),
     include_past: bool = Query(False, description="Include past meetings"),
+    include_created: bool = Query(True, description="Include meetings created by the user"),
     current_user: User = Depends(deps.get_current_user),
-    db: AsyncSession = Depends(get_db)  # Changed to AsyncSession
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Get upcoming meetings where the user is a participant with meeting status
+    Get upcoming meetings where the user is either:
+    1. A participant, OR
+    2. The creator of the meeting
+    
+    With meeting status and creator info
     """
     user_email = current_user.email
     user_telephone = getattr(current_user, 'telephone', None) or getattr(current_user, 'phone', None)
+    user_id = current_user.id
     
-    # Find participants
-    conditions = [MeetingParticipant.email == user_email]
+    meeting_ids = set()
+    
+    # 1. Find meetings where user is a participant
+    participant_conditions = [MeetingParticipant.email == user_email]
     if user_telephone:
-        conditions.append(MeetingParticipant.telephone == user_telephone)
+        participant_conditions.append(MeetingParticipant.telephone == user_telephone)
     
-    result = await db.execute(
-        select(MeetingParticipant).where(or_(*conditions))
+    participant_result = await db.execute(
+        select(MeetingParticipant).where(or_(*participant_conditions))
     )
-    participants = result.scalars().all()
+    participants = participant_result.scalars().all()
     
-    meeting_ids = list(set([p.meeting_id for p in participants]))
+    # Add meeting IDs from participant records
+    for p in participants:
+        meeting_ids.add(p.meeting_id)
+    
+    # 2. Find meetings where user is the creator
+    if include_created:
+        creator_result = await db.execute(
+            select(Meeting.id).where(
+                Meeting.created_by_id == user_id,
+                Meeting.is_active == True
+            )
+        )
+        creator_meeting_ids = creator_result.scalars().all()
+        meeting_ids.update(creator_meeting_ids)
     
     if not meeting_ids:
         return {
             "success": True,
             "data": {
                 "upcoming_meetings": [],
-                "total": 0
+                "total": 0,
+                "summary": {
+                    "as_participant": 0,
+                    "as_creator": 0
+                }
             }
         }
     
-    # Get meetings with status and participants loaded
+    # Get meetings with status, participants, and creator loaded
     now = datetime.utcnow()
     future_date = now + timedelta(days=days)
     
-    # Build query with eager loading for status
+    # Build query with eager loading
     query = (
         select(Meeting)
         .options(
             selectinload(Meeting.status),
-            selectinload(Meeting.participants)
+            selectinload(Meeting.participants),
+            selectinload(Meeting.created_by)
         )
-        .where(Meeting.id.in_(meeting_ids))
+        .where(Meeting.id.in_(list(meeting_ids)))
+        .where(Meeting.is_active == True)
     )
     
     # Apply date filter
     if include_past:
-        query = query.where(Meeting.meeting_date >= now - timedelta(days=7))  # Last 7 days for past
+        query = query.where(Meeting.meeting_date >= now - timedelta(days=7))
     else:
         query = query.where(Meeting.meeting_date >= now)
         query = query.where(Meeting.meeting_date <= future_date)
@@ -400,16 +427,28 @@ async def get_my_upcoming_meetings(
     result = await db.execute(query)
     meetings = result.scalars().all()
     
-    # Format response
+    # Format response with relationship types
     upcoming_meetings = []
+    as_participant_count = 0
+    as_creator_count = 0
+    
     for meeting in meetings:
-        # Find user's participant record from loaded participants
+        # Determine user's relationship to this meeting
+        is_creator = meeting.created_by_id == user_id
+        
+        # Find user's participant record (if any)
         user_participant = None
         for p in meeting.participants:
             if (p.email == user_email or 
                 (user_telephone and p.telephone == user_telephone)):
                 user_participant = p
                 break
+        
+        # Count based on relationship
+        if is_creator:
+            as_creator_count += 1
+        if user_participant:
+            as_participant_count += 1
         
         # Build status info
         status_info = None
@@ -423,6 +462,19 @@ async def get_my_upcoming_meetings(
                 "description": getattr(meeting.status, 'description', None)
             }
         
+        # Build creator info
+        creator_info = None
+        if meeting.created_by:
+            creator_info = {
+                "id": str(meeting.created_by.id),
+                "username": meeting.created_by.username,
+                "email": meeting.created_by.email,
+                "full_name": meeting.created_by.full_name,
+                "first_name": meeting.created_by.first_name,
+                "last_name": meeting.created_by.last_name,
+                "is_active": meeting.created_by.is_active
+            }
+        
         upcoming_meetings.append({
             "id": str(meeting.id),
             "title": meeting.title,
@@ -431,21 +483,39 @@ async def get_my_upcoming_meetings(
             "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
             "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
             "location": meeting.location_text,
-            "attendance_status": user_participant.attendance_status if user_participant else "pending",
-            "is_chairperson": user_participant.is_chairperson if user_participant else False,
-            "is_secretary": user_participant.is_secretary if user_participant else False,
-            "status": status_info,  # Added meeting status
-            "status_code": meeting.status.code if meeting.status else None,  # Shortcut field
-            "status_name": meeting.status.name if meeting.status else None,  # Shortcut field
+            # User's role in this meeting
+            "user_role": {
+                "is_creator": is_creator,
+                "is_participant": user_participant is not None,
+                "is_chairperson": user_participant.is_chairperson if user_participant else False,
+                "is_secretary": user_participant.is_secretary if user_participant else False,
+                "attendance_status": user_participant.attendance_status if user_participant else ("creator" if is_creator else "none"),
+                "participant_id": str(user_participant.id) if user_participant else None
+            },
+            "status": status_info,
+            "status_code": meeting.status.code if meeting.status else None,
+            "status_name": meeting.status.name if meeting.status else None,
             "status_color": getattr(meeting.status, 'color', None) if meeting.status else None,
-            "is_active": meeting.is_active
+            "created_by": creator_info,
+            "created_by_id": str(meeting.created_by_id) if meeting.created_by_id else None,
+            "created_by_name": meeting.created_by.full_name or meeting.created_by.username if meeting.created_by else None,
+            "created_at": meeting.created_at.isoformat() if meeting.created_at else None,
+            "is_active": meeting.is_active,
+            # Participant count
+            "participant_count": len(meeting.participants)
         })
     
     return {
         "success": True,
         "data": {
             "upcoming_meetings": upcoming_meetings,
-            "total": len(upcoming_meetings)
+            "total": len(upcoming_meetings),
+            "summary": {
+                "as_participant": as_participant_count,
+                "as_creator": as_creator_count,
+                "as_both": len([m for m in upcoming_meetings 
+                               if m["user_role"]["is_creator"] and m["user_role"]["is_participant"]])
+            }
         }
     }
 

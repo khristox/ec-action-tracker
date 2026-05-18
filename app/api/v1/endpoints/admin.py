@@ -139,7 +139,7 @@ async def create_user_by_admin(
     if not new_user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user"
+            detail="Failed to create user 2"
         )
     
     await db.commit()

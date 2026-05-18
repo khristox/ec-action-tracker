@@ -60,15 +60,14 @@ async def create_participant(
             )
         
         # Check if any participant in this list has the same email
-        # Using the Table object with .c to access columns
         stmt = (
             select(Participant)
             .join(
                 participant_list_members, 
-                Participant.id == participant_list_members.c.participant_id  # Use .c. for Table columns
+                Participant.id == participant_list_members.c.participant_id
             )
             .where(
-                participant_list_members.c.participant_list_id == participant_list_id,  # Note: column name is participant_list_id, not list_id
+                participant_list_members.c.participant_list_id == participant_list_id,
                 Participant.email == participant_in.email,
                 Participant.is_active == True
             )
@@ -89,25 +88,37 @@ async def create_participant(
         # Participant exists globally, just add to the list
         new_participant = existing_global
     else:
+        # Convert Pydantic model to dictionary
+        participant_dict = participant_in.dict()
+        
+        # Add created_by_id to the dictionary
+        participant_dict['created_by_id'] = current_user.id
+        
+        # Remove any fields that don't exist in the Participant model
+        # Get the Participant model columns
+        from sqlalchemy import inspect
+        model_columns = [c.name for c in inspect(Participant).columns]
+        
+        # Filter dict to only include valid model columns
+        filtered_dict = {k: v for k, v in participant_dict.items() if k in model_columns}
+        
         # Create new participant globally
         new_participant = await participant.create(
             db, 
-            obj_in=participant_in, 
-            created_by_id=current_user.id
+            obj_in=filtered_dict,
+            created_by_id=current_user.id  # ✅ Add this
         )
         await db.flush()
     
     # Add participant to the list if not already added
-    # Check if already in list using the Table
     list_participant_stmt = select(participant_list_members).where(
         participant_list_members.c.participant_list_id == participant_list_id,
         participant_list_members.c.participant_id == new_participant.id
     )
     list_participant_result = await db.execute(list_participant_stmt)
-    already_in_list = list_participant_result.first()  # Use first() for Table results
+    already_in_list = list_participant_result.first()
     
     if not already_in_list:
-        # Add to participant list using the Table's insert
         insert_stmt = participant_list_members.insert().values(
             participant_list_id=participant_list_id,
             participant_id=new_participant.id,
@@ -123,16 +134,17 @@ async def create_participant(
         id=new_participant.id,
         name=new_participant.name,
         email=new_participant.email,
-        telephone=new_participant.telephone,
-        title=new_participant.title,
-        organization=new_participant.organization,
+        telephone=getattr(new_participant, 'telephone', None),
+        title=getattr(new_participant, 'title', None),
+        organization=getattr(new_participant, 'organization', None),
         notes=getattr(new_participant, 'notes', None),
         created_by_id=new_participant.created_by_id,
         created_at=new_participant.created_at,
         updated_by_id=getattr(new_participant, 'updated_by_id', None),
         updated_at=getattr(new_participant, 'updated_at', None),
-        is_active=new_participant.is_active,
+        is_active=getattr(new_participant, 'is_active', True),
     )
+
 
 @router.post("/bulk", response_model=List[ParticipantResponse])
 async def bulk_create_participants(

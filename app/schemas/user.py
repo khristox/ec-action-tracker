@@ -93,15 +93,29 @@ class ValidationUtils:
     
     @staticmethod
     def validate_phone(phone: Optional[str]) -> Optional[str]:
-        """Validate and format phone number to E.164 format"""
-        if phone is None:
+        """Validate and format phone number to E.164 format
+        
+        Args:
+            phone: Phone number string, can be None, empty string, or a phone number
+            
+        Returns:
+            Formatted phone number with + prefix, or None if input is None/empty
+            
+        Raises:
+            ValueError: If phone number format is invalid (not None/empty)
+        """
+        # Handle None or empty string
+        if phone is None or phone.strip() == '':
             return None
         
+        # Clean the phone number
         cleaned = re.sub(r'[\s\-\(\)\.]+', '', phone.strip())
         
+        # Validate format (must be 8-15 digits, optionally starting with +)
         if not re.match(r'^\+?[0-9]{8,15}$', cleaned):
             raise ValueError('Phone number must be 8-15 digits, optionally starting with +')
         
+        # Ensure it starts with +
         if not cleaned.startswith('+'):
             cleaned = '+' + cleaned
         
@@ -258,6 +272,7 @@ class UserBase(BaseModel):
     phone: Optional[str] = Field(None, max_length=20, description="Phone number with international format", example="+256712345678")
     is_active: bool = Field(True, description="Whether user account is active")
     is_verified: bool = Field(False, description="Whether email is verified")
+    is_superuser: bool = Field(False, description="Whether user has superuser privileges")
     preferred_currency: Optional[str] = Field(None, min_length=3, max_length=3, description="Preferred currency code (ISO 4217)", example="USD")
     language: str = Field("en", min_length=2, max_length=5, description="Preferred language code", example="en")
     timezone: str = Field("UTC", description="User's timezone", example="Africa/Nairobi")
@@ -387,6 +402,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="Whether user account is active")
     is_verified: Optional[bool] = Field(None, description="Whether email is verified (usually only admin can change)")
     is_superuser: Optional[bool] = Field(None, description="Whether Super User or Not")
+    
 
     preferred_currency: Optional[str] = Field(None, min_length=3, max_length=3, description="Preferred currency code (ISO 4217)", example="KES")
     language: Optional[str] = Field(None, min_length=2, max_length=5, description="Preferred language (ISO 639-1)", example="sw")

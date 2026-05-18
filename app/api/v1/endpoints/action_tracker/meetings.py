@@ -1176,7 +1176,7 @@ async def update_meeting_status(
     
     update_data = {"status_id": UUID(status_info["id"]), "status_comment": comment}
     updated_meeting = await update_meeting_common(db, meeting_id, update_data, current_user, "PATCH")
-    return build_meeting_response(updated_meeting)
+    return utils_build_meeting_response(updated_meeting)
 
 
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1296,20 +1296,77 @@ async def add_participant(
         "message": "Participant added successfully"
     }
 
+# Replace the existing get_meeting_participants function in meetings.py with this:
+
+
 
 @router.get("/{meeting_id}/participants", response_model=List[MeetingParticipantResponse])
+@router.get("/{meeting_id}/participants/", response_model=List[MeetingParticipantResponse], include_in_schema=False)
 async def get_meeting_participants(
     meeting_id: UUID,
+    search: Optional[str] = Query(None, description="Search participants by name or email"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum records to return"),
+    include_inactive: bool = Query(False, description="Include inactive participants"),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Get all participants for a meeting"""
-    meeting = await meeting_crud.get(db, meeting_id)
-    if not meeting:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
-    
-    participants = await meeting_participant.get_by_meeting(db, meeting_id)
-    return participants or []
+    """
+    Get all participants for a specific meeting.
+    """
+    try:
+        # First verify meeting exists
+        meeting = await meeting_crud.get(db, meeting_id)
+        if not meeting:
+            logger.warning(f"Meeting not found: {meeting_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail=f"Meeting with ID '{meeting_id}' not found"
+            )
+        
+        # Get participants using the updated method
+        participants = await meeting_participant.get_by_meeting(
+            db=db,
+            meeting_id=meeting_id,
+            search=search,
+            skip=skip,
+            limit=limit,
+            include_inactive=include_inactive
+        )
+        
+        logger.info(f"Retrieved {len(participants)} participants for meeting {meeting_id}")
+        
+        # Convert to response models
+        return [
+            MeetingParticipantResponse(
+                id=p.id,
+                meeting_id=p.meeting_id,
+                name=p.name,
+                email=p.email,
+                telephone=getattr(p, 'telephone', None),
+                title=getattr(p, 'title', None),
+                organization=getattr(p, 'organization', None),
+                is_chairperson=getattr(p, 'is_chairperson', False),
+                is_secretary=getattr(p, 'is_secretary', False),
+                attendance_status=getattr(p, 'attendance_status', 'pending'),
+                apology_comment=getattr(p, 'apology_comment', None),
+                created_by_id=p.created_by_id,
+                created_at=p.created_at,
+                updated_by_id=getattr(p, 'updated_by_id', None),
+                updated_at=getattr(p, 'updated_at', None),
+                is_active=p.is_active,
+            )
+            for p in participants
+        ]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching participants for meeting {meeting_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch participants: {str(e)}"
+        )
 
 
 @router.patch("/{meeting_id}/participants/{participant_id}", response_model=MeetingParticipantResponse)

@@ -19,10 +19,10 @@ const ecLogoDark = "./logo1.png";
 
 // Features array moved outside to prevent re-declaration on every render
 const features = [
-  { icon: <Event />, title: 'Smart Scheduling', desc: 'Plan plenary & committee sessions', color: '#4F46E5' },
-  { icon: <Group />, title: 'Member Management', desc: 'Manage commissioners & roles', color: '#0EA5E9' },
+  { icon: <Event />, title: 'Smart Scheduling', desc: 'Organize both physical and online meetings', color: '#4F46E5' },
+  { icon: <Group />, title: 'Member Management', desc: 'Manage Meeting participants', color: '#0EA5E9' },
   { icon: <Assignment />, title: 'Agenda & Resolutions', desc: 'Track action points', color: '#10B981' },
-  { icon: <Timeline />, title: 'Progress Monitoring', desc: 'Follow‑up on compliance', color: '#F59E0B' },
+  { icon: <Timeline />, title: 'Progress Monitoring', desc: 'Follow-up on implementation of assigned tasks', color: '#F59E0B' },
 ];
 
 const Content = () => {

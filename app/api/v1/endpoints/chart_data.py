@@ -73,15 +73,16 @@ async def get_monthly_trend(
     
     cache_key = f"monthly_trend_{current_user.id}_{months}"
     
+    
     async def compute():
         return await service.get_monthly_trend(
-            user_id=current_user.id if not is_admin(current_user) else None,
+            user_id=current_user.id ,
             user_email=getattr(current_user, 'email', None),
             user_phone=getattr(current_user, 'phone', None),
             months=months
         )
     
-    # ADD AWAIT HERE
+    
     data = await service.get_cached_or_compute(cache_key, compute, ttl_minutes=30)
     return ChartDataResponse(success=True, data=data)
 

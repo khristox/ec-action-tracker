@@ -327,41 +327,58 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
     
     # ==================== USER CREATION ====================
     
+    # In app/crud/user.py
+
     async def create_with_roles(
         self, 
-        db: AsyncSession, 
+        db: AsyncSession,
+        obj_in: UserCreate = None,
+        email: str = None,
+        username: str = None,
+        full_name: str = None,
+        password: str = None,
+        roles: List[str] = None,
+        is_verified: bool = False,
+        is_superuser: bool = False,
+        is_active: bool = True,
         **kwargs
     ) -> Optional[User]:
         """
         Create a new user with roles.
-        Supports both old (obj_in) and new (individual parameters) signatures.
+        Supports both signatures:
+        1. create_with_roles(db, obj_in=user_create_obj)
+        2. create_with_roles(db, email="...", username="...", ...)
         """
         from app.core.security import get_password_hash
         
         try:
-            # Handle old signature with obj_in
-            if 'obj_in' in kwargs:
-                obj_in = kwargs['obj_in']
+            # Handle both calling conventions
+            if obj_in is not None:
+                # Called with obj_in parameter
                 email = obj_in.email
                 username = obj_in.username
-                full_name = obj_in.full_name
+                # Handle both full_name or first_name/last_name
+                if hasattr(obj_in, 'full_name') and obj_in.full_name:
+                    full_name = obj_in.full_name
+                elif hasattr(obj_in, 'first_name') and hasattr(obj_in, 'last_name'):
+                    full_name = f"{obj_in.first_name or ''} {obj_in.last_name or ''}".strip()
+                else:
+                    full_name = username
                 password = obj_in.password
-                roles = getattr(obj_in, 'roles', None)
+                roles = getattr(obj_in, 'roles', [])
                 is_verified = getattr(obj_in, 'is_verified', False)
                 is_superuser = getattr(obj_in, 'is_superuser', False)
+                is_active = getattr(obj_in, 'is_active', True)
             else:
-                # New signature with individual parameters
-                email = kwargs.get('email')
-                username = kwargs.get('username')
-                full_name = kwargs.get('full_name')
-                password = kwargs.get('password')
-                roles = kwargs.get('roles', [])
-                is_verified = kwargs.get('is_verified', False)
-                is_superuser = getattr(obj_in, 'is_superuser', False)
+                # Called with individual parameters
+                if not all([email, username, full_name, password]):
+                    logger.error("Missing required fields for user creation")
+                    return None
+                roles = roles or []
             
             # Validate required fields
-            if not all([email, username, full_name, password]):
-                logger.error("Missing required fields for user creation")
+            if not email or not username or not password:
+                logger.error("Missing required fields: email, username, or password")
                 return None
             
             # Check if user exists
@@ -370,10 +387,19 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
                 logger.warning(f"User '{username}' already exists")
                 return existing
             
-            # Split full name
-            name_parts = full_name.split()
-            first_name = name_parts[0] if name_parts else ""
-            last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+            existing_email = await self.get_by_email(db, email)
+            if existing_email:
+                logger.warning(f"Email '{email}' already exists")
+                return existing_email
+            
+            # Split full name if provided, otherwise use username
+            if full_name:
+                name_parts = full_name.split()
+                first_name = name_parts[0] if name_parts else ""
+                last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+            else:
+                first_name = username
+                last_name = ""
             
             # Create user
             user = User(
@@ -384,11 +410,10 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
                 hashed_password=get_password_hash(password),
                 is_verified=is_verified,
                 is_superuser=is_superuser,
-                is_active=True
+                is_active=is_active
             )
             db.add(user)
             await db.flush()
-            print(user)
             
             # Assign roles
             if roles:
@@ -402,9 +427,9 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             
         except SQLAlchemyError as e:
             await db.rollback()
-            logger.error(f"Error creating user '{kwargs.get('username', 'unknown')}': {e}")
+            logger.error(f"Error creating user: {e}")
             return None
-    
+        
     # ==================== USER UPDATES ====================
     
     async def update_last_login(self, db: AsyncSession, user_id: UUID) -> bool:

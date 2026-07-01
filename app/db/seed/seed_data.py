@@ -108,7 +108,7 @@ def get_db_config_from_env() -> Dict[str, Any]:
         db_url = settings.DATABASE_URL
         if 'mysql' in db_url:
             # Parse MySQL URL: mysql+aiomysql://user:password@host:port/database
-            import re
+            # ✅ Remove this line: import re
             match = re.search(r'mysql\+aiomysql://([^:]+):([^@]+)@([^:]+):(\d+)/([^?]+)', db_url)
             if match:
                 return {
@@ -120,6 +120,7 @@ def get_db_config_from_env() -> Dict[str, Any]:
                     'driver': 'mysql+aiomysql',
                 }
         elif 'postgresql' in db_url:
+            # ✅ Remove this line: import re
             match = re.search(r'postgresql\+asyncpg://([^:]+):([^@]+)@([^:]+):(\d+)/([^?]+)', db_url)
             if match:
                 return {
@@ -132,7 +133,6 @@ def get_db_config_from_env() -> Dict[str, Any]:
                 }
     
     # Fall back to individual environment variables
-    # Default password should be read from .env or settings
     default_password = getattr(settings, 'DB_PASSWORD', None) or os.getenv('DB_PASSWORD', 'aradmin!2723646')
     
     return {

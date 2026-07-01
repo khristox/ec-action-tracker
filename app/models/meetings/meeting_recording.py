@@ -1,12 +1,12 @@
 # app/models/meeting_recording.py
 
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, Enum, ForeignKey
-from sqlalchemy.dialects.mysql import LONGBLOB
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, Enum, ForeignKey, LargeBinary
 from datetime import datetime
 import uuid
 import enum
 
 from app.db.base_class import Base
+from app.db.types import UUID as CustomUUID
 
 class RecordingType(str, enum.Enum):
     VIDEO = "VIDEO"
@@ -21,8 +21,8 @@ class RecordingStatus(str, enum.Enum):
 class MeetingRecording(Base):
     __tablename__ = "meeting_recordings"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    meeting_id = Column(String(36), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(CustomUUID, primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(CustomUUID, ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Basic info
     title = Column(String(500), nullable=False)
@@ -31,7 +31,7 @@ class MeetingRecording(Base):
     recording_type = Column(Enum(RecordingType), default=RecordingType.VIDEO)
     
     # File storage - using file_data for simplicity
-    file_data = Column(LONGBLOB, nullable=True)
+    file_data = Column(LargeBinary, nullable=True)
     file_name = Column(String(500), nullable=False)
     original_filename = Column(String(500), nullable=True)
     file_size = Column(Integer, nullable=False)
@@ -54,8 +54,8 @@ class MeetingRecording(Base):
     # Audit fields
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    updated_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(CustomUUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    updated_by_id = Column(CustomUUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
     deleted_at = Column(DateTime, nullable=True)
 

@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from app.db.base import Base
+from app.db.types import UUID as CustomUUID
 
 
 # ==================== Helper Functions ====================
@@ -50,12 +51,12 @@ class OrganizationNode(Base):
     )
     
     # Primary Key
-    id = Column(String(36), primary_key=True, default=generate_uuid, nullable=False)
+    id = Column(CustomUUID, primary_key=True, default=generate_uuid, nullable=False)
     
     # Basic Information
     name = Column(String(200), nullable=False)
     title = Column(String(200), nullable=False)
-    parent_id = Column(String(36), ForeignKey('organization_nodes.id', ondelete='CASCADE'), nullable=True)
+    parent_id = Column(CustomUUID, ForeignKey('organization_nodes.id', ondelete='CASCADE'), nullable=True)
     
     # Hierarchy Information
     level = Column(Integer, default=0, nullable=False)

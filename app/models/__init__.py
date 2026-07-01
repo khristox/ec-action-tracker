@@ -1,9 +1,7 @@
 """
 Model imports - ensures all models are registered with SQLAlchemy
 """
-
 from app.db.base import Base
-
 # No dependencies
 from app.models.user import User, user_roles
 from app.models.role import Role, Permission, role_permissions
@@ -17,13 +15,16 @@ from app.models.general.dynamic_attribute import (
     EntityAttribute
 )
 from app.models.address.location import Location
-
-# Import Menu and RoleMenuPermission models (ADD THESE)
 from app.models.menu import Menu
-from app.models.role import  RoleMenuPermission
+from app.models.role import RoleMenuPermission
 
+from app.models.meetings.organization import OrganizationNode
+from app.models.meetings.user_department import (
+    UserDepartment,
+    UserDepartmentRole,
+    UserDepartmentStatus,
+)
 
-# Then import action tracker models
 from app.models.meetings.action_tracker import (
     Participant,
     ParticipantList,
@@ -35,6 +36,15 @@ from app.models.meetings.action_tracker import (
     ActionComment,
     MeetingDocument
 )
+
+from app.models.meetings.recurring_meeting import (
+    RecurringMeeting,
+    RecurringMeetingOccurrence,
+)
+
+from app.models.meetings.meeting_recording import MeetingRecording
+from app.models.chart_data import ChartConfiguration, ChartDataCache
+from app.models.token_blacklist import TokenBlacklist
 
 __all__ = [
     'Base',
@@ -51,8 +61,12 @@ __all__ = [
     'AttributeValue',
     'EntityAttribute',
     'Location',
-    'Menu',              # ADD THIS
-    'RoleMenuPermission', # ADD THIS
+    'Menu',
+    'RoleMenuPermission',
+    'OrganizationNode',
+    'UserDepartment',
+    'UserDepartmentRole',
+    'UserDepartmentStatus',
     "Participant",
     "ParticipantList",
     "Meeting",
@@ -61,5 +75,11 @@ __all__ = [
     "MeetingAction",
     "ActionStatusHistory",
     "ActionComment",
-    "MeetingDocument"
+    "MeetingDocument",
+    "RecurringMeeting",
+    "RecurringMeetingOccurrence",
+    "MeetingRecording",
+    "ChartConfiguration",
+    "ChartDataCache",
+    "TokenBlacklist",
 ]

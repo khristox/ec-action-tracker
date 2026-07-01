@@ -125,7 +125,7 @@ class Meeting(Base):
     description = Column(Text, nullable=True)
     
     # Department Information
-    department_id = Column(String(36), ForeignKey("organization_nodes.id"), nullable=True)
+    department_id = Column(CustomUUID, ForeignKey("organization_nodes.id"), nullable=True)
     
     # Location Information
     location_id = Column(CustomUUID, ForeignKey('locations.id', ondelete='SET NULL'), nullable=True)
@@ -164,7 +164,7 @@ class Meeting(Base):
     
     # Visibility fields (organization_id REMOVED)
     visibility = Column(String(50), default="open", nullable=False)
-    restricted_department_id = Column(String(36), ForeignKey("organization_nodes.id"), nullable=True)
+    restricted_department_id = Column(CustomUUID, ForeignKey("organization_nodes.id"), nullable=True)
     
     # Audit fields
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)

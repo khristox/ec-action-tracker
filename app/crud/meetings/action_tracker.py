@@ -1889,19 +1889,15 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             # Build conditions for matching assignments
             conditions = [MeetingAction.assigned_to_id == user_id]
             
-            # Condition for MySQL JSON field
+            # Condition for JSON field (Postgres ->> operator)
             if user_email:
                 conditions.append(
-                    func.json_unquote(
-                        func.json_extract(MeetingAction.assigned_to_name, '$.email')
-                    ).like(f"%{user_email}%")
+                    MeetingAction.assigned_to_name.op('->>')('email').like(f"%{user_email}%")
                 )
             
             if user_phone:
                 conditions.append(
-                    func.json_unquote(
-                        func.json_extract(MeetingAction.assigned_to_name, '$.phone')
-                    ).like(f"%{user_phone}%")
+                    MeetingAction.assigned_to_name.op('->>')('phone').like(f"%{user_phone}%")
                 )
             
             # Apply OR condition
@@ -1982,19 +1978,15 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             # Build conditions for matching assignments
             conditions = [MeetingAction.assigned_to_id == user_id]
             
-            # Condition for MySQL JSON field
+            # Condition for JSON field (Postgres ->> operator)
             if user_email:
                 conditions.append(
-                    func.json_unquote(
-                        func.json_extract(MeetingAction.assigned_to_name, '$.email')
-                    ).like(f"%{user_email}%")
+                    MeetingAction.assigned_to_name.op('->>')('email').like(f"%{user_email}%")
                 )
             
             if user_phone:
                 conditions.append(
-                    func.json_unquote(
-                        func.json_extract(MeetingAction.assigned_to_name, '$.phone')
-                    ).like(f"%{user_phone}%")
+                    MeetingAction.assigned_to_name.op('->>')('phone').like(f"%{user_phone}%")
                 )
             
             # Apply OR condition

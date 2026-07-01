@@ -1,12 +1,13 @@
-# app/services/chart_data_service.py - IMPROVED VERSION
+# app/services/chart_data_service.py - POSTGRESQL COMPATIBLE VERSION
 
 from datetime import datetime, timedelta
-from sqlalchemy import func, and_, or_, select, case
+from sqlalchemy import func, and_, or_, select, case, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from collections import defaultdict
 import logging
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from functools import wraps
+import json
 
 from app.models.meetings.action_tracker import Meeting, MeetingAction, MeetingParticipant
 
@@ -25,19 +26,123 @@ def retry_on_error(max_retries: int = 2):
                     if attempt == max_retries - 1:
                         raise
                     logger.warning(f"Retry {attempt + 1}/{max_retries} for {func.__name__}: {e}")
+                    # Rollback session on retry
+                    if len(args) > 0 and hasattr(args[0], 'db'):
+                        try:
+                            await args[0].db.rollback()
+                        except:
+                            pass
             return None
         return wrapper
     return decorator
 
 
 class ChartDataService:
-    def __init__(self, db_session):
+    def __init__(self, db_session: AsyncSession):
         self.db = db_session
-        # Use MeetingAction for tasks, NOT ActionComment
-        self.task_model = MeetingAction  # This was incorrectly set to ActionComment
+        self.task_model = MeetingAction
         self.meeting_model = Meeting
         self.participant_model = MeetingParticipant
+        self._db_type = None
+        
+    @property
+    def db_type(self) -> str:
+        """Get database type (postgresql/mysql)"""
+        if self._db_type is None:
+            try:
+                url = str(self.db.bind.url)
+                if 'postgresql' in url or 'postgres' in url:
+                    self._db_type = 'postgresql'
+                elif 'mysql' in url:
+                    self._db_type = 'mysql'
+                else:
+                    self._db_type = 'unknown'
+            except:
+                self._db_type = 'unknown'
+        return self._db_type
+    
+    def is_postgres(self) -> bool:
+        """Check if using PostgreSQL"""
+        return self.db_type == 'postgresql'
+    
+    def is_mysql(self) -> bool:
+        """Check if using MySQL"""
+        return self.db_type == 'mysql'
 
+    def _has_attribute(self, obj, attr_name: str) -> bool:
+        """Safely check if object has attribute"""
+        return hasattr(obj, attr_name) and getattr(obj, attr_name) is not None
+    
+    def _get_json_extract(self, column, path: str) -> str:
+        """
+        Get database-specific JSON extraction expression.
+        PostgreSQL: column->>'path'
+        MySQL: JSON_UNQUOTE(JSON_EXTRACT(column, '$.path'))
+        """
+        if self.is_postgres():
+            # PostgreSQL uses ->> for text extraction
+            return f"{column}->>'{path}'"
+        else:
+            # MySQL
+            return f"JSON_UNQUOTE(JSON_EXTRACT({column}, '$.{path}'))"
+    
+    def _get_json_extract_condition(self, column, path: str, value: str, operator: str = 'LIKE') -> str:
+        """
+        Get database-specific JSON extraction condition.
+        """
+        if self.is_postgres():
+            # PostgreSQL: column->>'path' LIKE '%value%'
+            return f"{column}->>'{path}' {operator} '{value}'"
+        else:
+            # MySQL: JSON_UNQUOTE(JSON_EXTRACT(column, '$.path')) LIKE '%value%'
+            return f"JSON_UNQUOTE(JSON_EXTRACT({column}, '$.{path}')) {operator} '{value}'"
+    
+    def _get_ifnull(self, column, default: str = "'{}'") -> str:
+        """
+        Get database-specific IFNULL/COALESCE.
+        PostgreSQL: COALESCE(column, default)
+        MySQL: IFNULL(column, default)
+        """
+        if self.is_postgres():
+            return f"COALESCE({column}, {default})"
+        else:
+            return f"IFNULL({column}, {default})"
+
+    def _get_empty_chart_data(self, labels: List[str]) -> Dict[str, Any]:
+        """Return empty chart data structure"""
+        return {
+            "labels": labels,
+            "datasets": [
+                {
+                    "label": "Tasks Created", 
+                    "data": [0] * len(labels), 
+                    "backgroundColor": "rgba(25, 118, 210, 0.7)",
+                    "borderColor": "#1976d2",
+                    "borderWidth": 1,
+                    "borderRadius": 6
+                },
+                {
+                    "label": "Tasks Completed", 
+                    "data": [0] * len(labels), 
+                    "backgroundColor": "rgba(46, 125, 50, 0.7)",
+                    "borderColor": "#2e7d32",
+                    "borderWidth": 1,
+                    "borderRadius": 6
+                }
+            ]
+        }
+    
+    def _get_empty_status_distribution(self) -> Dict[str, Any]:
+        """Return empty status distribution"""
+        return {
+            "labels": ["Pending", "In Progress", "Completed", "Overdue"],
+            "datasets": [{
+                "data": [0, 0, 0, 0],
+                "backgroundColor": ["#ed6c02", "#1976d2", "#2e7d32", "#d32f2f"],
+                "borderWidth": 0
+            }]
+        }
+    
     def _get_empty_monthly_trend(self, months: int) -> Dict[str, Any]:
         """Return empty monthly trend data structure"""
         end_date = datetime.utcnow()
@@ -83,174 +188,65 @@ class ChartDataService:
                 }
             ]
         }
-
     
-    def _discover_models(self):
-        """Dynamically discover the correct model from action_tracker"""
-        try:
-            from app.models.meetings import action_tracker
-            
-            # List of possible model names to try
-            possible_names = ['ActionItem', 'ActionPlan', 'Action', 'Task', 'ActionTask', 'MyTask']
-            
-            for name in possible_names:
-                if hasattr(action_tracker, name):
-                    self.task_model = getattr(action_tracker, name)
-                    logger.info(f"✅ Found task model: {name}")
-                    # Discover field names once
-                    self._discover_field_names()
-                    return
-            
-            # If none found, try to get any model from action_tracker
-            import inspect
-            for name, obj in inspect.getmembers(action_tracker):
-                if inspect.isclass(obj) and name != 'Base' and hasattr(obj, '__tablename__'):
-                    self.task_model = obj
-                    self._discover_field_names()
-                    return
-                    
-            logger.warning("⚠️ No task model found in action_tracker")
-        except Exception as e:
-            logger.error(f"Error discovering models: {e}")
-    
-    def _discover_field_names(self):
-        """Discover available field names on the task model"""
-        if not self.task_model:
-            return
-        
-        self.available_fields = set()
-        for column in self.task_model.__table__.columns:
-            self.available_fields.add(column.name)
-        
-        # Also check relationships
-        if hasattr(self.task_model, '__mapper__'):
-            for rel in self.task_model.__mapper__.relationships:
-                self.available_fields.add(rel.key)
-        
-        logger.debug(f"Available fields: {self.available_fields}")
-    
-    def _has_attribute(self, obj, attr_name: str) -> bool:
-        """Safely check if object has attribute"""
-        return hasattr(obj, attr_name) and getattr(obj, attr_name) is not None
-    
-    def _get_user_id_field(self) -> Optional[str]:
-        """Find the correct user ID field name"""
-        if not self.task_model:
-            return None
-        
-        # Priority order for user ID fields
-        user_id_fields = ['assignee_id', 'assigned_to_id', 'user_id', 'created_by_id', 'owner_id']
-        
-        for field in user_id_fields:
-            if field in getattr(self, 'available_fields', set()) or self._has_attribute(self.task_model, field):
-                return field
-        
-        # Check relationship fields
-        relationship_fields = ['assignee', 'assigned_to', 'created_by', 'owner']
-        for field in relationship_fields:
-            if self._has_attribute(self.task_model, field):
-                # Return the foreign key column name
-                fk_name = f"{field}_id"
-                if self._has_attribute(self.task_model, fk_name):
-                    return fk_name
-        
-        return None
-    
-    def _apply_user_filter(self, query, user_id: Optional[str]):
-        """Apply user filter correctly using the proper field"""
-        if not user_id:
-            return query
-        
-        user_id_field = self._get_user_id_field()
-        
-        if user_id_field:
-            # Direct column comparison
-            return query.where(getattr(self.task_model, user_id_field) == user_id)
-        else:
-            # Try relationship with has()
-            for rel_field in ['assignee', 'assigned_to', 'created_by', 'owner']:
-                if self._has_attribute(self.task_model, rel_field):
-                    return query.where(getattr(self.task_model, rel_field).has(id=user_id))
-        
-        logger.warning(f"No user filter field found for model {self.task_model}")
-        return query
-    
+    def _get_empty_priority_distribution(self) -> Dict[str, Any]:
+        """Return empty priority distribution"""
+        return {
+            "labels": ["High", "Medium", "Low"],
+            "datasets": [{
+                "data": [0, 0, 0],
+                "backgroundColor": ["#d32f2f", "#ed6c02", "#2e7d32"],
+                "borderWidth": 0
+            }]
+        }
 
     @retry_on_error(max_retries=2)
-    async def get_weekly_activity1(self, user_id: str = None, user_email: str = None, user_phone: str = None, days: int = 7) -> Dict[str, Any]:
-        """Get weekly task creation and completion activity for tasks assigned to user
-        
-        Checks both:
-        1. assigned_to_id matches the user_id directly (handles NULL)
-        2. assigned_to_name JSON contains user's email or phone (for legacy/imported data)
-        """
-        from sqlalchemy import or_, and_, func
-        from sqlalchemy.sql import expression
-        
+    async def get_weekly_activity(self, user_id: str = None, user_email: str = None, 
+                                   user_phone: str = None, days: int = 7) -> Dict[str, Any]:
+        """Get weekly task creation and completion activity for tasks assigned to user"""
         if not self.task_model:
             return self._get_empty_chart_data(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
         
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days)
         
-        # Build query using select
-        query = select(self.task_model).limit(2000)
+        # Build query
+        query = select(self.task_model)
         
-        # Apply user filter with both ID and JSON matching
+        # Apply user filter using raw SQL for PostgreSQL compatibility
         if user_id or user_email or user_phone:
             conditions = []
             
-            # Condition 1: Direct user ID match (NULL assigned_to_id won't match)
-            if user_id:
-                conditions.append(self.task_model.assigned_to_id == user_id)
+            if user_id and self._has_attribute(self.task_model, 'assigned_to_id'):
+                conditions.append(f"assigned_to_id = '{user_id}'")
             
-            # Condition 2: Match by email in JSON field (handles NULL assigned_to_name)
-            if user_email:
-                email_condition = func.json_unquote(
-                    func.json_extract(
-                        func.ifnull(self.task_model.assigned_to_name, '{}'), 
-                        '$.email'
-                    )
-                ).like(f"%{user_email}%")
-                conditions.append(email_condition)
+            if user_email and self._has_attribute(self.task_model, 'assigned_to_name'):
+                if self.is_postgres():
+                    conditions.append(f"assigned_to_name->>'email' LIKE '%{user_email}%'")
+                else:
+                    conditions.append(f"JSON_UNQUOTE(JSON_EXTRACT(assigned_to_name, '$.email')) LIKE '%{user_email}%'")
             
-            # Condition 3: Match by phone in JSON field (handles NULL assigned_to_name)
-            if user_phone:
-                phone_condition = func.json_unquote(
-                    func.json_extract(
-                        func.ifnull(self.task_model.assigned_to_name, '{}'), 
-                        '$.phone'
-                    )
-                ).like(f"%{user_phone}%")
-                conditions.append(phone_condition)
+            if user_phone and self._has_attribute(self.task_model, 'assigned_to_name'):
+                if self.is_postgres():
+                    conditions.append(f"assigned_to_name->>'phone' LIKE '%{user_phone}%'")
+                else:
+                    conditions.append(f"JSON_UNQUOTE(JSON_EXTRACT(assigned_to_name, '$.phone')) LIKE '%{user_phone}%'")
             
-            # Apply OR condition if we have conditions
             if conditions:
-                query = query.where(or_(*conditions))
-            else:
-                # No valid conditions, return empty chart
-                return self._get_empty_chart_data(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+                query = query.where(text(" OR ".join(conditions)))
         
-        # Date filter using date fields - improved to better capture relevant dates
+        # Date filter
         date_conditions = []
         if self._has_attribute(self.task_model, 'created_at'):
-            date_conditions.append(self.task_model.created_at >= start_date)
-        
+            date_conditions.append(f"created_at >= '{start_date.isoformat()}'")
         if self._has_attribute(self.task_model, 'completed_at'):
-            date_conditions.append(self.task_model.completed_at >= start_date)
-        
-        # Also include updated_at for status changes to completion
+            date_conditions.append(f"completed_at >= '{start_date.isoformat()}'")
         if self._has_attribute(self.task_model, 'updated_at'):
-            date_conditions.append(self.task_model.updated_at >= start_date)
+            date_conditions.append(f"updated_at >= '{start_date.isoformat()}'")
         
-        # Apply date conditions with OR (show tasks that were created, completed, or updated in range)
         if date_conditions:
-            query = query.where(or_(*date_conditions))
-        else:
-            # If no date fields exist, apply no filter
-            pass
+            query = query.where(text(" OR ".join(date_conditions)))
         
-        # Execute query
         try:
             result = await self.db.execute(query)
             tasks = result.scalars().all()
@@ -258,99 +254,54 @@ class ChartDataService:
             logger.error(f"Error executing weekly activity query: {e}")
             return self._get_empty_chart_data(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
         
-        # Prepare date range (last 'days' days including today)
-        date_range = []
-        for i in range(days):
-            date = end_date - timedelta(days=days-1-i)
-            date_range.append(date.date())
-        
-        # Helper function to safely get attribute
-        def get_attr(obj, attr_name, default=None):
-            return getattr(obj, attr_name, default) if self._has_attribute(obj, attr_name) else default
-        
-        # Count activities with proper date handling
+        # Process results
+        date_range = [end_date - timedelta(days=days-1-i) for i in range(days)]
         created_counts = defaultdict(int)
         completed_counts = defaultdict(int)
         
         for task in tasks:
-            # Count creation
-            created_at = get_attr(task, 'created_at')
-            if created_at:
-                created_date = created_at.date()
-                # Check if within range (including timezone considerations)
-                if start_date.date() <= created_date <= end_date.date():
-                    created_counts[created_date] += 1
+            created_at = getattr(task, 'created_at', None)
+            if created_at and start_date <= created_at <= end_date:
+                created_counts[created_at.date()] += 1
             
-            # Count completion - check multiple indicators
+            # Check completion
             is_completed = False
             completion_date = None
             
-            # Check explicit completed_at
-            completed_at = get_attr(task, 'completed_at')
+            completed_at = getattr(task, 'completed_at', None)
             if completed_at:
                 completion_date = completed_at.date()
                 is_completed = True
             
-            # Check status field for completion
             if not is_completed:
-                status = get_attr(task, 'status')
-                if status and str(status).lower() in ['completed', 'done', 'closed', 'finished']:
-                    # Use updated_at if available, otherwise created_at, otherwise today
-                    updated_at = get_attr(task, 'updated_at')
-                    if updated_at:
-                        completion_date = updated_at.date()
-                    elif created_at:
-                        completion_date = created_at.date()
-                    else:
-                        completion_date = end_date.date()
+                status = getattr(task, 'status', None)
+                if status and str(status).lower() in ['completed', 'done', 'closed']:
+                    updated_at = getattr(task, 'updated_at', None)
+                    completion_date = (updated_at or created_at or end_date).date()
                     is_completed = True
             
-            # Check state field for completion
             if not is_completed:
-                state = get_attr(task, 'state')
-                if state and str(state).lower() in ['completed', 'done', 'closed', 'finished']:
-                    updated_at = get_attr(task, 'updated_at')
-                    if updated_at:
-                        completion_date = updated_at.date()
-                    elif created_at:
-                        completion_date = created_at.date()
-                    else:
-                        completion_date = end_date.date()
-                    is_completed = True
-            
-            # Check progress for completion
-            if not is_completed:
-                progress = get_attr(task, 'progress')
+                progress = getattr(task, 'progress', None)
                 if progress is not None:
                     try:
                         if float(progress) >= 100:
-                            updated_at = get_attr(task, 'updated_at')
-                            if updated_at:
-                                completion_date = updated_at.date()
-                            elif created_at:
-                                completion_date = created_at.date()
-                            else:
-                                completion_date = end_date.date()
+                            updated_at = getattr(task, 'updated_at', None)
+                            completion_date = (updated_at or created_at or end_date).date()
                             is_completed = True
-                    except (ValueError, TypeError):
+                    except:
                         pass
             
-            # Count completion if within date range
             if is_completed and completion_date and start_date.date() <= completion_date <= end_date.date():
                 completed_counts[completion_date] += 1
         
-        # Prepare chart data
-        weekday_labels = [d.strftime("%a") for d in date_range]
-        created_data = [created_counts.get(d, 0) for d in date_range]
-        completed_data = [completed_counts.get(d, 0) for d in date_range]
-        
-        # Calculate max value for better chart scaling
-        max_value = max(max(created_data) if created_data else 0, 
-                    max(completed_data) if completed_data else 0)
+        # Build response
+        labels = [d.strftime("%a") for d in date_range]
+        created_data = [created_counts.get(d.date(), 0) for d in date_range]
+        completed_data = [completed_counts.get(d.date(), 0) for d in date_range]
         
         return {
-            "labels": weekday_labels,
-            "full_dates": [d.strftime("%Y-%m-%d") for d in date_range],  # Useful for tooltips
+            "labels": labels,
+            "full_dates": [d.strftime("%Y-%m-%d") for d in date_range],
             "datasets": [
                 {
                     "label": "Tasks Created",
@@ -377,281 +328,40 @@ class ChartDataService:
                 "total_created": sum(created_data),
                 "total_completed": sum(completed_data),
                 "completion_rate": round((sum(completed_data) / sum(created_data) * 100) if sum(created_data) > 0 else 0, 1),
-                "max_value": max_value
+                "max_value": max(max(created_data) if created_data else 0, max(completed_data) if completed_data else 0)
             }
         }
 
     @retry_on_error(max_retries=2)
-    async def get_weekly_activity(self, user_id: str = None, user_email: str = None, user_phone: str = None, days: int = 7) -> Dict[str, Any]:
-        """Get weekly task creation and completion activity for tasks assigned to user
-        
-        Checks both:
-        1. assigned_to_id matches the user_id directly (handles NULL)
-        2. assigned_to_name JSON contains user's email or phone (for legacy/imported data)
-        
-        Note: Only applies JSON matching if the model has assigned_to_name attribute
-        """
-        from sqlalchemy import or_, and_, func
-        from sqlalchemy.sql import expression
-        
-        if not self.task_model:
-            return self._get_empty_chart_data(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
-        
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Build query using select
-        query = select(self.task_model).limit(2000)
-        
-        # Check what attributes the model has
-        has_assigned_to_id = self._has_attribute(self.task_model, 'assigned_to_id')
-        has_assigned_to_name = self._has_attribute(self.task_model, 'assigned_to_name')
-        
-        # Apply user filter with both ID and JSON matching (only if attributes exist)
-        if user_id or user_email or user_phone:
-            conditions = []
-            
-            # Condition 1: Direct user ID match (if attribute exists)
-            if user_id and has_assigned_to_id:
-                conditions.append(self.task_model.assigned_to_id == user_id)
-            
-            # Condition 2: Match by email in JSON field (only if model has assigned_to_name)
-            if user_email and has_assigned_to_name:
-                email_condition = func.json_unquote(
-                    func.json_extract(
-                        func.ifnull(self.task_model.assigned_to_name, '{}'), 
-                        '$.email'
-                    )
-                ).like(f"%{user_email}%")
-                conditions.append(email_condition)
-            
-            # Condition 3: Match by phone in JSON field (only if model has assigned_to_name)
-            if user_phone and has_assigned_to_name:
-                phone_condition = func.json_unquote(
-                    func.json_extract(
-                        func.ifnull(self.task_model.assigned_to_name, '{}'), 
-                        '$.phone'
-                    )
-                ).like(f"%{user_phone}%")
-                conditions.append(phone_condition)
-            
-            # Apply OR condition if we have conditions
-            if conditions:
-                query = query.where(or_(*conditions))
-            else:
-                # No valid conditions but user filter was requested
-                if user_id or user_email or user_phone:
-                    logger.warning(f"Model {self.task_model.__name__} has no attributes for user filtering (assigned_to_id={has_assigned_to_id}, assigned_to_name={has_assigned_to_name})")
-                    return self._get_empty_chart_data(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
-        
-        # Date filter using date fields - improved to better capture relevant dates
-        date_conditions = []
-        if self._has_attribute(self.task_model, 'created_at'):
-            date_conditions.append(self.task_model.created_at >= start_date)
-        
-        if self._has_attribute(self.task_model, 'completed_at'):
-            date_conditions.append(self.task_model.completed_at >= start_date)
-        
-        # Also include updated_at for status changes to completion
-        if self._has_attribute(self.task_model, 'updated_at'):
-            date_conditions.append(self.task_model.updated_at >= start_date)
-        
-        # Apply date conditions with OR (show tasks that were created, completed, or updated in range)
-        if date_conditions:
-            query = query.where(or_(*date_conditions))
-        else:
-            # If no date fields exist, apply no filter
-            pass
-        
-        # Execute query
-        try:
-            result = await self.db.execute(query)
-            tasks = result.scalars().all()
-        except Exception as e:
-            logger.error(f"Error executing weekly activity query: {e}")
-            return self._get_empty_chart_data(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
-        
-        # Prepare date range (last 'days' days including today)
-        date_range = []
-        for i in range(days):
-            date = end_date - timedelta(days=days-1-i)
-            date_range.append(date.date())
-        
-        # Helper function to safely get attribute
-        def get_attr(obj, attr_name, default=None):
-            return getattr(obj, attr_name, default) if hasattr(obj, attr_name) else default
-        
-        # Count activities with proper date handling
-        created_counts = defaultdict(int)
-        completed_counts = defaultdict(int)
-        
-        for task in tasks:
-            # Count creation
-            created_at = get_attr(task, 'created_at')
-            if created_at:
-                created_date = created_at.date()
-                # Check if within range (including timezone considerations)
-                if start_date.date() <= created_date <= end_date.date():
-                    created_counts[created_date] += 1
-            
-            # Count completion - check multiple indicators
-            is_completed = False
-            completion_date = None
-            
-            # Check explicit completed_at
-            completed_at = get_attr(task, 'completed_at')
-            if completed_at:
-                completion_date = completed_at.date()
-                is_completed = True
-            
-            # Check status field for completion
-            if not is_completed:
-                status = get_attr(task, 'status')
-                if status and str(status).lower() in ['completed', 'done', 'closed', 'finished']:
-                    # Use updated_at if available, otherwise created_at, otherwise today
-                    updated_at = get_attr(task, 'updated_at')
-                    if updated_at:
-                        completion_date = updated_at.date()
-                    elif created_at:
-                        completion_date = created_at.date()
-                    else:
-                        completion_date = end_date.date()
-                    is_completed = True
-            
-            # Check state field for completion
-            if not is_completed:
-                state = get_attr(task, 'state')
-                if state and str(state).lower() in ['completed', 'done', 'closed', 'finished']:
-                    updated_at = get_attr(task, 'updated_at')
-                    if updated_at:
-                        completion_date = updated_at.date()
-                    elif created_at:
-                        completion_date = created_at.date()
-                    else:
-                        completion_date = end_date.date()
-                    is_completed = True
-            
-            # Check progress for completion
-            if not is_completed:
-                progress = get_attr(task, 'progress')
-                if progress is not None:
-                    try:
-                        if float(progress) >= 100:
-                            updated_at = get_attr(task, 'updated_at')
-                            if updated_at:
-                                completion_date = updated_at.date()
-                            elif created_at:
-                                completion_date = created_at.date()
-                            else:
-                                completion_date = end_date.date()
-                            is_completed = True
-                    except (ValueError, TypeError):
-                        pass
-            
-            # Count completion if within date range
-            if is_completed and completion_date and start_date.date() <= completion_date <= end_date.date():
-                completed_counts[completion_date] += 1
-        
-        # Prepare chart data
-        weekday_labels = [d.strftime("%a") for d in date_range]
-        created_data = [created_counts.get(d, 0) for d in date_range]
-        completed_data = [completed_counts.get(d, 0) for d in date_range]
-        
-        # Calculate max value for better chart scaling
-        max_value = max(max(created_data) if created_data else 0, 
-                    max(completed_data) if completed_data else 0)
-        
-        return {
-            "labels": weekday_labels,
-            "full_dates": [d.strftime("%Y-%m-%d") for d in date_range],  # Useful for tooltips
-            "datasets": [
-                {
-                    "label": "Tasks Created",
-                    "data": created_data,
-                    "backgroundColor": "rgba(25, 118, 210, 0.7)",
-                    "borderColor": "#1976d2",
-                    "borderWidth": 1,
-                    "borderRadius": 6,
-                    "barPercentage": 0.65,
-                    "categoryPercentage": 0.8
-                },
-                {
-                    "label": "Tasks Completed",
-                    "data": completed_data,
-                    "backgroundColor": "rgba(46, 125, 50, 0.7)",
-                    "borderColor": "#2e7d32",
-                    "borderWidth": 1,
-                    "borderRadius": 6,
-                    "barPercentage": 0.65,
-                    "categoryPercentage": 0.8
-                }
-            ],
-            "summary": {
-                "total_created": sum(created_data),
-                "total_completed": sum(completed_data),
-                "completion_rate": round((sum(completed_data) / sum(created_data) * 100) if sum(created_data) > 0 else 0, 1),
-                "max_value": max_value
-            }
-        }
-
-
-    @retry_on_error(max_retries=2)
-    async def get_status_distribution(self, user_id: str = None, user_email: str = None, user_phone: str = None) -> Dict[str, Any]:
-        """Get task status distribution for tasks assigned to user
-        
-        Checks matches on:
-        1. assigned_to_id matches the user_id (handles NULL - NULL won't match)
-        2. assigned_to_name JSON contains user's email (if attribute exists)
-        3. assigned_to_name JSON contains user's phone (if attribute exists)
-        
-        Note: If assigned_to_id is NULL, the task will only be included if email/phone matches
-        """
-        from sqlalchemy import or_, and_, func
-        from sqlalchemy.sql import expression
-        
+    async def get_status_distribution(self, user_id: str = None, user_email: str = None, 
+                                       user_phone: str = None) -> Dict[str, Any]:
+        """Get task status distribution for tasks assigned to user"""
         if not self.task_model:
             return self._get_empty_status_distribution()
         
-        query = select(self.task_model).limit(2000)
+        query = select(self.task_model)
         
-        # Build user assignment filter - only if attributes exist
+        # Build user filter
         if user_id or user_email or user_phone:
             conditions = []
             
-            # Condition 1: Direct user ID match (if attribute exists)
             if user_id and self._has_attribute(self.task_model, 'assigned_to_id'):
-                conditions.append(self.task_model.assigned_to_id == user_id)
+                conditions.append(f"assigned_to_id = '{user_id}'")
             
-            # Condition 2: Match by email in JSON field (if attribute exists)
             if user_email and self._has_attribute(self.task_model, 'assigned_to_name'):
-                # Use nullsafe_json_extract or handle NULL assigned_to_name
-                email_condition = func.json_unquote(
-                    func.json_extract(
-                        func.ifnull(self.task_model.assigned_to_name, '{}'), 
-                        '$.email'
-                    )
-                ).like(f"%{user_email}%")
-                conditions.append(email_condition)
+                if self.is_postgres():
+                    conditions.append(f"assigned_to_name->>'email' LIKE '%{user_email}%'")
+                else:
+                    conditions.append(f"JSON_UNQUOTE(JSON_EXTRACT(assigned_to_name, '$.email')) LIKE '%{user_email}%'")
             
-            # Condition 3: Match by phone in JSON field (if attribute exists)
             if user_phone and self._has_attribute(self.task_model, 'assigned_to_name'):
-                phone_condition = func.json_unquote(
-                    func.json_extract(
-                        func.ifnull(self.task_model.assigned_to_name, '{}'), 
-                        '$.phone'
-                    )
-                ).like(f"%{user_phone}%")
-                conditions.append(phone_condition)
+                if self.is_postgres():
+                    conditions.append(f"assigned_to_name->>'phone' LIKE '%{user_phone}%'")
+                else:
+                    conditions.append(f"JSON_UNQUOTE(JSON_EXTRACT(assigned_to_name, '$.phone')) LIKE '%{user_phone}%'")
             
-            # Apply OR condition only if we have conditions
             if conditions:
-                query = query.where(or_(*conditions))
-            else:
-                # No valid conditions (model missing required attributes), return all tasks? or empty?
-                # For safety, return empty if we have user filter but no way to apply it
-                if user_id or user_email or user_phone:
-                    logger.warning(f"Model {self.task_model.__name__} missing required attributes for user filtering")
-                    return self._get_empty_status_distribution()
+                query = query.where(text(" OR ".join(conditions)))
         
         try:
             result = await self.db.execute(query)
@@ -660,186 +370,144 @@ class ChartDataService:
             logger.error(f"Error executing status distribution query: {e}")
             return self._get_empty_status_distribution()
         
-        status_config = {
-            "pending": {"label": "Pending", "color": "#ed6c02", "count": 0},
-            "in_progress": {"label": "In Progress", "color": "#1976d2", "count": 0},
-            "completed": {"label": "Completed", "color": "#2e7d32", "count": 0},
-            "overdue": {"label": "Overdue", "color": "#d32f2f", "count": 0}
+        # Count statuses
+        status_counts = {
+            "pending": 0,
+            "in_progress": 0,
+            "completed": 0,
+            "overdue": 0
         }
         
         current_date = datetime.utcnow().date()
         
         for task in tasks:
-            # Helper function to safely get attribute
-            def get_attr(obj, attr_name, default=None):
-                return getattr(obj, attr_name, default) if self._has_attribute(obj, attr_name) else default
-            
-            # Check explicit completed status (most reliable)
-            completed_at = get_attr(task, 'completed_at')
+            # Check if completed
+            completed_at = getattr(task, 'completed_at', None)
             if completed_at:
-                status_config["completed"]["count"] += 1
+                status_counts["completed"] += 1
                 continue
             
             # Check status field
-            status = get_attr(task, 'status')
+            status = getattr(task, 'status', None)
             if status:
                 status_lower = str(status).lower()
-                if status_lower in ['completed', 'done', 'closed', 'finished']:
-                    status_config["completed"]["count"] += 1
+                if status_lower in ['completed', 'done', 'closed']:
+                    status_counts["completed"] += 1
                     continue
-                elif status_lower in ['in_progress', 'in-progress', 'ongoing', 'active', 'in progress']:
-                    status_config["in_progress"]["count"] += 1
-                    continue
-            
-            # Check state field
-            state = get_attr(task, 'state')
-            if state:
-                state_lower = str(state).lower()
-                if state_lower in ['completed', 'done', 'closed', 'finished']:
-                    status_config["completed"]["count"] += 1
-                    continue
-                elif state_lower in ['in_progress', 'in-progress', 'ongoing', 'active', 'in progress']:
-                    status_config["in_progress"]["count"] += 1
+                elif status_lower in ['in_progress', 'in-progress', 'ongoing', 'active']:
+                    status_counts["in_progress"] += 1
                     continue
             
-            # Check progress percentage
-            progress = get_attr(task, 'progress')
+            # Check progress
+            progress = getattr(task, 'progress', None)
             if progress is not None:
                 try:
                     progress_val = float(progress)
                     if progress_val >= 100:
-                        status_config["completed"]["count"] += 1
+                        status_counts["completed"] += 1
                         continue
                     elif progress_val > 0:
-                        status_config["in_progress"]["count"] += 1
+                        status_counts["in_progress"] += 1
                         continue
-                except (ValueError, TypeError):
+                except:
                     pass
             
-            # Check overall status name
-            overall_status_name = get_attr(task, 'overall_status_name')
-            if overall_status_name:
-                status_lower = str(overall_status_name).lower()
-                if status_lower in ['completed', 'done', 'closed', 'finished']:
-                    status_config["completed"]["count"] += 1
-                    continue
-                elif status_lower in ['in_progress', 'in-progress', 'ongoing', 'active', 'in progress']:
-                    status_config["in_progress"]["count"] += 1
-                    continue
-            
-            # Check overall status ID
-            overall_status_id = get_attr(task, 'overall_status_id')
-            if overall_status_id is not None:
-                # Common status ID mappings
-                if overall_status_id in [3, 4, 5, 100]:  # Completed status IDs
-                    status_config["completed"]["count"] += 1
-                    continue
-                elif overall_status_id in [2, 6]:  # In progress status IDs
-                    status_config["in_progress"]["count"] += 1
-                    continue
-            
-            # If not completed or in_progress, check if overdue
-            due_date = get_attr(task, 'due_date')
+            # Check if overdue
+            due_date = getattr(task, 'due_date', None)
             if due_date and due_date.date() < current_date:
-                status_config["overdue"]["count"] += 1
+                status_counts["overdue"] += 1
             else:
-                status_config["pending"]["count"] += 1
+                status_counts["pending"] += 1
+        
+        status_config = {
+            "pending": {"label": "Pending", "color": "#ed6c02"},
+            "in_progress": {"label": "In Progress", "color": "#1976d2"},
+            "completed": {"label": "Completed", "color": "#2e7d32"},
+            "overdue": {"label": "Overdue", "color": "#d32f2f"}
+        }
         
         return {
-            "labels": [s["label"] for s in status_config.values()],
+            "labels": [status_config[k]["label"] for k in ["pending", "in_progress", "completed", "overdue"]],
             "datasets": [{
-                "data": [s["count"] for s in status_config.values()],
-                "backgroundColor": [s["color"] for s in status_config.values()],
+                "data": [status_counts[k] for k in ["pending", "in_progress", "completed", "overdue"]],
+                "backgroundColor": [status_config[k]["color"] for k in ["pending", "in_progress", "completed", "overdue"]],
                 "borderWidth": 0
             }]
         }
 
-
     @retry_on_error(max_retries=2)
-    async def get_monthly_trend(self, user_id: str = None, user_email: str = None, user_phone: str = None, months: int = 6) -> Dict[str, Any]:
-        """Get monthly task and meeting trends for user
-        
-        Checks both:
-        1. Tasks: assigned_to_id matches user_id OR assigned_to_name JSON contains user's email/phone
-        2. Meetings: user is participant OR is the creator of the meeting
-        """
-        from sqlalchemy import or_, func
-        from app.models.meetings.action_tracker import Meeting, MeetingParticipant
-        
+    async def get_monthly_trend(self, user_id: str = None, user_email: str = None, 
+                                 user_phone: str = None, months: int = 6) -> Dict[str, Any]:
+        """Get monthly task and meeting trends for user"""
         if not self.task_model:
             return self._get_empty_monthly_trend(months)
         
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=months*30)
-
         
         # ========== TASKS QUERY ==========
-        task_query = select(self.task_model).limit(2000)
+        task_query = select(self.task_model)
         
-        # Apply user filter for tasks
-        if user_id:
-            conditions = [self.task_model.assigned_to_id == user_id]
+        if user_id or user_email or user_phone:
+            conditions = []
             
-            if user_email:
-                email_condition = func.json_unquote(
-                    func.json_extract(self.task_model.assigned_to_name, '$.email')
-                ).like(f"%{user_email}%")
-                conditions.append(email_condition)
+            if user_id and self._has_attribute(self.task_model, 'assigned_to_id'):
+                conditions.append(f"assigned_to_id = '{user_id}'")
             
-            if user_phone:
-                phone_condition = func.json_unquote(
-                    func.json_extract(self.task_model.assigned_to_name, '$.phone')
-                ).like(f"%{user_phone}%")
-                conditions.append(phone_condition)
+            if user_email and self._has_attribute(self.task_model, 'assigned_to_name'):
+                if self.is_postgres():
+                    conditions.append(f"assigned_to_name->>'email' LIKE '%{user_email}%'")
+                else:
+                    conditions.append(f"JSON_UNQUOTE(JSON_EXTRACT(assigned_to_name, '$.email')) LIKE '%{user_email}%'")
+            
+            if user_phone and self._has_attribute(self.task_model, 'assigned_to_name'):
+                if self.is_postgres():
+                    conditions.append(f"assigned_to_name->>'phone' LIKE '%{user_phone}%'")
+                else:
+                    conditions.append(f"JSON_UNQUOTE(JSON_EXTRACT(assigned_to_name, '$.phone')) LIKE '%{user_phone}%'")
             
             if conditions:
-                task_query = task_query.where(or_(*conditions))
+                task_query = task_query.where(text(" OR ".join(conditions)))
         
         if self._has_attribute(self.task_model, 'created_at'):
-            task_query = task_query.where(self.task_model.created_at >= start_date)
+            task_query = task_query.where(text(f"created_at >= '{start_date.isoformat()}'"))
         
         # ========== MEETINGS QUERY ==========
         meeting_ids = set()
         
-        # Find meetings where user is a participant
+        # Find meetings where user is participant
         if user_email or user_phone:
             participant_conditions = []
             if user_email:
-                participant_conditions.append(MeetingParticipant.email == user_email)
+                participant_conditions.append(f"email = '{user_email}'")
             if user_phone:
-                participant_conditions.append(MeetingParticipant.telephone == user_phone)
+                participant_conditions.append(f"telephone = '{user_phone}'")
             
-            participant_result = await self.db.execute(
-                select(MeetingParticipant.meeting_id).where(or_(*participant_conditions))
-            )
-            participant_meeting_ids = participant_result.scalars().all()
-            meeting_ids.update(participant_meeting_ids)
-
-        
-        
-        # Find meetings where user is the creator
-        if user_id:
-            creator_result = await self.db.execute(
-                select(Meeting.id).where(
-                    Meeting.created_by_id == user_id,
-                    Meeting.is_active == True
+            if participant_conditions:
+                participant_query = select(self.participant_model.meeting_id).where(
+                    text(" OR ".join(participant_conditions))
                 )
+                participant_result = await self.db.execute(participant_query)
+                meeting_ids.update(participant_result.scalars().all())
+        
+        # Find meetings where user is creator
+        if user_id:
+            creator_query = select(self.meeting_model.id).where(
+                text(f"created_by_id = '{user_id}' AND is_active = TRUE")
             )
-            creator_meeting_ids = creator_result.scalars().all()
-            meeting_ids.update(creator_meeting_ids)
+            creator_result = await self.db.execute(creator_query)
+            meeting_ids.update(creator_result.scalars().all())
         
         # Query meetings
         meetings = []
         if meeting_ids:
-            meeting_query = select(Meeting).where(
-                Meeting.id.in_(list(meeting_ids)),
-                Meeting.is_active == True,
-                Meeting.created_at >= start_date
+            meeting_query = select(self.meeting_model).where(
+                text(f"id IN ({','.join([f"'{m}'" for m in meeting_ids])}) AND is_active = TRUE AND created_at >= '{start_date.isoformat()}'")
             )
             meeting_result = await self.db.execute(meeting_query)
             meetings = meeting_result.scalars().all()
         
-        # ========== PROCESS TASKS ==========
+        # Process tasks
         try:
             task_result = await self.db.execute(task_query)
             tasks = task_result.scalars().all()
@@ -847,54 +515,59 @@ class ChartDataService:
             logger.error(f"Error executing monthly trend query for tasks: {e}")
             tasks = []
         
-        # Prepare month range (last N months)
-        month_range = []
+        # Prepare month range
         month_keys = []
+        month_labels = []
         for i in range(months-1, -1, -1):
             month_date = end_date - timedelta(days=30*i)
-            month_range.append(month_date.strftime("%b"))
             month_keys.append(month_date.strftime("%Y-%m"))
+            month_labels.append(month_date.strftime("%b"))
         
         # Count tasks per month
-        tasks_created_counts = defaultdict(int)
-        tasks_completed_counts = defaultdict(int)
+        tasks_created = defaultdict(int)
+        tasks_completed = defaultdict(int)
         
         for task in tasks:
-            if self._has_attribute(task, 'created_at') and task.created_at:
-                month_key = task.created_at.strftime("%Y-%m")
-                tasks_created_counts[month_key] += 1
+            created_at = getattr(task, 'created_at', None)
+            if created_at:
+                month_key = created_at.strftime("%Y-%m")
+                tasks_created[month_key] += 1
             
-            if self._has_attribute(task, 'completed_at') and task.completed_at:
-                month_key = task.completed_at.strftime("%Y-%m")
-                tasks_completed_counts[month_key] += 1
+            completed_at = getattr(task, 'completed_at', None)
+            if completed_at:
+                month_key = completed_at.strftime("%Y-%m")
+                tasks_completed[month_key] += 1
+            else:
+                # Check if completed by status
+                status = getattr(task, 'status', None)
+                if status and str(status).lower() in ['completed', 'done', 'closed']:
+                    updated_at = getattr(task, 'updated_at', None)
+                    if updated_at:
+                        month_key = updated_at.strftime("%Y-%m")
+                        tasks_completed[month_key] += 1
         
         # Count meetings per month
-        meetings_created_counts = defaultdict(int)
-        meetings_completed_counts = defaultdict(int)
+        meetings_created = defaultdict(int)
+        meetings_attended = defaultdict(int)
         
         for meeting in meetings:
-            if hasattr(meeting, 'created_at') and meeting.created_at:
-                month_key = meeting.created_at.strftime("%Y-%m")
-                meetings_created_counts[month_key] += 1
+            created_at = getattr(meeting, 'created_at', None)
+            if created_at:
+                month_key = created_at.strftime("%Y-%m")
+                meetings_created[month_key] += 1
             
-            # For meetings, "completed" could mean meetings that have passed or have status "completed"
-            if hasattr(meeting, 'meeting_date') and meeting.meeting_date:
-                if meeting.meeting_date < datetime.utcnow():
-                    month_key = meeting.meeting_date.strftime("%Y-%m")
-                    meetings_completed_counts[month_key] += 1
+            meeting_date = getattr(meeting, 'meeting_date', None)
+            if meeting_date and meeting_date < datetime.utcnow():
+                month_key = meeting_date.strftime("%Y-%m")
+                meetings_attended[month_key] += 1
         
         # Build datasets
-        tasks_created_data = [tasks_created_counts.get(key, 0) for key in month_keys]
-        tasks_completed_data = [tasks_completed_counts.get(key, 0) for key in month_keys]
-        meetings_created_data = [meetings_created_counts.get(key, 0) for key in month_keys]
-        meetings_completed_data = [meetings_completed_counts.get(key, 0) for key in month_keys]
-        
         return {
-            "labels": month_range,
+            "labels": month_labels,
             "datasets": [
                 {
                     "label": "Tasks Created",
-                    "data": tasks_created_data,
+                    "data": [tasks_created.get(key, 0) for key in month_keys],
                     "borderColor": "#1976d2",
                     "backgroundColor": "rgba(25, 118, 210, 0.1)",
                     "fill": True,
@@ -902,7 +575,7 @@ class ChartDataService:
                 },
                 {
                     "label": "Tasks Completed",
-                    "data": tasks_completed_data,
+                    "data": [tasks_completed.get(key, 0) for key in month_keys],
                     "borderColor": "#2e7d32",
                     "backgroundColor": "rgba(46, 125, 50, 0.1)",
                     "fill": True,
@@ -910,7 +583,7 @@ class ChartDataService:
                 },
                 {
                     "label": "Meetings Attended",
-                    "data": meetings_completed_data,
+                    "data": [meetings_attended.get(key, 0) for key in month_keys],
                     "borderColor": "#ed6c02",
                     "backgroundColor": "rgba(237, 108, 2, 0.1)",
                     "fill": True,
@@ -918,7 +591,7 @@ class ChartDataService:
                 },
                 {
                     "label": "Meetings Organized",
-                    "data": meetings_created_data,
+                    "data": [meetings_created.get(key, 0) for key in month_keys],
                     "borderColor": "#9c27b0",
                     "backgroundColor": "rgba(156, 39, 176, 0.1)",
                     "fill": True,
@@ -927,60 +600,16 @@ class ChartDataService:
             ]
         }
 
-    def _get_empty_monthly_trend(self, months: int) -> Dict[str, Any]:
-        """Return empty monthly trend data structure"""
-        end_date = datetime.utcnow()
-        month_range = []
-        for i in range(months-1, -1, -1):
-            month_date = end_date - timedelta(days=30*i)
-            month_range.append(month_date.strftime("%b"))
-        
-        return {
-            "labels": month_range,
-            "datasets": [
-                {
-                    "label": "Tasks Created",
-                    "data": [0] * months,
-                    "borderColor": "#1976d2",
-                    "backgroundColor": "rgba(25, 118, 210, 0.1)",
-                    "fill": True,
-                    "tension": 0.4
-                },
-                {
-                    "label": "Tasks Completed",
-                    "data": [0] * months,
-                    "borderColor": "#2e7d32",
-                    "backgroundColor": "rgba(46, 125, 50, 0.1)",
-                    "fill": True,
-                    "tension": 0.4
-                },
-                {
-                    "label": "Meetings Attended",
-                    "data": [0] * months,
-                    "borderColor": "#ed6c02",
-                    "backgroundColor": "rgba(237, 108, 2, 0.1)",
-                    "fill": True,
-                    "tension": 0.4
-                },
-                {
-                    "label": "Meetings Organized",
-                    "data": [0] * months,
-                    "borderColor": "#9c27b0",
-                    "backgroundColor": "rgba(156, 39, 176, 0.1)",
-                    "fill": True,
-                    "tension": 0.4
-                }
-            ]
-        }
-    
     @retry_on_error(max_retries=2)
     async def get_priority_distribution(self, user_id: str = None) -> Dict[str, Any]:
         """Get task priority distribution"""
         if not self.task_model:
             return self._get_empty_priority_distribution()
         
-        query = select(self.task_model).limit(2000)
-        query = self._apply_user_filter(query, user_id)
+        query = select(self.task_model)
+        
+        if user_id and self._has_attribute(self.task_model, 'assigned_to_id'):
+            query = query.where(text(f"assigned_to_id = '{user_id}'"))
         
         try:
             result = await self.db.execute(query)
@@ -989,49 +618,43 @@ class ChartDataService:
             logger.error(f"Error executing priority distribution query: {e}")
             return self._get_empty_priority_distribution()
         
-        priority_config = {
-            "high": {"label": "High", "color": "#d32f2f", "count": 0},
-            "medium": {"label": "Medium", "color": "#ed6c02", "count": 0},
-            "low": {"label": "Low", "color": "#2e7d32", "count": 0}
-        }
+        priority_counts = {"high": 0, "medium": 0, "low": 0}
         
         for task in tasks:
-            # Try different priority field names
             priority = None
-            if self._has_attribute(task, 'priority'):
-                priority = str(task.priority).lower() if task.priority else None
-            elif self._has_attribute(task, 'priority_level'):
-                priority = str(task.priority_level).lower() if task.priority_level else None
-            elif self._has_attribute(task, 'urgency'):
-                priority = str(task.urgency).lower() if task.urgency else None
+            for attr in ['priority', 'priority_level', 'urgency']:
+                if self._has_attribute(task, attr):
+                    priority = getattr(task, attr, None)
+                    if priority is not None:
+                        break
             
-            if priority:
-                if priority in ['high', '1', 'critical', 'urgent']:
-                    priority_config["high"]["count"] += 1
-                elif priority in ['medium', '2', 'normal', 'standard']:
-                    priority_config["medium"]["count"] += 1
-                elif priority in ['low', '3']:
-                    priority_config["low"]["count"] += 1
+            if priority is not None:
+                priority_str = str(priority).lower()
+                if priority_str in ['high', 'critical', 'urgent', '1']:
+                    priority_counts["high"] += 1
+                elif priority_str in ['low', '3']:
+                    priority_counts["low"] += 1
                 else:
-                    priority_config["medium"]["count"] += 1
+                    priority_counts["medium"] += 1
             else:
-                priority_config["medium"]["count"] += 1
+                priority_counts["medium"] += 1
         
         return {
-            "labels": [p["label"] for p in priority_config.values()],
+            "labels": ["High", "Medium", "Low"],
             "datasets": [{
-                "data": [p["count"] for p in priority_config.values()],
-                "backgroundColor": [p["color"] for p in priority_config.values()],
+                "data": [priority_counts["high"], priority_counts["medium"], priority_counts["low"]],
+                "backgroundColor": ["#d32f2f", "#ed6c02", "#2e7d32"],
                 "borderWidth": 0
             }]
         }
-    
-    async def get_cached_or_compute(self, cache_key: str, compute_func: Callable[[], Awaitable], ttl_minutes: int = 30):
+
+    async def get_cached_or_compute(self, cache_key: str, compute_func: Callable[[], Awaitable], 
+                                     ttl_minutes: int = 30) -> Any:
         """Get data from cache or compute it"""
         try:
             from app.models.chart_data import ChartDataCache
             
-            # Check cache - using async
+            # Check cache
             result = await self.db.execute(
                 select(ChartDataCache).where(ChartDataCache.cache_key == cache_key)
             )
@@ -1046,84 +669,29 @@ class ChartDataService:
             data = await compute_func()
             
             # Store in cache
-            if cache_entry:
-                cache_entry.data = data
-                cache_entry.expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
-                cache_entry.updated_at = datetime.utcnow()
-            else:
-                cache_entry = ChartDataCache(
-                    cache_key=cache_key,
-                    data=data,
-                    expires_at=datetime.utcnow() + timedelta(minutes=ttl_minutes)
-                )
-                self.db.add(cache_entry)
+            try:
+                if cache_entry:
+                    cache_entry.data = data
+                    cache_entry.expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+                    cache_entry.updated_at = datetime.utcnow()
+                else:
+                    cache_entry = ChartDataCache(
+                        cache_key=cache_key,
+                        data=data,
+                        expires_at=datetime.utcnow() + timedelta(minutes=ttl_minutes)
+                    )
+                    self.db.add(cache_entry)
+                
+                await self.db.commit()
+            except Exception as e:
+                logger.warning(f"Cache save error (continuing without cache): {e}")
+                await self.db.rollback()
             
-            await self.db.commit()
             return data
         except Exception as e:
             logger.warning(f"Cache error (continuing without cache): {e}")
+            try:
+                await self.db.rollback()
+            except:
+                pass
             return await compute_func()
-    
-    # ==================== Helper Methods for Empty Data ====================
-    
-    def _get_empty_chart_data(self, labels):
-        """Return empty chart data structure"""
-        return {
-            "labels": labels,
-            "datasets": [
-                {"label": "Tasks Created", "data": [0] * len(labels), "backgroundColor": "#1976d2", "borderRadius": 6},
-                {"label": "Tasks Completed", "data": [0] * len(labels), "backgroundColor": "#2e7d32", "borderRadius": 6}
-            ]
-        }
-    
-    def _get_empty_status_distribution(self):
-        """Return empty status distribution"""
-        return {
-            "labels": ["Pending", "In Progress", "Completed", "Overdue"],
-            "datasets": [{
-                "data": [0, 0, 0, 0],
-                "backgroundColor": ["#ed6c02", "#1976d2", "#2e7d32", "#d32f2f"],
-                "borderWidth": 0
-            }]
-        }
-    
-    def _get_empty_monthly_trend(self, months):
-        """Return empty monthly trend"""
-        end_date = datetime.utcnow()
-        month_range = []
-        for i in range(months-1, -1, -1):
-            month_date = end_date - timedelta(days=30*i)
-            month_range.append(month_date.strftime("%b"))
-        
-        return {
-            "labels": month_range,
-            "datasets": [
-                {
-                    "label": "Tasks Created",
-                    "data": [0] * months,
-                    "borderColor": "#1976d2",
-                    "backgroundColor": "rgba(25, 118, 210, 0.1)",
-                    "fill": True,
-                    "tension": 0.4
-                },
-                {
-                    "label": "Tasks Completed",
-                    "data": [0] * months,
-                    "borderColor": "#2e7d32",
-                    "backgroundColor": "rgba(46, 125, 50, 0.1)",
-                    "fill": True,
-                    "tension": 0.4
-                }
-            ]
-        }
-    
-    def _get_empty_priority_distribution(self):
-        """Return empty priority distribution"""
-        return {
-            "labels": ["High", "Medium", "Low"],
-            "datasets": [{
-                "data": [0, 0, 0],
-                "backgroundColor": ["#d32f2f", "#ed6c02", "#2e7d32"],
-                "borderWidth": 0
-            }]
-        }

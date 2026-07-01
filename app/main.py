@@ -159,15 +159,131 @@ app = FastAPI(
     openapi_url=None,
 )
 
-# ==================== CORS ====================
-if settings.CORS_ORIGINS:
+# ==================== CORS CONFIGURATION ====================
+
+def get_cors_origins() -> list:
+    """
+    Get CORS origins with proper handling of DEV_CORS_ALLOW_ALL.
+    
+    Returns:
+        List of allowed origins or ["*"] for development
+    """
+    # Check if DEV_CORS_ALLOW_ALL is enabled
+    if settings.DEV_CORS_ALLOW_ALL:
+        logger.warning("⚠️ DEV_CORS_ALLOW_ALL is enabled - allowing all origins (DEVELOPMENT ONLY)")
+        return ["*"]
+    
+    # Get origins from settings
+    origins = settings.CORS_ORIGINS
+    
+    # If no origins are configured and we're in development, use defaults
+    if not origins and settings.IS_DEVELOPMENT:
+        default_origins = [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://localhost:5173",
+            "http://localhost:8001",
+        ]
+        logger.info(f"🔧 No CORS origins configured, using defaults: {default_origins}")
+        return default_origins
+    
+    # Return configured origins
+    return origins
+
+
+def setup_cors(app: FastAPI):
+    """
+    Setup CORS middleware with proper configuration.
+    """
+    # Get CORS origins
+    cors_origins = get_cors_origins()
+    
+    # Log CORS configuration
+    logger.info("=" * 60)
+    logger.info("🌐 CORS CONFIGURATION")
+    logger.info("=" * 60)
+    logger.info(f"📋 DEV_CORS_ALLOW_ALL: {settings.DEV_CORS_ALLOW_ALL}")
+    logger.info(f"📋 BACKEND_CORS_ORIGINS: {settings.BACKEND_CORS_ORIGINS}")
+    logger.info(f"📋 CORS_ORIGINS (final): {cors_origins}")
+    logger.info(f"📋 Environment: {settings.ENVIRONMENT}")
+    logger.info(f"📋 DEBUG: {settings.DEBUG}")
+    logger.info("=" * 60)
+    
+    # Check for invalid configuration
+    if cors_origins == ["*"] and settings.IS_PRODUCTION:
+        logger.critical("❌ CRITICAL: Allowing all CORS origins in PRODUCTION!")
+        logger.critical("❌ This is a security risk! Please configure specific origins.")
+        if not settings.DEV_CORS_ALLOW_ALL:
+            logger.warning("⚠️ DEV_CORS_ALLOW_ALL is false, but CORS_ORIGINS is ['*']")
+    
+    # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=[
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH",
+            "OPTIONS",
+            "HEAD"
+        ],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-Requested-With",
+            "X-CSRF-Token",
+            "X-API-Key",
+            "X-Total-Count",
+            "X-Page",
+            "X-Per-Page"
+        ],
+        expose_headers=[
+            "Content-Type",
+            "Authorization",
+            "X-Total-Count",
+            "X-Page",
+            "X-Per-Page",
+            "X-Request-ID"
+        ],
+        max_age=3600,  # Cache preflight requests for 1 hour
     )
+    
+    # Log success
+    if cors_origins == ["*"]:
+        logger.info("✅ CORS configured to allow ALL origins (development mode)")
+    else:
+        logger.info(f"✅ CORS configured with {len(cors_origins)} origins: {cors_origins}")
+    
+    return cors_origins
+
+
+# Apply CORS configuration
+CORS_ORIGINS_CONFIGURED = setup_cors(app)
+
+# ==================== CORS DEBUG ENDPOINT ====================
+
+@app.get("/debug/cors", tags=["Debug"])
+async def debug_cors():
+    """
+    Debug endpoint to check CORS configuration.
+    """
+    return {
+        "cors_origins": CORS_ORIGINS_CONFIGURED,
+        "backend_cors_origins": settings.BACKEND_CORS_ORIGINS,
+        "dev_cors_allow_all": settings.DEV_CORS_ALLOW_ALL,
+        "environment": settings.ENVIRONMENT,
+        "debug": settings.DEBUG,
+        "is_production": settings.IS_PRODUCTION,
+        "is_development": settings.IS_DEVELOPMENT,
+        "root_path": ROOT_PATH,
+    }
 
 # ==================== API ROUTES ====================
 app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -367,7 +483,7 @@ if not settings.DEBUG:
             check_path = path.lstrip("/")
 
             # 2. Updated exclusion list to be more flexible
-            excluded_prefixes = ("api/", "docs", "redoc", "openapi.json", "health")
+            excluded_prefixes = ("api/", "docs", "redoc", "openapi.json", "health", "debug")
             
             if any(check_path.startswith(prefix) for prefix in excluded_prefixes):
                 raise HTTPException(status_code=404)

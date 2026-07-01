@@ -133,15 +133,15 @@ def get_db_config_from_env() -> Dict[str, Any]:
                 }
     
     # Fall back to individual environment variables
-    default_password = getattr(settings, 'DB_PASSWORD', None) or os.getenv('DB_PASSWORD', 'aradmin!2723646')
+    default_password = getattr(settings, 'DB_PASSWORD', None) or os.getenv('DB_PASSWORD')
     
     return {
         'host': os.getenv('DB_HOST', 'localhost'),
-        'port': int(os.getenv('DB_PORT', '3306')),
-        'user': os.getenv('DB_USER', 'root'),
+        'port': int(os.getenv('DB_PORT', '5432')),
+        'user': os.getenv('DB_USER', 'postgres'),
         'password': os.getenv('DB_PASSWORD', default_password),
         'database': os.getenv('DB_NAME', 'action_tracker'),
-        'driver': os.getenv('DB_DRIVER', 'mysql+aiomysql'),
+        'driver': os.getenv('DB_DRIVER', 'postgresql+asyncpg'),
     }
 
 def get_database_url_from_env() -> str:
@@ -397,7 +397,63 @@ class ConfigLoader:
         
         logger.info(f"📋 Loaded {len(roles)} roles from {file_path.name}")
         return roles
-    
+
+    @staticmethod
+    def load_all_roles(seed_dir: Path) -> List[Dict[str, Any]]:
+        """
+        Load and merge roles from multiple sources, so new modules can ship
+        their own roles without editing the core file:
+
+          - seed_dir/roles.txt              (core/legacy roles file)
+          - seed_dir/roles/*.txt            (flat per-module files,
+                                              e.g. roles/inventory.txt)
+          - seed_dir/modules/*/roles.txt    (per-module directories,
+                                              e.g. modules/inventory/roles.txt)
+
+        Files are merged in sorted order for determinism. If the same role
+        code appears in more than one file, the first occurrence wins and a
+        warning is logged so conflicts are visible instead of silently
+        overwritten.
+        """
+        role_files: List[Path] = []
+
+        core_file = seed_dir / "roles.txt"
+        if core_file.exists():
+            role_files.append(core_file)
+
+        roles_subdir = seed_dir / "roles"
+        if roles_subdir.is_dir():
+            role_files.extend(sorted(roles_subdir.glob("*.txt")))
+
+        modules_dir = seed_dir / "modules"
+        if modules_dir.is_dir():
+            role_files.extend(sorted(modules_dir.glob("*/roles.txt")))
+
+        if not role_files:
+            logger.warning(f"No roles.txt files found under {seed_dir}")
+            return []
+
+        logger.info(
+            f"📁 Found {len(role_files)} roles file(s): "
+            f"{[str(f.relative_to(seed_dir)) for f in role_files]}"
+        )
+
+        merged: Dict[str, Dict[str, Any]] = {}
+        for file_path in role_files:
+            for role in ConfigLoader.load_roles(file_path):
+                code = role['code']
+                if code in merged:
+                    logger.warning(
+                        f"⚠️ Duplicate role code '{code}' found in {file_path.name} "
+                        f"(already loaded from another file) - keeping first definition"
+                    )
+                    continue
+                merged[code] = role
+
+        all_roles = list(merged.values())
+        logger.info(f"📋 Loaded {len(all_roles)} total unique roles from {len(role_files)} file(s)")
+        return all_roles
+
     @staticmethod
     def load_users(file_path: Path) -> List[Dict[str, Any]]:
         """Load users from users.txt"""
@@ -935,7 +991,7 @@ async def init_db(drop_existing: bool = None, base_url: str = None,
         if should_seed:
             logger.info("\n📁 Loading configuration files...")
             permissions = ConfigLoader.load_permissions(permissions_file)
-            roles = ConfigLoader.load_roles(roles_file)
+            roles = ConfigLoader.load_all_roles(seed_dir)
             users = ConfigLoader.load_users(users_file)
             
             if not permissions:

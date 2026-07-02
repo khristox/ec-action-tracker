@@ -7,6 +7,7 @@ from app.db.base import Base
 
 class ChartType(str, enum.Enum):
     BAR = "bar"
+    HORIZONTAL_BAR = "horizontal_bar"
     LINE = "line"
     PIE = "pie"
     DOUGHNUT = "doughnut"

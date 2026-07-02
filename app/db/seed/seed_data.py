@@ -634,7 +634,35 @@ class TableManager:
             async with async_engine.begin() as conn:
                 if drop_existing:
                     logger.info("🗑️ Dropping existing tables...")
-                    await conn.run_sync(Base.metadata.drop_all)
+                    db_type = DatabaseType.detect()
+                    if db_type == DatabaseType.POSTGRESQL:
+                        # Base.metadata.drop_all() cannot resolve FK cycles
+                        # across tables unless every constraint has an
+                        # explicit name. Drop each table individually with
+                        # CASCADE instead - this handles dependent
+                        # constraints automatically regardless of order,
+                        # and only needs table ownership (not schema
+                        # ownership, unlike DROP SCHEMA).
+                        for table_name in metadata_tables:
+                            await conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+
+                        # Also drop custom Postgres enum types. Dropping a
+                        # table doesn't drop the enum type it used, and
+                        # create_all() won't alter an existing type to add
+                        # new labels (e.g. a newly added enum member) - so
+                        # stale enum definitions survive across --drop runs
+                        # unless explicitly removed here.
+                        enum_result = await conn.execute(text(
+                            "SELECT t.typname FROM pg_type t "
+                            "JOIN pg_enum e ON t.oid = e.enumtypid "
+                            "JOIN pg_namespace n ON n.oid = t.typnamespace "
+                            "WHERE n.nspname = 'public' "
+                            "GROUP BY t.typname"
+                        ))
+                        for (type_name,) in enum_result.fetchall():
+                            await conn.execute(text(f'DROP TYPE IF EXISTS "{type_name}" CASCADE'))
+                    else:
+                        await conn.run_sync(Base.metadata.drop_all)
                     logger.info("✅ Existing tables dropped")
                     await asyncio.sleep(1)
                 
@@ -818,13 +846,25 @@ class UserSeeder:
 
 # ==================== DOCKER-OPTIMIZED SCRIPT RUNNER ====================
 
+# Orchestration/meta scripts that live in scripts_dir but are NOT
+# individual seed steps - they are standalone entry points meant to be
+# run manually by a developer (e.g. a first-time project bootstrap).
+# setup.sh reinstalls pip packages and would overwrite .env on every
+# seed run; run_all_seeds.sh recursively re-invokes seed_data.py itself.
+# Auto-running either one here causes redundant/recursive execution.
+EXCLUDED_SHELL_SCRIPTS = {"setup.sh", "run_all_seeds.sh", "create_location.sh", "diagnosis.sh"}
+
+
 async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, password: str):
     """Run all .sh scripts with Docker-optimized execution"""
     if not scripts_dir.exists():
         logger.warning(f"Scripts directory not found: {scripts_dir}")
         return
     
-    sh_scripts = sorted(scripts_dir.glob("*.sh"))
+    sh_scripts = sorted(
+        p for p in scripts_dir.glob("*.sh")
+        if p.name not in EXCLUDED_SHELL_SCRIPTS
+    )
     
     if not sh_scripts:
         logger.info("No .sh scripts found in scripts directory")

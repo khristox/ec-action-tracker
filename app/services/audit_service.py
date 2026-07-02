@@ -117,10 +117,10 @@ class AuditService:
             
             # Create audit entry
             audit_entry = AuditLog(
-                id=uuid.uuid4(),  # Generate UUID object
+                id=str(uuid.uuid4()),
                 action=action.upper(),
                 table_name=table_name,
-                record_id=record_uuid,  # Store as UUID object
+                record_id=str(record_uuid) if record_uuid else None,
                 old_data=self._sanitize_values(old_values),
                 new_data=self._sanitize_values(new_values),
                 ip_address=ip_address,
@@ -136,7 +136,7 @@ class AuditService:
             
             # Add user info if provided
             if user:
-                audit_entry.user_id = user.id  # This should already be UUID
+                audit_entry.user_id = str(user.id)
                 audit_entry.username = user.username
                 audit_entry.user_email = user.email
             

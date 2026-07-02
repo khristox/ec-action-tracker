@@ -49,7 +49,7 @@ print_success "Server is running"
 print_header "Step 1: Database Initialization"
 print_info "Creating database tables..."
 
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../../../.." || exit 1
 
 python app/db/seed/seed_data.py
 

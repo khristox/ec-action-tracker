@@ -265,7 +265,7 @@ if echo "$VERIFY_RESPONSE" | jq -e '.items' > /dev/null 2>&1; then
         
         echo ""
         echo -e "${BLUE}📋 Document Type Attributes:${NC}"
-        echo "$VERIFY_RESPONSE" | jq -r '.items[] | "  • \(.name) (\(.code)) - \(.extra_metadata.icon) - Extensions: \(.extra_metadata.allowed_extensions | join(\", \"))"'
+        echo "$VERIFY_RESPONSE" | jq -r '.items[] | "  • \(.name) (\(.code)) - \(.extra_metadata.icon) - Extensions: \(.extra_metadata.allowed_extensions | join(", "))"'
     else
         print_warning "No document type attributes found"
     fi

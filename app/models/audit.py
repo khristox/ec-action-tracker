@@ -2,7 +2,7 @@
 import uuid
 from sqlalchemy import Column, String, DateTime, Text, JSON, Index
 from sqlalchemy.dialects.mysql import CHAR
-from datetime import datetime
+from datetime import datetime, timezone
 import enum
 from app.db.base import Base
 
@@ -69,7 +69,7 @@ class AuditLog(Base):
     changes_summary = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     extra_data = Column(JSON, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     
     # Use String instead of Enum to accept any value
     # This will accept both 'SUCCESS' and 'success'

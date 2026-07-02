@@ -129,7 +129,7 @@ class ChartDataSeeder:
             {
                 "name": "workload_distribution",
                 "title": "Workload Distribution",
-                "chart_type": "horizontalBar",
+                "chart_type": "horizontal_bar",
                 "data_category": "tasks",
                 "config": {
                     "xAxisLabel": "Number of Tasks",

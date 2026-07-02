@@ -85,11 +85,11 @@ async def _log_audit_event(
     try:
         async with db.begin_nested():
             audit_entry = AuditLog(
-                id=uuid.uuid4(),
+                id=str(uuid.uuid4()),
                 action=action.upper(),
                 table_name="auth",
                 username=username,
-                user_id=user_id,
+                user_id=str(user_id) if user_id else None,
                 ip_address=request.client.host if request else None,
                 user_agent=request.headers.get("user-agent")[:500] if request else None,
                 endpoint=f"{request.method} {request.url.path}" if request else None,

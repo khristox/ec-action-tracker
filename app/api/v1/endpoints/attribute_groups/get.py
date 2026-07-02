@@ -65,7 +65,7 @@ async def list_attribute_groups_internal(
         AttributeGroupModel.code.in_(PUBLIC_GROUPS),
         and_(
             AttributeGroupModel.extra_metadata.is_not(None),
-            func.JSON_EXTRACT(AttributeGroupModel.extra_metadata, '$.public') == true()
+            cast(AttributeGroupModel.extra_metadata.op('->>')('public'), Boolean) == true()
         )
     )
     
@@ -567,7 +567,6 @@ async def get_group_attributes_internal(
         attrs = attrs[:limit]
         last_attr = attrs[-1]
         next_cursor = paginator.encode_cursor({"id": str(last_attr.id)})
-    print('Chrs','Needs to work on full')
     if detail_level == "limited":
         response_items = [
             {

@@ -40,12 +40,12 @@ class UserDepartment(Base):
     status = Column(String(50), default='active', nullable=False)
     
     is_primary = Column(Boolean, default=False)
-    start_date = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
-    end_date = Column(DateTime, nullable=True)
+    start_date = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc))
+    end_date = Column(DateTime(timezone=True), nullable=True)
     title = Column(String(200), nullable=True)
     responsibilities = Column(JSON, default=list)
-    created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
-    updated_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc), onupdate=datetime.datetime.now(datetime.timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc))
     created_by = Column(CustomUUID, nullable=True)
     notes = Column(String(500), nullable=True)
     

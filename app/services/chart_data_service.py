@@ -497,15 +497,18 @@ class ChartDataService:
             )
             creator_result = await self.db.execute(creator_query)
             meeting_ids.update(creator_result.scalars().all())
-        
+
+
         # Query meetings
         meetings = []
         if meeting_ids:
+            ids_str = ','.join(f"'{m}'" for m in meeting_ids)
             meeting_query = select(self.meeting_model).where(
-                text(f"id IN ({','.join([f"'{m}'" for m in meeting_ids])}) AND is_active = TRUE AND created_at >= '{start_date.isoformat()}'")
+                text(f"id IN ({ids_str}) AND is_active = TRUE AND created_at >= '{start_date.isoformat()}'")
             )
             meeting_result = await self.db.execute(meeting_query)
             meetings = meeting_result.scalars().all()
+
         
         # Process tasks
         try:

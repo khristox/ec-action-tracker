@@ -5,9 +5,14 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   Box, Typography, Button, Paper, Stack, Fab, Tabs, Tab,
   Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
-  CircularProgress
+  CircularProgress, IconButton, Chip, Divider, TextField, InputAdornment
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import CloseIcon from '@mui/icons-material/Close';
+import SearchIcon from '@mui/icons-material/Search';
+import ViewListIcon from '@mui/icons-material/ViewList';
+import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { 
   selectMeetingStatusOptions, 
   selectStatusOptions, 
@@ -48,6 +53,7 @@ const Meetings = () => {
   const location = useLocation();
   const dispatch = useDispatch();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const scrollContainerRef = useRef(null);
   
   const statusOptions = useSelector(selectStatusOptions);
@@ -78,7 +84,7 @@ const Meetings = () => {
     return saved ? parseInt(saved) : 1;
   });
   
-  const [rowsPerPage] = useState(10);
+  const [rowsPerPage] = useState(isMobile ? 5 : 10);
   
   const [viewMode, setViewMode] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.VIEW_MODE);
@@ -92,13 +98,11 @@ const Meetings = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   
   const [tabValue, setTabValue] = useState(() => {
-    // Check URL params first for tab selection
     const urlParams = new URLSearchParams(location.search);
     const tabParam = urlParams.get('tab');
     if (tabParam === 'recurring') return 1;
     if (tabParam === 'regular') return 0;
     
-    // Then check localStorage
     const saved = localStorage.getItem(STORAGE_KEYS.SELECTED_TAB);
     return saved ? parseInt(saved) : 0;
   });
@@ -135,10 +139,8 @@ const Meetings = () => {
   
   // Restore scroll position
   const restoreScrollPosition = useCallback(() => {
-    // Try session storage first (more recent)
     let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION);
     
-    // Fall back to localStorage
     if (!savedScroll) {
       savedScroll = localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
     }
@@ -155,7 +157,6 @@ const Meetings = () => {
   useEffect(() => {
     saveToLocalStorage(STORAGE_KEYS.SELECTED_TAB, tabValue);
     
-    // Update URL with tab parameter for deep linking
     const urlParams = new URLSearchParams(location.search);
     if (tabValue === 0) {
       urlParams.set('tab', 'regular');
@@ -277,7 +278,6 @@ const Meetings = () => {
     setTabValue(newValue);
     setPage(1);
     setFiltersChanged(false);
-    // Reset scroll position when changing tabs
     window.scrollTo({ top: 0, behavior: 'auto' });
   };
   
@@ -338,93 +338,362 @@ const Meetings = () => {
       restoreScrollPosition();
     }
   }, [loading, meetings.length, restoreScrollPosition]);
+
+  // Helper to get status label
+  const getStatusLabel = (statusId) => {
+    const status = statusOptions.find(s => s.id === statusId);
+    return status ? status.name : 'Unknown';
+  };
+
+  // Helper to get status color
+  const getStatusColor = (statusId) => {
+    const status = statusOptions.find(s => s.id === statusId);
+    return status?.color || 'default';
+  };
+
+  // Count active filters
+  const activeFilterCount = [
+    searchTerm ? 1 : 0,
+    statusFilter !== 'all' ? 1 : 0,
+    !showUpcoming ? 1 : 0,
+    showPast ? 1 : 0
+  ].reduce((a, b) => a + b, 0);
+
+  // Get grid columns based on screen size
+  const getGridColumns = () => {
+    if (isMobile) return '1fr';
+    if (isTablet) return 'repeat(2, 1fr)';
+    return 'repeat(auto-fill, minmax(300px, 1fr))';
+  };
   
   return (
-    <Box sx={{ width: '100%', minHeight: '100vh', pb: isMobile ? 8 : 4, bgcolor: 'background.default' }}>
-      <Box sx={{ p: isMobile ? 2 : 3 }} ref={scrollContainerRef}>
+    <Box sx={{ 
+      width: '100%', 
+      minHeight: '100vh', 
+      pb: isMobile ? 10 : 4, 
+      bgcolor: 'background.default',
+      pt: isMobile ? 0 : 2
+    }}>
+      <Box sx={{ p: isMobile ? 1.5 : 3 }} ref={scrollContainerRef}>
         
-        {/* Header */}
-        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={4}>
+        {/* Header - Simplified for mobile */}
+        <Stack 
+          direction={isMobile ? "column" : "row"} 
+          justifyContent="space-between" 
+          alignItems={isMobile ? "flex-start" : "center"} 
+          mb={isMobile ? 2 : 4}
+          spacing={isMobile ? 1.5 : 0}
+        >
           <Box>
-            <Typography variant={isMobile ? "h5" : "h4"} fontWeight={900} sx={{ background: COLORS.gradient.primary, backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' }}>
+            <Typography 
+              variant={isMobile ? "h5" : "h4"} 
+              fontWeight={900} 
+              sx={{ 
+                background: COLORS.gradient.primary, 
+                backgroundClip: 'text', 
+                WebkitBackgroundClip: 'text', 
+                color: 'transparent',
+                fontSize: isMobile ? '1.5rem' : '2.125rem'
+              }}
+            >
               Meetings
             </Typography>
-            <Typography variant="body2" color="text.secondary">Manage and track all scheduled sessions</Typography>
+            {!isMobile && (
+              <Typography variant="body2" color="text.secondary">
+                Manage and track all scheduled sessions
+              </Typography>
+            )}
           </Box>
           
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />} 
-            onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')} 
-            sx={{ 
-              borderRadius: 2.5, 
-              px: isMobile ? 2 : 4, 
-              py: isMobile ? 1 : 1.2, 
-              fontWeight: 700, 
-              textTransform: 'none',
-              ml: 'auto'
-            }}
-          >
-            New {tabValue === 0 ? 'Meeting' : 'Recurring Series'}
-          </Button>
+          {/* Desktop - Show both buttons */}
+          {!isMobile && (
+            <Stack direction="row" spacing={1.5}>
+              <Button 
+                variant="contained" 
+                startIcon={<AddIcon />} 
+                onClick={() => navigate('/meetings/create')} 
+                sx={{ 
+                  borderRadius: 2.5, 
+                  px: 3, 
+                  py: 1.2, 
+                  fontWeight: 700, 
+                  textTransform: 'none',
+                  ...(tabValue === 1 && { variant: 'outlined' })
+                }}
+              >
+                New Meeting
+              </Button>
+              <Button 
+                variant={tabValue === 1 ? "contained" : "outlined"} 
+                startIcon={<AddIcon />} 
+                onClick={() => navigate('/recurring-meetings/create')} 
+                sx={{ 
+                  borderRadius: 2.5, 
+                  px: 3, 
+                  py: 1.2, 
+                  fontWeight: 700, 
+                  textTransform: 'none'
+                }}
+              >
+                New Series
+              </Button>
+            </Stack>
+          )}
         </Stack>
         
-        {/* Tabs with accurate counts */}
-        <Paper sx={{ borderRadius: 3, overflow: 'hidden', mb: 3 }}>
+        {/* Tabs with accurate counts - Remove curve on mobile */}
+        <Paper sx={{ 
+          borderRadius: isMobile ? 0 : 3, 
+          overflow: 'hidden', 
+          mb: isMobile ? 0 : 3,
+          borderTopLeftRadius: isMobile ? '8px' : undefined,
+          borderTopRightRadius: isMobile ? '8px' : undefined,
+          boxShadow: isMobile ? 'none' : undefined
+        }}>
           <Tabs 
             value={tabValue} 
             onChange={handleTabChange}
             variant="fullWidth"
             sx={{ 
               bgcolor: 'background.paper',
-              '& .MuiTab-root': { py: 2, fontWeight: 600 },
+              '& .MuiTab-root': { 
+                py: isMobile ? 1.5 : 2, 
+                fontWeight: 600,
+                fontSize: isMobile ? '0.75rem' : '0.875rem',
+                minHeight: isMobile ? 44 : 48,
+                textTransform: isMobile ? 'none' : 'uppercase'
+              },
               '& .Mui-selected': { color: COLORS.primary },
-              '& .MuiTabs-indicator': { bgcolor: COLORS.primary, height: 3 }
+              '& .MuiTabs-indicator': { bgcolor: COLORS.primary, height: isMobile ? 2 : 3 }
             }}
           >
             <Tab 
-              label={`Regular Meetings ${regularMeetingsCount > 0 ? `(${regularMeetingsCount})` : ''}`} 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <span>Regular</span>
+                  {regularMeetingsCount > 0 && (
+                    <Chip 
+                      label={regularMeetingsCount} 
+                      size="small" 
+                      sx={{ 
+                        height: 18, 
+                        fontSize: '0.65rem',
+                        bgcolor: tabValue === 0 ? COLORS.primary : 'action.hover',
+                        color: tabValue === 0 ? 'white' : 'text.secondary'
+                      }} 
+                    />
+                  )}
+                </Box>
+              } 
             />
             <Tab 
-              label={`Recurring Series ${recurringMeetingsCount > 0 ? `(${recurringMeetingsCount})` : ''}`} 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <span>Recurring</span>
+                  {recurringMeetingsCount > 0 && (
+                    <Chip 
+                      label={recurringMeetingsCount} 
+                      size="small" 
+                      sx={{ 
+                        height: 18, 
+                        fontSize: '0.65rem',
+                        bgcolor: tabValue === 1 ? COLORS.primary : 'action.hover',
+                        color: tabValue === 1 ? 'white' : 'text.secondary'
+                      }} 
+                    />
+                  )}
+                </Box>
+              } 
             />
           </Tabs>
         </Paper>
         
         {/* Regular Meetings Tab */}
         <TabPanel value={tabValue} index={0}>
-          {/* Filters */}
-          <Paper elevation={0} sx={{ p: isMobile ? 1.5 : 2.5, mb: 4, borderRadius: 3, border: `1px solid ${COLORS.primary}20`, bgcolor: 'background.paper' }}>
-            <MeetingFilters
-              searchTerm={searchTerm}
-              setSearchTerm={handleSearchTermChange}
-              statusFilter={statusFilter}
-              setStatusFilter={handleStatusFilterChange}
-              statusOptions={statusOptions}
-              showUpcoming={showUpcoming}
-              setShowUpcoming={handleShowUpcomingChange}
-              showPast={showPast}
-              setShowPast={handleShowPastChange}
-              viewMode={viewMode}
-              setViewMode={setViewMode}
-              onClearFilters={handleClearFilters}
-              onOpenFilterDrawer={() => setFilterDrawerOpen(true)}
-              isMobile={isMobile}
-            />
+          {/* Filters - Mobile Optimized */}
+          <Paper elevation={0} sx={{ 
+            p: isMobile ? 1 : 2.5, 
+            mb: isMobile ? 2 : 4, 
+            borderRadius: isMobile ? 2 : 3, 
+            border: `1px solid ${COLORS.primary}20`, 
+            bgcolor: 'background.paper',
+            ...(isMobile && { 
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: 'none'
+            })
+          }}>
+            {/* Mobile Filter Bar */}
+            {isMobile ? (
+              <>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Box sx={{ flex: 1, position: 'relative' }}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      placeholder="Search meetings..."
+                      value={searchTerm}
+                      onChange={(e) => handleSearchTermChange(e.target.value)}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <SearchIcon fontSize="small" />
+                          </InputAdornment>
+                        ),
+                        endAdornment: searchTerm && (
+                          <InputAdornment position="end">
+                            <IconButton size="small" onClick={() => handleSearchTermChange('')}>
+                              <CloseIcon fontSize="small" />
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                        sx: { borderRadius: 2 }
+                      }}
+                    />
+                  </Box>
+                  <Stack direction="row" spacing={0.5}>
+                    <IconButton 
+                      onClick={() => setFilterDrawerOpen(true)}
+                      size="small"
+                      sx={{ 
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 2,
+                        color: 'text.secondary',
+                        ...(activeFilterCount > 0 && { 
+                          borderColor: COLORS.primary,
+                          color: COLORS.primary,
+                          bgcolor: `${COLORS.primary}10`
+                        })
+                      }}
+                    >
+                      <FilterListIcon fontSize="small" />
+                      {activeFilterCount > 0 && (
+                        <Chip 
+                          label={activeFilterCount} 
+                          size="small" 
+                          sx={{ 
+                            height: 14, 
+                            fontSize: '0.5rem', 
+                            minWidth: 14, 
+                            p: 0,
+                            bgcolor: COLORS.primary,
+                            color: 'white',
+                            ml: 0.5,
+                            '& .MuiChip-label': { px: 0.5 }
+                          }} 
+                        />
+                      )}
+                    </IconButton>
+                    <IconButton 
+                      onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')}
+                      size="small"
+                      sx={{ 
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 2,
+                        color: 'text.secondary'
+                      }}
+                    >
+                      {viewMode === 'grid' ? <ViewListIcon fontSize="small" /> : <ViewModuleIcon fontSize="small" />}
+                    </IconButton>
+                  </Stack>
+                </Stack>
+
+                {/* Filter Chips */}
+                {hasActiveFilters && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
+                    {searchTerm && (
+                      <Chip 
+                        label={`Search: ${searchTerm}`}
+                        size="small"
+                        onDelete={() => handleSearchTermChange('')}
+                        sx={{ height: 22, fontSize: '0.7rem' }}
+                      />
+                    )}
+                    {statusFilter !== 'all' && (
+                      <Chip 
+                        label={`Status: ${getStatusLabel(statusFilter)}`}
+                        size="small"
+                        color={getStatusColor(statusFilter)}
+                        onDelete={() => handleStatusFilterChange('all')}
+                        sx={{ height: 22, fontSize: '0.7rem' }}
+                      />
+                    )}
+                    {!showUpcoming && (
+                      <Chip 
+                        label="Hide Upcoming"
+                        size="small"
+                        onDelete={() => handleShowUpcomingChange(true)}
+                        sx={{ height: 22, fontSize: '0.7rem' }}
+                      />
+                    )}
+                    {showPast && (
+                      <Chip 
+                        label="Show Past"
+                        size="small"
+                        onDelete={() => handleShowPastChange(false)}
+                        sx={{ height: 22, fontSize: '0.7rem' }}
+                      />
+                    )}
+                    {hasActiveFilters && (
+                      <Chip 
+                        label="Clear All"
+                        size="small"
+                        color="error"
+                        onClick={handleClearFilters}
+                        sx={{ height: 22, fontSize: '0.7rem' }}
+                      />
+                    )}
+                  </Box>
+                )}
+              </>
+            ) : (
+              // Desktop - Original MeetingFilters component
+              <MeetingFilters
+                searchTerm={searchTerm}
+                setSearchTerm={handleSearchTermChange}
+                statusFilter={statusFilter}
+                setStatusFilter={handleStatusFilterChange}
+                statusOptions={statusOptions}
+                showUpcoming={showUpcoming}
+                setShowUpcoming={handleShowUpcomingChange}
+                showPast={showPast}
+                setShowPast={handleShowPastChange}
+                viewMode={viewMode}
+                setViewMode={setViewMode}
+                onClearFilters={handleClearFilters}
+                onOpenFilterDrawer={() => setFilterDrawerOpen(true)}
+                isMobile={isMobile}
+              />
+            )}
           </Paper>
           
           {/* Grid View */}
           {viewMode === 'grid' && (
             <>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              <Box sx={{ 
+                display: 'grid', 
+                gridTemplateColumns: getGridColumns(),
+                gap: { xs: 2, sm: 2.5, md: 3 },
+                width: '100%'
+              }}>
                 {loading ? (
-                  [...Array(isMobile ? 3 : 6)].map((_, i) => (
-                    <Box key={i} sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)' } }}>
-                      <Skeleton variant="rounded" height={isMobile ? 420 : 400} sx={{ borderRadius: 3 }} />
-                    </Box>
+                  // Loading skeletons - use the same grid structure
+                  Array.from({ length: isMobile ? 3 : 6 }).map((_, i) => (
+                    <Skeleton 
+                      key={i} 
+                      variant="rounded" 
+                      height={isMobile ? 320 : 380} 
+                      sx={{ 
+                        borderRadius: 3,
+                        width: '100%'
+                      }} 
+                    />
                   ))
                 ) : meetings.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 8, width: '100%' }}>
+                  <Box sx={{ textAlign: 'center', py: 8, gridColumn: '1 / -1' }}>
                     <Typography variant="h6" color="text.secondary">No meetings found</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       {hasActiveFilters ? 'Try adjusting your search or filters' : 'Create your first meeting'}
@@ -443,8 +712,12 @@ const Meetings = () => {
                 ) : (
                   meetings.map((meeting) => (
                     <Box 
-                      key={meeting.id} 
-                      sx={{ flex: { xs: '1 1 100%', md: '1 1 calc(33.333% - 24px)', lg: '1 1 calc(25% - 24px)' }, display: 'flex' }}
+                      key={meeting.id}
+                      sx={{ 
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex'
+                      }}
                     >
                       <MeetingCard 
                         meeting={meeting} 
@@ -468,8 +741,8 @@ const Meetings = () => {
                     onChange={handlePageChange}
                     color="primary"
                     size={isMobile ? "small" : "medium"}
-                    showFirstButton
-                    showLastButton
+                    showFirstButton={!isMobile}
+                    showLastButton={!isMobile}
                   />
                 </Box>
               )}
@@ -495,8 +768,8 @@ const Meetings = () => {
                     onChange={handlePageChange}
                     color="primary"
                     size={isMobile ? "small" : "medium"}
-                    showFirstButton
-                    showLastButton
+                    showFirstButton={!isMobile}
+                    showLastButton={!isMobile}
                   />
                 </Box>
               )}
@@ -521,15 +794,44 @@ const Meetings = () => {
         </TabPanel>
       </Box>
       
-      {/* Mobile FAB */}
+      {/* Mobile FAB - Single button with dropdown or toggle */}
       {isMobile && (
-        <Fab 
-          color="primary" 
-          sx={{ position: 'fixed', bottom: 16, right: 16 }} 
-          onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')}
+        <Stack 
+          direction="column" 
+          spacing={1} 
+          sx={{ 
+            position: 'fixed', 
+            bottom: 80, 
+            right: 16, 
+            zIndex: 1000,
+            alignItems: 'flex-end'
+          }}
         >
-          <AddIcon />
-        </Fab>
+          {/* Quick action hint */}
+          <Box sx={{ 
+            bgcolor: 'background.paper', 
+            px: 1.5, 
+            py: 0.5, 
+            borderRadius: 2,
+            boxShadow: 2,
+            fontSize: '0.7rem',
+            color: 'text.secondary',
+            mb: 0.5
+          }}>
+            {tabValue === 0 ? 'Create Meeting' : 'Create Series'}
+          </Box>
+          
+          <Fab 
+            color="primary" 
+            sx={{ 
+              boxShadow: 3,
+              '&:active': { transform: 'scale(0.95)' }
+            }} 
+            onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')}
+          >
+            <AddIcon />
+          </Fab>
+        </Stack>
       )}
       
       {/* Mobile Filter Drawer */}
@@ -546,6 +848,7 @@ const Meetings = () => {
         showPast={showPast}
         setShowPast={handleShowPastChange}
         onClearFilters={handleClearFilters}
+        activeFilterCount={activeFilterCount}
       />
       
       {/* Notification Dialog */}

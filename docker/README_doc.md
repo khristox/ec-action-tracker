@@ -96,8 +96,9 @@ apt-get update && apt-get install -y jq
 
 docker compose run --rm app uvicorn app.main:app --reload --port 8001
 
-docker compose run --rm app python app/db/seed/seed_data.py http://ec_app:8001 admin Admin123! --force
+docker compose run --rm app python app/db/seed/seed_data.py http://ec_app:8006 admin Admin123! --force
 
+docker compose run --user root --rm app python app/db/seed/seed_data.py http://ec_app:8006 admin Admin123! --force
 
 
   docker compose pull app

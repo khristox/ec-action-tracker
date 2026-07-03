@@ -3,37 +3,58 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { 
   Box, SwipeableDrawer, Stack, Typography, IconButton, 
   TextField, InputAdornment, Chip, Button, FormControlLabel, Switch,
-  Divider, useMediaQuery, useTheme
+  Divider, useMediaQuery, useTheme, alpha, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
-import { StatusChip } from './StatusChip';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import EventIcon from '@mui/icons-material/Event';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+
+// Status color mapping based on common meeting statuses
+const getStatusColor = (statusId, statusOptions) => {
+  const status = statusOptions?.find(s => s.id === statusId || s.value === statusId);
+  if (status?.color) return status.color;
+  // Fallback colors
+  const colors = {
+    'scheduled': '#2196f3',
+    'completed': '#4caf50',
+    'cancelled': '#f44336',
+    'postponed': '#ff9800',
+    'in-progress': '#9c27b0'
+  };
+  return colors[statusId] || '#757575';
+};
 
 export const MobileFilterDrawer = ({ 
   open, 
   onClose, 
   statusFilter, 
   setStatusFilter, 
-  statusOptions = [],  // Default to empty array
-  searchTerm = '',      // Default values
+  statusOptions = [],
+  searchTerm = '',
   setSearchTerm,
   showUpcoming = true,
   setShowUpcoming,
   showPast = false,
   setShowPast,
   onClearFilters,
-  totalResults = 0,     // Optional: show filtered results count
+  totalResults = 0,
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   
   // Local state for form values
   const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
   const [localStatusFilter, setLocalStatusFilter] = useState(statusFilter);
   const [localShowUpcoming, setLocalShowUpcoming] = useState(showUpcoming);
   const [localShowPast, setLocalShowPast] = useState(showPast);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   
   // Track if filters have been modified
   const hasChanges = useMemo(() => {
@@ -51,6 +72,8 @@ export const MobileFilterDrawer = ({
       setLocalStatusFilter(statusFilter);
       setLocalShowUpcoming(showUpcoming);
       setLocalShowPast(showPast);
+      // Reset advanced section when drawer opens
+      setIsAdvancedOpen(false);
     }
   }, [open, searchTerm, statusFilter, showUpcoming, showPast]);
 
@@ -71,11 +94,17 @@ export const MobileFilterDrawer = ({
     setLocalShowUpcoming(true);
     setLocalShowPast(false);
     
+    // Also clear parent state
+    if (setSearchTerm) setSearchTerm('');
+    if (setStatusFilter) setStatusFilter('all');
+    if (setShowUpcoming) setShowUpcoming(true);
+    if (setShowPast) setShowPast(false);
+    
     if (onClearFilters) {
       onClearFilters();
     }
     onClose();
-  }, [onClearFilters, onClose]);
+  }, [setSearchTerm, setStatusFilter, setShowUpcoming, setShowPast, onClearFilters, onClose]);
 
   // Handle escape key
   useEffect(() => {
@@ -111,6 +140,13 @@ export const MobileFilterDrawer = ({
     return count;
   }, [searchTerm, statusFilter, showUpcoming, showPast]);
 
+  // Get status label
+  const getStatusLabel = (statusId) => {
+    if (statusId === 'all') return 'All Statuses';
+    const status = statusOptions.find(s => s.id === statusId || s.value === statusId);
+    return status?.name || status?.label || statusId;
+  };
+
   return (
     <SwipeableDrawer 
       anchor="bottom" 
@@ -120,13 +156,30 @@ export const MobileFilterDrawer = ({
       disableSwipeToOpen={false}
       PaperProps={{
         sx: {
-          borderTopLeftRadius: 16,
-          borderTopRightRadius: 16,
-          maxHeight: '90vh',
+          borderTopLeftRadius: isMobile ? 12 : 16,
+          borderTopRightRadius: isMobile ? 12 : 16,
+          maxHeight: isMobile ? '85vh' : '80vh',
+          minHeight: isMobile ? '50vh' : '40vh',
+          p: 0,
         }
       }}
     >
-      <Box sx={{ p: { xs: 2, sm: 3 }, pb: 4 }}>
+      {/* Drag Handle */}
+      <Box 
+        sx={{ 
+          width: 40, 
+          height: 4, 
+          bgcolor: 'divider', 
+          borderRadius: 2, 
+          mx: 'auto', 
+          mt: 1.5,
+          mb: 1,
+          cursor: 'pointer'
+        }}
+        onClick={onClose}
+      />
+
+      <Box sx={{ p: { xs: 2, sm: 3 }, pb: { xs: 4, sm: 4 } }}>
         {/* Header */}
         <Stack 
           direction="row" 
@@ -135,17 +188,16 @@ export const MobileFilterDrawer = ({
           mb={2}
         >
           <Stack direction="row" spacing={1} alignItems="center">
-            <FilterAltIcon color="primary" />
-            <Typography variant="h6" fontWeight={700}>
+            <FilterAltIcon color="primary" sx={{ fontSize: isMobile ? 20 : 24 }} />
+            <Typography variant="h6" fontWeight={700} fontSize={isMobile ? '1.1rem' : '1.25rem'}>
               Filters
               {activeFilterCount > 0 && (
-                <Typography 
-                  component="span" 
-                  variant="caption" 
-                  sx={{ ml: 1, color: 'primary.main' }}
-                >
-                  ({activeFilterCount} active)
-                </Typography>
+                <Chip 
+                  label={activeFilterCount} 
+                  size="small" 
+                  color="primary" 
+                  sx={{ ml: 1, height: 20, fontSize: '0.7rem', fontWeight: 600 }}
+                />
               )}
             </Typography>
           </Stack>
@@ -153,25 +205,26 @@ export const MobileFilterDrawer = ({
             onClick={onClose} 
             edge="end"
             aria-label="Close filters"
+            size={isMobile ? 'small' : 'medium'}
           >
             <CloseIcon />
           </IconButton>
         </Stack>
 
-        <Divider sx={{ mb: 3 }} />
+        <Divider sx={{ mb: 2.5 }} />
 
-        {/* Search Field */}
+        {/* Search Field - Optimized for mobile */}
         <TextField
           fullWidth
           size="small"
-          placeholder="Search by title, description, or attendee..."
+          placeholder="Search meetings..."
           value={localSearchTerm}
           onChange={(e) => setLocalSearchTerm(e.target.value)}
-          sx={{ mb: 3 }}
+          sx={{ mb: 2.5 }}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <SearchIcon color="action" />
+                <SearchIcon color="action" sx={{ fontSize: isMobile ? 18 : 20 }} />
               </InputAdornment>
             ),
             endAdornment: localSearchTerm && (
@@ -184,121 +237,218 @@ export const MobileFilterDrawer = ({
                   <CloseIcon fontSize="small" />
                 </IconButton>
               </InputAdornment>
-            )
+            ),
+            sx: { 
+              borderRadius: 2,
+              '& .MuiOutlinedInput-root': { borderRadius: 2 }
+            }
           }}
         />
 
-        {/* Status Filter */}
-        <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-          Status
-        </Typography>
-        <Stack 
-          direction="row" 
-          spacing={1} 
-          flexWrap="wrap" 
-          useFlexGap
-          sx={{ mb: 3, gap: 1 }}
-        >
-          <Chip 
-            label="All" 
-            onClick={() => setLocalStatusFilter('all')} 
-            color={localStatusFilter === 'all' ? 'primary' : 'default'}
-            variant={localStatusFilter === 'all' ? 'filled' : 'outlined'}
-            aria-pressed={localStatusFilter === 'all'}
-          />
-          {statusOptions.map(opt => (
+        {/* Status Filter - Compact */}
+        <Stack spacing={1} sx={{ mb: 2.5 }}>
+          <Typography variant="subtitle2" fontWeight={600} fontSize={isMobile ? '0.8rem' : '0.875rem'}>
+            Status
+          </Typography>
+          <Stack 
+            direction="row" 
+            spacing={0.75} 
+            flexWrap="wrap" 
+            useFlexGap
+            sx={{ gap: 0.75 }}
+          >
             <Chip 
-              key={opt.value}
-              label={opt.label}
-              onClick={() => setLocalStatusFilter(opt.value)}
-              color={localStatusFilter === opt.value ? 'primary' : 'default'}
-              variant={localStatusFilter === opt.value ? 'filled' : 'outlined'}
+              label="All" 
+              onClick={() => setLocalStatusFilter('all')} 
+              color={localStatusFilter === 'all' ? 'primary' : 'default'}
+              variant={localStatusFilter === 'all' ? 'filled' : 'outlined'}
+              size="small"
               sx={{ 
-                bgcolor: localStatusFilter === opt.value ? opt.color : 'transparent',
-                '&:hover': { 
-                  bgcolor: opt.color,
-                  opacity: 0.8 
-                }
+                height: 28,
+                fontSize: '0.7rem',
+                fontWeight: localStatusFilter === 'all' ? 600 : 400,
+                '& .MuiChip-label': { px: 1.5 }
               }}
-              aria-pressed={localStatusFilter === opt.value}
             />
-          ))}
+            {statusOptions.map(opt => {
+              const isSelected = localStatusFilter === (opt.id || opt.value);
+              const color = opt.color || getStatusColor(opt.id || opt.value, statusOptions);
+              return (
+                <Chip 
+                  key={opt.id || opt.value}
+                  label={opt.name || opt.label}
+                  onClick={() => setLocalStatusFilter(opt.id || opt.value)}
+                  size="small"
+                  sx={{ 
+                    height: 28,
+                    fontSize: '0.7rem',
+                    fontWeight: isSelected ? 600 : 400,
+                    bgcolor: isSelected ? alpha(color, 0.15) : 'transparent',
+                    borderColor: isSelected ? color : 'divider',
+                    color: isSelected ? color : 'text.primary',
+                    '&:hover': { 
+                      bgcolor: alpha(color, 0.08),
+                    },
+                    '& .MuiChip-label': { px: 1.5 }
+                  }}
+                  variant={isSelected ? 'filled' : 'outlined'}
+                />
+              );
+            })}
+          </Stack>
         </Stack>
 
-        <Divider sx={{ mb: 3 }} />
+        <Divider sx={{ mb: 2.5 }} />
 
-        {/* Date Range Filter */}
-        <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-          Date Range
-        </Typography>
-        <Stack spacing={1.5} sx={{ mb: 3 }}>
-          <FormControlLabel
-            control={
-              <Switch 
-                checked={localShowUpcoming} 
-                onChange={(e) => setLocalShowUpcoming(e.target.checked)}
-                color="primary"
-              />
-            }
-            label={
-              <Stack>
-                <Typography variant="body2">Show Upcoming Meetings</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Scheduled for future dates
-                </Typography>
-              </Stack>
-            }
-            sx={{ alignItems: 'flex-start', m: 0 }}
-          />
-          <FormControlLabel
-            control={
-              <Switch 
-                checked={localShowPast} 
-                onChange={(e) => setLocalShowPast(e.target.checked)}
-                color="secondary"
-              />
-            }
-            label={
-              <Stack>
-                <Typography variant="body2">Show Past Meetings</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Already completed meetings
-                </Typography>
-              </Stack>
-            }
-            sx={{ alignItems: 'flex-start', m: 0 }}
-          />
+        {/* Toggle Section - Simplified */}
+        <Stack spacing={2} sx={{ mb: 2.5 }}>
+          <Typography variant="subtitle2" fontWeight={600} fontSize={isMobile ? '0.8rem' : '0.875rem'}>
+            Show Meetings
+          </Typography>
+          
+          <Stack direction="row" spacing={1}>
+            <Chip
+              icon={<EventIcon />}
+              label="Upcoming"
+              onClick={() => setLocalShowUpcoming(!localShowUpcoming)}
+              color={localShowUpcoming ? 'primary' : 'default'}
+              variant={localShowUpcoming ? 'filled' : 'outlined'}
+              sx={{ 
+                flex: 1,
+                height: 32,
+                fontSize: '0.75rem',
+                fontWeight: localShowUpcoming ? 600 : 400,
+              }}
+            />
+            <Chip
+              icon={localShowPast ? <CheckCircleIcon /> : <CancelIcon />}
+              label="Past"
+              onClick={() => setLocalShowPast(!localShowPast)}
+              color={localShowPast ? 'secondary' : 'default'}
+              variant={localShowPast ? 'filled' : 'outlined'}
+              sx={{ 
+                flex: 1,
+                height: 32,
+                fontSize: '0.75rem',
+                fontWeight: localShowPast ? 600 : 400,
+              }}
+            />
+          </Stack>
         </Stack>
 
         {/* Optional: Show total results */}
         {totalResults > 0 && (
-          <Typography 
-            variant="caption" 
-            color="text.secondary" 
-            sx={{ display: 'block', mb: 2, textAlign: 'center' }}
-          >
-            {totalResults} meeting{totalResults !== 1 ? 's' : ''} found
-          </Typography>
+          <Box sx={{ 
+            bgcolor: (t) => alpha(t.palette.primary.main, 0.05),
+            borderRadius: 2,
+            p: 1,
+            mb: 2.5,
+            textAlign: 'center'
+          }}>
+            <Typography variant="body2" color="text.secondary">
+              <strong>{totalResults}</strong> meeting{totalResults !== 1 ? 's' : ''} found
+            </Typography>
+          </Box>
         )}
 
-        <Divider sx={{ mb: 3 }} />
+        <Divider sx={{ mb: 2.5 }} />
 
-        {/* Action Buttons */}
-        <Stack direction="row" spacing={2}>
+        {/* Active Filters Summary */}
+        {activeFilterCount > 0 && (
+          <Box sx={{ mb: 2.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Active Filters
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ gap: 0.5 }}>
+              {searchTerm && (
+                <Chip 
+                  label={`🔍 ${searchTerm}`}
+                  size="small"
+                  onDelete={() => setLocalSearchTerm('')}
+                  sx={{ height: 24, fontSize: '0.7rem' }}
+                />
+              )}
+              {statusFilter !== 'all' && (
+                <Chip 
+                  label={`📌 ${getStatusLabel(statusFilter)}`}
+                  size="small"
+                  onDelete={() => setLocalStatusFilter('all')}
+                  sx={{ height: 24, fontSize: '0.7rem' }}
+                />
+              )}
+              {!showUpcoming && (
+                <Chip 
+                  label="⏰ No Upcoming"
+                  size="small"
+                  onDelete={() => setLocalShowUpcoming(true)}
+                  sx={{ height: 24, fontSize: '0.7rem' }}
+                />
+              )}
+              {showPast && (
+                <Chip 
+                  label="📅 Show Past"
+                  size="small"
+                  onDelete={() => setLocalShowPast(false)}
+                  sx={{ height: 24, fontSize: '0.7rem' }}
+                />
+              )}
+            </Stack>
+          </Box>
+        )}
+
+        {/* Action Buttons - Sticky at bottom */}
+        <Stack 
+          direction="row" 
+          spacing={1.5}
+          sx={{ 
+            position: 'sticky', 
+            bottom: 0, 
+            bgcolor: 'background.paper',
+            pt: 2,
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            mx: -2,
+            px: 2,
+            pb: 0,
+          }}
+        >
           <Button 
-            fullWidth 
             variant="outlined" 
             onClick={handleClear}
             startIcon={<ClearAllIcon />}
-            disabled={!hasChanges && activeFilterCount === 0}
+            disabled={activeFilterCount === 0}
+            sx={{ 
+              flex: 1,
+              borderRadius: 2,
+              fontWeight: 600,
+              textTransform: 'none',
+              fontSize: '0.8rem',
+              py: 1.2,
+              borderColor: 'divider',
+              '&:hover': {
+                borderColor: 'error.main',
+                color: 'error.main'
+              }
+            }}
           >
             Clear All
           </Button>
           <Button 
-            fullWidth 
             variant="contained" 
             onClick={handleApply}
             disabled={!hasChanges}
+            sx={{ 
+              flex: 2,
+              borderRadius: 2,
+              fontWeight: 700,
+              textTransform: 'none',
+              fontSize: '0.8rem',
+              py: 1.2,
+              boxShadow: theme.shadows[2],
+              '&:hover': {
+                boxShadow: theme.shadows[4],
+              }
+            }}
           >
             Apply Filters
           </Button>
@@ -308,5 +458,8 @@ export const MobileFilterDrawer = ({
   );
 };
 
-// Optional: Add prop types for better documentation
+// Display name for debugging
 MobileFilterDrawer.displayName = 'MobileFilterDrawer';
+
+// Default export
+export default MobileFilterDrawer;

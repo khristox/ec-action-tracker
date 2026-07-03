@@ -57,7 +57,9 @@ import {
   Badge as BadgeIcon,
   Star as StarIcon,
   Work as WorkIcon,
-  Notes as NotesIcon
+  Notes as NotesIcon,
+  PersonSearch as PersonSearchIcon,
+  AccountCircle as AccountCircleIcon
 } from '@mui/icons-material';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -86,6 +88,11 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   const [validationErrors, setValidationErrors] = useState({});
   const [fieldFocus, setFieldFocus] = useState({});
   
+  // State for users from the users/available endpoint
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  
   // New participant form
   const [newParticipant, setNewParticipant] = useState({
     name: '',
@@ -104,8 +111,42 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   const availableData = availableParticipants[listId] || { items: [], total: 0, pages: 1 };
   const participants = availableData.items || [];
   const totalPages = availableData.pages || 1;
-  
-  // Fetch available participants
+
+  // 🔥 NEW: Fetch users from the users/available endpoint
+  const fetchAvailableUsers = useCallback(async () => {
+    if (!open || activeTab !== 0) return;
+    
+    setLoadingUsers(true);
+    try {
+      const response = await api.get('/users/available', {
+        params: {
+          skip: (page - 1) * itemsPerPage,
+          limit: itemsPerPage,
+          search: searchTerm || undefined
+        }
+      });
+      
+      // The response structure might be { items: [], total: 0 } or just an array
+      const data = response.data;
+      const users = data.items || data || [];
+      const total = data.total || users.length;
+      
+      setAvailableUsers(users);
+      setTotalUsers(total);
+    } catch (err) {
+      console.error('Failed to fetch available users:', err);
+      setError('Failed to load users. Please try again.');
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [open, activeTab, page, itemsPerPage, searchTerm]);
+
+  // Fetch users when the component mounts or filters change
+  useEffect(() => {
+    fetchAvailableUsers();
+  }, [fetchAvailableUsers]);
+
+  // Also fetch from the existing Redux action for participants
   const fetchData = useCallback(() => {
     if (listId && open && activeTab === 0) {
       dispatch(fetchAvailableParticipants({
@@ -119,9 +160,8 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     }
   }, [dispatch, listId, open, activeTab, page, searchTerm, itemsPerPage]);
   
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  // Use the new fetchAvailableUsers instead of fetchData
+  // Keep fetchData as fallback or for other parts of the component
   
   // Handle participant selection
   const handleToggleParticipant = (participant) => {
@@ -137,10 +177,10 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   
   // Handle select all on current page
   const handleSelectAll = () => {
-    if (selectedParticipants.length === participants.length) {
+    if (selectedParticipants.length === availableUsers.length) {
       setSelectedParticipants([]);
     } else {
-      setSelectedParticipants([...participants]);
+      setSelectedParticipants([...availableUsers]);
     }
   };
   
@@ -151,6 +191,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     setSubmitting(true);
     setError(null);
     try {
+      // Add the selected users to the participant list
       await dispatch(addMembersToList({
         listId,
         participantIds: selectedParticipants.map(p => p.id)
@@ -159,8 +200,8 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
       setSuccessMessage(`Successfully added ${selectedParticipants.length} participant(s) to "${listName}"`);
       setSelectedParticipants([]);
       
-      // Refresh the available participants list
-      fetchData();
+      // Refresh the available users list
+      fetchAvailableUsers();
       
       setTimeout(() => {
         if (onSuccess) onSuccess();
@@ -199,17 +240,21 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     return Object.keys(errors).length === 0;
   };
   
-  // Check if participant exists by email - with better error handling
+  // Check if participant exists by email - search ALL users
   const checkIfParticipantExists = async (email) => {
     if (!email || skipDuplicateCheck) return null;
     
     try {
-      const response = await api.get('/action-tracker/participants/search', {
-        params: { q: email, limit: 5,list_id: listId  },
+      // Search from all registered users
+      const response = await api.get('/users/available', {
+        params: { 
+          search: email,
+          limit: 5
+        },
         timeout: 5000
       });
-      const items = response.data?.items || response.data || [];
-      return items.find(p => p.email === email);
+      const users = response.data?.items || response.data || [];
+      return users.find(p => p.email === email);
     } catch (err) {
       console.warn('Error checking existing participant (will proceed with creation):', err.message);
       return null;
@@ -217,90 +262,90 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   };
   
   // Handle create new participant
-// In AddParticipantsToList.jsx - handleCreateParticipant function
-const handleCreateParticipant = async () => {
-  if (!validateNewParticipant()) {
-    return;
-  }
-  
-  setCreating(true);
-  setError(null);
-  setValidationErrors({});
-  
-  try {
-    const participantData = {
-      name: newParticipant.name.trim(),
-      email: newParticipant.email?.trim() || null,
-      telephone: newParticipant.telephone?.trim() || null,
-      title: newParticipant.title?.trim() || null,
-      organization: newParticipant.organization?.trim() || null,
-      notes: newParticipant.notes?.trim() || null
-    };
+  const handleCreateParticipant = async () => {
+    if (!validateNewParticipant()) {
+      return;
+    }
     
-    // Create the participant and add to list in ONE request
-    const response = await api.post('/action-tracker/participants/', participantData, {
-      params: {
-        participant_list_id: listId  // Send the list ID as query parameter
-      }
-    });
+    setCreating(true);
+    setError(null);
+    setValidationErrors({});
     
-    const result = response.data;
-    
-    setSuccessMessage(`Participant "${result.name}" created and added to "${listName}"`);
-    setNewParticipant({
-      name: '',
-      email: '',
-      telephone: '',
-      title: '',
-      organization: '',
-      notes: ''
-    });
-    
-    fetchData();
-    
-    setTimeout(() => {
-      if (onSuccess) onSuccess();
-      onClose();
-    }, 1500);
-  } catch (err) {
-    console.error('Failed to create participant:', err);
-    
-    if (err.response?.status === 400 && err.response?.data?.detail) {
-      const errorDetail = err.response.data.detail;
-      if (typeof errorDetail === 'string' && errorDetail.includes('already exists')) {
-        setError({
-          type: 'duplicate',
-          message: errorDetail,
-          participant: null
-        });
-      } else {
-        setError({ type: 'general', message: errorDetail });
-      }
-    } else if (err.response?.data?.detail && Array.isArray(err.response.data.detail)) {
-      const fieldErrors = {};
-      err.response.data.detail.forEach((errorItem) => {
-        const field = errorItem.loc?.[1];
-        const message = errorItem.msg;
-        if (field === 'telephone') fieldErrors.telephone = message;
-        else if (field === 'email') fieldErrors.email = message;
-        else if (field === 'name') fieldErrors.name = message;
+    try {
+      const participantData = {
+        name: newParticipant.name.trim(),
+        email: newParticipant.email?.trim() || null,
+        telephone: newParticipant.telephone?.trim() || null,
+        title: newParticipant.title?.trim() || null,
+        organization: newParticipant.organization?.trim() || null,
+        notes: newParticipant.notes?.trim() || null
+      };
+      
+      // Create the participant and add to list in ONE request
+      const response = await api.post('/action-tracker/participants/', participantData, {
+        params: {
+          participant_list_id: listId
+        }
       });
       
-      if (Object.keys(fieldErrors).length > 0) {
-        setValidationErrors(fieldErrors);
-        setError(null);
+      const result = response.data;
+      
+      setSuccessMessage(`Participant "${result.name}" created and added to "${listName}"`);
+      setNewParticipant({
+        name: '',
+        email: '',
+        telephone: '',
+        title: '',
+        organization: '',
+        notes: ''
+      });
+      
+      // Refresh the available users list
+      fetchAvailableUsers();
+      
+      setTimeout(() => {
+        if (onSuccess) onSuccess();
+        onClose();
+      }, 1500);
+    } catch (err) {
+      console.error('Failed to create participant:', err);
+      
+      if (err.response?.status === 400 && err.response?.data?.detail) {
+        const errorDetail = err.response.data.detail;
+        if (typeof errorDetail === 'string' && errorDetail.includes('already exists')) {
+          setError({
+            type: 'duplicate',
+            message: errorDetail,
+            participant: null
+          });
+        } else {
+          setError({ type: 'general', message: errorDetail });
+        }
+      } else if (err.response?.data?.detail && Array.isArray(err.response.data.detail)) {
+        const fieldErrors = {};
+        err.response.data.detail.forEach((errorItem) => {
+          const field = errorItem.loc?.[1];
+          const message = errorItem.msg;
+          if (field === 'telephone') fieldErrors.telephone = message;
+          else if (field === 'email') fieldErrors.email = message;
+          else if (field === 'name') fieldErrors.name = message;
+        });
+        
+        if (Object.keys(fieldErrors).length > 0) {
+          setValidationErrors(fieldErrors);
+          setError(null);
+        } else {
+          setError({ type: 'general', message: 'Please check the form for errors' });
+        }
+      } else if (err.message) {
+        setError({ type: 'general', message: err.message });
       } else {
-        setError({ type: 'general', message: 'Please check the form for errors' });
+        setError({ type: 'general', message: 'Failed to create participant. Please check the form fields.' });
       }
-    } else if (err.message) {
-      setError({ type: 'general', message: err.message });
-    } else {
-      setError({ type: 'general', message: 'Failed to create participant. Please check the form fields.' });
+    } finally {
+      setCreating(false);
     }
-  } finally {
-    setCreating(false);
-  }
-};
+  };
   
   const handleAddExistingDuplicate = async (participant) => {
     if (!listId || !participant) return;
@@ -312,7 +357,7 @@ const handleCreateParticipant = async () => {
         participantIds: [participant.id]
       })).unwrap();
       setSuccessMessage(`"${participant.name}" added to "${listName}" successfully!`);
-      fetchData();
+      fetchAvailableUsers();
       setTimeout(() => {
         if (onSuccess) onSuccess();
         onClose();
@@ -362,6 +407,7 @@ const handleCreateParticipant = async () => {
     setSearchTerm('');
     setValidationErrors({});
     setSkipDuplicateCheck(false);
+    setPage(1);
   };
   
   // Get gradient colors based on theme
@@ -372,6 +418,9 @@ const handleCreateParticipant = async () => {
   const successGradient = isDark
     ? `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.12)} 0%, ${alpha(theme.palette.success.dark, 0.04)} 100%)`
     : `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.06)} 0%, ${alpha(theme.palette.success.light, 0.02)} 100%)`;
+
+  // Total pages for users
+  const totalUserPages = Math.ceil(totalUsers / itemsPerPage);
 
   // Floating label animation variants
   const inputVariants = {
@@ -477,9 +526,9 @@ const handleCreateParticipant = async () => {
             }}
           >
             <Tab 
-              icon={<PeopleIcon />} 
+              icon={<PersonSearchIcon />} 
               iconPosition="start" 
-              label="Existing Participants" 
+              label="Search Users" 
             />
             <Tab 
               icon={<PersonAddIcon />} 
@@ -488,14 +537,30 @@ const handleCreateParticipant = async () => {
             />
           </Tabs>
           
-          {/* Tab 1: Existing Participants */}
+          {/* Tab 1: Search Users from /users/available */}
           {activeTab === 0 && (
             <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+              {/* Info Banner */}
+              <Box sx={{ 
+                p: isMobile ? 1.5 : 2, 
+                bgcolor: alpha(theme.palette.info.main, 0.06),
+                borderBottom: `1px solid ${alpha(theme.palette.info.main, 0.15)}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}>
+                <PersonSearchIcon sx={{ color: theme.palette.info.main, fontSize: 20 }} />
+                <Typography variant="body2" color="text.secondary">
+                  Search from <strong>all registered users</strong> in the system. 
+                  {listId && ' Only users not already in this list will be shown.'}
+                </Typography>
+              </Box>
+              
               {/* Search Bar */}
               <Box sx={{ p: isMobile ? 2 : 2.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
                 <TextField
                   fullWidth
-                  placeholder="Search participants by name, email, or organization..."
+                  placeholder="Search all registered users by name, email..."
                   value={searchTerm}
                   onChange={handleSearchChange}
                   size={isMobile ? "small" : "medium"}
@@ -545,7 +610,7 @@ const handleCreateParticipant = async () => {
                       <Box display="flex" alignItems="center" gap={1}>
                         <CheckCircleIcon sx={{ color: theme.palette.primary.main }} />
                         <Typography variant="body2" fontWeight={600}>
-                          {selectedParticipants.length} participant(s) selected
+                          {selectedParticipants.length} user(s) selected
                         </Typography>
                       </Box>
                       <Box display="flex" gap={1}>
@@ -585,13 +650,13 @@ const handleCreateParticipant = async () => {
                 </Alert>
               )}
               
-              {/* Participants List */}
+              {/* Users List */}
               <Box sx={{ flex: 1, overflow: 'auto', p: isMobile ? 1.5 : 2 }}>
-                {loading ? (
+                {loadingUsers ? (
                   <Box display="flex" justifyContent="center" py={5}>
                     <CircularProgress />
                   </Box>
-                ) : participants.length === 0 ? (
+                ) : availableUsers.length === 0 ? (
                   <Box textAlign="center" py={5}>
                     <Paper sx={{ 
                       p: 4, 
@@ -600,9 +665,9 @@ const handleCreateParticipant = async () => {
                       borderRadius: 3,
                       border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
                     }}>
-                      <PeopleIcon sx={{ fontSize: 64, color: theme.palette.text.disabled, mb: 2, opacity: 0.5 }} />
+                      <AccountCircleIcon sx={{ fontSize: 64, color: theme.palette.text.disabled, mb: 2, opacity: 0.5 }} />
                       <Typography color="text.secondary" gutterBottom variant="h6">
-                        {searchTerm ? 'No participants match your search' : 'No participants available'}
+                        {searchTerm ? 'No registered users match your search' : 'All registered users are already in this list'}
                       </Typography>
                       {searchTerm && (
                         <Button 
@@ -613,23 +678,22 @@ const handleCreateParticipant = async () => {
                           Clear search
                         </Button>
                       )}
-                      {!searchTerm && (
+                      <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
                         <Button
                           variant="outlined"
                           startIcon={<PersonAddIcon />}
                           onClick={() => setActiveTab(1)}
-                          sx={{ mt: 2 }}
                         >
-                          Create a new participant
+                          Create New User
                         </Button>
-                      )}
+                      </Box>
                     </Paper>
                   </Box>
                 ) : (
                   <>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                       <Typography variant="body2" color="text.secondary">
-                        Showing {participants.length} of {availableData.total || participants.length} participants
+                        Showing {availableUsers.length} of {totalUsers} registered users
                       </Typography>
                       <Button 
                         size="small" 
@@ -637,29 +701,29 @@ const handleCreateParticipant = async () => {
                         startIcon={<AddCircleIcon />}
                         sx={{ borderRadius: 2 }}
                       >
-                        {selectedParticipants.length === participants.length ? 'Deselect All' : 'Select All Page'}
+                        {selectedParticipants.length === availableUsers.length ? 'Deselect All' : 'Select All Page'}
                       </Button>
                     </Box>
                     
                     <List dense={!isMobile} sx={{ bgcolor: 'transparent' }}>
                       <AnimatePresence>
-                        {participants.map((participant, index) => (
+                        {availableUsers.map((user, index) => (
                           <motion.div
-                            key={participant.id}
+                            key={user.id}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: index * 0.02 }}
                           >
                             <ListItem
                               button
-                              onClick={() => handleToggleParticipant(participant)}
+                              onClick={() => handleToggleParticipant(user)}
                               sx={{
                                 borderRadius: 2,
                                 mb: 1,
-                                bgcolor: selectedParticipants.some(p => p.id === participant.id) 
+                                bgcolor: selectedParticipants.some(p => p.id === user.id) 
                                   ? alpha(theme.palette.primary.main, 0.08)
                                   : 'transparent',
-                                border: `1px solid ${selectedParticipants.some(p => p.id === participant.id) 
+                                border: `1px solid ${selectedParticipants.some(p => p.id === user.id) 
                                   ? alpha(theme.palette.primary.main, 0.3)
                                   : alpha(theme.palette.divider, 0.5)}`,
                                 transition: 'all 0.2s',
@@ -671,37 +735,37 @@ const handleCreateParticipant = async () => {
                               }}
                             >
                               <Checkbox
-                                checked={selectedParticipants.some(p => p.id === participant.id)}
-                                onChange={() => handleToggleParticipant(participant)}
+                                checked={selectedParticipants.some(p => p.id === user.id)}
+                                onChange={() => handleToggleParticipant(user)}
                                 onClick={(e) => e.stopPropagation()}
                                 icon={<CheckCircleIcon sx={{ color: theme.palette.text.disabled }} />}
                                 checkedIcon={<CheckCircleIcon sx={{ color: theme.palette.primary.main }} />}
                               />
                               <ListItemAvatar>
                                 <Avatar sx={{ 
-                                  bgcolor: selectedParticipants.some(p => p.id === participant.id)
+                                  bgcolor: selectedParticipants.some(p => p.id === user.id)
                                     ? theme.palette.primary.main
                                     : theme.palette.grey[isDark ? 700 : 400],
                                   transition: 'all 0.2s',
-                                  background: selectedParticipants.some(p => p.id === participant.id) && isDark
+                                  background: selectedParticipants.some(p => p.id === user.id) && isDark
                                     ? `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`
                                     : 'none'
                                 }}>
-                                  {participant.name?.charAt(0)?.toUpperCase()}
+                                  {user.username?.charAt(0)?.toUpperCase() || user.name?.charAt(0)?.toUpperCase() || 'U'}
                                 </Avatar>
                               </ListItemAvatar>
                               <ListItemText
                                 primary={
                                   <Typography variant="body1" fontWeight={500}>
-                                    {participant.name}
+                                    {user.name || user.username}
                                   </Typography>
                                 }
                                 secondary={
                                   <Stack direction="row" spacing={1} flexWrap="wrap" gap={0.5} mt={0.5}>
-                                    {participant.email && (
+                                    {user.email && (
                                       <Chip 
                                         icon={<EmailIcon sx={{ fontSize: 14 }} />}
-                                        label={participant.email} 
+                                        label={user.email} 
                                         size="small" 
                                         variant="outlined" 
                                         sx={{ 
@@ -712,10 +776,10 @@ const handleCreateParticipant = async () => {
                                         }}
                                       />
                                     )}
-                                    {participant.telephone && (
+                                    {user.phone && (
                                       <Chip 
                                         icon={<PhoneIcon sx={{ fontSize: 14 }} />}
-                                        label={participant.telephone} 
+                                        label={user.phone} 
                                         size="small" 
                                         variant="outlined" 
                                         sx={{ 
@@ -726,24 +790,33 @@ const handleCreateParticipant = async () => {
                                         }}
                                       />
                                     )}
-                                    {participant.organization && (
+                                    {user.is_superuser && (
                                       <Chip 
-                                        icon={<BusinessIcon sx={{ fontSize: 14 }} />}
-                                        label={participant.organization} 
+                                        label="Admin" 
                                         size="small" 
-                                        variant="outlined" 
+                                        color="warning"
                                         sx={{ 
-                                          fontSize: '0.7rem', 
-                                          height: 24,
-                                          borderColor: alpha(theme.palette.primary.main, 0.2),
-                                          bgcolor: alpha(theme.palette.background.paper, 0.5)
+                                          height: 20, 
+                                          fontSize: '0.6rem',
+                                          fontWeight: 600
                                         }}
                                       />
                                     )}
+                                    <Chip 
+                                      label="Available" 
+                                      size="small" 
+                                      color="success"
+                                      sx={{ 
+                                        height: 20, 
+                                        fontSize: '0.6rem',
+                                        bgcolor: alpha(theme.palette.success.main, 0.1),
+                                        color: theme.palette.success.main
+                                      }}
+                                    />
                                   </Stack>
                                 }
                               />
-                              {selectedParticipants.some(p => p.id === participant.id) && (
+                              {selectedParticipants.some(p => p.id === user.id) && (
                                 <motion.div
                                   initial={{ scale: 0 }}
                                   animate={{ scale: 1 }}
@@ -762,7 +835,7 @@ const handleCreateParticipant = async () => {
               </Box>
               
               {/* Pagination */}
-              {totalPages > 1 && (
+              {totalUserPages > 1 && (
                 <Box sx={{ 
                   p: 2, 
                   borderTop: `1px solid ${theme.palette.divider}`, 
@@ -771,7 +844,7 @@ const handleCreateParticipant = async () => {
                 }}>
                   <Stack alignItems="center">
                     <Pagination
-                      count={totalPages}
+                      count={totalUserPages}
                       page={page}
                       onChange={(_, val) => setPage(val)}
                       color="primary"
@@ -793,7 +866,7 @@ const handleCreateParticipant = async () => {
             </Box>
           )}
           
-          {/* Tab 2: Create New Participant - Enhanced Design */}
+          {/* Tab 2: Create New Participant */}
           {activeTab === 1 && (
             <Box sx={{ p: isMobile ? 2 : 2.5, overflow: 'auto' }}>
               {/* Info Card */}
@@ -1189,7 +1262,7 @@ const handleCreateParticipant = async () => {
                   }
                 }}
               >
-                {submitting ? 'Adding...' : `Add ${selectedParticipants.length} Participant(s)`}
+                {submitting ? 'Adding...' : `Add ${selectedParticipants.length} User(s)`}
               </Button>
             </motion.div>
           )}

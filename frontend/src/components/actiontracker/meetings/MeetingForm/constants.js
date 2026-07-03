@@ -6,60 +6,25 @@
  * @property {string} description - Step description
  */
 
-/**
- * @typedef {Object} WeekDay
- * @property {string} value - Day value (lowercase)
- * @property {string} label - Short label (1-2 chars)
- * @property {string} full - Full day name
- * @property {number} dayIndex - JavaScript day index (0-6, Sunday=0)
- */
-
-/**
- * @typedef {Object} LevelInfo
- * @property {number} level - Level number
- * @property {string} name - Level name
- * @property {string} icon - Icon name (string, not JSX)
- * @property {string} color - Hex color code
- */
-
-/**
- * @typedef {Object} RecurrenceType
- * @property {string} value - Type value
- * @property {string} label - Display label
- * @property {string} icon - Emoji icon
- * @property {string} description - Human-readable description
- * @property {string} intervalText - Text for interval field
- */
-
 // ============================================================================
-// STEP CONFIGURATION
+// STEP CONFIGURATION — split into smaller pages to reduce per-step scrolling
 // ============================================================================
 
 /** @type {Step[]} */
 export const STEPS = [
-  { 
-    label: 'Meeting Details', 
-    description: 'Basic info, date, location' 
-  },
-  { 
-    label: 'Participants', 
-    description: 'Add attendees and roles' 
-  },
-  { 
-    label: 'Recurrence', 
-    description: 'Set up recurring schedule' 
-  },
-  { 
-    label: 'Review & Submit', 
-    description: 'Verify all information' 
-  },
+  { label: 'Basic Info', description: 'Title, date & time' },
+  { label: 'Access Control', description: 'Who can view this meeting' },
+  { label: 'Location', description: 'Where it happens' },
+  { label: 'Agenda', description: 'Meeting outline' },
+  { label: 'Participants', description: 'Add attendees and roles' },
+  { label: 'Recurrence', description: 'Set up recurring schedule' },
+  { label: 'Review & Submit', description: 'Verify all information' },
 ];
 
 // ============================================================================
 // WEEK DAYS
 // ============================================================================
 
-/** @type {WeekDay[]} */
 export const WEEK_DAYS = [
   { value: 'monday', label: 'M', full: 'Monday', dayIndex: 1 },
   { value: 'tuesday', label: 'T', full: 'Tuesday', dayIndex: 2 },
@@ -70,17 +35,13 @@ export const WEEK_DAYS = [
   { value: 'sunday', label: 'S', full: 'Sunday', dayIndex: 0 }
 ];
 
-// Helper to get day by value
 export const getDayByValue = (value) => WEEK_DAYS.find(day => day.value === value);
-
-// Helper to get day by index
 export const getDayByIndex = (index) => WEEK_DAYS.find(day => day.dayIndex === index);
 
 // ============================================================================
 // LOCATION LEVELS
 // ============================================================================
 
-/** @type {LevelInfo[]} */
 export const ADDRESS_LEVELS = [
   { level: 1, name: 'Country', icon: 'PublicIcon', color: '#4CAF50' },
   { level: 2, name: 'Region', icon: 'FlagIcon', color: '#2196F3' },
@@ -91,7 +52,6 @@ export const ADDRESS_LEVELS = [
   { level: 7, name: 'Village', icon: 'HomeIcon', color: '#8BC34A' },
 ];
 
-/** @type {LevelInfo[]} */
 export const BUILDING_LEVELS = [
   { level: 11, name: 'Office', icon: 'ApartmentIcon', color: '#E91E63' },
   { level: 12, name: 'Building', icon: 'BusinessIcon', color: '#3F51B5' },
@@ -99,15 +59,8 @@ export const BUILDING_LEVELS = [
   { level: 14, name: 'Conference', icon: 'EventSeatIcon', color: '#673AB7' },
 ];
 
-// Combined location levels (useful for lookup)
 export const ALL_LOCATION_LEVELS = [...ADDRESS_LEVELS, ...BUILDING_LEVELS];
 
-/**
- * Get location level info by level number
- * @param {number} level - Level number
- * @param {string} mode - 'address' or 'buildings'
- * @returns {LevelInfo | undefined}
- */
 export const getLocationLevel = (level, mode = 'address') => {
   const levels = mode === 'buildings' ? BUILDING_LEVELS : ADDRESS_LEVELS;
   return levels.find(l => l.level === level);
@@ -117,7 +70,6 @@ export const getLocationLevel = (level, mode = 'address') => {
 // RECURRENCE CONFIGURATION
 // ============================================================================
 
-/** @type {RecurrenceType[]} */
 export const RECURRENCE_TYPES = [
   { value: 'daily', label: 'Daily', icon: '📅', description: 'Repeats every day', intervalText: 'day(s)' },
   { value: 'weekly', label: 'Weekly', icon: '📆', description: 'Repeats every week on selected days', intervalText: 'week(s)' },
@@ -127,18 +79,15 @@ export const RECURRENCE_TYPES = [
   { value: 'yearly', label: 'Yearly', icon: '🎉', description: 'Repeats every year', intervalText: 'year(s)' }
 ];
 
-// Recurrence type lookup helpers
 export const getRecurrenceType = (value) => RECURRENCE_TYPES.find(t => t.value === value);
 export const getRecurrenceIntervalText = (type) => getRecurrenceType(type)?.intervalText || 'time(s)';
 
-/** @type {Array<{value: string, label: string}>} */
 export const END_OPTIONS = [
   { value: 'never', label: 'Never' },
   { value: 'after', label: 'After X occurrences' },
   { value: 'on', label: 'On date' }
 ];
 
-// Recurrence presets for quick selection
 export const RECURRENCE_PRESETS = {
   daily: { type: 'daily', interval: 1 },
   weekly: { type: 'weekly', interval: 1, days: ['monday'] },
@@ -152,30 +101,25 @@ export const RECURRENCE_PRESETS = {
 // VISIBILITY & ACCESS
 // ============================================================================
 
-/** @type {Array<{value: string, label: string, description: string, color: string}>} */
 export const VISIBILITY_OPTIONS = [
   { value: 'open', label: 'Open to All', description: 'Anyone can view and join this meeting', color: '#4CAF50' },
   { value: 'department', label: 'Department Only', description: 'Restricted to selected department only', color: '#FF9800' }
 ];
 
-// Visibility helper
 export const isRestrictedVisibility = (visibility) => visibility === 'department';
 
 // ============================================================================
 // PARTICIPANT CONFIGURATION
 // ============================================================================
 
-/** @type {Array<{value: string, label: string, icon?: string}>} */
 export const PARTICIPANT_TABS = [
   { value: 'existing', label: 'Existing Users', icon: 'PersonSearchIcon' },
   { value: 'manual', label: 'Add Manually', icon: 'PersonAddIcon' },
   { value: 'lists', label: 'Participant Lists', icon: 'ListAltIcon' }
 ];
 
-// Maximum participants per meeting
 export const MAX_PARTICIPANTS = 100;
 
-// Participant roles
 export const PARTICIPANT_ROLES = {
   CHAIRPERSON: 'chairperson',
   SECRETARY: 'secretary',
@@ -183,7 +127,6 @@ export const PARTICIPANT_ROLES = {
   OBSERVER: 'observer',
 };
 
-/** @type {Array<{value: string, label: string, color: string}>} */
 export const PARTICIPANT_ROLES_OPTIONS = [
   { value: PARTICIPANT_ROLES.CHAIRPERSON, label: 'Chairperson', color: '#1976D2' },
   { value: PARTICIPANT_ROLES.SECRETARY, label: 'Secretary', color: '#DC004E' },
@@ -195,7 +138,6 @@ export const PARTICIPANT_ROLES_OPTIONS = [
 // MEETING CONSTANTS
 // ============================================================================
 
-// Meeting statuses
 export const MEETING_STATUSES = {
   DRAFT: 'draft',
   SCHEDULED: 'scheduled',
@@ -205,7 +147,6 @@ export const MEETING_STATUSES = {
   POSTPONED: 'postponed',
 };
 
-/** @type {Array<{value: string, label: string, color: string}>} */
 export const MEETING_STATUS_OPTIONS = [
   { value: MEETING_STATUSES.DRAFT, label: 'Draft', color: '#9E9E9E' },
   { value: MEETING_STATUSES.SCHEDULED, label: 'Scheduled', color: '#2196F3' },
@@ -225,7 +166,6 @@ export const LOCATION_MODES = {
   BUILDINGS: 'buildings',
 };
 
-/** @type {Array<{value: string, label: string, icon: string}>} */
 export const LOCATION_MODE_OPTIONS = [
   { value: LOCATION_MODES.ADDRESS, label: 'Address', icon: 'PublicIcon' },
   { value: LOCATION_MODES.STRUCTURE, label: 'Structure', icon: 'StructureIcon' },
@@ -236,19 +176,9 @@ export const LOCATION_MODE_OPTIONS = [
 // ============================================================================
 
 export const VALIDATION_RULES = {
-  TITLE: {
-    required: true,
-    minLength: 3,
-    maxLength: 200,
-  },
-  DESCRIPTION: {
-    required: false,
-    maxLength: 5000,
-  },
-  AGENDA: {
-    required: false,
-    maxLength: 50000,
-  },
+  TITLE: { required: true, minLength: 3, maxLength: 200 },
+  DESCRIPTION: { required: false, maxLength: 5000 },
+  AGENDA: { required: false, maxLength: 50000 },
 };
 
 // ============================================================================
@@ -281,10 +211,6 @@ export const DEFAULT_MEETING_FORM = {
   gps_longitude: '',
 };
 
-// ============================================================================
-// EXPORT ALL
-// ============================================================================
-
 export default {
   STEPS,
   WEEK_DAYS,
@@ -306,7 +232,6 @@ export default {
   DEFAULT_RECURRENCE,
   DEFAULT_MEETING_FORM,
   MAX_PARTICIPANTS,
-  // Helpers
   getDayByValue,
   getDayByIndex,
   getLocationLevel,

@@ -6,7 +6,8 @@ import {
   Grid, FormControl, InputLabel, Select, MenuItem, Switch,
   FormControlLabel, Alert, Snackbar, CircularProgress, InputAdornment,
   Tooltip, Card, CardContent, Stack, Divider, useTheme, useMediaQuery,
-  Collapse, Badge, alpha, Autocomplete, Fade,
+  Collapse, Badge, alpha, Autocomplete, Fade, Checkbox, ListItemText,
+  Skeleton
 } from '@mui/material';
 import {
   SearchOutlined, EditOutlined, DeleteOutlined, LockOutlined,
@@ -18,18 +19,18 @@ import {
   AccountTreeOutlined, SupervisorAccountOutlined, CheckCircleOutlined,
   CancelOutlined, TuneOutlined, ChevronRightOutlined, FolderOutlined,
   FolderOpenOutlined, SwapHorizOutlined, CheckBoxOutlined,
-  CheckBoxOutlineBlankOutlined,
+  CheckBoxOutlineBlankOutlined, WarningAmberOutlined,
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
   fetchUsers, createUser, updateUser, deleteUser,
   resetUserPassword, updateUserRoles,
 } from '../../store/slices/adminSlice';
-import { fetchRoles, selectAllRoles, selectRolesLoading } from '../../store/slices/roleSlice';
+import { fetchRoles, selectAllRoles } from '../../store/slices/roleSlice';
 import api from '../../services/api';
 import UserDetailPanel from './UserDetailPanel';
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const ROLE_PALETTE = {
   head:       { color: 'error',   label: 'Head',       bgColor: '#fef2f2', borderColor: '#fca5a5', textColor: '#b91c1c' },
   manager:    { color: 'warning', label: 'Manager',    bgColor: '#fffbeb', borderColor: '#fcd34d', textColor: '#92400e' },
@@ -41,54 +42,39 @@ const ROLE_PALETTE = {
 
 const ASSIGNABLE_ROLES = ['member', 'supervisor', 'manager', 'head'];
 
-// ─── Tiny helpers ─────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 const initials = (u) =>
   u?.first_name?.[0]?.toUpperCase() || u?.username?.[0]?.toUpperCase() || 'U';
 
 const fullName = (u) =>
   [u?.first_name, u?.last_name].filter(Boolean).join(' ') || u?.username || '—';
 
-/**
- * Groups a flat department list into a tree structure.
- * Supports multiple levels of nesting.
- */
 const buildDeptTree = (departments = []) => {
   if (!departments.length) return [];
-  
-  // Create a map of all departments
+
   const map = {};
   const roots = [];
-  
-  // First, create a map with all departments
+
   departments.forEach((dept) => {
-    map[dept.id] = { 
-      ...dept, 
+    map[dept.id] = {
+      ...dept,
       children: [],
-      level: 0
+      level: 0,
     };
   });
-  
-  // Build the tree structure
+
   departments.forEach((dept) => {
     const node = map[dept.id];
-    
     if (dept.parent_id && map[dept.parent_id]) {
-      // Has a valid parent - add as child
       map[dept.parent_id].children.push(node);
       node.level = map[dept.parent_id].level + 1;
     } else if (!dept.parent_id) {
-      // No parent - this is a root node
-      roots.push(node);
-    } else {
-      // Parent_id exists but parent not found - add as root with warning
-      console.warn(`Department ${dept.id} (${dept.name}) has parent_id ${dept.parent_id} but parent not found`);
       roots.push(node);
     }
   });
-  
-  // Sort children by order or name
+
   const sortChildren = (node) => {
-    if (node.children && node.children.length) {
+    if (node.children?.length) {
       node.children.sort((a, b) => {
         if (a.order !== undefined && b.order !== undefined) {
           return a.order - b.order;
@@ -98,21 +84,20 @@ const buildDeptTree = (departments = []) => {
       node.children.forEach(sortChildren);
     }
   };
-  
+
   roots.forEach(sortChildren);
-  
-  // Sort roots as well
   roots.sort((a, b) => {
     if (a.order !== undefined && b.order !== undefined) {
       return a.order - b.order;
     }
     return a.name.localeCompare(b.name);
   });
-  
+
   return roots;
 };
 
-// ─── Inline department pill with unlink ──────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 const DeptPill = ({ assignment, onUnlink, compact = false }) => {
   const cfg = ROLE_PALETTE[assignment.role] || ROLE_PALETTE.member;
   return (
@@ -124,14 +109,19 @@ const DeptPill = ({ assignment, onUnlink, compact = false }) => {
         variant="outlined"
         onDelete={onUnlink ? () => onUnlink(assignment.department_id) : undefined}
         deleteIcon={onUnlink ? <LinkOffOutlined sx={{ fontSize: '13px !important' }} /> : undefined}
-        sx={{ maxWidth: 140, fontSize: '0.72rem', height: 22 }}
+        sx={{ 
+          maxWidth: 140, 
+          fontSize: '0.72rem', 
+          height: 22,
+          '& .MuiChip-label': { px: 1 },
+          '& .MuiChip-deleteIcon': { fontSize: '14px !important', mx: 0.5 }
+        }}
       />
     </Tooltip>
   );
 };
 
-// ─── Stat card ────────────────────────────────────────────────────────────────
-const StatCard = ({ label, value, icon, color }) => (
+const StatCard = ({ label, value, icon, color, isLoading }) => (
   <Paper
     elevation={0}
     sx={{
@@ -142,6 +132,11 @@ const StatCard = ({ label, value, icon, color }) => (
       display: 'flex',
       flexDirection: 'column',
       gap: 0.5,
+      transition: 'all 0.2s',
+      '&:hover': {
+        borderColor: 'primary.main',
+        bgcolor: (theme) => alpha(theme.palette.primary.main, 0.02),
+      },
     }}
   >
     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -155,13 +150,59 @@ const StatCard = ({ label, value, icon, color }) => (
       </Typography>
       <Box sx={{ color, '& svg': { fontSize: 16 } }}>{icon}</Box>
     </Box>
-    <Typography variant="h4" fontWeight={800} color={color} sx={{ lineHeight: 1 }}>
-      {value}
-    </Typography>
+    {isLoading ? (
+      <Skeleton variant="text" width={50} height={40} />
+    ) : (
+      <Typography variant="h4" fontWeight={800} color={color} sx={{ lineHeight: 1 }}>
+        {value}
+      </Typography>
+    )}
   </Paper>
 );
 
-// ─── Role chip (inline selector) ─────────────────────────────────────────────
+// ─── Compact Stat Card for Mobile ──────────────────────────────────────────
+const CompactStatCard = ({ label, value, icon, color, isLoading }) => (
+  <Box
+    sx={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 0.75,
+      px: 1.5,
+      py: 0.75,
+      borderRadius: 2,
+      border: '1px solid',
+      borderColor: 'divider',
+      whiteSpace: 'nowrap',
+      minWidth: 'fit-content',
+      bgcolor: 'background.paper',
+      flexShrink: 0,
+      transition: 'all 0.2s',
+      '&:hover': {
+        borderColor: color,
+        bgcolor: (t) => alpha(t.palette.primary.main, 0.02),
+      },
+    }}
+  >
+    <Box sx={{ color, display: 'flex', '& svg': { fontSize: 16 } }}>{icon}</Box>
+    <Box>
+      <Typography 
+        variant="caption" 
+        color="text.secondary" 
+        sx={{ fontSize: '0.55rem', display: 'block', lineHeight: 1.1, textTransform: 'uppercase', letterSpacing: 0.3 }}
+      >
+        {label}
+      </Typography>
+      {isLoading ? (
+        <Skeleton variant="text" width={20} height={16} />
+      ) : (
+        <Typography variant="body2" fontWeight={700} color={color} sx={{ lineHeight: 1.2 }}>
+          {value}
+        </Typography>
+      )}
+    </Box>
+  </Box>
+);
+
 const RoleChip = ({ role, onChange, disabled }) => {
   const cfg = ROLE_PALETTE[role] || ROLE_PALETTE.member;
   return (
@@ -185,7 +226,11 @@ const RoleChip = ({ role, onChange, disabled }) => {
           '& .MuiSelect-icon': { color: cfg.textColor, fontSize: 16 },
           borderRadius: 1,
         }}
-        MenuProps={{ PaperProps: { sx: { mt: 0.5, borderRadius: 1.5 } } }}
+        MenuProps={{ 
+          PaperProps: { 
+            sx: { mt: 0.5, borderRadius: 1.5, maxHeight: 200 } 
+          } 
+        }}
       >
         {ASSIGNABLE_ROLES.map((r) => {
           const c = ROLE_PALETTE[r];
@@ -208,42 +253,39 @@ const RoleChip = ({ role, onChange, disabled }) => {
   );
 };
 
-// ─── Recursive Department Tree Node ────────────────────────────────────────
-const DeptTreeNode = ({ 
-  node, 
-  level = 0, 
-  selectedMap, 
-  onToggleChild, 
+// ─── Recursive Department Tree Node ──────────────────────────────────────────
+const DeptTreeNode = ({
+  node,
+  level = 0,
+  selectedMap,
+  onToggleChild,
   onRoleChange,
   searchTerm = '',
-  defaultOpen = false 
+  defaultOpen = false
 }) => {
   const theme = useTheme();
   const [open, setOpen] = useState(defaultOpen);
   const hasChildren = node.children && node.children.length > 0;
   const isSelected = !!selectedMap[node.id];
   const selectedChildrenCount = node.children?.filter(c => selectedMap[c.id]).length || 0;
-  
-  // Auto-open if any child selected or if search matches
+
   useEffect(() => {
     if (selectedChildrenCount > 0 || (searchTerm && node.name.toLowerCase().includes(searchTerm.toLowerCase()))) {
       setOpen(true);
     }
   }, [selectedChildrenCount, searchTerm, node.name]);
-  
-  // Check if this node or any children match search
+
   const matchesSearch = !searchTerm || node.name.toLowerCase().includes(searchTerm.toLowerCase());
-  const hasMatchingChildren = node.children?.some(child => 
+  const hasMatchingChildren = node.children?.some(child =>
     child.name.toLowerCase().includes(searchTerm?.toLowerCase() || '')
   );
-  
+
   if (searchTerm && !matchesSearch && !hasMatchingChildren) {
     return null;
   }
-  
+
   return (
     <Box sx={{ position: 'relative' }}>
-      {/* Tree connector lines for non-root nodes */}
       {level > 0 && (
         <>
           <Box
@@ -268,8 +310,7 @@ const DeptTreeNode = ({
           />
         </>
       )}
-      
-      {/* Node row */}
+
       <Box
         sx={{
           display: 'flex',
@@ -280,10 +321,10 @@ const DeptTreeNode = ({
           ml: level * 2,
           borderRadius: 1.5,
           cursor: 'pointer',
-          transition: 'background 0.13s',
+          transition: 'all 0.13s',
           bgcolor: isSelected ? alpha(theme.palette.primary.main, 0.06) : 'transparent',
           '&:hover': {
-            bgcolor: isSelected 
+            bgcolor: isSelected
               ? alpha(theme.palette.primary.main, 0.09)
               : alpha(theme.palette.action.hover, 0.6),
           },
@@ -296,7 +337,6 @@ const DeptTreeNode = ({
           }
         }}
       >
-        {/* Expand/Collapse icon */}
         <Box sx={{ color: 'text.disabled', display: 'flex', flexShrink: 0, width: 20 }}>
           {hasChildren ? (
             <ChevronRightOutlined
@@ -310,13 +350,12 @@ const DeptTreeNode = ({
             <Box sx={{ width: 18 }} />
           )}
         </Box>
-        
-        {/* Checkbox or selection indicator */}
-        <Box 
-          sx={{ 
-            color: isSelected ? 'primary.main' : 'text.disabled', 
-            display: 'flex', 
-            flexShrink: 0 
+
+        <Box
+          sx={{
+            color: isSelected ? 'primary.main' : 'text.disabled',
+            display: 'flex',
+            flexShrink: 0
           }}
           onClick={(e) => {
             e.stopPropagation();
@@ -327,8 +366,7 @@ const DeptTreeNode = ({
             ? <CheckBoxOutlined sx={{ fontSize: 18 }} />
             : <CheckBoxOutlineBlankOutlined sx={{ fontSize: 18 }} />}
         </Box>
-        
-        {/* Icon based on node type */}
+
         <Box sx={{ color: open ? 'primary.main' : 'text.secondary', display: 'flex', flexShrink: 0 }}>
           {hasChildren ? (
             open ? <FolderOpenOutlined sx={{ fontSize: 18 }} /> : <FolderOutlined sx={{ fontSize: 18 }} />
@@ -336,14 +374,13 @@ const DeptTreeNode = ({
             <ApartmentOutlined sx={{ fontSize: 16 }} />
           )}
         </Box>
-        
-        {/* Node info */}
+
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography 
-            variant="body2" 
+          <Typography
+            variant="body2"
             fontWeight={isSelected ? 600 : 400}
             color={isSelected ? 'primary.main' : 'text.primary'}
-            noWrap 
+            noWrap
             sx={{ fontSize: '0.82rem' }}
           >
             {node.name}
@@ -354,8 +391,7 @@ const DeptTreeNode = ({
             </Typography>
           )}
         </Box>
-        
-        {/* Member count badge */}
+
         {node.member_count != null && node.member_count > 0 && (
           <Chip
             label={`${node.member_count}`}
@@ -364,8 +400,7 @@ const DeptTreeNode = ({
             sx={{ height: 18, fontSize: '0.65rem' }}
           />
         )}
-        
-        {/* Selection count badge for folders */}
+
         {hasChildren && selectedChildrenCount > 0 && (
           <Chip
             label={`${selectedChildrenCount} selected`}
@@ -374,19 +409,17 @@ const DeptTreeNode = ({
             sx={{ height: 18, fontSize: '0.65rem', fontWeight: 600 }}
           />
         )}
-        
-        {/* Role selector - only visible when selected (leaf nodes) */}
+
         {isSelected && !hasChildren && (
           <Box onClick={(e) => e.stopPropagation()}>
-            <RoleChip 
-              role={selectedMap[node.id] || 'member'} 
-              onChange={(r) => onRoleChange(node.id, r)} 
+            <RoleChip
+              role={selectedMap[node.id] || 'member'}
+              onChange={(r) => onRoleChange(node.id, r)}
             />
           </Box>
         )}
       </Box>
-      
-      {/* Children */}
+
       {hasChildren && (
         <Collapse in={open}>
           <Box sx={{ pl: 0.5 }}>
@@ -405,14 +438,12 @@ const DeptTreeNode = ({
           </Box>
         </Collapse>
       )}
-      
-      {/* Divider between root nodes */}
+
       {level === 0 && <Divider sx={{ mt: 0.5, opacity: 0.5 }} />}
     </Box>
   );
 };
 
-// ─── Diff preview row ─────────────────────────────────────────────────────────
 const DiffRow = ({ icon, color, children }) => (
   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
     <Box sx={{ color, display: 'flex', flexShrink: 0 }}>{icon}</Box>
@@ -422,34 +453,29 @@ const DiffRow = ({ icon, color, children }) => (
   </Box>
 );
 
-// ─── Enhanced Department Dialog ───────────────────────────────────────────────
-// ─── Enhanced Department Dialog ───────────────────────────────────────────────
+// ─── Department Dialog ────────────────────────────────────────────────────────
 const DepartmentDialog = ({
   open, onClose, user, departments, currentAssignments, onSave, saving,
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // selectedMap: { [deptId]: role }
   const [selectedMap, setSelectedMap] = useState({});
   const [search, setSearch] = useState('');
   const searchRef = useRef(null);
 
-  // Filter to only active departments
   const activeDepartments = useMemo(() => {
     return departments.filter(dept => dept.is_active !== false);
   }, [departments]);
 
-  // Build tree from active departments list
   const deptTree = useMemo(() => buildDeptTree(activeDepartments), [activeDepartments]);
 
-  // Create a quick lookup map for department names (for diff preview)
   const deptNameMap = useMemo(() => {
     const map = {};
     const buildMap = (nodes) => {
       nodes.forEach(node => {
         map[node.id] = node.name;
-        if (node.children && node.children.length) {
+        if (node.children?.length) {
           buildMap(node.children);
         }
       });
@@ -458,7 +484,6 @@ const DepartmentDialog = ({
     return map;
   }, [deptTree]);
 
-  // Initialize from current assignments on open
   useEffect(() => {
     if (open) {
       const initial = {};
@@ -471,15 +496,14 @@ const DepartmentDialog = ({
     }
   }, [open, currentAssignments]);
 
-  // Filter tree by search
   const filteredTree = useMemo(() => {
     if (!search.trim()) return deptTree;
     const q = search.toLowerCase();
-    
+
     const filterNode = (node) => {
       const matchesName = node.name.toLowerCase().includes(q);
       const filteredChildren = node.children.filter(filterNode);
-      
+
       if (matchesName || filteredChildren.length > 0) {
         return {
           ...node,
@@ -488,7 +512,7 @@ const DepartmentDialog = ({
       }
       return null;
     };
-    
+
     return deptTree.map(filterNode).filter(Boolean);
   }, [deptTree, search]);
 
@@ -507,11 +531,10 @@ const DepartmentDialog = ({
     setSelectedMap((prev) => ({ ...prev, [deptId]: role }));
   }, []);
 
-  // Compute diff
   const { toAdd, toRemove, toChange } = useMemo(() => {
     const prevMap = {};
-    currentAssignments.forEach((a) => { 
-      prevMap[a.department_id] = a.role || 'member'; 
+    currentAssignments.forEach((a) => {
+      prevMap[a.department_id] = a.role || 'member';
     });
 
     const toAdd = Object.keys(selectedMap).filter((id) => !prevMap[id]);
@@ -526,10 +549,7 @@ const DepartmentDialog = ({
   const hasChanges = toAdd.length + toRemove.length + toChange.length > 0;
   const selectedCount = Object.keys(selectedMap).length;
 
-  // Get department name from the map (much faster and reliable)
-  const getDeptName = (id) => {
-    return deptNameMap[id] || id;
-  };
+  const getDeptName = (id) => deptNameMap[id] || id;
 
   const handleSave = () => {
     const removeIds = toRemove;
@@ -550,10 +570,10 @@ const DepartmentDialog = ({
         sx: {
           borderRadius: isMobile ? 0 : 2.5,
           overflow: 'hidden',
+          maxHeight: '90vh',
         },
       }}
     >
-      {/* ── Header ── */}
       <DialogTitle
         sx={{
           pb: 1.5,
@@ -580,7 +600,6 @@ const DepartmentDialog = ({
             </Typography>
           </Box>
 
-          {/* Selected count badge */}
           <Chip
             icon={<ApartmentOutlined sx={{ fontSize: '14px !important' }} />}
             label={`${selectedCount} assigned`}
@@ -599,8 +618,6 @@ const DepartmentDialog = ({
       </DialogTitle>
 
       <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-        {/* ── Search ── */}
         <Box sx={{ px: 2.5, pt: 2, pb: 1.5 }}>
           <TextField
             inputRef={searchRef}
@@ -627,11 +644,10 @@ const DepartmentDialog = ({
           />
         </Box>
 
-        {/* ── Legend ── */}
         <Box
           sx={{
-            px: 2.5, pb: 1,
-            display: 'flex', alignItems: 'center', gap: 2,
+            px: 2.5, pb: 1.5,
+            display: 'flex', alignItems: 'center', gap: 1,
             flexWrap: 'wrap',
           }}
         >
@@ -659,9 +675,8 @@ const DepartmentDialog = ({
           })}
         </Box>
 
-        {/* Info alert about active departments only */}
         {activeDepartments.length !== departments.length && (
-          <Box sx={{ px: 2.5, pb: 1 }}>
+          <Box sx={{ px: 2.5, pb: 1.5 }}>
             <Alert severity="info" icon={<BusinessOutlined />} sx={{ py: 0, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
               Showing only active departments ({activeDepartments.length} of {departments.length})
             </Alert>
@@ -670,7 +685,6 @@ const DepartmentDialog = ({
 
         <Divider />
 
-        {/* ── Department Tree ── */}
         <Box
           sx={{
             flex: 1,
@@ -679,6 +693,13 @@ const DepartmentDialog = ({
             py: 1,
             minHeight: 260,
             maxHeight: isMobile ? 'calc(100vh - 480px)' : 340,
+            '&::-webkit-scrollbar': {
+              width: 4,
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'divider',
+              borderRadius: 4,
+            },
           }}
         >
           {filteredTree.length === 0 ? (
@@ -705,7 +726,6 @@ const DepartmentDialog = ({
 
         <Divider />
 
-        {/* ── Diff preview ── */}
         {hasChanges && (
           <Box
             sx={{
@@ -757,7 +777,6 @@ const DepartmentDialog = ({
         )}
       </DialogContent>
 
-      {/* ── Actions ── */}
       <DialogActions
         sx={{
           px: 2.5, py: 2,
@@ -796,7 +815,7 @@ const DepartmentDialog = ({
   );
 };
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 const UserManagement = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -805,52 +824,49 @@ const UserManagement = () => {
   const { user: currentUser } = useSelector((s) => s.auth);
   const rolesList = useSelector(selectAllRoles);
 
-  // Pagination / search / filter
-  const [page, setPage]               = useState(0);
+  const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 5 : 10);
-  const [searchTerm, setSearchTerm]   = useState('');
-  const [statusFilter, setStatusFilter]         = useState('all');
-  const [roleFilter, setRoleFilter]             = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [superAdminFilter, setSuperAdminFilter] = useState('all');
   const [departmentFilter, setDepartmentFilter] = useState('all');
-  const [showFilters, setShowFilters]           = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
-  // Dialogs / panels
-  const [dialogOpen, setDialogOpen]   = useState(false);
-  const [dialogMode, setDialogMode]   = useState('create');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState('create');
   const [selectedUser, setSelectedUser] = useState(null);
-  const [detailUser, setDetailUser]   = useState(null);
+  const [detailUser, setDetailUser] = useState(null);
 
-  // Department dialog
+  const [rolesMenuOpen, setRolesMenuOpen] = useState(false);
+
   const [deptDialogOpen, setDeptDialogOpen] = useState(false);
   const [deptDialogUser, setDeptDialogUser] = useState(null);
-  const [savingDepts, setSavingDepts]       = useState(false);
+  const [savingDepts, setSavingDepts] = useState(false);
 
-  // Data
-  const [departments, setDepartments]         = useState([]);
-  const [userDepartmentsMap, setUserDeptMap]  = useState({});
+  const [departments, setDepartments] = useState([]);
+  const [userDepartmentsMap, setUserDeptMap] = useState({});
   const [loadingUserDepts, setLoadingUserDepts] = useState({});
 
-  // Form
   const [formData, setFormData] = useState({
     email: '', username: '', first_name: '', last_name: '', phone: '',
     roles: [], is_active: true, is_verified: false, is_superuser: false,
     department_ids: [],
   });
   const [passwordData, setPasswordData] = useState({ password: '', confirm_password: '' });
-  const [formErrors, setFormErrors]     = useState({});
+  const [formErrors, setFormErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [expandedUser, setExpandedUser] = useState(null);
-  const [snackbar, setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // ── Data fetching ────────────────────────────────────────────────────────────
   const fetchDepartments = useCallback(async () => {
     try {
       const r = await api.get('/departments');
-      console.log('Departments loaded:', r.data);
       setDepartments(r.data || []);
-    } catch { 
-      setDepartments([]); 
+    } catch {
+      setDepartments([]);
     }
   }, []);
 
@@ -867,7 +883,10 @@ const UserManagement = () => {
     }
   }, [userDepartmentsMap, loadingUserDepts]);
 
-  useEffect(() => { dispatch(fetchRoles()); fetchDepartments(); }, [dispatch]);
+  useEffect(() => { 
+    dispatch(fetchRoles()); 
+    fetchDepartments(); 
+  }, [dispatch]);
 
   const loadUsers = useCallback(() => {
     dispatch(fetchUsers({
@@ -883,16 +902,29 @@ const UserManagement = () => {
 
   useEffect(() => {
     if (users?.length) {
-      users.forEach((u) => { if (!userDepartmentsMap[u.id]) fetchUserDepts(u.id); });
+      users.forEach((u) => { 
+        if (!userDepartmentsMap[u.id]) fetchUserDepts(u.id); 
+      });
     }
   }, [users]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setUserDeptMap({});
+    await Promise.all([
+      loadUsers(),
+      dispatch(fetchRoles()),
+      fetchDepartments()
+    ]);
+    setIsRefreshing(false);
+    setSnackbar({ open: true, message: 'Data refreshed', severity: 'success' });
+  };
 
   // ── Enhanced department save handler ─────────────────────────────────────────
   const handleSaveDepartments = async ({ addEntries, changeEntries, removeIds }) => {
     if (!deptDialogUser) return;
     setSavingDepts(true);
     try {
-      // Add new assignments (with individual roles)
       for (const { id, role } of addEntries) {
         await api.post(`/users/${deptDialogUser.id}/departments`, {
           department_ids: [id],
@@ -900,12 +932,10 @@ const UserManagement = () => {
         });
       }
 
-      // Update role for existing assignments
       for (const { id, role } of changeEntries) {
         await api.patch(`/users/${deptDialogUser.id}/departments/${id}`, { role });
       }
 
-      // Remove unlinked departments
       for (const deptId of removeIds) {
         await api.delete(`/users/${deptDialogUser.id}/departments/${deptId}`);
       }
@@ -1123,21 +1153,34 @@ const UserManagement = () => {
       is_superuser: user.is_superuser || false,
       department_ids: assignments.map((a) => a.department_id),
     });
-    setFormErrors({});
-    setDialogOpen(true);
-  };
-
-  const handleOpenDelete = (user) => { setDialogMode('delete'); setSelectedUser(user); setDialogOpen(true); };
-  const handleOpenReset  = (user) => {
-    setDialogMode('reset'); setSelectedUser(user);
     setPasswordData({ password: '', confirm_password: '' });
     setFormErrors({});
     setDialogOpen(true);
   };
+
+  const handleOpenDelete = (user) => {
+    setDialogMode('delete');
+    setSelectedUser(user);
+    setPasswordData({ password: '', confirm_password: '' });
+    setFormErrors({});
+    setDialogOpen(true);
+  };
+
+  const handleOpenReset = (user) => {
+    setDialogMode('reset'); 
+    setSelectedUser(user);
+    setPasswordData({ password: '', confirm_password: '' });
+    setFormErrors({});
+    setDialogOpen(true);
+  };
+  
   const handleOpenCreate = () => {
     setDialogMode('create');
-    setFormData({ email:'', username:'', first_name:'', last_name:'', phone:'',
-      roles:[], is_active:true, is_verified:false, is_superuser:false, department_ids:[] });
+    setSelectedUser(null);
+    setFormData({ 
+      email:'', username:'', first_name:'', last_name:'', phone:'',
+      roles:[], is_active:true, is_verified:false, is_superuser:false, department_ids:[] 
+    });
     setPasswordData({ password:'', confirm_password:'' });
     setFormErrors({});
     setDialogOpen(true);
@@ -1146,14 +1189,12 @@ const UserManagement = () => {
   // ── Form validation / submit ─────────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!formData.email) e.email = 'Required';
-    else if (!/\S+@\S+\.\S+/.test(formData.email)) e.email = 'Invalid email';
-    if (!formData.username || formData.username.length < 3) e.username = 'Min 3 chars';
-    if (dialogMode === 'create') {
-      if (!passwordData.password || passwordData.password.length < 8) e.password = 'Min 8 chars';
-      if (passwordData.password !== passwordData.confirm_password) e.confirm_password = 'Mismatch';
+    if (dialogMode === 'create' || dialogMode === 'edit') {
+      if (!formData.email) e.email = 'Required';
+      else if (!/\S+@\S+\.\S+/.test(formData.email)) e.email = 'Invalid email';
+      if (!formData.username || formData.username.length < 3) e.username = 'Min 3 chars';
     }
-    if (dialogMode === 'reset') {
+    if (dialogMode === 'create' || dialogMode === 'reset') {
       if (!passwordData.password || passwordData.password.length < 8) e.password = 'Min 8 chars';
       if (passwordData.password !== passwordData.confirm_password) e.confirm_password = 'Mismatch';
     }
@@ -1166,45 +1207,69 @@ const UserManagement = () => {
     setIsSubmitting(true);
     try {
       if (dialogMode === 'create') {
-        await dispatch(createUser({ ...formData, password: passwordData.password })).unwrap();
-        setSnackbar({ open: true, message: 'User created', severity: 'success' });
+        const created = await dispatch(createUser({ ...formData, password: passwordData.password })).unwrap();
+
+        if (formData.department_ids?.length && created?.id) {
+          await api.post(`/users/${created.id}/departments`, {
+            department_ids: formData.department_ids,
+            role: 'member',
+          });
+          await fetchUserDepts(created.id, true);
+        }
+
+        setSnackbar({ open: true, message: 'User created successfully', severity: 'success' });
       } else if (dialogMode === 'edit') {
         await dispatch(updateUser({
-          id: selectedUser.id, email: formData.email, username: formData.username,
-          first_name: formData.first_name, last_name: formData.last_name,
-          phone: formData.phone, is_active: formData.is_active,
-          is_verified: formData.is_verified, is_superuser: formData.is_superuser,
+          id: selectedUser.id, 
+          email: formData.email, 
+          username: formData.username,
+          first_name: formData.first_name, 
+          last_name: formData.last_name,
+          phone: formData.phone, 
+          is_active: formData.is_active,
+          is_verified: formData.is_verified, 
+          is_superuser: formData.is_superuser,
         })).unwrap();
 
         const prevRoles = [...(selectedUser.roles || [])].sort();
         const nextRoles = [...(formData.roles || [])].sort();
-        if (JSON.stringify(prevRoles) !== JSON.stringify(nextRoles))
+        if (JSON.stringify(prevRoles) !== JSON.stringify(nextRoles)) {
           await dispatch(updateUserRoles({ id: selectedUser.id, roles: nextRoles })).unwrap();
+        }
 
         const prevDepts = (userDepartmentsMap[selectedUser.id] || []).map((a) => a.department_id).sort();
         const nextDepts = [...(formData.department_ids || [])].sort();
         if (JSON.stringify(prevDepts) !== JSON.stringify(nextDepts)) {
           const toAdd = nextDepts.filter((id) => !prevDepts.includes(id));
-          const toRm  = prevDepts.filter((id) => !nextDepts.includes(id));
-          if (toAdd.length)
+          const toRm = prevDepts.filter((id) => !nextDepts.includes(id));
+          if (toAdd.length) {
             await api.post(`/users/${selectedUser.id}/departments`, { department_ids: toAdd, role: 'member' });
-          for (const dId of toRm)
+          }
+          for (const dId of toRm) {
             await api.delete(`/users/${selectedUser.id}/departments/${dId}`);
+          }
           await fetchUserDepts(selectedUser.id, true);
         }
-        setSnackbar({ open: true, message: 'User updated', severity: 'success' });
+        setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
       } else if (dialogMode === 'delete') {
         await dispatch(deleteUser(selectedUser.id)).unwrap();
         if (detailUser?.id === selectedUser.id) setDetailUser(null);
-        setSnackbar({ open: true, message: 'User deleted', severity: 'success' });
+        setSnackbar({ open: true, message: 'User deleted successfully', severity: 'success' });
       } else if (dialogMode === 'reset') {
-        await dispatch(resetUserPassword({ user_id: selectedUser.id, new_password: passwordData.password })).unwrap();
-        setSnackbar({ open: true, message: 'Password reset', severity: 'success' });
+        await dispatch(resetUserPassword({ 
+          user_id: selectedUser.id, 
+          new_password: passwordData.password 
+        })).unwrap();
+        setSnackbar({ open: true, message: 'Password reset successfully', severity: 'success' });
       }
       setDialogOpen(false);
       loadUsers();
     } catch (err) {
-      setSnackbar({ open: true, message: err.message || `${dialogMode} failed`, severity: 'error' });
+      setSnackbar({ 
+        open: true, 
+        message: err.message || `${dialogMode} failed`, 
+        severity: 'error' 
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1212,41 +1277,49 @@ const UserManagement = () => {
 
   // ── Stats ────────────────────────────────────────────────────────────────────
   const stats = useMemo(() => ({
-    total:      total || 0,
-    active:     users?.filter((u) => u.is_active).length || 0,
-    verified:   users?.filter((u) => u.is_verified).length || 0,
-    admins:     users?.filter((u) => u.roles?.includes('admin')).length || 0,
+    total: total || 0,
+    active: users?.filter((u) => u.is_active).length || 0,
+    verified: users?.filter((u) => u.is_verified).length || 0,
+    admins: users?.filter((u) => u.roles?.includes('admin')).length || 0,
     superadmins: users?.filter((u) => u.is_superuser).length || 0,
   }), [users, total]);
 
   const STAT_CARDS = [
-    { label: 'Total users',  value: stats.total,       icon: <PeopleAltOutlined />,           color: 'text.primary' },
-    { label: 'Active',       value: stats.active,      icon: <LockOpenOutlined />,             color: 'success.main' },
-    { label: 'Verified',     value: stats.verified,    icon: <VerifiedUserOutlined />,         color: 'info.main' },
-    { label: 'Admins',       value: stats.admins,      icon: <AdminPanelSettingsOutlined />,   color: 'warning.main' },
-    { label: 'Super admins', value: stats.superadmins, icon: <ShieldOutlined />,               color: 'error.main' },
+    { label: 'Total users', value: stats.total, icon: <PeopleAltOutlined />, color: 'text.primary' },
+    { label: 'Active', value: stats.active, icon: <LockOpenOutlined />, color: 'success.main' },
+    { label: 'Verified', value: stats.verified, icon: <VerifiedUserOutlined />, color: 'info.main' },
+    { label: 'Admins', value: stats.admins, icon: <AdminPanelSettingsOutlined />, color: 'warning.main' },
+    { label: 'Super admins', value: stats.superadmins, icon: <ShieldOutlined />, color: 'error.main' },
   ];
 
   // ── Mobile card ──────────────────────────────────────────────────────────────
   const UserCard = ({ user }) => {
-    const expanded   = expandedUser === user.id;
-    const selected   = detailUser?.id === user.id;
+    const expanded = expandedUser === user.id;
+    const selected = detailUser?.id === user.id;
     const assignments = userDepartmentsMap[user.id] || [];
-    const isLoadingD  = loadingUserDepts[user.id];
+    const isLoadingD = loadingUserDepts[user.id];
 
     return (
       <Card
         sx={{
-          mb: 1.5, borderRadius: 2.5, border: '1.5px solid',
+          mb: 1.5, 
+          borderRadius: 2.5, 
+          border: '1.5px solid',
           borderColor: selected ? 'primary.main' : user.is_superuser
             ? (t) => alpha(t.palette.warning.main, 0.4) : 'divider',
           transition: 'all 0.18s ease',
+          '&:hover': {
+            borderColor: 'primary.main',
+          }
         }}
       >
         <CardContent sx={{ pb: '8px !important', px: 2, pt: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-              <Avatar sx={{ bgcolor: user.is_superuser ? 'warning.main' : 'primary.main', width: 42, height: 42, fontWeight: 700 }}>
+              <Avatar sx={{ 
+                bgcolor: user.is_superuser ? 'warning.main' : 'primary.main', 
+                width: 42, height: 42, fontWeight: 700 
+              }}>
                 {initials(user)}
               </Avatar>
               <Box sx={{ minWidth: 0 }}>
@@ -1272,7 +1345,6 @@ const UserManagement = () => {
             </Box>
           </Box>
 
-          {/* Department pills */}
           <Box sx={{ mt: 1.25 }}>
             {isLoadingD ? <CircularProgress size={18} /> : assignments.length > 0 ? (
               <Stack direction="row" sx={{ gap: 0.5, flexWrap: 'wrap' }}>
@@ -1285,7 +1357,9 @@ const UserManagement = () => {
                 ))}
               </Stack>
             ) : (
-              <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>No departments</Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>
+                No departments
+              </Typography>
             )}
           </Box>
 
@@ -1296,10 +1370,14 @@ const UserManagement = () => {
               color={user.is_active ? 'success' : 'default'}
               icon={user.is_active ? <LockOpenOutlined /> : <LockOutlined />}
             />
-            {user.is_verified && <Chip label="Verified" size="small" color="info" variant="outlined" />}
+            {user.is_verified && (
+              <Chip label="Verified" size="small" color="info" variant="outlined" />
+            )}
             {(user.roles || []).slice(0, 2).map((c) => {
               const { name, color } = getRoleDetails(c);
-              return <Chip key={c} label={name} size="small" color={color} variant="outlined" sx={{ fontWeight: 600 }} />;
+              return (
+                <Chip key={c} label={name} size="small" color={color} variant="outlined" sx={{ fontWeight: 600 }} />
+              );
             })}
           </Stack>
         </CardContent>
@@ -1326,12 +1404,18 @@ const UserManagement = () => {
           <Divider />
           <Box sx={{ px: 1.5, py: 1, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
             <Button size="small" variant="outlined" startIcon={<EditOutlined />}
-              onClick={() => handleOpenEdit(user)} sx={{ flex: 1, minWidth: 80 }}>Edit</Button>
+              onClick={() => handleOpenEdit(user)} sx={{ flex: 1, minWidth: 80 }}>
+              Edit
+            </Button>
             <Button size="small" variant="outlined" startIcon={<LockOutlined />}
-              onClick={() => handleOpenReset(user)} sx={{ flex: 1, minWidth: 80 }}>Reset PW</Button>
+              onClick={() => handleOpenReset(user)} sx={{ flex: 1, minWidth: 80 }}>
+              Reset PW
+            </Button>
             {user.id !== currentUser?.id && !user.is_superuser && (
               <Button size="small" variant="outlined" color="error" startIcon={<DeleteOutlined />}
-                onClick={() => handleOpenDelete(user)} sx={{ flex: 1, minWidth: 80 }}>Delete</Button>
+                onClick={() => handleOpenDelete(user)} sx={{ flex: 1, minWidth: 80 }}>
+                Delete
+              </Button>
             )}
           </Box>
         </Collapse>
@@ -1356,10 +1440,14 @@ const UserManagement = () => {
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <Tooltip title="Refresh">
             <IconButton
-              onClick={() => { setUserDeptMap({}); loadUsers(); dispatch(fetchRoles()); fetchDepartments(); setSnackbar({ open: true, message: 'Refreshed', severity: 'success' }); }}
-              sx={{ bgcolor: (t) => alpha(t.palette.primary.main, 0.08) }}
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              sx={{ 
+                bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
+                '&:disabled': { opacity: 0.6 }
+              }}
             >
-              <RefreshOutlined />
+              {isRefreshing ? <CircularProgress size={24} /> : <RefreshOutlined />}
             </IconButton>
           </Tooltip>
           <Button
@@ -1374,9 +1462,38 @@ const UserManagement = () => {
         </Box>
       </Box>
 
-      {/* Stats */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2,1fr)', sm: 'repeat(3,1fr)', md: 'repeat(5,1fr)' }, gap: 1.5, mb: 3 }}>
-        {STAT_CARDS.map((s) => <StatCard key={s.label} {...s} />)}
+      {/* Stats - Mobile Optimized */}
+      <Box sx={{ mb: 3 }}>
+        {isMobile ? (
+          // Scrollable horizontal row for mobile
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 1,
+              overflowX: 'auto',
+              pb: 1,
+              '&::-webkit-scrollbar': { display: 'none' },
+              scrollbarWidth: 'none',
+              mx: -0.5,
+              px: 0.5,
+            }}
+          >
+            {STAT_CARDS.map((s) => (
+              <CompactStatCard key={s.label} {...s} isLoading={isLoading} />
+            ))}
+          </Box>
+        ) : (
+          // Grid for desktop
+          <Box sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: 1.5,
+          }}>
+            {STAT_CARDS.map((s) => (
+              <StatCard key={s.label} {...s} isLoading={isLoading} />
+            ))}
+          </Box>
+        )}
       </Box>
 
       {/* Search + filters */}
@@ -1384,7 +1501,7 @@ const UserManagement = () => {
         <Box sx={{ display: 'flex', gap: 1 }}>
           <TextField
             fullWidth
-            placeholder="Search users…"
+            placeholder="Search users by name, email, or username…"
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setPage(0); }}
             size="small"
@@ -1394,6 +1511,13 @@ const UserManagement = () => {
                   <SearchOutlined fontSize="small" sx={{ color: 'text.disabled' }} />
                 </InputAdornment>
               ),
+              endAdornment: searchTerm && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearchTerm('')}>
+                    <CloseOutlined fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              )
             }}
           />
           <Tooltip title={showFilters ? 'Hide filters' : 'Show filters'}>
@@ -1401,10 +1525,13 @@ const UserManagement = () => {
               size="small"
               onClick={() => setShowFilters((v) => !v)}
               sx={{
-                border: '1px solid', borderRadius: 1.5, px: 1.5,
+                border: '1px solid', 
+                borderRadius: 1.5, 
+                px: 1.5,
                 borderColor: showFilters ? 'primary.main' : 'divider',
                 color: showFilters ? 'primary.main' : 'text.secondary',
                 bgcolor: showFilters ? (t) => alpha(t.palette.primary.main, 0.06) : 'transparent',
+                transition: 'all 0.2s',
               }}
             >
               <TuneOutlined fontSize="small" />
@@ -1427,8 +1554,14 @@ const UserManagement = () => {
               <Grid key={label} size={{ xs: 12, sm: 6, md: 3 }}>
                 <FormControl fullWidth size="small">
                   <InputLabel>{label}</InputLabel>
-                  <Select value={value} onChange={(e) => { set(e.target.value); setPage(0); }} label={label}>
-                    {opts.map(([v, l]) => <MenuItem key={v} value={v}>{l}</MenuItem>)}
+                  <Select 
+                    value={value} 
+                    onChange={(e) => { set(e.target.value); setPage(0); }} 
+                    label={label}
+                  >
+                    {opts.map(([v, l]) => (
+                      <MenuItem key={v} value={v}>{l}</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -1464,8 +1597,15 @@ const UserManagement = () => {
                       ? alpha(t.palette.common.white, 0.03)
                       : alpha(t.palette.common.black, 0.02),
                   },
-                  '& .MuiDataGrid-row': { cursor: 'pointer', '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.04) } },
+                  '& .MuiDataGrid-row': { 
+                    cursor: 'pointer', 
+                    '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.04) } 
+                  },
                   '& .MuiDataGrid-cell': { borderColor: 'divider', py: 1, alignItems: 'center' },
+                  '& .MuiDataGrid-footerContainer': {
+                    borderTop: '1px solid',
+                    borderColor: 'divider',
+                  }
                 }}
               />
             </Paper>
@@ -1474,18 +1614,53 @@ const UserManagement = () => {
           {/* Mobile cards */}
           {isMobile && (
             <Box>
-              {isLoading && <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}
+              {isLoading && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              )}
               {!isLoading && !users?.length && (
-                <Paper elevation={0} sx={{ p: 4, textAlign: 'center', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                <Paper elevation={0} sx={{ 
+                  p: 4, 
+                  textAlign: 'center', 
+                  borderRadius: 2, 
+                  border: '1px solid', 
+                  borderColor: 'divider' 
+                }}>
                   <Typography color="text.secondary">No users found</Typography>
+                  {searchTerm && (
+                    <Button 
+                      size="small" 
+                      sx={{ mt: 1 }}
+                      onClick={() => setSearchTerm('')}
+                    >
+                      Clear search
+                    </Button>
+                  )}
                 </Paper>
               )}
               {!isLoading && users?.map((u) => <UserCard key={u.id} user={u} />)}
               {!isLoading && users?.length > 0 && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 1.5, alignItems: 'center' }}>
-                  <Button variant="outlined" size="small" onClick={() => setPage((p) => p - 1)} disabled={page === 0}>Prev</Button>
-                  <Typography variant="body2" color="text.secondary">{page + 1} / {Math.ceil(total / rowsPerPage)}</Typography>
-                  <Button variant="outlined" size="small" onClick={() => setPage((p) => p + 1)} disabled={(page + 1) * rowsPerPage >= total}>Next</Button>
+                  <Button 
+                    variant="outlined" 
+                    size="small" 
+                    onClick={() => setPage((p) => p - 1)} 
+                    disabled={page === 0}
+                  >
+                    Prev
+                  </Button>
+                  <Typography variant="body2" color="text.secondary">
+                    {page + 1} / {Math.ceil(total / rowsPerPage)}
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    size="small" 
+                    onClick={() => setPage((p) => p + 1)} 
+                    disabled={(page + 1) * rowsPerPage >= total}
+                  >
+                    Next
+                  </Button>
                 </Box>
               )}
             </Box>
@@ -1495,13 +1670,24 @@ const UserManagement = () => {
         {/* Side detail panel */}
         {detailUser && (
           <Box sx={{
-            width: { xs: '100%', md: 370 }, flexShrink: 0,
-            position: isMobile ? 'fixed' : 'sticky', top: isMobile ? 0 : 16,
+            width: { xs: '100%', md: 370 }, 
+            flexShrink: 0,
+            position: isMobile ? 'fixed' : 'sticky', 
+            top: isMobile ? 0 : 16,
             zIndex: isMobile ? 1200 : 1,
+            maxHeight: isMobile ? '100vh' : 'calc(100vh - 32px)',
+            overflowY: 'auto',
           }}>
             {isMobile && (
-              <Box onClick={() => setDetailUser(null)}
-                sx={{ position: 'fixed', inset: 0, bgcolor: (t) => alpha(t.palette.common.black, 0.5), zIndex: -1 }} />
+              <Box 
+                onClick={() => setDetailUser(null)}
+                sx={{ 
+                  position: 'fixed', 
+                  inset: 0, 
+                  bgcolor: (t) => alpha(t.palette.common.black, 0.5), 
+                  zIndex: -1 
+                }} 
+              />
             )}
             <UserDetailPanel
               user={detailUser}
@@ -1532,14 +1718,27 @@ const UserManagement = () => {
         fullWidth
         fullScreen={isMobile}
         TransitionComponent={Fade}
-        PaperProps={{ sx: { borderRadius: isMobile ? 0 : 2.5 } }}
+        PaperProps={{ 
+          sx: { 
+            borderRadius: isMobile ? 0 : 2.5,
+            maxHeight: '90vh',
+          } 
+        }}
       >
-        <DialogTitle sx={{ fontWeight: 700, borderBottom: '1px solid', borderColor: 'divider', pb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <DialogTitle sx={{ 
+          fontWeight: 700, 
+          borderBottom: '1px solid', 
+          borderColor: 'divider', 
+          pb: 2, 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center' 
+        }}>
           <span>
             {dialogMode === 'create' && 'Create new user'}
-            {dialogMode === 'edit'   && `Edit · ${selectedUser?.username}`}
+            {dialogMode === 'edit' && `Edit · ${selectedUser?.username}`}
             {dialogMode === 'delete' && 'Confirm delete'}
-            {dialogMode === 'reset'  && `Reset password · ${selectedUser?.username}`}
+            {dialogMode === 'reset' && `Reset password · ${selectedUser?.username}`}
           </span>
           {isMobile && (
             <IconButton size="small" onClick={() => !isSubmitting && setDialogOpen(false)}>
@@ -1548,78 +1747,164 @@ const UserManagement = () => {
           )}
         </DialogTitle>
 
-        <DialogContent sx={{ pt: 2.5, px: { xs: 2, sm: 3 } }}>
+        <DialogContent sx={{ 
+          pt: 2.5, 
+          px: { xs: 2, sm: 3 },
+          overflowY: 'auto',
+        }}>
           {dialogMode === 'delete' ? (
-            <Alert severity="error" sx={{ borderRadius: 1.5 }}>
-              Delete <strong>{fullName(selectedUser)}</strong> permanently? This cannot be undone.
+            <Alert severity="error" icon={<WarningAmberOutlined />} sx={{ borderRadius: 1.5 }}>
+              Delete <strong>{fullName(selectedUser)}</strong> (@{selectedUser?.username}) permanently?
+              This will remove their account, role assignments, and department access. This cannot be undone.
             </Alert>
           ) : dialogMode === 'reset' ? (
             <Stack spacing={2}>
-              <TextField label="New password" name="password" type="password" size="small" fullWidth
+              <TextField 
+                label="New password" 
+                name="password" 
+                type="password" 
+                size="small" 
+                fullWidth
                 value={passwordData.password}
                 onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
-                error={!!formErrors.password} helperText={formErrors.password} />
-              <TextField label="Confirm password" name="confirm_password" type="password" size="small" fullWidth
+                error={!!formErrors.password} 
+                helperText={formErrors.password || 'At least 8 characters'} 
+              />
+              <TextField 
+                label="Confirm password" 
+                name="confirm_password" 
+                type="password" 
+                size="small" 
+                fullWidth
                 value={passwordData.confirm_password}
                 onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
-                error={!!formErrors.confirm_password} helperText={formErrors.confirm_password} />
+                error={!!formErrors.confirm_password} 
+                helperText={formErrors.confirm_password} 
+              />
             </Stack>
           ) : (
             <Stack spacing={2}>
               <Grid container spacing={1.5}>
                 <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField label="First name" name="first_name" size="small" fullWidth
+                  <TextField 
+                    label="First name" 
+                    name="first_name" 
+                    size="small" 
+                    fullWidth
                     value={formData.first_name}
-                    onChange={(e) => setFormData((p) => ({ ...p, first_name: e.target.value }))} />
+                    onChange={(e) => setFormData((p) => ({ ...p, first_name: e.target.value }))} 
+                  />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField label="Last name" name="last_name" size="small" fullWidth
+                  <TextField 
+                    label="Last name" 
+                    name="last_name" 
+                    size="small" 
+                    fullWidth
                     value={formData.last_name}
-                    onChange={(e) => setFormData((p) => ({ ...p, last_name: e.target.value }))} />
+                    onChange={(e) => setFormData((p) => ({ ...p, last_name: e.target.value }))} 
+                  />
                 </Grid>
               </Grid>
-              <TextField label="Email" name="email" size="small" fullWidth required
+              <TextField 
+                label="Email" 
+                name="email" 
+                size="small" 
+                fullWidth 
+                required
                 value={formData.email}
-                onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
-                error={!!formErrors.email} helperText={formErrors.email} />
-              <TextField label="Username" name="username" size="small" fullWidth required
+                onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value.trim() }))}
+                error={!!formErrors.email} 
+                helperText={formErrors.email} 
+              />
+              <TextField 
+                label="Username" 
+                name="username" 
+                size="small" 
+                fullWidth 
+                required
                 value={formData.username}
-                onChange={(e) => setFormData((p) => ({ ...p, username: e.target.value }))}
-                error={!!formErrors.username} helperText={formErrors.username} />
-              <TextField label="Phone" name="phone" size="small" fullWidth
+                onChange={(e) => setFormData((p) => ({ ...p, username: e.target.value.trim() }))}
+                error={!!formErrors.username} 
+                helperText={formErrors.username} 
+              />
+              <TextField 
+                label="Phone" 
+                name="phone" 
+                size="small" 
+                fullWidth
                 value={formData.phone}
-                onChange={(e) => setFormData((p) => ({ ...p, phone: e.target.value }))} />
+                onChange={(e) => setFormData((p) => ({ ...p, phone: e.target.value }))} 
+              />
 
               {dialogMode === 'create' && (
                 <>
-                  <TextField label="Password" name="password" type="password" size="small" fullWidth required
+                  <TextField 
+                    label="Password" 
+                    name="password" 
+                    type="password" 
+                    size="small" 
+                    fullWidth 
+                    required
                     value={passwordData.password}
                     onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
-                    error={!!formErrors.password} helperText={formErrors.password} />
-                  <TextField label="Confirm password" name="confirm_password" type="password" size="small" fullWidth required
+                    error={!!formErrors.password} 
+                    helperText={formErrors.password || 'At least 8 characters'} 
+                  />
+                  <TextField 
+                    label="Confirm password" 
+                    name="confirm_password" 
+                    type="password" 
+                    size="small" 
+                    fullWidth 
+                    required
                     value={passwordData.confirm_password}
                     onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
-                    error={!!formErrors.confirm_password} helperText={formErrors.confirm_password} />
+                    error={!!formErrors.confirm_password} 
+                    helperText={formErrors.confirm_password} 
+                  />
                 </>
               )}
 
               <FormControl size="small" fullWidth>
                 <InputLabel>Roles</InputLabel>
-                <Select multiple value={formData.roles} label="Roles"
-                  onChange={(e) => setFormData((p) => ({ ...p, roles: e.target.value }))}
+                <Select
+                  multiple
+                  open={rolesMenuOpen}
+                  onOpen={() => setRolesMenuOpen(true)}
+                  onClose={() => setRolesMenuOpen(false)}
+                  value={formData.roles}
+                  label="Roles"
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setFormData((p) => ({
+                      ...p,
+                      roles: typeof value === 'string' ? value.split(',') : value,
+                    }));
+                  }}
                   renderValue={(sel) => (
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {sel.map((v) => <Chip key={v} label={getRoleDetails(v).name} size="small" />)}
+                      {sel.length === 0
+                        ? <Typography variant="body2" color="text.disabled">No roles assigned</Typography>
+                        : sel.map((v) => (
+                            <Chip key={v} label={getRoleDetails(v).name} size="small" />
+                          ))}
                     </Box>
                   )}
                 >
                   {(rolesList || []).map((r) => (
-                    <MenuItem key={r.id} value={r.code}>{r.name}</MenuItem>
+                    <MenuItem key={r.id} value={r.code}>
+                      <Checkbox
+                        size="small"
+                        checked={formData.roles.includes(r.code)}
+                        sx={{ mr: 0.5, p: 0.5 }}
+                      />
+                      <ListItemText primary={r.name} />
+                    </MenuItem>
                   ))}
                 </Select>
               </FormControl>
 
-              {/* Department selector inside create/edit uses flat Autocomplete (simpler context) */}
               <Autocomplete
                 multiple
                 options={departments}
@@ -1627,28 +1912,47 @@ const UserManagement = () => {
                 isOptionEqualToValue={(o, v) => o.id === v.id}
                 value={departments.filter((d) => formData.department_ids.includes(d.id))}
                 onChange={(_, v) => setFormData((p) => ({ ...p, department_ids: v.map((d) => d.id) }))}
-                renderInput={(params) => <TextField {...params} label="Departments" size="small" />}
+                renderInput={(params) => (
+                  <TextField 
+                    {...params} 
+                    label="Departments" 
+                    size="small" 
+                    placeholder="Select departments..."
+                  />
+                )}
                 renderTags={(val, getTagProps) =>
                   val.map((opt, i) => (
-                    <Chip key={opt.id} label={opt.name} size="small" {...getTagProps({ index: i })} />
+                    <Chip 
+                      key={opt.id} 
+                      label={opt.name} 
+                      size="small" 
+                      {...getTagProps({ index: i })} 
+                    />
                   ))
                 }
               />
 
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                 <FormControlLabel
-                  control={<Switch checked={formData.is_active}
-                    onChange={(e) => setFormData((p) => ({ ...p, is_active: e.target.checked }))} />}
+                  control={<Switch 
+                    checked={formData.is_active}
+                    onChange={(e) => setFormData((p) => ({ ...p, is_active: e.target.checked }))} 
+                  />}
                   label="Active"
                 />
                 <FormControlLabel
-                  control={<Switch checked={formData.is_verified}
-                    onChange={(e) => setFormData((p) => ({ ...p, is_verified: e.target.checked }))} />}
+                  control={<Switch 
+                    checked={formData.is_verified}
+                    onChange={(e) => setFormData((p) => ({ ...p, is_verified: e.target.checked }))} 
+                  />}
                   label="Verified"
                 />
                 <FormControlLabel
-                  control={<Switch checked={formData.is_superuser} color="warning"
-                    onChange={(e) => setFormData((p) => ({ ...p, is_superuser: e.target.checked }))} />}
+                  control={<Switch 
+                    checked={formData.is_superuser} 
+                    color="warning"
+                    onChange={(e) => setFormData((p) => ({ ...p, is_superuser: e.target.checked }))} 
+                  />}
                   label="Super admin"
                 />
               </Box>
@@ -1656,8 +1960,16 @@ const UserManagement = () => {
           )}
         </DialogContent>
 
-        <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, borderTop: '1px solid', borderColor: 'divider', gap: 1 }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
+        <DialogActions sx={{ 
+          px: { xs: 2, sm: 3 }, 
+          py: 2, 
+          borderTop: '1px solid', 
+          borderColor: 'divider', 
+          gap: 1 
+        }}>
+          <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting}>
+            Cancel
+          </Button>
           <Button
             onClick={handleSubmit}
             variant="contained"
@@ -1668,9 +1980,9 @@ const UserManagement = () => {
             {isSubmitting ? <CircularProgress size={20} color="inherit" /> : (
               <>
                 {dialogMode === 'create' && 'Create user'}
-                {dialogMode === 'edit'   && 'Save changes'}
+                {dialogMode === 'edit' && 'Save changes'}
                 {dialogMode === 'delete' && 'Delete user'}
-                {dialogMode === 'reset'  && 'Reset password'}
+                {dialogMode === 'reset' && 'Reset password'}
               </>
             )}
           </Button>

@@ -284,7 +284,7 @@ echo ""
 
 # User Profile & Account Settings
 create_menu "profile" "Profile" "fa-user" "fontawesome" "fas" "#795548" "settings/profile" 1 "settings"
-create_menu "security" "Security" "fa-shield-alt" "fontawesome" "fas" "#dc004e" "settings/security" 2 "settings"
+create_menu "change_password" "Change Password" "fa-key" "fontawesome" "fas" "#dc004e" "settings/change-password" 2 "settings"
 create_menu "preferences" "Preferences" "fa-sliders-h" "fontawesome" "fas" "#607d8b" "settings/preferences" 3 "settings"
 
 # System Administration
@@ -324,32 +324,35 @@ echo ""
 declare -A ROLE_MENUS
 
 # Admin - Full access to everything including role menu assignment
-ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
-ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
+ROLE_MENUS["admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,change_password,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
+ROLE_MENUS["super_admin"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,all_actions,overdue_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,change_password,preferences,users,roles,role_menu_assignment,audit,locations,admin_structures,departments,positions,hierarchy,calendar"
 
 # Meeting Creator - Has participants access
-ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,participants,participants_list,participant_lists,participants_create,settings,profile,security,preferences,calendar"
+ROLE_MENUS["meeting_creator"]="dashboard,meetings,meetings_list,meetings_create,actions,my_tasks,participants,participants_list,participant_lists,participants_create,settings,profile,
+change_password,
+preferences,
+calendar"
 
 # Meeting Participant - Basic participants access
-ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,security,calendar"
+ROLE_MENUS["meeting_participant"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,change_password,calendar"
 
 # Action Assigner - Full participants access
-ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_actions,settings,profile,security,preferences,calendar"
+ROLE_MENUS["action_assigner"]="dashboard,meetings,meetings_list,actions,all_actions,action_assign,participants,participants_list,participant_lists,participants_create,participants_import,reports,reports_actions,settings,profile,change_password,preferences,calendar"
 
 # Action Owner - Basic participants access
-ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,calendar"
+ROLE_MENUS["action_owner"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,settings,profile,change_password,calendar"
 
 # Action Viewer - Read-only participants
-ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,participants,participants_list,reports,reports_actions,settings,profile,security,calendar"
+ROLE_MENUS["action_viewer"]="dashboard,meetings,meetings_list,actions,all_actions,participants,participants_list,reports,reports_actions,settings,profile,change_password,calendar"
 
 # Participant Manager - Full participants management
-ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,actions,my_tasks,settings,profile,security,preferences,calendar"
+ROLE_MENUS["participant_manager"]="dashboard,participants,participants_list,participant_lists,participants_create,participants_import,meetings,meetings_list,actions,my_tasks,settings,profile,change_password,preferences,calendar"
 
 # Report Viewer
-ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,security,calendar"
+ROLE_MENUS["report_viewer"]="dashboard,reports,reports_meetings,reports_actions,reports_participants,reports_export,settings,profile,change_password,calendar"
 
 # Basic User - Has ALL participants submenus (list, lists, create, import)
-ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,participant_lists,participants_create,participants_import,settings,profile,security,calendar"
+ROLE_MENUS["user"]="dashboard,meetings,meetings_list,actions,my_tasks,participants,participants_list,participant_lists,participants_create,participants_import,settings,profile,change_password,preferences,calendar"
 
 echo ""
 
@@ -459,7 +462,7 @@ echo "    - Add Participant (Create single)"
 echo "    - Bulk Import (Import from file)"
 echo "  • Settings submenus (NEW ORDER):"
 echo "    - Profile"
-echo "    - Security"
+echo "    - Change Password"
 echo "    - Preferences"
 echo "    - User Management"
 echo "    - Role Management"
@@ -497,7 +500,7 @@ echo "  📄 Participant Reports [People] (MUI)"
 echo "  📄 Export Data [Download] (MUI)"
 echo "📁 Settings [fa-cog] (Font Awesome) - Sort Order: 6"
 echo "  📄 Profile [fa-user] (FA)"
-echo "  📄 Security [fa-shield-alt] (FA)"
+echo "  📄 Change Password [fa-key] (FA)"
 echo "  📄 Preferences [fa-sliders-h] (FA)"
 echo "  📄 User Management [fa-users] (FA)"
 echo "  📄 Role Management [fa-tag] (FA)"

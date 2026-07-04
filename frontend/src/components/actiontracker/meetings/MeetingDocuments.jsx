@@ -51,11 +51,11 @@ import {
   PictureAsPdf as PdfIcon,
   Image as ImageIcon,
   InsertDriveFile as FileIcon,
-  Delete as Delete,
+  Delete as DeleteIcon,
   Download as DownloadIcon,
   CloudUpload as UploadIcon,
   Refresh as RefreshIcon,
-  Close as Close,
+  Close as CloseIcon,
   Visibility as VisibilityIcon,
   Info as InfoIcon,
   ZoomIn as ZoomInIcon,
@@ -67,17 +67,13 @@ import {
   MoreVert as MoreVertIcon,
   TextSnippet as TextSnippetIcon,
   CenterFocusStrong as ScanIcon,
-  TextFields as TextFieldsIcon,
   Description as DescriptionIcon,
-  AttachFile as AttachFileIcon,
   CheckCircle as CheckCircleIcon,
-  Pending as PendingIcon,
-  DownloadDone as DownloadDoneIcon
+  Lock as LockIcon
 } from '@mui/icons-material';
 
 import api from '../../../services/api';
 
-// Elegant color palette with dark mode support
 const getColors = (theme) => ({
   primary: {
     main: theme.palette.primary.main,
@@ -123,13 +119,38 @@ const getColors = (theme) => ({
   }
 });
 
-const MeetingDocuments = ({ meetingId, onRefresh }) => {
+// Generate valid UUID for fallback types
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+// Fallback document types with valid UUIDs
+const FALLBACK_DOCUMENT_TYPES = [
+  { id: generateUUID(), name: 'Agenda' },
+  { id: generateUUID(), name: 'Minutes' },
+  { id: generateUUID(), name: 'Presentation' },
+  { id: generateUUID(), name: 'Report' },
+  { id: generateUUID(), name: 'Attachment' },
+  { id: generateUUID(), name: 'Meeting Notes' },
+  { id: generateUUID(), name: 'Action Items' },
+  { id: generateUUID(), name: 'Supporting Document' },
+];
+
+const MeetingDocuments = ({ meetingId, meetingStatus, onRefresh }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const colors = getColors(theme);
   const isDarkMode = theme.palette.mode === 'dark';
 
-  // State Management
+  const uploadBlockedReason = !meetingStatus
+    ? 'Meeting status is still loading. Please wait a moment, or refresh, before uploading documents.'
+    : null;
+  const canUpload = !uploadBlockedReason;
+
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -139,21 +160,17 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
   const [fileTitle, setFileTitle] = useState('');
   const [fileDescription, setFileDescription] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [documentTypes, setDocumentTypes] = useState([]);
+  const [documentTypes, setDocumentTypes] = useState(FALLBACK_DOCUMENT_TYPES);
   const [selectedDocumentTypeId, setSelectedDocumentTypeId] = useState('');
   const [loadingTypes, setLoadingTypes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
-
-  // OCR States
   const [enableOCR, setEnableOCR] = useState(false);
   const [ocrLanguage, setOcrLanguage] = useState('eng');
   const [ocrDialogOpen, setOcrDialogOpen] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrResult, setOcrResult] = useState(null);
   const [processingDocId, setProcessingDocId] = useState(null);
-
-  // Preview States
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -162,25 +179,14 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
   const [previewError, setPreviewError] = useState(null);
   const [imageZoom, setImageZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // Mobile Menu
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedDocForMenu, setSelectedDocForMenu] = useState(null);
-
-  // Pagination
   const [page, setPage] = useState(1);
-  const itemsPerPage = isMobile ? 5 : 10;
-  const totalPages = Math.ceil(documents.length / itemsPerPage);
-  const paginatedDocs = documents.slice((page - 1) * itemsPerPage, page * itemsPerPage);
-
-  // Toast/Snackbar
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-  // Refs
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  // OCR Language Options
   const ocrLanguages = [
     { code: 'eng', name: 'English' },
     { code: 'spa', name: 'Spanish' },
@@ -194,9 +200,15 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
     { code: 'ara', name: 'Arabic' }
   ];
 
-  // Helper Functions
+  const itemsPerPage = isMobile ? 5 : 10;
+  const totalPages = Math.ceil(documents.length / itemsPerPage);
+  const paginatedDocs = documents.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+
   const showNotification = (message, severity = 'success') => {
-    setSnackbar({ open: true, message, severity });
+    const msg = typeof message === 'object' 
+      ? message.message || JSON.stringify(message) 
+      : String(message);
+    setSnackbar({ open: true, message: msg, severity });
   };
 
   const handleCloseSnackbar = () => {
@@ -209,69 +221,108 @@ const MeetingDocuments = ({ meetingId, onRefresh }) => {
     return compatibleTypes.includes(file.type);
   };
 
-  // Fetch document types
+  const handleOpenUploadDialog = () => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    if (!canUpload) {
+      showNotification(uploadBlockedReason, 'warning');
+      return;
+    }
+    setUploadDialogOpen(true);
+  };
+
+  const getUploadDisabledReason = () => {
+    if (!canUpload) return uploadBlockedReason;
+    if (!selectedFile) return 'Select a file to upload.';
+    if (!fileTitle.trim()) return 'Enter a document title.';
+    if (loadingTypes) return 'Loading document types…';
+    if (documentTypes.length === 0) return 'No document types are available. Try refreshing.';
+    if (!selectedDocumentTypeId) return 'Select a document type.';
+    return null;
+  };
+
+  // ============ FETCH DOCUMENT TYPES ============
   const fetchDocumentTypes = useCallback(async () => {
     setLoadingTypes(true);
+    setError(null);
+    
     try {
-      const response = await api.get('/action-tracker/documents/attribute-groups/DOCUMENT_TYPE/attributes');
+      // CORRECT URL - matches the working endpoint
+      const response = await api.get('/action-tracker/documents/document-types');
+      
       let types = [];
-     
-      if (response.data?.items) {
-        types = response.data.items;
-      } else if (Array.isArray(response.data)) {
+      
+      // Handle different response formats
+      if (Array.isArray(response.data)) {
         types = response.data;
+      } else if (response.data?.items && Array.isArray(response.data.items)) {
+        types = response.data.items;
+      } else if (response.data?.data && Array.isArray(response.data.data)) {
+        types = response.data.data;
       }
-      setDocumentTypes(types);
-      if (types.length > 0 && !selectedDocumentTypeId) {
-        setSelectedDocumentTypeId(types[0].id);
+      
+      if (types.length > 0) {
+        console.log('Loaded document types from server:', types);
+        setDocumentTypes(types);
+        // Set the first type as default
+        if (!selectedDocumentTypeId) {
+          setSelectedDocumentTypeId(types[0].id);
+        }
+      } else {
+        console.warn('No document types from server, using fallback');
+        setDocumentTypes(FALLBACK_DOCUMENT_TYPES);
+        if (!selectedDocumentTypeId) {
+          setSelectedDocumentTypeId(FALLBACK_DOCUMENT_TYPES[0].id);
+        }
       }
     } catch (err) {
       console.error('Error fetching document types:', err);
-      setError('Failed to load document types.');
+      setDocumentTypes(FALLBACK_DOCUMENT_TYPES);
+      if (!selectedDocumentTypeId && FALLBACK_DOCUMENT_TYPES.length > 0) {
+        setSelectedDocumentTypeId(FALLBACK_DOCUMENT_TYPES[0].id);
+      }
     } finally {
       setLoadingTypes(false);
     }
   }, [selectedDocumentTypeId]);
 
-  // Fetch documents
-const fetchDocuments = useCallback(async () => {
-  if (!meetingId) return;
-  
-  if (abortControllerRef.current) {
-    abortControllerRef.current.abort();
-  }
-  
-  abortControllerRef.current = new AbortController();
-  setLoading(true);
-  setError(null);
-
-  try {
-    // CORRECT URL based on working curl test
-    const response = await api.get(`/action-tracker/documents/${meetingId}/documents`, {
-      signal: abortControllerRef.current.signal
-    });
-    const docs = response.data?.items || response.data || [];
-    setDocuments(docs);
-    setPage(1);
-  } catch (err) {
-    if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
-      // Don't show error for 404 - just show empty state
-      if (err.response?.status === 404) {
-        console.warn('Documents endpoint not implemented yet');
-        setDocuments([]);
-      } else {
-        const errorMsg = err.response?.data?.detail || 'Failed to load documents';
-        setError(errorMsg);
-        showNotification(errorMsg, 'error');
-      }
+  // ============ FETCH DOCUMENTS ============
+  const fetchDocuments = useCallback(async () => {
+    if (!meetingId) return;
+    
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
-  } finally {
-    setLoading(false);
-  }
-}, [meetingId]);
+    
+    abortControllerRef.current = new AbortController();
+    setLoading(true);
+    setError(null);
 
+    try {
+      const response = await api.get(`/action-tracker/documents/${meetingId}/documents`, {
+        signal: abortControllerRef.current.signal
+      });
+      const docs = response.data?.items || response.data || [];
+      setDocuments(docs);
+      setPage(1);
+    } catch (err) {
+      if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
+        if (err.response?.status === 404) {
+          console.warn('Documents endpoint not implemented yet');
+          setDocuments([]);
+        } else {
+          const errorMsg = err.response?.data?.detail || 'Failed to load documents';
+          setError(typeof errorMsg === 'string' ? errorMsg : 'Failed to load documents');
+          showNotification(errorMsg, 'error');
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [meetingId]);
 
-
+  // ============ INITIAL LOAD ============
   useEffect(() => {
     if (meetingId) {
       fetchDocuments();
@@ -283,6 +334,17 @@ const fetchDocuments = useCallback(async () => {
       }
     };
   }, [meetingId, fetchDocuments, fetchDocumentTypes]);
+
+  // ============ VALIDATE SELECTED DOCUMENT TYPE ============
+  useEffect(() => {
+    if (documentTypes.length > 0 && selectedDocumentTypeId) {
+      const isValid = documentTypes.some(t => t.id === selectedDocumentTypeId);
+      if (!isValid) {
+        console.warn('Selected document type is invalid, resetting to first available');
+        setSelectedDocumentTypeId(documentTypes[0].id);
+      }
+    }
+  }, [documentTypes, selectedDocumentTypeId]);
 
   const handleRefresh = () => {
     fetchDocuments();
@@ -305,58 +367,102 @@ const fetchDocuments = useCallback(async () => {
     }
   };
 
-const handleUpload = async () => {
-  if (!selectedFile || !fileTitle.trim() || !selectedDocumentTypeId) {
-    showNotification('Please fill all required fields', 'warning');
-    return;
-  }
+  // ============ UPLOAD ============
+  const handleUpload = async () => {
+    const reason = getUploadDisabledReason();
+    if (reason) {
+      showNotification(reason, 'warning');
+      return;
+    }
 
-  setUploading(true);
-  setError(null);
-
-  const formData = new FormData();
-  formData.append('file', selectedFile);
-  formData.append('title', fileTitle.trim());
-  formData.append('description', fileDescription);
-  formData.append('document_type_id', selectedDocumentTypeId);
-  
-  if (enableOCR && isOcrCompatible(selectedFile)) {
-    formData.append('ocr_enabled', 'true');
-    formData.append('ocr_language', ocrLanguage);
-  }
-
-  try {
-    // SAME URL pattern as GET
-    await api.post(`/action-tracker/documents/${meetingId}/documents`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(percent);
-        }
+    // Verify the selected ID is valid
+    const isValid = documentTypes.some(t => t.id === selectedDocumentTypeId);
+    if (!isValid) {
+      showNotification('Invalid document type selected. Please refresh the page.', 'error');
+      if (documentTypes.length > 0) {
+        setSelectedDocumentTypeId(documentTypes[0].id);
       }
-    });
+      return;
+    }
 
-    setUploadDialogOpen(false);
-    setSelectedFile(null);
-    setFileTitle('');
-    setFileDescription('');
-    setUploadProgress(0);
-    setEnableOCR(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    await fetchDocuments();
-    if (onRefresh) onRefresh();
-    showNotification('Document uploaded successfully!', 'success');
-  } catch (err) {
-    const errorMsg = err.response?.data?.detail || 'Failed to upload document';
-    setError(errorMsg);
-    showNotification(errorMsg, 'error');
-  } finally {
-    setUploading(false);
-  }
-};
+    setUploading(true);
+    setError(null);
 
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('title', fileTitle.trim());
+    formData.append('description', fileDescription || '');
+    formData.append('document_type_id', selectedDocumentTypeId);
+    
+    if (enableOCR && isOcrCompatible(selectedFile)) {
+      formData.append('ocr_enabled', 'true');
+      formData.append('ocr_language', ocrLanguage);
+    }
+
+    console.log('=== UPLOAD REQUEST ===');
+    console.log('Document Type ID being sent:', selectedDocumentTypeId);
+    console.log('Meeting ID:', meetingId);
+    console.log('File:', selectedFile.name);
+
+    try {
+      const response = await api.post(
+        `/action-tracker/documents/${meetingId}/documents`,
+        formData,
+        {
+          headers: { 
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setUploadProgress(percent);
+            }
+          }
+        }
+      );
+
+      console.log('Upload success:', response.data);
+      
+      setUploadDialogOpen(false);
+      setSelectedFile(null);
+      setFileTitle('');
+      setFileDescription('');
+      setUploadProgress(0);
+      setEnableOCR(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      await fetchDocuments();
+      if (onRefresh) onRefresh();
+      showNotification('Document uploaded successfully!', 'success');
+    } catch (err) {
+      console.error('Upload error:', err);
+      
+      let errorMsg = 'Failed to upload document';
+      if (err.response?.data) {
+        if (typeof err.response.data === 'string') {
+          errorMsg = err.response.data;
+        } else if (err.response.data.detail) {
+          errorMsg = err.response.data.detail;
+        } else if (err.response.data.message) {
+          errorMsg = err.response.data.message;
+        } else {
+          errorMsg = JSON.stringify(err.response.data);
+        }
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      
+      setError(errorMsg);
+      showNotification(errorMsg, 'error');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ============ OCR FUNCTIONS ============
   const handleProcessOCR = async (doc) => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setProcessingDocId(doc.id);
     setOcrDialogOpen(true);
     setOcrProgress(0);
@@ -398,6 +504,7 @@ const handleUpload = async () => {
     setOcrResult(null);
   };
 
+  // ============ DELETE ============
   const handleDelete = async (doc) => {
     if (!window.confirm(`Delete "${doc.title || doc.file_name}"?`)) return;
 
@@ -416,7 +523,11 @@ const handleUpload = async () => {
     }
   };
 
+  // ============ PREVIEW ============
   const handlePreview = async (doc) => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setSelectedDoc(doc);
     setPreviewTab(0);
     setPreviewError(null);
@@ -455,6 +566,7 @@ const handleUpload = async () => {
     setIsFullscreen(false);
   };
 
+  // ============ DOWNLOAD ============
   const handleDownload = async (doc) => {
     if (!doc) return;
     setDownloadingId(doc.id);
@@ -506,6 +618,7 @@ const handleUpload = async () => {
     }
   };
 
+  // ============ HELPER FUNCTIONS ============
   const getFileIcon = (fileName, mimeType) => {
     if (mimeType === 'application/pdf') return <PdfIcon sx={{ color: colors.error.main, fontSize: isMobile ? 28 : 40 }} />;
     if (mimeType?.startsWith('image/')) return <ImageIcon sx={{ color: colors.success.main, fontSize: isMobile ? 28 : 40 }} />;
@@ -544,6 +657,7 @@ const handleUpload = async () => {
     }
   };
 
+  // ============ MOBILE CARD ============
   const MobileDocumentCard = ({ doc, index }) => (
     <Card 
       key={doc.id || index} 
@@ -560,7 +674,7 @@ const handleUpload = async () => {
       }}
     >
       <CardContent sx={{ p: 2 }}>
-        <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             {getFileIcon(doc.file_name, doc.mime_type)}
           </Box>
@@ -568,7 +682,7 @@ const handleUpload = async () => {
             <Typography variant="subtitle2" fontWeight={600} noWrap color="text.primary">
               {doc.title || doc.file_name || 'Untitled Document'}
             </Typography>
-            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap">
+            <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
               <Chip 
                 label={getDocumentTypeName(doc)} 
                 size="small" 
@@ -616,11 +730,12 @@ const handleUpload = async () => {
     </Card>
   );
 
+  // ============ LOADING SKELETON ============
   const LoadingSkeleton = () => (
     <Stack spacing={2}>
       {[1, 2, 3].map((i) => (
         <Paper key={i} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
             <Skeleton variant="circular" width={isMobile ? 36 : 40} height={isMobile ? 36 : 40} />
             <Box sx={{ flex: 1 }}>
               <Skeleton variant="text" width="70%" height={24} />
@@ -636,17 +751,22 @@ const handleUpload = async () => {
     return <LoadingSkeleton />;
   }
 
+  // ============ RENDER ============
   return (
     <Fade in timeout={400}>
       <Box>
         {/* Header */}
         <Stack 
           direction="row" 
-          justifyContent="space-between" 
-          alignItems="center" 
-          sx={{ mb: 3, pb: 1, borderBottom: `1px solid ${colors.surface.border}` }} 
-          flexWrap="wrap" 
-          gap={2}
+          sx={{ 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            mb: 3, 
+            pb: 1, 
+            borderBottom: `1px solid ${colors.surface.border}`,
+            flexWrap: 'wrap',
+            gap: 2
+          }}
         >
           <Typography variant={isMobile ? "subtitle1" : "h6"} fontWeight={700} color="text.primary">
             Documents ({documents.length})
@@ -665,33 +785,46 @@ const handleUpload = async () => {
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
-            <Button 
-              variant="contained" 
-              startIcon={<UploadIcon />} 
-              onClick={() => setUploadDialogOpen(true)} 
-              size={isMobile ? "small" : "medium"}
-              sx={{ 
-                background: colors.primary.gradient,
-                '&:hover': { transform: 'translateY(-1px)', boxShadow: theme.shadows[4] }
-              }}
-            >
-              {isMobile ? "Upload" : "Upload Document"}
-            </Button>
+            <Tooltip title={uploadBlockedReason || 'Upload a new document'}>
+              <span>
+                <Button 
+                  variant="contained" 
+                  startIcon={canUpload ? <UploadIcon /> : <LockIcon />} 
+                  onClick={handleOpenUploadDialog} 
+                  disabled={!canUpload}
+                  size={isMobile ? "small" : "medium"}
+                  sx={{ 
+                    background: colors.primary.gradient,
+                    '&:hover': { transform: 'translateY(-1px)', boxShadow: theme.shadows[4] }
+                  }}
+                >
+                  {isMobile ? "Upload" : "Upload Document"}
+                </Button>
+              </span>
+            </Tooltip>
           </Stack>
         </Stack>
 
-        {/* Error Alert */}
+        {uploadBlockedReason && (
+          <Alert 
+            severity="info" 
+            icon={<LockIcon />} 
+            sx={{ mb: 3, borderRadius: 2 }}
+          >
+            {uploadBlockedReason}
+          </Alert>
+        )}
+
         {error && (
           <Alert 
             severity="error" 
             sx={{ mb: 3, borderRadius: 2 }} 
             onClose={() => setError(null)}
           >
-            {error}
+            {typeof error === 'string' ? error : 'An error occurred'}
           </Alert>
         )}
 
-        {/* Empty State */}
         {documents.length === 0 ? (
           <Grow in timeout={500}>
             <Paper 
@@ -710,15 +843,20 @@ const handleUpload = async () => {
               <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420, mx: 'auto', mb: 3 }}>
                 Upload meeting agendas, presentations, minutes, or any supporting documents here.
               </Typography>
-              <Button 
-                variant="contained" 
-                startIcon={<UploadIcon />} 
-                onClick={() => setUploadDialogOpen(true)} 
-                size={isMobile ? "medium" : "large"}
-                sx={{ background: colors.primary.gradient }}
-              >
-                Upload First Document
-              </Button>
+              <Tooltip title={uploadBlockedReason || ''}>
+                <span>
+                  <Button 
+                    variant="contained" 
+                    startIcon={canUpload ? <UploadIcon /> : <LockIcon />} 
+                    onClick={handleOpenUploadDialog} 
+                    disabled={!canUpload}
+                    size={isMobile ? "medium" : "large"}
+                    sx={{ background: colors.primary.gradient }}
+                  >
+                    Upload First Document
+                  </Button>
+                </span>
+              </Tooltip>
             </Paper>
           </Grow>
         ) : (
@@ -750,7 +888,7 @@ const handleUpload = async () => {
                       {paginatedDocs.map((doc, index) => (
                         <TableRow key={doc.id || index} hover>
                           <TableCell>
-                            <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                               {getFileIcon(doc.file_name, doc.mime_type)}
                               <Box>
                                 <Typography variant="body2" fontWeight={500} color="text.primary">
@@ -789,7 +927,7 @@ const handleUpload = async () => {
                             <Typography variant="caption" color="text.secondary">{formatDate(doc.uploaded_at)}</Typography>
                           </TableCell>
                           <TableCell align="center">
-                            <Stack direction="row" spacing={0.5} justifyContent="center">
+                            <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'center' }}>
                               <Tooltip title="Preview">
                                 <IconButton 
                                   onClick={() => handlePreview(doc)} 
@@ -828,7 +966,7 @@ const handleUpload = async () => {
                                   disabled={deletingId === doc.id}
                                   sx={{ color: colors.error.main, '&:hover': { bgcolor: alpha(colors.error.main, 0.1) } }}
                                 >
-                                  {deletingId === doc.id ? <CircularProgress size={16} /> : <Delete fontSize="small" />}
+                                  {deletingId === doc.id ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
                                 </IconButton>
                               </Tooltip>
                             </Stack>
@@ -842,7 +980,7 @@ const handleUpload = async () => {
             )}
 
             {totalPages > 1 && (
-              <Stack alignItems="center" sx={{ mt: 3 }}>
+              <Stack sx={{ alignItems: 'center', mt: 3 }}>
                 <Pagination 
                   count={totalPages} 
                   page={page} 
@@ -870,13 +1008,15 @@ const handleUpload = async () => {
           anchor="bottom" 
           open={mobileMenuOpen} 
           onClose={() => setMobileMenuOpen(false)} 
-          onOpen={() => {}} 
+          onOpen={() => {}}
           disableBackdropTransition
-          PaperProps={{
-            sx: {
-              bgcolor: 'background.paper',
-              borderTopLeftRadius: 16,
-              borderTopRightRadius: 16
+          slotProps={{
+            paper: {
+              sx: {
+                bgcolor: 'background.paper',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16
+              }
             }
           }}
         >
@@ -915,7 +1055,7 @@ const handleUpload = async () => {
               )}
               <Button 
                 fullWidth 
-                startIcon={<Delete />} 
+                startIcon={<DeleteIcon />} 
                 onClick={() => handleDelete(selectedDocForMenu)} 
                 color="error" 
                 sx={{ justifyContent: 'flex-start' }}
@@ -932,10 +1072,13 @@ const handleUpload = async () => {
           onClose={handleCloseOcrDialog} 
           maxWidth="md" 
           fullWidth
-          PaperProps={{ sx: { borderRadius: 3, bgcolor: 'background.paper' } }}
+          disableRestoreFocus
+          slotProps={{
+            paper: { sx: { borderRadius: 3, bgcolor: 'background.paper' } }
+          }}
         >
           <DialogTitle>
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack direction="row" sx={{ alignItems: 'center', spacing: 1 }}>
               <ScanIcon sx={{ color: colors.purple.main }} />
               <Typography variant="h6" color="text.primary">OCR Processing</Typography>
             </Stack>
@@ -1010,12 +1153,15 @@ const handleUpload = async () => {
           maxWidth="xl" 
           fullWidth 
           fullScreen={isMobile || isFullscreen}
-          PaperProps={{ 
-            sx: { 
-              borderRadius: isMobile ? 0 : 3,
-              bgcolor: 'background.paper',
-              overflow: 'hidden'
-            } 
+          disableRestoreFocus
+          slotProps={{
+            paper: { 
+              sx: { 
+                borderRadius: isMobile ? 0 : 3,
+                bgcolor: 'background.paper',
+                overflow: 'hidden'
+              } 
+            }
           }}
         >
           <DialogTitle sx={{ 
@@ -1023,7 +1169,7 @@ const handleUpload = async () => {
             borderBottom: `1px solid ${colors.surface.border}`,
             bgcolor: alpha(colors.primary.main, 0.02)
           }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
               <Typography variant="subtitle1" fontWeight={600} color="text.primary" noWrap sx={{ maxWidth: '60%' }}>
                 {selectedDoc?.title || selectedDoc?.file_name || 'Document Preview'}
               </Typography>
@@ -1050,7 +1196,7 @@ const handleUpload = async () => {
                   <FullscreenIcon />
                 </IconButton>
                 <IconButton onClick={handleClosePreview} size="small" sx={{ color: 'text.secondary' }}>
-                  <Close />
+                  <CloseIcon />
                 </IconButton>
               </Stack>
             </Stack>
@@ -1073,7 +1219,6 @@ const handleUpload = async () => {
               {selectedDoc?.ocr_text && <Tab label="OCR Text" icon={<TextSnippetIcon />} iconPosition="start" />}
             </Tabs>
             
-            {/* Preview Tab */}
             {previewTab === 0 && (
               <Box sx={{ 
                 height: isMobile ? 'calc(100vh - 180px)' : 'calc(100% - 48px)', 
@@ -1133,7 +1278,6 @@ const handleUpload = async () => {
               </Box>
             )}
             
-            {/* Details Tab */}
             {previewTab === 1 && selectedDoc && (
               <TableContainer sx={{ p: isMobile ? 2 : 4 }}>
                 <Table size={isMobile ? "small" : "medium"}>
@@ -1187,7 +1331,6 @@ const handleUpload = async () => {
               </TableContainer>
             )}
             
-            {/* OCR Text Tab */}
             {previewTab === 2 && selectedDoc?.ocr_text && (
               <Box sx={{ p: 3 }}>
                 <Paper 
@@ -1230,18 +1373,26 @@ const handleUpload = async () => {
           maxWidth="sm" 
           fullWidth 
           fullScreen={isMobile}
-          PaperProps={{ sx: { borderRadius: isMobile ? 0 : 3, bgcolor: 'background.paper' } }}
+          disableRestoreFocus
+          slotProps={{
+            paper: { sx: { borderRadius: isMobile ? 0 : 3, bgcolor: 'background.paper' } }
+          }}
         >
           <DialogTitle sx={{ borderBottom: `1px solid ${colors.surface.border}`, bgcolor: alpha(colors.primary.main, 0.02) }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="h6" fontWeight={700} color="text.primary">Upload Document</Typography>
               <IconButton onClick={() => !uploading && setUploadDialogOpen(false)} size="small" sx={{ color: 'text.secondary' }}>
-                <Close />
+                <CloseIcon />
               </IconButton>
             </Stack>
           </DialogTitle>
           <DialogContent sx={{ pt: 3 }}>
             <Stack spacing={3}>
+              {uploadBlockedReason && (
+                <Alert severity="warning" icon={<LockIcon />} sx={{ borderRadius: 2 }}>
+                  {uploadBlockedReason}
+                </Alert>
+              )}
               <Button 
                 variant="outlined" 
                 component="label" 
@@ -1254,16 +1405,16 @@ const handleUpload = async () => {
                   color: colors.primary.main,
                   '&:hover': { borderColor: colors.primary.light, bgcolor: alpha(colors.primary.main, 0.05) }
                 }} 
-                disabled={uploading}
+                disabled={uploading || !canUpload}
               >
                 {selectedFile ? 'Change File' : 'Select File'}
-                <input type="file" hidden onChange={handleFileSelect} disabled={uploading} ref={fileInputRef} accept=".pdf,.jpg,.jpeg,.png,.tiff,.bmp,.doc,.docx,.txt" />
+                <input type="file" hidden onChange={handleFileSelect} disabled={uploading || !canUpload} ref={fileInputRef} accept=".pdf,.jpg,.jpeg,.png,.tiff,.bmp,.doc,.docx,.txt" />
               </Button>
               
               {selectedFile && (
                 <Card variant="outlined" sx={{ bgcolor: alpha(colors.primary.main, 0.02), borderRadius: 2 }}>
                   <CardContent>
-                    <Stack direction="row" spacing={2} alignItems="center">
+                    <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
                       {getFileIcon(selectedFile.name, selectedFile.type)}
                       <Box sx={{ flex: 1 }}>
                         <Typography variant="body2" fontWeight={500} color="text.primary">{selectedFile.name}</Typography>
@@ -1271,7 +1422,7 @@ const handleUpload = async () => {
                       </Box>
                       {!uploading && (
                         <IconButton size="small" onClick={() => setSelectedFile(null)} sx={{ color: 'text.secondary' }}>
-                          <Close fontSize="small" />
+                          <CloseIcon fontSize="small" />
                         </IconButton>
                       )}
                     </Stack>
@@ -1281,7 +1432,7 @@ const handleUpload = async () => {
               
               {uploading && (
                 <Box>
-                  <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="caption" color="text.secondary">Uploading...</Typography>
                     <Typography variant="caption" color="text.secondary">{uploadProgress}%</Typography>
                   </Stack>
@@ -1304,26 +1455,47 @@ const handleUpload = async () => {
                   label="Document Title *" 
                   value={fileTitle} 
                   onChange={(e) => setFileTitle(e.target.value)} 
-                  disabled={uploading} 
+                  disabled={uploading || !canUpload} 
                   required
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                 />
               )}
               
-              {selectedFile && documentTypes.length > 0 && (
-                <FormControl fullWidth>
-                  <InputLabel>Document Type *</InputLabel>
-                  <Select 
-                    value={selectedDocumentTypeId} 
-                    label="Document Type *" 
-                    onChange={(e) => setSelectedDocumentTypeId(e.target.value)} 
-                    disabled={uploading}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    {documentTypes.map((type) => (
-                      <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
-                    ))}
-                  </Select>
+              {selectedFile && (
+                <FormControl fullWidth error={!loadingTypes && documentTypes.length === 0}>
+                  {loadingTypes ? (
+                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', py: 1.5 }}>
+                      <CircularProgress size={20} />
+                      <Typography variant="body2" color="text.secondary">Loading document types…</Typography>
+                    </Stack>
+                  ) : documentTypes.length === 0 ? (
+                    <Alert
+                      severity="error"
+                      sx={{ borderRadius: 2 }}
+                      action={
+                        <Button color="inherit" size="small" onClick={fetchDocumentTypes}>
+                          RETRY
+                        </Button>
+                      }
+                    >
+                      Couldn't load document types. Using fallback types.
+                    </Alert>
+                  ) : (
+                    <>
+                      <InputLabel>Document Type *</InputLabel>
+                      <Select
+                        value={selectedDocumentTypeId}
+                        label="Document Type *"
+                        onChange={(e) => setSelectedDocumentTypeId(e.target.value)}
+                        disabled={uploading || !canUpload}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {documentTypes.map((type) => (
+                          <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </>
+                  )}
                 </FormControl>
               )}
               
@@ -1334,12 +1506,11 @@ const handleUpload = async () => {
                 rows={isMobile ? 2 : 3} 
                 value={fileDescription} 
                 onChange={(e) => setFileDescription(e.target.value)} 
-                disabled={uploading} 
+                disabled={uploading || !canUpload} 
                 placeholder="Add notes about this document..."
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
               />
               
-              {/* OCR Option */}
               {selectedFile && isOcrCompatible(selectedFile) && (
                 <Card 
                   variant="outlined" 
@@ -1356,7 +1527,7 @@ const handleUpload = async () => {
                           <Switch 
                             checked={enableOCR} 
                             onChange={(e) => setEnableOCR(e.target.checked)} 
-                            disabled={uploading} 
+                            disabled={uploading || !canUpload} 
                             sx={{ 
                               '& .MuiSwitch-switchBase.Mui-checked': { color: colors.purple.main },
                               '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: alpha(colors.purple.main, 0.5) }
@@ -1364,7 +1535,7 @@ const handleUpload = async () => {
                           />
                         }
                         label={
-                          <Stack direction="row" alignItems="center" spacing={1}>
+                          <Stack direction="row" sx={{ alignItems: 'center', spacing: 1 }}>
                             <ScanIcon sx={{ color: colors.purple.main }} />
                             <Typography variant="body2" fontWeight={500}>Enable OCR (Text Recognition)</Typography>
                           </Stack>
@@ -1378,7 +1549,7 @@ const handleUpload = async () => {
                               value={ocrLanguage} 
                               label="OCR Language" 
                               onChange={(e) => setOcrLanguage(e.target.value)} 
-                              disabled={uploading}
+                              disabled={uploading || !canUpload}
                               sx={{ borderRadius: 2 }}
                             >
                               {ocrLanguages.map((lang) => (
@@ -1407,15 +1578,19 @@ const handleUpload = async () => {
           </DialogContent>
           <DialogActions sx={{ p: 3, borderTop: `1px solid ${colors.surface.border}` }}>
             <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading}>Cancel</Button>
-            <Button 
-              variant="contained" 
-              onClick={handleUpload} 
-              disabled={uploading || !selectedFile || !fileTitle.trim() || !selectedDocumentTypeId} 
-              startIcon={uploading ? <CircularProgress size={20} /> : <UploadIcon />}
-              sx={{ background: colors.primary.gradient }}
-            >
-              {uploading ? 'Uploading...' : 'Upload'}
-            </Button>
+            <Tooltip title={!uploading ? (getUploadDisabledReason() || '') : ''}>
+              <span>
+                <Button 
+                  variant="contained" 
+                  onClick={handleUpload} 
+                  disabled={uploading || Boolean(getUploadDisabledReason())} 
+                  startIcon={uploading ? <CircularProgress size={20} /> : <UploadIcon />}
+                  sx={{ background: colors.primary.gradient }}
+                >
+                  {uploading ? 'Uploading...' : 'Upload'}
+                </Button>
+              </span>
+            </Tooltip>
           </DialogActions>
         </Dialog>
 

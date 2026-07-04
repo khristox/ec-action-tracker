@@ -720,9 +720,15 @@ export const hasAllPermissions = (permissions, requiredPermissions) => {
 
 const rateLimitState = getRateLimitState();
 
+// NOTE: permissionsLoaded distinguishes "we haven't checked permissions yet"
+// from "we checked, and the user genuinely has none". Consumers (e.g.
+// MeetingMinutes) must gate their access-denied UI on this flag, not just
+// on userPermissions.length === 0, or they will render "Access Denied"
+// during the brief window before checkAuth/login resolves.
 const initialState = {
   user: JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || 'null'),
   userPermissions: JSON.parse(localStorage.getItem(STORAGE_KEYS.USER_PERMISSIONS) || '[]'),
+  permissionsLoaded: !!localStorage.getItem(STORAGE_KEYS.USER_PERMISSIONS),
   profilePicture: getCachedProfilePicture(),
   token: localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN),
   isAuthenticated: !!localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN),
@@ -787,6 +793,7 @@ const authSlice = createSlice({
         errorCode: null,
         profilePicture: null,
         userPermissions: [],
+        permissionsLoaded: false,
         failedAttempts: 0,
         remainingAttempts: RATE_LIMIT.MAX_ATTEMPTS,
         isLocked: false,
@@ -803,6 +810,7 @@ const authSlice = createSlice({
     },
     setUserPermissions: (state, action) => {
       state.userPermissions = action.payload;
+      state.permissionsLoaded = true;
       if (state.user) {
         state.user.permissions = action.payload;
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(state.user));
@@ -873,6 +881,7 @@ const authSlice = createSlice({
         state.isAuthChecking = false;
         state.user = action.payload.user;
         state.userPermissions = action.payload.permissions || [];
+        state.permissionsLoaded = true;
         state.token = action.payload.token;
         state.tokenExpiration = getTokenExpiration(action.payload.token);
         state.isAuthenticated = true;
@@ -895,6 +904,11 @@ const authSlice = createSlice({
         state.token = null;
         state.profilePicture = null;
         state.userPermissions = [];
+        // A rejected auth check means the user is logged out, not that we're
+        // still waiting. permissionsLoaded=false here is correct because
+        // there IS no valid permission set for consumers to key off of, and
+        // isAuthenticated=false should be what gates the UI at that point.
+        state.permissionsLoaded = false;
         state.tokenExpiration = null;
       })
       
@@ -912,6 +926,7 @@ const authSlice = createSlice({
         state.tokenExpiration = getTokenExpiration(action.payload.access_token);
         state.isAuthenticated = true;
         state.userPermissions = action.payload.permissions || [];
+        state.permissionsLoaded = true;
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
@@ -967,6 +982,7 @@ const authSlice = createSlice({
         }
         
         state.userPermissions = [];
+        state.permissionsLoaded = false;
         if (action.payload?.status === 401) {
           state.isAuthenticated = false;
         }
@@ -1146,6 +1162,7 @@ const authSlice = createSlice({
           errorCode: null,
           profilePicture: null,
           userPermissions: [],
+          permissionsLoaded: false,
           failedAttempts: 0,
           remainingAttempts: RATE_LIMIT.MAX_ATTEMPTS,
           isLocked: false,
@@ -1202,6 +1219,11 @@ export const {
 export const selectAuth = (state) => state.auth;
 export const selectUser = (state) => state.auth.user;
 export const selectUserPermissions = (state) => state.auth.userPermissions;
+// NEW: use this to know whether userPermissions reflects a real check yet.
+// Any component that renders an "Access Denied" state based on permissions
+// MUST check this first — an empty/false permission result before this flag
+// is true just means "we don't know yet", not "denied".
+export const selectPermissionsLoaded = (state) => state.auth.permissionsLoaded;
 export const selectProfilePicture = (state) => state.auth.profilePicture;
 export const selectProfilePictureChecked = (state) => state.auth.profilePictureChecked;
 export const selectIsAuthenticated = (state) => state.auth.isAuthenticated;

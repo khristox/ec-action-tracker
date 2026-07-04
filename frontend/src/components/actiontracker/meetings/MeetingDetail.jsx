@@ -402,10 +402,6 @@ const RichTextContent = memo(({ content }) => {
 RichTextContent.displayName = 'RichTextContent';
 
 // ==================== Agenda Section (Rich Text Display) ====================
-// Renders the agenda entirely through RichTextContent. When collapsed, height
-// is clipped with a fade-out gradient rather than a hard pixel cut, so list
-// items / headings never get sliced mid-element. There is a single source of
-// truth for the content (no separate plain-text preview competing with it).
 const AgendaSection = memo(({ agenda }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -415,8 +411,6 @@ const AgendaSection = memo(({ agenda }) => {
 
   const hasAgenda = !isAgendaEmpty(agenda);
 
-  // Only show the expand/collapse control if the content actually overflows
-  // the collapsed height — short agendas shouldn't get a pointless button.
   useEffect(() => {
     if (!hasAgenda || !contentRef.current) return;
     setNeedsToggle(contentRef.current.scrollHeight > AGENDA_COLLAPSED_HEIGHT + 8);
@@ -693,15 +687,20 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
       }}
     >
       <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-        {/* Title + Status */}
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          sx={{
+            justifyContent: 'space-between',
+            alignItems: { xs: 'flex-start', sm: 'center' },
+          }}
+        >
           <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight={800}>
             {meeting?.title}
           </Typography>
           <Chip label={statusConfig.label} color={statusConfig.color} icon={statusConfig.icon} sx={{ fontWeight: 600 }} />
         </Stack>
 
-        {/* Description — detailed only */}
         {!isSimple && meeting?.description && (
           <>
             <Divider sx={{ my: 2 }} />
@@ -714,7 +713,6 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
         <Divider sx={{ my: 2 }} />
 
         <Grid container spacing={{ xs: 2, sm: 3 }}>
-          {/* Date & Time */}
           <Grid size={{ xs: 12, sm: 6, md: isSimple ? 4 : 3 }}>
             <Stack direction="row" spacing={2} alignItems="center">
               <Avatar sx={{ bgcolor: alpha('#7C3AED', 0.1), color: '#7C3AED' }}>
@@ -734,7 +732,6 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
             </Stack>
           </Grid>
 
-          {/* Location / Platform */}
           <Grid size={{ xs: 12, sm: 6, md: isSimple ? 4 : 3 }}>
             <Stack direction="row" spacing={2} alignItems="flex-start">
               <Avatar sx={{ bgcolor: alpha('#3B82F6', 0.1), color: '#3B82F6' }}>
@@ -765,7 +762,6 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
             </Stack>
           </Grid>
 
-          {/* Secretary — detailed only */}
           {!isSimple && meeting?.facilitator && (
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <Stack direction="row" spacing={2} alignItems="center">
@@ -778,7 +774,6 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
             </Grid>
           )}
 
-          {/* Chairperson — detailed only */}
           {!isSimple && meeting?.chairperson_name && (
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <Stack direction="row" spacing={2} alignItems="center">
@@ -791,7 +786,6 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
             </Grid>
           )}
 
-          {/* Simple mode: show secretary & chairperson as compact inline text */}
           {isSimple && (meeting?.facilitator || meeting?.chairperson_name) && (
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
               <Stack direction="row" spacing={2} alignItems="flex-start">
@@ -806,10 +800,8 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
           )}
         </Grid>
 
-        {/* Agenda — rich text, detailed view only */}
         {!isSimple && <AgendaSection agenda={meeting?.agenda} />}
 
-        {/* Simple mode hint */}
         {isSimple && (
           <Box sx={{ mt: 2, pt: 2, borderTop: `1px dashed ${isDarkMode ? '#374151' : '#E5E7EB'}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
@@ -832,7 +824,6 @@ const MeetingDetail = () => {
   const isDarkMode = theme.palette.mode === 'dark';
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Redux selectors
   const currentMeeting = useSelector(selectCurrentMeeting);
   const loading = useSelector(selectMeetingsLoading);
   const error = useSelector(selectMeetingsError);
@@ -842,11 +833,9 @@ const MeetingDetail = () => {
   const notificationError = useSelector(selectNotificationError);
   const lastNotificationResult = useSelector(selectLastNotificationResult);
 
-  // Permission selectors
   const userPermissions = useSelector(selectUserPermissions);
   const currentUser = useSelector((state) => state.auth.user);
 
-  // Individual permission checks
   const hasDeleteMeetingPermission = hasPermission(userPermissions, PERMISSIONS.DELETE_MEETING);
   const hasUpdateMeetingPermission = hasPermission(userPermissions, PERMISSIONS.UPDATE_MEETING);
   const hasRecordPermission = hasPermission(userPermissions, PERMISSIONS.RECORD_MEETING);
@@ -856,17 +845,14 @@ const MeetingDetail = () => {
   const hasExportReportPermission = hasPermission(userPermissions, PERMISSIONS.EXPORT_REPORTS);
   const hasViewAuditPermission = hasPermission(userPermissions, PERMISSIONS.VIEW_AUDIT_LOGS);
 
-  // Check if user is admin/superuser
   const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
 
-  // Combined permission checks
   const canDeleteMeeting = isAdmin || hasDeleteMeetingPermission;
   const canUpdateMeeting = isAdmin || hasUpdateMeetingPermission;
   const canSendNotifications = hasSendInAppNotificationPermission || hasSendEmailNotificationPermission;
   const canExportReports = isAdmin || hasExportReportPermission;
   const canViewAudit = isAdmin || hasViewAuditPermission;
 
-  // Local state
   const [tabValue, setTabValue] = useState(0);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [updateLinkDialogOpen, setUpdateLinkDialogOpen] = useState(false);
@@ -886,14 +872,12 @@ const MeetingDetail = () => {
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
-  // View mode — default to 'simple'
   const [viewMode, setViewMode] = useState('simple');
 
   const handleViewModeChange = useCallback((mode) => {
     setViewMode(mode);
   }, []);
 
-  // Speed dial actions
   const speedDialActions = useMemo(() => getSpeedDialActions(
     canUpdateMeeting,
     hasSendInAppNotificationPermission,
@@ -902,7 +886,6 @@ const MeetingDetail = () => {
     canDeleteMeeting
   ), [canUpdateMeeting, hasSendInAppNotificationPermission, hasSendEmailNotificationPermission, canExportReports, canDeleteMeeting]);
 
-  // Memoized values
   const normalizedMeeting = useMemo(
     () => (currentMeeting ? { ...currentMeeting, status: normalizeStatus(currentMeeting.status) } : null),
     [currentMeeting]
@@ -927,7 +910,6 @@ const MeetingDetail = () => {
     [normalizedMeeting?.status?.short_name]
   );
 
-  // Filter tabs based on user permissions
   const visibleTabs = useMemo(() => {
     return TABS.filter((tab) => {
       if (tab.requiresPermission) {
@@ -938,6 +920,57 @@ const MeetingDetail = () => {
       return true;
     });
   }, [hasViewRecorderPermission, canViewAudit, userPermissions]);
+
+  // Tabs actually shown given the current view mode (simple vs detailed).
+  const visibleTabsForMode = useMemo(
+    () => visibleTabs.filter((t) => viewMode === 'detailed' || t.simple),
+    [visibleTabs, viewMode]
+  );
+
+  // ---- FIX: always render Tabs/TabPanels with a value that's actually visible ----
+  // `tabValue` state can briefly point at a tab that isn't in
+  // `visibleTabsForMode` — e.g. on first mount, before permissions have
+  // loaded, "Minutes" (value 0) isn't visible yet. If we render <Tabs
+  // value={tabValue}> directly in that window, MUI logs "None of the Tabs'
+  // children match with 0" because nothing with that value exists among the
+  // rendered <Tab>s. `effectiveTabValue` is computed synchronously during
+  // render (not just via the effect below) so the very first paint is
+  // already valid — the effect then persists that correction into state so
+  // other code reading `tabValue` directly (handlers, etc.) stays in sync.
+  const isTabValueVisible = visibleTabsForMode.some((t) => t.value === tabValue);
+  const effectiveTabValue = isTabValueVisible
+    ? tabValue
+    : (visibleTabsForMode[0]?.value ?? tabValue);
+
+  // ---- FIX: keep the selected tab in sync with what's actually visible ----
+  // Previously, the Tabs component derived its `value` from the *position*
+  // of the active tab inside the permission/mode-filtered array
+  // (`activeVisibleIndex`), while each <Tab> had no explicit `value` (so MUI
+  // assigned them positional values 0,1,2...). Meanwhile the <TabPanel>s
+  // below kept switching on the raw `tabValue` state (the tab's real
+  // `value`, e.g. 0 for "Minutes").
+  //
+  // These two are not the same number once any earlier tab is filtered out
+  // — e.g. "Minutes" (value 0) requires VIEW_MINUTES. If that check is false
+  // (either the user genuinely lacks it, or permissions simply haven't
+  // finished loading yet), "Minutes" drops out of the visible array,
+  // "Documents" becomes position 0, and the Tabs bar highlights it as
+  // selected — but the TabPanel below still matches on tabValue === 0,
+  // which is still "Minutes". Result: "Documents" is shown as the active
+  // tab while Meeting Minutes' own Access Denied panel renders under it.
+  //
+  // Fix: give every <Tab> its real `value`, use that value directly for
+  // both the Tabs and TabPanels (no positional translation), and whenever
+  // the currently selected tab is no longer visible, persist a snap to the
+  // first tab that is (effectiveTabValue above already handles this for the
+  // current render; this effect keeps `tabValue` state itself correct for
+  // subsequent renders/handlers).
+  useEffect(() => {
+    if (visibleTabsForMode.length === 0) return;
+    if (!isTabValueVisible) {
+      setTabValue(visibleTabsForMode[0].value);
+    }
+  }, [visibleTabsForMode, isTabValueVisible]);
 
   const getStatusValue = useCallback(() => {
     const status = normalizedMeeting?.status;
@@ -966,11 +999,9 @@ const MeetingDetail = () => {
     return status.name || 'Unknown';
   }, [normalizedMeeting?.status]);
 
-  // Fetch functions
   const fetchMeeting = useCallback(() => { if (id) dispatch(fetchMeetingById(id)); }, [id, dispatch]);
   const fetchParticipants = useCallback(() => { if (id) dispatch(fetchMeetingParticipants(id)); }, [id, dispatch]);
 
-  // Report/export handlers
   const handlePrintPDF = useCallback(async () => {
     if (!canExportReports) {
       setSnackbar({ open: true, message: 'You don\'t have permission to export reports', severity: 'error' });
@@ -1028,7 +1059,6 @@ const MeetingDetail = () => {
     }
   }, [id, canExportReports]);
 
-  // Effects
   useEffect(() => {
     setShowNotFound(false);
     setLoadingTimeout(false);
@@ -1081,7 +1111,6 @@ const MeetingDetail = () => {
     }
   }, [notificationError, dispatch]);
 
-  // Handlers
   const handleRefresh = useCallback(() => {
     setShowNotFound(false);
     setLoadingTimeout(false);
@@ -1220,7 +1249,12 @@ const MeetingDetail = () => {
   const handleSnackbarClose = () => setSnackbar((prev) => ({ ...prev, open: false }));
   const handleErrorClose = () => { setLocalError(null); dispatch(clearMeetingState()); };
 
-  // ---- Loading state ----
+  // Direct value-based tab change — no positional translation needed since
+  // each <Tab> now carries its real `tab.value`.
+  const handleTabChange = useCallback((_, newValue) => {
+    setTabValue(newValue);
+  }, []);
+
   if (loading && !currentMeeting && !showNotFound) {
     return (
       <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1235,7 +1269,6 @@ const MeetingDetail = () => {
     );
   }
 
-  // ---- Not found state ----
   if (showNotFound && (!currentMeeting || (!loading && !currentMeeting))) {
     return (
       <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1258,7 +1291,6 @@ const MeetingDetail = () => {
     );
   }
 
-  // ---- Main render ----
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6' }}>
       <HeaderBar
@@ -1300,82 +1332,72 @@ const MeetingDetail = () => {
           viewMode={viewMode}
         />
 
-        {(() => {
-          const filteredByMode = visibleTabs.filter((t) => viewMode === 'detailed' || t.simple);
-          const visibleIndex = filteredByMode.findIndex((t) => t.value === tabValue);
-          const activeVisibleIndex = visibleIndex === -1 ? 0 : visibleIndex;
-          const handleTabChange = (_, newVisibleIdx) => setTabValue(filteredByMode[newVisibleIdx].value);
+        {visibleTabsForMode.length > 0 && (
+          <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB', pr: 1.5 }}>
+              <Tabs
+                value={effectiveTabValue}
+                onChange={handleTabChange}
+                variant="scrollable"
+                scrollButtons="auto"
+                sx={{ flex: 1, minHeight: 48, '& .MuiTab-root': { py: 1.5, minHeight: 48, fontWeight: 600, fontSize: '0.8rem', '&.Mui-selected': { color: '#7C3AED' } }, '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 } }}
+              >
+                {visibleTabsForMode.map((tab) => (
+                  <Tab key={tab.value} value={tab.value} icon={tab.icon} iconPosition="start" label={tab.label} />
+                ))}
+              </Tabs>
 
-          if (filteredByMode.length === 0) return null;
-
-          return (
-            <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB', pr: 1.5 }}>
-                <Tabs
-                  value={activeVisibleIndex}
-                  onChange={handleTabChange}
-                  variant="scrollable"
-                  scrollButtons="auto"
-                  sx={{ flex: 1, minHeight: 48, '& .MuiTab-root': { py: 1.5, minHeight: 48, fontWeight: 600, fontSize: '0.8rem', '&.Mui-selected': { color: '#7C3AED' } }, '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 } }}
-                >
-                  {filteredByMode.map((tab) => (
-                    <Tab key={tab.value} icon={tab.icon} iconPosition="start" label={tab.label} />
-                  ))}
-                </Tabs>
-
-                {viewMode === 'simple' && (
-                  <Tooltip title={`Also available: ${visibleTabs.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`} arrow>
-                    <Chip
-                      label={`+${visibleTabs.filter((t) => !t.simple).length} more`}
-                      size="small"
-                      onClick={() => handleViewModeChange('detailed')}
-                      sx={{ ml: 1, height: 24, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0, bgcolor: alpha('#7C3AED', 0.08), color: '#7C3AED', border: `1px dashed ${alpha('#7C3AED', 0.45)}`, '&:hover': { bgcolor: alpha('#7C3AED', 0.16) }, '& .MuiChip-label': { px: 1 } }}
-                    />
-                  </Tooltip>
-                )}
-              </Box>
-
-              <Box sx={{ p: { xs: 2, sm: 3 } }}>
-                <TabPanel value={tabValue} index={0}>
-                  <MeetingMinutes meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
-                </TabPanel>
-                <TabPanel value={tabValue} index={1}>
-                  <MeetingActionsList meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
-                </TabPanel>
-                <TabPanel value={tabValue} index={2}>
-                  <ParticipantsTab
-                    meetingId={id}
-                    participants={participants}
-                    onRefresh={fetchParticipants}
-                    meetingStatus={normalizedMeeting?.status?.short_name}
-                    meetingStartTime={normalizedMeeting?.start_time}
-                    currentChairpersonId={normalizedMeeting?.chairperson_id}
-                    currentSecretaryId={normalizedMeeting?.secretary_id}
+              {viewMode === 'simple' && (
+                <Tooltip title={`Also available: ${visibleTabs.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`} arrow>
+                  <Chip
+                    label={`+${visibleTabs.filter((t) => !t.simple).length} more`}
+                    size="small"
+                    onClick={() => handleViewModeChange('detailed')}
+                    sx={{ ml: 1, height: 24, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0, bgcolor: alpha('#7C3AED', 0.08), color: '#7C3AED', border: `1px dashed ${alpha('#7C3AED', 0.45)}`, '&:hover': { bgcolor: alpha('#7C3AED', 0.16) }, '& .MuiChip-label': { px: 1 } }}
                   />
+                </Tooltip>
+              )}
+            </Box>
+
+            <Box sx={{ p: { xs: 2, sm: 3 } }}>
+              <TabPanel value={effectiveTabValue} index={0}>
+                <MeetingMinutes meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
+              </TabPanel>
+              <TabPanel value={effectiveTabValue} index={1}>
+                <MeetingActionsList meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
+              </TabPanel>
+              <TabPanel value={effectiveTabValue} index={2}>
+                <ParticipantsTab
+                  meetingId={id}
+                  participants={participants}
+                  onRefresh={fetchParticipants}
+                  meetingStatus={normalizedMeeting?.status?.short_name}
+                  meetingStartTime={normalizedMeeting?.start_time}
+                  currentChairpersonId={normalizedMeeting?.chairperson_id}
+                  currentSecretaryId={normalizedMeeting?.secretary_id}
+                />
+              </TabPanel>
+              <TabPanel value={effectiveTabValue} index={3}>
+                <MeetingDocuments meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
+              </TabPanel>
+              <TabPanel value={effectiveTabValue} index={4}>
+                <MeetingHistory meetingId={id} />
+              </TabPanel>
+              {canViewAudit && (
+                <TabPanel value={effectiveTabValue} index={5}>
+                  <MeetingAudit meetingId={id} />
                 </TabPanel>
-                <TabPanel value={tabValue} index={3}>
-                  <MeetingDocuments meetingId={id} onRefresh={handleRefresh} />
+              )}
+              {hasViewRecorderPermission && (
+                <TabPanel value={effectiveTabValue} index={6}>
+                  <MeetingRecorder meetingId={id} />
                 </TabPanel>
-                <TabPanel value={tabValue} index={4}>
-                  <MeetingHistory meetingId={id} />
-                </TabPanel>
-                {canViewAudit && (
-                  <TabPanel value={tabValue} index={5}>
-                    <MeetingAudit meetingId={id} />
-                  </TabPanel>
-                )}
-                {hasViewRecorderPermission && (
-                  <TabPanel value={tabValue} index={6}>
-                    <MeetingRecorder meetingId={id} />
-                  </TabPanel>
-                )}
-              </Box>
-            </Paper>
-          );
-        })()}
+              )}
+            </Box>
+          </Paper>
+        )}
       </Container>
 
-      {/* Speed Dial — mobile only */}
       {isMobile && speedDialActions.length > 0 && (
         <Zoom in={true}>
           <SpeedDial
@@ -1393,7 +1415,6 @@ const MeetingDetail = () => {
         </Zoom>
       )}
 
-      {/* More Options Menu */}
       <Menu anchorEl={moreMenuAnchor} open={Boolean(moreMenuAnchor)} onClose={handleMoreMenuClose}>
         <MenuItem onClick={() => { setUpdateLinkDialogOpen(true); handleMoreMenuClose(); }}>
           <ListItemIcon><UpdateIcon /></ListItemIcon><ListItemText>Update Meeting Link</ListItemText>
@@ -1423,7 +1444,6 @@ const MeetingDetail = () => {
         )}
       </Menu>
 
-      {/* Status Update Menu */}
       <Menu anchorEl={statusMenuAnchor} open={Boolean(statusMenuAnchor)} onClose={handleStatusMenuClose}>
         {(statusOptions?.length > 0 ? statusOptions : Object.entries(STATUS_CONFIG).map(([key, config]) => ({ short_name: key, label: config.label, id: key }))).map((status) => {
           const statusValue = status.short_name || status.value;
@@ -1440,7 +1460,6 @@ const MeetingDetail = () => {
         })}
       </Menu>
 
-      {/* Status Update Dialog */}
       <Dialog open={statusDialogOpen} onClose={() => setStatusDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle><Typography variant="h6" fontWeight={700}>Update Meeting Status</Typography></DialogTitle>
         <DialogContent>
@@ -1478,7 +1497,6 @@ const MeetingDetail = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle><Typography variant="h6" fontWeight={700}>Delete Meeting</Typography></DialogTitle>
         <DialogContent>
@@ -1493,7 +1511,6 @@ const MeetingDetail = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Share Dialog */}
       <Dialog open={shareDialogOpen} onClose={() => setShareDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle><Typography variant="h6" fontWeight={700}>Share Meeting</Typography></DialogTitle>
         <DialogContent>
@@ -1510,7 +1527,6 @@ const MeetingDetail = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Update Meeting Link Dialog */}
       <UpdateMeetingLinkDialog
         open={updateLinkDialogOpen}
         onClose={() => setUpdateLinkDialogOpen(false)}
@@ -1521,7 +1537,6 @@ const MeetingDetail = () => {
         }}
       />
 
-      {/* Notification Dialog */}
       <NotificationDialog
         open={notificationDialogOpen}
         onClose={() => setNotificationDialogOpen(false)}
@@ -1533,7 +1548,6 @@ const MeetingDetail = () => {
         hasInAppPermission={hasSendInAppNotificationPermission}
       />
 
-      {/* Snackbar */}
       <Snackbar open={snackbar.open} autoHideDuration={SNACKBAR_AUTO_HIDE_MS} onClose={handleSnackbarClose} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
         <Alert onClose={handleSnackbarClose} severity={snackbar.severity} variant="filled">{snackbar.message}</Alert>
       </Snackbar>

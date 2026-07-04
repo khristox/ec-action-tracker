@@ -23,8 +23,8 @@ import {
   Button
 } from '@mui/material';
 import {
-  Close as CloseIcon,
-  Save as SaveIcon,
+  Close as Close,
+  Save as Save,
   Person as PersonIcon,
   Schedule as ScheduleIcon,
   Flag as FlagIcon,
@@ -114,7 +114,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Typography variant="h6" fontWeight={700}>Edit Action</Typography>
           <IconButton onClick={onClose} size="small">
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -275,7 +275,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
           variant="contained" 
           onClick={handleSave} 
           disabled={saving || !description.trim()}
-          startIcon={saving ? <CircularProgress size={16} /> : <SaveIcon />}
+          startIcon={saving ? <CircularProgress size={16} /> : <Save />}
           sx={{ minWidth: 120 }}
         >
           {saving ? 'Saving...' : 'Save Changes'}

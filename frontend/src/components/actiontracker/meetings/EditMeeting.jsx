@@ -51,10 +51,10 @@ import {
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
-  Save as SaveIcon,
-  Close as CloseIcon,
-  Delete as DeleteIcon,
-  PersonAdd as PersonAddIcon,
+  Save as Save,
+  Close as Close,
+  Delete as Delete,
+  PersonAdd as PersonAdd,
   LocationOn as LocationIcon,
   Event as EventIcon,
   People as PeopleIcon,
@@ -843,7 +843,7 @@ useEffect(() => {
                 Edit Meeting
               </Typography>
               <IconButton edge="end" onClick={handleSubmit} disabled={apiLoading}>
-                {apiLoading ? <CircularProgress size={24} /> : <SaveIcon />}
+                {apiLoading ? <CircularProgress size={24} /> : <Save />}
               </IconButton>
             </Toolbar>
           </AppBar>
@@ -1023,7 +1023,7 @@ useEffect(() => {
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
                     <Typography variant="subtitle1" fontWeight="bold">Participants</Typography>
-                    <Button startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)} size="small">
+                    <Button startIcon={<PersonAdd />} onClick={() => setShowAddParticipantDialog(true)} size="small">
                       Add Participant
                     </Button>
                   </Stack>
@@ -1039,7 +1039,7 @@ useEffect(() => {
                           <ListItem
                             secondaryAction={
                               <IconButton edge="end" onClick={() => handleRemoveParticipant(participant.id)}>
-                                <DeleteIcon />
+                                <Delete />
                               </IconButton>
                             }
                           >

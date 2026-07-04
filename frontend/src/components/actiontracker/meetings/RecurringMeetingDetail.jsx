@@ -14,9 +14,9 @@ import {
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Add as AddIcon,
+  Edit as Edit,
+  Delete as Delete,
+  Add as Add,
   Repeat as RepeatIcon,
   EventNote as EventNoteIcon,
   Today as TodayIcon,
@@ -320,7 +320,7 @@ const RecurringMeetingDetail = () => {
               </Tooltip>
               <Tooltip title="Edit">
                 <IconButton size="small" onClick={() => navigate(`/meetings/${occurrence.id}/edit`)}>
-                  <EditIcon fontSize="small" />
+                  <Edit fontSize="small" />
                 </IconButton>
               </Tooltip>
             </Stack>
@@ -483,7 +483,7 @@ const RecurringMeetingDetail = () => {
                 <Button
                   onClick={handleGenerateNext}
                   disabled={generating}
-                  startIcon={generating ? <CircularProgress size={16} /> : <AddIcon />}
+                  startIcon={generating ? <CircularProgress size={16} /> : <Add />}
                   sx={{ textTransform: 'none', fontWeight: 600 }}
                 >
                   Generate Next
@@ -512,7 +512,7 @@ const RecurringMeetingDetail = () => {
             <Button
               variant="outlined"
               onClick={() => navigate(`/recurring-meetings/${id}/edit`)}
-              startIcon={<EditIcon />}
+              startIcon={<Edit />}
               sx={{ textTransform: 'none', fontWeight: 600 }}
             >
               Edit
@@ -521,7 +521,7 @@ const RecurringMeetingDetail = () => {
               variant="contained"
               color="error"
               onClick={() => setDeleteDialogOpen(true)}
-              startIcon={<DeleteIcon />}
+              startIcon={<Delete />}
               sx={{ textTransform: 'none', fontWeight: 600 }}
             >
               Delete
@@ -535,7 +535,7 @@ const RecurringMeetingDetail = () => {
             <IconButton onClick={handleMenuOpen}><MoreVertIcon /></IconButton>
             <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose}>
               <MenuItem onClick={handleGenerateNext} disabled={generating}>
-                <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>Generate Next
+                <ListItemIcon><Add fontSize="small" /></ListItemIcon>Generate Next
               </MenuItem>
               <MenuItem onClick={() => handleGenerateMultiple(5)} disabled={generating}>
                 <ListItemIcon><CalendarTodayIcon fontSize="small" /></ListItemIcon>Generate 5
@@ -552,10 +552,10 @@ const RecurringMeetingDetail = () => {
               </MenuItem>
               <Divider />
               <MenuItem onClick={() => navigate(`/recurring-meetings/${id}/edit`)}>
-                <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>Edit Series
+                <ListItemIcon><Edit fontSize="small" /></ListItemIcon>Edit Series
               </MenuItem>
               <MenuItem onClick={() => setDeleteDialogOpen(true)} sx={{ color: COLORS.danger }}>
-                <ListItemIcon><DeleteIcon fontSize="small" sx={{ color: COLORS.danger }} /></ListItemIcon>
+                <ListItemIcon><Delete fontSize="small" sx={{ color: COLORS.danger }} /></ListItemIcon>
                 Delete Series
               </MenuItem>
             </Menu>
@@ -801,7 +801,7 @@ const RecurringMeetingDetail = () => {
                 </Typography>
                 <Button
                   variant="contained"
-                  startIcon={<AddIcon />}
+                  startIcon={<Add />}
                   onClick={handleGenerateNext}
                   disabled={generating}
                   size="large"
@@ -890,7 +890,7 @@ const RecurringMeetingDetail = () => {
                                 </Tooltip>
                                 <Tooltip title="Edit">
                                   <IconButton size="small" onClick={() => navigate(`/meetings/${occurrence.id}/edit`)}>
-                                    <EditIcon fontSize="small" />
+                                    <Edit fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
                               </Stack>
@@ -963,11 +963,11 @@ const RecurringMeetingDetail = () => {
           onOpen={() => setSpeedDialOpen(true)}
           open={speedDialOpen}
         >
-          <SpeedDialAction icon={<AddIcon />}           tooltipTitle="Generate Next" onClick={handleGenerateNext} />
+          <SpeedDialAction icon={<Add />}           tooltipTitle="Generate Next" onClick={handleGenerateNext} />
           <SpeedDialAction icon={<CalendarTodayIcon />} tooltipTitle="Generate 5"    onClick={() => handleGenerateMultiple(5)} />
           <SpeedDialAction icon={<DownloadIcon />}      tooltipTitle="Export"         onClick={handleExport} />
-          <SpeedDialAction icon={<EditIcon />}          tooltipTitle="Edit"           onClick={() => navigate(`/recurring-meetings/${id}/edit`)} />
-          <SpeedDialAction icon={<DeleteIcon />}        tooltipTitle="Delete"         onClick={() => setDeleteDialogOpen(true)} />
+          <SpeedDialAction icon={<Edit />}          tooltipTitle="Edit"           onClick={() => navigate(`/recurring-meetings/${id}/edit`)} />
+          <SpeedDialAction icon={<Delete />}        tooltipTitle="Delete"         onClick={() => setDeleteDialogOpen(true)} />
         </SpeedDial>
       </Fade>
 

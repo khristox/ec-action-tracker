@@ -6,7 +6,7 @@ import {
   FormHelperText, Button, Alert, IconButton, Badge
 } from '@mui/material';
 import {
-  Repeat as RepeatIcon, Preview as PreviewIcon, Close as CloseIcon,
+  Repeat as RepeatIcon, Preview as PreviewIcon, Close as Close,
   Today as TodayIcon, Info as InfoIcon, Event as EventIcon
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -260,7 +260,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                   icon={<TodayIcon />} 
                   action={
                     <IconButton size="small" onClick={() => setShowPreview(false)}>
-                      <CloseIcon fontSize="small" />
+                      <Close fontSize="small" />
                     </IconButton>
                   }
                 >

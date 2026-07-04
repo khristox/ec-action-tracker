@@ -114,7 +114,7 @@ export const isRestrictedVisibility = (visibility) => visibility === 'department
 
 export const PARTICIPANT_TABS = [
   { value: 'existing', label: 'Existing Users', icon: 'PersonSearchIcon' },
-  { value: 'manual', label: 'Add Manually', icon: 'PersonAddIcon' },
+  { value: 'manual', label: 'Add Manually', icon: 'PersonAdd' },
   { value: 'lists', label: 'Participant Lists', icon: 'ListAltIcon' }
 ];
 

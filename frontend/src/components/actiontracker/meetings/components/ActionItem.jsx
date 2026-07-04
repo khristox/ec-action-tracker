@@ -6,7 +6,7 @@ import {
   Box
 } from '@mui/material';
 import {
-  Edit as EditIcon, CheckCircle as CheckCircleIcon,
+  Edit as Edit, CheckCircle as CheckCircleIcon,
   Warning as WarningIcon, PlayCircle as PlayCircleIcon, Schedule as ScheduleIcon,
   Person as PersonIcon, Comment as CommentIcon, ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon, Assignment as AssignmentIcon
@@ -153,7 +153,7 @@ const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
                 disabled={disabled}
                 sx={{ p: 0.5 }}
               >
-                <EditIcon fontSize="small" />
+                <Edit fontSize="small" />
               </IconButton>
             </Tooltip>
           </Stack>

@@ -7,7 +7,7 @@ import {
   Stack, Box, Chip, Divider
 } from '@mui/material';
 import { 
-  Close as CloseIcon, 
+  Close as Close, 
   Description as DescriptionIcon, 
   AccessTime as AccessTimeIcon,
   Person as PersonIcon,
@@ -259,7 +259,7 @@ const AddActionDialog = ({
             {editingAction ? 'Edit Action Item' : 'New Action Item'}
           </Typography>
           {isMobile && (
-            <IconButton onClick={onClose} sx={{ color: 'white' }}><CloseIcon /></IconButton>
+            <IconButton onClick={onClose} sx={{ color: 'white' }}><Close /></IconButton>
           )}
         </DialogTitle>
 

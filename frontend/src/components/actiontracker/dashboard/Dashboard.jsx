@@ -29,7 +29,7 @@ import {
   Today as TodayIcon,
   Upcoming as UpcomingIcon,
   Pending as PendingIcon,
-  Cancel as CancelIcon,
+  Cancel as Cancel,
   HourglassEmpty as HourglassEmptyIcon
 } from '@mui/icons-material';
 import {
@@ -105,12 +105,12 @@ const getMeetingStatusConfig = (status) => {
     'MEETING_STATUS_SCHEDULED': { label: 'Scheduled', color: '#3b82f6', bgAlpha: 0.1, icon: <ScheduleIcon sx={{ fontSize: 12 }} /> },
     'MEETING_STATUS_STARTED': { label: 'In Progress', color: '#f59e0b', bgAlpha: 0.1, icon: <HourglassEmptyIcon sx={{ fontSize: 12 }} /> },
     'MEETING_STATUS_COMPLETED': { label: 'Completed', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
-    'MEETING_STATUS_CANCELLED': { label: 'Cancelled', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> },
+    'MEETING_STATUS_CANCELLED': { label: 'Cancelled', color: '#ef4444', bgAlpha: 0.1, icon: <Cancel sx={{ fontSize: 12 }} /> },
     'MEETING_STATUS_POSTPONED': { label: 'Postponed', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> },
     'scheduled': { label: 'Scheduled', color: '#3b82f6', bgAlpha: 0.1, icon: <ScheduleIcon sx={{ fontSize: 12 }} /> },
     'started': { label: 'In Progress', color: '#f59e0b', bgAlpha: 0.1, icon: <HourglassEmptyIcon sx={{ fontSize: 12 }} /> },
     'completed': { label: 'Completed', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
-    'cancelled': { label: 'Cancelled', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> },
+    'cancelled': { label: 'Cancelled', color: '#ef4444', bgAlpha: 0.1, icon: <Cancel sx={{ fontSize: 12 }} /> },
     'postponed': { label: 'Postponed', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> }
   };
   
@@ -137,11 +137,11 @@ const getAttendanceStatusConfig = (status) => {
     'confirmed': { label: 'Confirmed', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
     'attended': { label: 'Attended', color: '#10b981', bgAlpha: 0.1, icon: <CheckCircleIcon sx={{ fontSize: 12 }} /> },
     'pending': { label: 'Pending', color: '#f59e0b', bgAlpha: 0.1, icon: <ScheduleIcon sx={{ fontSize: 12 }} /> },
-    'absent': { label: 'Absent', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> },
+    'absent': { label: 'Absent', color: '#ef4444', bgAlpha: 0.1, icon: <Cancel sx={{ fontSize: 12 }} /> },
     'absent_with_apology': { label: 'Absent (Excused)', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> },
     'excused': { label: 'Excused', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> },
     'maybe': { label: 'Maybe', color: '#06b6d4', bgAlpha: 0.1, icon: <HourglassEmptyIcon sx={{ fontSize: 12 }} /> },
-    'declined': { label: 'Declined', color: '#ef4444', bgAlpha: 0.1, icon: <CancelIcon sx={{ fontSize: 12 }} /> }
+    'declined': { label: 'Declined', color: '#ef4444', bgAlpha: 0.1, icon: <Cancel sx={{ fontSize: 12 }} /> }
   };
   
   return configs[statusStr] || { 

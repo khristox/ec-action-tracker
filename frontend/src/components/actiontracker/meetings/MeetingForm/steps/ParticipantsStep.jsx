@@ -5,7 +5,7 @@ import {
   FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
-import { PersonAdd as PersonAddIcon, EditNote as SecretaryIcon } from '@mui/icons-material';
+import { PersonAdd as PersonAdd, EditNote as SecretaryIcon } from '@mui/icons-material';
 import { ExistingUsersSelector } from '../components/ExistingUsersSelector';
 import { ManualParticipantEntry } from '../components/ManualParticipantEntry';
 import { ParticipantListsSelector } from '../components/ParticipantListsSelector';
@@ -81,7 +81,7 @@ export const ParticipantsStep = ({
             </Typography>
             <Button
               variant="outlined"
-              startIcon={<PersonAddIcon />}
+              startIcon={<PersonAdd />}
               onClick={() => setShowAddParticipantDialog(true)}
               disabled={apiLoading}
             >

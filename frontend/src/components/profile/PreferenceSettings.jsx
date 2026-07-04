@@ -27,7 +27,7 @@ import {
   AttachMoneyOutlined,
   AccessTimeOutlined,
   SaveOutlined,
-  CheckCircleOutline,
+  CheckCircleOutlined,
   SettingsOutlined
 } from '@mui/icons-material';
 import { updateProfile } from '../../store/slices/profileSlice';

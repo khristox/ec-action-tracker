@@ -13,7 +13,7 @@ import {
   Autocomplete, Skeleton, Badge
 } from '@mui/material';
 import {
-  Edit as EditIcon,
+  Edit as Edit,
   Assignment as AssignmentIcon,
   Schedule as ScheduleIcon,
   Person as PersonIcon,
@@ -21,13 +21,13 @@ import {
   Pending as PendingIcon,
   Warning as WarningIcon,
   Refresh as RefreshIcon,
-  Close as CloseIcon,
-  Save as SaveIcon,
+  Close as Close,
+  Save as Save,
   TrendingUp as TrendingUpIcon,
   PlayCircle as PlayCircleIcon,
   TaskAlt as TaskAltIcon,
   Visibility as VisibilityIcon,
-  PersonAdd as PersonAddIcon,
+  PersonAdd as PersonAdd,
   Flag as FlagIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
@@ -279,12 +279,12 @@ const ActionRow = ({ action, onOpenProgress, onEdit, onAssign, onView }) => {
           </Tooltip>
           <Tooltip title="Edit Action">
             <IconButton size="small" onClick={() => onEdit(action)} color="secondary">
-              <EditIcon fontSize="small" />
+              <Edit fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip title="Assign/Reassign User">
             <IconButton size="small" onClick={() => onAssign(action)} color="success">
-              <PersonAddIcon fontSize="small" />
+              <PersonAdd fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip title="View Details">
@@ -601,7 +601,7 @@ const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
                 Update Progress
               </Typography>
               <IconButton onClick={() => setShowProgressDialog(false)} size="small">
-                <CloseIcon />
+                <Close />
               </IconButton>
             </Stack>
           </DialogTitle>
@@ -713,7 +713,7 @@ const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
               variant="contained"
               onClick={handleProgressUpdate}
               disabled={isUpdating || !selectedStatusId}
-              startIcon={isUpdating ? <CircularProgress size={16} /> : <SaveIcon />}
+              startIcon={isUpdating ? <CircularProgress size={16} /> : <Save />}
             >
               {isUpdating ? 'Saving...' : 'Save Progress'}
             </Button>

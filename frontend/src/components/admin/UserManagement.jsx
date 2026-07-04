@@ -16,7 +16,7 @@ import {
   RefreshOutlined, AdminPanelSettingsOutlined, OpenInNewOutlined,
   ShieldOutlined, PeopleAltOutlined, FilterListOutlined, CloseOutlined,
   BusinessOutlined, LinkOutlined, LinkOffOutlined, ApartmentOutlined,
-  AccountTreeOutlined, SupervisorAccountOutlined, CheckCircleOutlined,
+  AccountTreeOutlined, SupervisorAccountOutlined, CheckCircleOutlinedd,
   CancelOutlined, TuneOutlined, ChevronRightOutlined, FolderOutlined,
   FolderOpenOutlined, SwapHorizOutlined, CheckBoxOutlined,
   CheckBoxOutlineBlankOutlined, WarningAmberOutlined,
@@ -748,7 +748,7 @@ const DepartmentDialog = ({
               {toAdd.map((id) => (
                 <DiffRow
                   key={id}
-                  icon={<CheckCircleOutlined sx={{ fontSize: 14 }} />}
+                  icon={<CheckCircleOutlinedd sx={{ fontSize: 14 }} />}
                   color="success.main"
                 >
                   Add: <strong>{getDeptName(id)}</strong> as {ROLE_PALETTE[selectedMap[id]]?.label}

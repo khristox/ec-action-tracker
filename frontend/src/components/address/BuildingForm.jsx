@@ -40,8 +40,8 @@ import {
   Collapse
 } from '@mui/material';
 import {
-  Close as CloseIcon,
-  Save as SaveIcon,
+  Close as Close,
+  Save as Save,
   Apartment as ApartmentIcon,
   Business as BusinessIcon,
   MeetingRoom as MeetingRoomIcon,
@@ -51,7 +51,7 @@ import {
   ArrowForward as ArrowForwardIcon,
   ArrowBack as ArrowBackIcon,
   CheckCircle as CheckCircleIcon,
-  Edit as EditIcon,
+  Edit as Edit,
   Link as LinkIcon,
   Search as SearchIcon,
   Home as HomeIcon,
@@ -961,7 +961,7 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
     if (editMode) {
       return (
         <Stack spacing={2}>
-          <Alert severity="warning" icon={<EditIcon />}>
+          <Alert severity="warning" icon={<Edit />}>
             Editing {BUILDINGS_LEVELS[editingLevel].name}: {hierarchy[editingLevel]?.name}
           </Alert>
           <Grid container spacing={2}>
@@ -1064,7 +1064,7 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
               label={`${BUILDINGS_LEVELS[parseInt(level)].name}: ${hierarchy[level].name}`}
               size="small"
               onDelete={() => handleEditLevel(parseInt(level))}
-              deleteIcon={<EditIcon />}
+              deleteIcon={<Edit />}
               sx={{
                 bgcolor: alpha(getLevelColor(BUILDINGS_LEVELS[parseInt(level)].level), 0.1),
                 color: getLevelColor(BUILDINGS_LEVELS[parseInt(level)].level),
@@ -1096,7 +1096,7 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
               {isEdit ? 'Edit Building Hierarchy' : 'Add Building Hierarchy'}
             </Typography>
           </Stack>
-          <IconButton onClick={onClose} disabled={loading}><CloseIcon /></IconButton>
+          <IconButton onClick={onClose} disabled={loading}><Close /></IconButton>
         </Stack>
       </DialogTitle>
 
@@ -1136,7 +1136,7 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
                 onChange={(e) => setCurrentFormData(prev => ({ ...prev, name: e.target.value }))} size="small" />
               <TextField fullWidth label="Code" value={initialData?.code || ''} disabled size="small" />
               <Button variant="contained" onClick={handleUpdateLocation} disabled={loading}
-                startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}>
+                startIcon={loading ? <CircularProgress size={20} /> : <Save />}>
                 Save Changes
               </Button>
             </Stack>
@@ -1168,7 +1168,7 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
                 ? handleSaveWithAddressLink
                 : (editMode ? handleUpdateLocation : handleSaveNewLocation)}
               disabled={loading || !currentFormData.name || (editMode ? false : (!currentFormData.code || codeAvailable === false))}
-              startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}>
+              startIcon={loading ? <CircularProgress size={20} /> : <Save />}>
               {editMode ? `Update ${currentLevel.name}` : `Save ${currentLevel.name}`}
             </Button>
           </>

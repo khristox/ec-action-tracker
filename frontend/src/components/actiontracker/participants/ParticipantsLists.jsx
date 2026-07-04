@@ -10,10 +10,10 @@ import {
   ListItemIcon, ListItemText, Snackbar, Tooltip, alpha
 } from '@mui/material';
 import {
-  Add as AddIcon, Search as SearchIcon, Person as PersonIcon,
+  Add as Add, Search as SearchIcon, Person as PersonIcon,
   Email as EmailIcon, Phone as PhoneIcon, Business as BusinessIcon,
-  Close as CloseIcon, Edit as EditIcon, Delete as DeleteIcon,
-  MoreVert as MoreVertIcon, Save as SaveIcon, Cancel as CancelIcon,
+  Close as Close, Edit as Edit, Delete as Delete,
+  MoreVert as MoreVertIcon, Save as Save, Cancel as Cancel,
   Refresh as RefreshIcon, Description as DescriptionIcon
 } from '@mui/icons-material';
 import { 
@@ -178,7 +178,7 @@ const ParticipantsList = ({ meetingId }) => {
           onClick={() => setDialogOpen(true)}
           sx={{ px: 4, borderRadius: 4, fontWeight: 800, textTransform: 'none' }}
         >
-          <AddIcon sx={{ mr: 1 }} /> Add New
+          <Add sx={{ mr: 1 }} /> Add New
         </Fab>
       </Stack>
 
@@ -255,10 +255,10 @@ const ParticipantsList = ({ meetingId }) => {
                   </TableCell>
                   <TableCell align="right" sx={{ pr: 4 }}>
                     <IconButton onClick={() => { setEditingParticipant(p); setDialogOpen(true); }} sx={{ color: 'primary.main', bgcolor: isDark ? alpha(theme.palette.primary.main, 0.1) : alpha(theme.palette.primary.main, 0.05), mr: 1 }}>
-                      <EditIcon fontSize="small" />
+                      <Edit fontSize="small" />
                     </IconButton>
                     <IconButton sx={{ color: 'error.main', bgcolor: isDark ? alpha(theme.palette.error.main, 0.1) : alpha(theme.palette.error.main, 0.05) }}>
-                      <DeleteIcon fontSize="small" />
+                      <Delete fontSize="small" />
                     </IconButton>
                   </TableCell>
                 </TableRow>

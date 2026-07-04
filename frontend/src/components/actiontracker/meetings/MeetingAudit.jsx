@@ -44,18 +44,18 @@ import {
   Refresh as RefreshIcon,
   Visibility as VisibilityIcon,
   Person as PersonIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Add as AddIcon,
+  Edit as Edit,
+  Delete as Delete,
+  Add as Add,
   Update as UpdateIcon,
   CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
+  Cancel as Cancel,
   Schedule as ScheduleIcon,
   Link as LinkIcon,
   Assignment as AssignmentIcon,
   People as PeopleIcon,
   Description as DescriptionIcon,
-  Close as CloseIcon,
+  Close as Close,
   ExpandMore as ExpandMoreIcon,
   Difference as DifferenceIcon,
   Code as CodeIcon,
@@ -249,13 +249,13 @@ const getActionIcon = (action) => {
   const actionLower = action?.toLowerCase() || '';
   
   if (actionLower.includes('create') || actionLower.includes('add')) {
-    return <AddIcon fontSize="small" color="success" />;
+    return <Add fontSize="small" color="success" />;
   }
   if (actionLower.includes('update') || actionLower.includes('edit') || actionLower.includes('modify')) {
     return <UpdateIcon fontSize="small" color="info" />;
   }
   if (actionLower.includes('delete') || actionLower.includes('remove')) {
-    return <DeleteIcon fontSize="small" color="error" />;
+    return <Delete fontSize="small" color="error" />;
   }
   if (actionLower.includes('status')) {
     return <ScheduleIcon fontSize="small" color="warning" />;
@@ -276,7 +276,7 @@ const getActionIcon = (action) => {
     return <CheckCircleIcon fontSize="small" color="success" />;
   }
   if (actionLower.includes('cancel')) {
-    return <CancelIcon fontSize="small" color="error" />;
+    return <Cancel fontSize="small" color="error" />;
   }
   
   return <HistoryIcon fontSize="small" />;
@@ -720,7 +720,7 @@ const MeetingAudit = ({ meetingId }) => {
               </Typography>
             </Stack>
             <IconButton onClick={() => setShowDetailsDialog(false)} size="small">
-              <CloseIcon />
+              <Close />
             </IconButton>
           </Stack>
         </DialogTitle>

@@ -6,7 +6,7 @@ import {
   Card, CardContent, TextField, Button, Typography, Box,
   InputAdornment, IconButton, Alert, CircularProgress, Divider, Link
 } from '@mui/material';
-import { LockOutlined, Visibility, VisibilityOff, CheckCircleOutline } from '@mui/icons-material';
+import { LockOutlined, Visibility, VisibilityOff, CheckCircleOutlined } from '@mui/icons-material';
 import { resetPassword, clearError } from '../../store/slices/authSlice';
 
 const ResetPassword = () => {
@@ -69,7 +69,7 @@ const ResetPassword = () => {
     return (
       <Card sx={{ maxWidth: 500, mx: 'auto', mt: 8, borderRadius: 4 }}>
         <CardContent sx={{ p: 4, textAlign: 'center' }}>
-          <CheckCircleOutline sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
+          <CheckCircleOutlined sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
           <Typography variant="h5" fontWeight={700} gutterBottom>
             Password Reset Successful!
           </Typography>

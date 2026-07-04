@@ -34,7 +34,7 @@ import {
   DomainOutlined as StructureIcon,
   CheckCircle as CheckCircleIcon,
   ChevronRight as ChevronRightIcon,
-  Close as CloseIcon,
+  Close as Close,
   GpsFixed as GpsFixedIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
@@ -557,7 +557,7 @@ export const LocationSearch = React.memo(({ value, onChange, onClear }) => {
                   size="small"
                   color="success"
                   onDelete={handleClear}
-                  deleteIcon={<CloseIcon />}
+                  deleteIcon={<Close />}
                 />
               </Tooltip>
             )}
@@ -771,7 +771,7 @@ export const LocationSearch = React.memo(({ value, onChange, onClear }) => {
               variant="outlined" 
               sx={{ borderRadius: 1.5 }}
               action={
-                <Button color="inherit" size="small" onClick={handleClear} startIcon={<CloseIcon />}>
+                <Button color="inherit" size="small" onClick={handleClear} startIcon={<Close />}>
                   Change
                 </Button>
               }

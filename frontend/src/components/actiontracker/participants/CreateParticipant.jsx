@@ -28,16 +28,16 @@ import {
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
-  Save as SaveIcon,
-  Cancel as CancelIcon,
-  PersonAdd as PersonAddIcon,
+  Save as Save,
+  Cancel as Cancel,
+  PersonAdd as PersonAdd,
   Email as EmailIcon,
   Phone as PhoneIcon,
   Business as BusinessIcon,
   Title as TitleIcon,
   Description as DescriptionIcon,
   Home as HomeIcon,
-  GroupAdd as GroupAddIcon
+  GroupAdd as GroupAdd
 } from '@mui/icons-material';
 import { createParticipant, clearError } from '../../../store/slices/actionTracker/participantSlice';
 
@@ -163,7 +163,7 @@ const CreateParticipant = () => {
           Participants
         </Link>
         <Typography color="text.primary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <PersonAddIcon fontSize="small" />
+          <PersonAdd fontSize="small" />
           Create New Participant
         </Typography>
       </Breadcrumbs>
@@ -191,7 +191,7 @@ const CreateParticipant = () => {
         <Box display="flex" gap={2}>
           <Button
             variant="outlined"
-            startIcon={<CancelIcon />}
+            startIcon={<Cancel />}
             onClick={handleCancel}
             sx={{ 
               borderColor: 'divider',
@@ -207,7 +207,7 @@ const CreateParticipant = () => {
           </Button>
           <Button
             variant="contained"
-            startIcon={saving ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : <SaveIcon />}
+            startIcon={saving ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : <Save />}
             onClick={handleSubmit}
             disabled={saving || !isFormValid()}
             sx={{ 
@@ -308,7 +308,7 @@ const CreateParticipant = () => {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonAddIcon color={getFieldError('name') ? "error" : "action"} />
+                      <PersonAdd color={getFieldError('name') ? "error" : "action"} />
                     </InputAdornment>
                   ),
                 }}
@@ -511,7 +511,7 @@ const CreateParticipant = () => {
       }}>
         <Button
           variant="outlined"
-          startIcon={<CancelIcon />}
+          startIcon={<Cancel />}
           onClick={handleCancel}
           fullWidth={isMobile}
           size="large"
@@ -529,7 +529,7 @@ const CreateParticipant = () => {
         </Button>
         <Button
           variant="contained"
-          startIcon={saving ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : <SaveIcon />}
+          startIcon={saving ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : <Save />}
           onClick={handleSubmit}
           disabled={saving || !isFormValid()}
           fullWidth={isMobile}
@@ -559,7 +559,7 @@ const CreateParticipant = () => {
           <Alert 
             severity="success" 
             onClose={() => setSuccessMessage(null)}
-            icon={<GroupAddIcon />}
+            icon={<GroupAdd />}
             sx={{ 
               boxShadow: 3,
               bgcolor: isDark ? alpha(theme.palette.success.main, 0.9) : theme.palette.success.main,

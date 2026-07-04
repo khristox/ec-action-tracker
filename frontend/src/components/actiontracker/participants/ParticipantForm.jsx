@@ -21,13 +21,13 @@ import {
   alpha
 } from '@mui/material';
 import {
-  Close as CloseIcon,
-  PersonAdd as PersonAddIcon,
+  Close as Close,
+  PersonAdd as PersonAdd,
   Email as EmailIcon,
   Business as BusinessIcon,
   Phone as PhoneIcon,
   LocationOn as LocationIcon,
-  Save as SaveIcon
+  Save as Save
 } from '@mui/icons-material';
 import api from '../../../services/api';
 
@@ -180,13 +180,13 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
         bgcolor: 'background.paper'
       }}>
         <Stack direction="row" spacing={1} alignItems="center">
-          <PersonAddIcon sx={{ color: theme.palette.primary.main }} />
+          <PersonAdd sx={{ color: theme.palette.primary.main }} />
           <Typography variant="h6" fontWeight={700} sx={{ color: 'text.primary' }}>
             {editingParticipant ? 'Edit Participant' : 'Add Participant'}
           </Typography>
         </Stack>
         <IconButton onClick={onClose} size="small" sx={{ color: 'text.secondary' }}>
-          <CloseIcon />
+          <Close />
         </IconButton>
       </DialogTitle>
       
@@ -241,7 +241,7 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <PersonAddIcon fontSize="small" sx={{ color: 'action.active' }} />
+                    <PersonAdd fontSize="small" sx={{ color: 'action.active' }} />
                   </InputAdornment>
                 ),
               }}
@@ -433,7 +433,7 @@ const ParticipantForm = ({ open, onClose, onSave, editingParticipant, meetingId,
           variant="contained" 
           onClick={handleSubmit}
           disabled={loading || externalLoading}
-          startIcon={loading ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <SaveIcon />}
+          startIcon={loading ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <Save />}
           sx={{ 
             fontWeight: 600,
             '&:hover': {

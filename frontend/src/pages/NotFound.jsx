@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Button, Container, Typography, Paper } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { ErrorOutline, Home } from '@mui/icons-material';
+import { ErrorOutlined, Home } from '@mui/icons-material';
 
 const NotFound = () => {
   const navigate = useNavigate();
@@ -26,7 +26,7 @@ const NotFound = () => {
             background: 'linear-gradient(135deg, rgba(25,118,210,0.05) 0%, rgba(25,118,210,0.02) 100%)',
           }}
         >
-          <ErrorOutline sx={{ fontSize: 80, color: 'error.main', mb: 2 }} />
+          <ErrorOutlined sx={{ fontSize: 80, color: 'error.main', mb: 2 }} />
           <Typography variant="h2" component="h1" gutterBottom fontWeight={700}>
             404
           </Typography>

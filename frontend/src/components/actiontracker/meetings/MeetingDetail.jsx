@@ -40,7 +40,6 @@ import {
   alpha,
   Card,
   CardContent,
-  Collapse,
   LinearProgress,
   Breadcrumbs,
   Skeleton,
@@ -53,8 +52,8 @@ import {
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
+  Edit as Edit,
+  Delete as Delete,
   LocationOn as LocationIcon,
   People as PeopleIcon,
   Description as DescriptionIcon,
@@ -64,7 +63,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Pending as PendingIcon,
   Schedule as ScheduleIcon,
-  Cancel as CancelIcon,
+  Cancel as Cancel,
   MoreVert as MoreVertIcon,
   VideoCall as VideoCallIcon,
   Link as LinkIcon,
@@ -74,7 +73,7 @@ import {
   AccessTime as AccessTimeIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  ErrorOutline as ErrorOutlineIcon,
+  ErrorOutlined as ErrorOutlinedIcon,
   HourglassEmpty as HourglassEmptyIcon,
   Public as PublicIcon,
   Flag as FlagIcon,
@@ -212,6 +211,8 @@ const PERMISSIONS = {
 // ==================== Constants ====================
 const NOT_FOUND_DELAY_MS = 7000;
 const SNACKBAR_AUTO_HIDE_MS = 6000;
+const AGENDA_COLLAPSED_HEIGHT = 160;
+const AGENDA_EXPANDED_MAX_HEIGHT = 2000;
 
 // Location level configurations
 const LOCATION_LEVELS = {
@@ -236,7 +237,7 @@ const STATUS_CONFIG = {
   in_progress: { label: 'In Progress', icon: <PendingIcon />,      color: 'info',    action: 'Continue Meeting'  },
   ended:       { label: 'Ended',       icon: <CheckCircleIcon />,  color: 'success', action: 'End Meeting'       },
   closed:      { label: 'Closed',      icon: <CheckCircleIcon />,  color: 'success', action: 'Close Meeting'     },
-  cancelled:   { label: 'Cancelled',   icon: <CancelIcon />,       color: 'error',   action: 'Cancel Meeting'    },
+  cancelled:   { label: 'Cancelled',   icon: <Cancel />,       color: 'error',   action: 'Cancel Meeting'    },
   awaiting:    { label: 'Awaiting',    icon: <HourglassEmptyIcon />, color: 'warning', action: 'Awaiting Action' },
 };
 
@@ -254,14 +255,14 @@ const TABS = [
 // Speed Dial Actions
 const getSpeedDialActions = (hasUpdatePermission, hasNotificationPermission, hasEmailPermission, hasExportPermission, hasDeletePermission) => {
   const actions = [];
-  if (hasUpdatePermission) actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit' });
+  if (hasUpdatePermission) actions.push({ icon: <Edit />, name: 'Edit', action: 'edit' });
   if (hasNotificationPermission || hasEmailPermission) actions.push({ icon: <NotificationsIcon />, name: 'Notify', action: 'notify' });
   actions.push({ icon: <ShareIcon />, name: 'Share', action: 'share' });
   if (hasExportPermission) {
     actions.push({ icon: <PictureAsPdfIcon />, name: 'PDF Report', action: 'pdf' });
     actions.push({ icon: <CodeIcon />, name: 'Export JSON', action: 'json' });
   }
-  if (hasDeletePermission) actions.push({ icon: <DeleteIcon />, name: 'Delete', action: 'delete' });
+  if (hasDeletePermission) actions.push({ icon: <Delete />, name: 'Delete', action: 'delete' });
   return actions;
 };
 
@@ -294,6 +295,8 @@ const normalizeStatus = (status) => {
   if (typeof status === 'string') return { short_name: status.toLowerCase(), name: status, code: status, id: null };
   return status;
 };
+
+const isAgendaEmpty = (agenda) => !agenda || agenda.trim() === '' || agenda === '<p></p>';
 
 // ==================== CTE Location Display Component ====================
 const CTELocationDisplay = memo(({ locationId, locationData }) => {
@@ -363,7 +366,7 @@ const RichTextContent = memo(({ content }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
 
-  if (!content || content.trim() === '' || content === '<p></p>') {
+  if (isAgendaEmpty(content)) {
     return (
       <Typography variant="body2" sx={{ fontStyle: 'italic', color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
         No agenda provided.
@@ -388,12 +391,106 @@ const RichTextContent = memo(({ content }) => {
         },
         '& a': { color: '#A78BFA', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
         '& strong, & b': { fontWeight: 700 },
+        '& img': { maxWidth: '100%', borderRadius: '8px' },
+        '& table': { borderCollapse: 'collapse', width: '100%', marginBottom: '12px' },
+        '& th, & td': { border: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`, padding: '6px 10px' },
       }}
       dangerouslySetInnerHTML={{ __html: content }}
     />
   );
 });
 RichTextContent.displayName = 'RichTextContent';
+
+// ==================== Agenda Section (Rich Text Display) ====================
+// Renders the agenda entirely through RichTextContent. When collapsed, height
+// is clipped with a fade-out gradient rather than a hard pixel cut, so list
+// items / headings never get sliced mid-element. There is a single source of
+// truth for the content (no separate plain-text preview competing with it).
+const AgendaSection = memo(({ agenda }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  const [expanded, setExpanded] = useState(false);
+  const [needsToggle, setNeedsToggle] = useState(false);
+  const contentRef = React.useRef(null);
+
+  const hasAgenda = !isAgendaEmpty(agenda);
+
+  // Only show the expand/collapse control if the content actually overflows
+  // the collapsed height — short agendas shouldn't get a pointless button.
+  useEffect(() => {
+    if (!hasAgenda || !contentRef.current) return;
+    setNeedsToggle(contentRef.current.scrollHeight > AGENDA_COLLAPSED_HEIGHT + 8);
+  }, [agenda, hasAgenda]);
+
+  if (!hasAgenda) return null;
+
+  const cardBg = isDarkMode ? '#1F2937' : '#FFFFFF';
+
+  return (
+    <Box sx={{ mt: 4 }}>
+      <Divider sx={{ mb: 3 }} />
+      <Stack direction="row" spacing={2} alignItems="flex-start">
+        <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}>
+          <DescriptionIcon />
+        </Avatar>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>
+            Agenda
+          </Typography>
+
+          <Paper
+            variant="outlined"
+            sx={{
+              position: 'relative',
+              p: 3,
+              bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02),
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}
+          >
+            <Box
+              ref={contentRef}
+              sx={{
+                maxHeight: expanded ? AGENDA_EXPANDED_MAX_HEIGHT : AGENDA_COLLAPSED_HEIGHT,
+                overflow: 'hidden',
+                transition: 'max-height 0.35s ease',
+              }}
+            >
+              <RichTextContent content={agenda} />
+            </Box>
+
+            {!expanded && needsToggle && (
+              <Box
+                aria-hidden
+                sx={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: 56,
+                  background: `linear-gradient(to bottom, ${alpha(cardBg, 0)}, ${cardBg})`,
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+          </Paper>
+
+          {needsToggle && (
+            <Button
+              size="small"
+              onClick={() => setExpanded((prev) => !prev)}
+              endIcon={expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              sx={{ mt: 1, textTransform: 'none', fontWeight: 600, color: '#7C3AED' }}
+            >
+              {expanded ? 'Show less' : 'Show full agenda'}
+            </Button>
+          )}
+        </Box>
+      </Stack>
+    </Box>
+  );
+});
+AgendaSection.displayName = 'AgendaSection';
 
 // ==================== Tab Panel Component ====================
 const TabPanel = memo(({ children, value, index, ...other }) => (
@@ -535,10 +632,8 @@ const HeaderBar = memo(({
           </Stack>
         ) : (
           <Stack direction="row" spacing={0.5}>
-{/*             <Tooltip title="Share Meeting"><IconButton onClick={onShare} size="small"><ShareIcon /></IconButton></Tooltip>
- */}            <Tooltip title="Generate PDF Report"><IconButton onClick={onPrintPDF} size="small"><PictureAsPdfIcon /></IconButton></Tooltip>
-{/*             <Tooltip title="Export as JSON"><IconButton onClick={onExportJSON} size="small"><CodeIcon /></IconButton></Tooltip>
- */}            <Tooltip title="Update Meeting Link"><IconButton onClick={onUpdateLink} size="small"><UpdateIcon /></IconButton></Tooltip>
+            <Tooltip title="Generate PDF Report"><IconButton onClick={onPrintPDF} size="small"><PictureAsPdfIcon /></IconButton></Tooltip>
+            <Tooltip title="Update Meeting Link"><IconButton onClick={onUpdateLink} size="small"><UpdateIcon /></IconButton></Tooltip>
             {canSendNotifications && (
               <Tooltip title="Send Notifications" arrow>
                 <IconButton onClick={onNotify} size="small">
@@ -548,7 +643,7 @@ const HeaderBar = memo(({
             )}
             <Tooltip title="Refresh"><IconButton onClick={onRefresh} size="small"><RefreshIcon /></IconButton></Tooltip>
             {hasUpdatePermission && (
-              <Tooltip title="Edit Meeting"><IconButton onClick={onEdit} size="small"><EditIcon /></IconButton></Tooltip>
+              <Tooltip title="Edit Meeting"><IconButton onClick={onEdit} size="small"><Edit /></IconButton></Tooltip>
             )}
             {canRecord && hasRecordPermission && (
               <Tooltip title="Record Meeting" arrow>
@@ -581,21 +676,11 @@ HeaderBar.displayName = 'HeaderBar';
 const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, viewMode }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
-  const [agendaExpanded, setAgendaExpanded] = useState(false);
 
   const isSimple = viewMode === 'simple';
-  const hasAgenda = meeting?.agenda && meeting.agenda.trim() !== '' && meeting.agenda !== '<p></p>';
   const statusConfig = STATUS_CONFIG[meeting?.status?.short_name?.toLowerCase()] || STATUS_CONFIG.pending;
   const isOnlineMeeting = meeting?.platform && meeting?.platform !== 'physical';
   const hasMeetingLink = meeting?.meeting_link;
-
-  const getAgendaPreview = useCallback(() => {
-    if (!hasAgenda) return '';
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = meeting.agenda;
-    const plainText = tempDiv.textContent || tempDiv.innerText || '';
-    return plainText.length <= 150 ? plainText : plainText.substring(0, 150) + '...';
-  }, [meeting?.agenda, hasAgenda]);
 
   return (
     <Card
@@ -721,31 +806,8 @@ const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, 
           )}
         </Grid>
 
-        {/* Agenda — detailed only */}
-        {!isSimple && hasAgenda && (
-          <Box sx={{ mt: 4 }}>
-            <Divider sx={{ mb: 3 }} />
-            <Stack direction="row" spacing={2} alignItems="flex-start" sx={{ cursor: 'pointer' }} onClick={() => setAgendaExpanded(!agendaExpanded)}>
-              <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}><DescriptionIcon /></Avatar>
-              <Box sx={{ flex: 1 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                  <Typography variant="subtitle1" fontWeight={700}>Agenda</Typography>
-                  <IconButton size="small">{agendaExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}</IconButton>
-                </Stack>
-                <Collapse in={agendaExpanded} collapsedSize={60}>
-                  <Paper variant="outlined" sx={{ p: 3, bgcolor: alpha('#000000', 0.02), borderRadius: 2 }}>
-                    <RichTextContent content={meeting.agenda} />
-                  </Paper>
-                </Collapse>
-                {!agendaExpanded && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    {getAgendaPreview()}
-                  </Typography>
-                )}
-              </Box>
-            </Stack>
-          </Box>
-        )}
+        {/* Agenda — rich text, detailed view only */}
+        {!isSimple && <AgendaSection agenda={meeting?.agenda} />}
 
         {/* Simple mode hint */}
         {isSimple && (
@@ -779,11 +841,11 @@ const MeetingDetail = () => {
   const sendingNotifications = useSelector(selectNotificationSending);
   const notificationError = useSelector(selectNotificationError);
   const lastNotificationResult = useSelector(selectLastNotificationResult);
-  
+
   // Permission selectors
   const userPermissions = useSelector(selectUserPermissions);
   const currentUser = useSelector((state) => state.auth.user);
-  
+
   // Individual permission checks
   const hasDeleteMeetingPermission = hasPermission(userPermissions, PERMISSIONS.DELETE_MEETING);
   const hasUpdateMeetingPermission = hasPermission(userPermissions, PERMISSIONS.UPDATE_MEETING);
@@ -793,10 +855,10 @@ const MeetingDetail = () => {
   const hasSendEmailNotificationPermission = hasPermission(userPermissions, PERMISSIONS.SEND_EMAIL_NOTIFICATIONS);
   const hasExportReportPermission = hasPermission(userPermissions, PERMISSIONS.EXPORT_REPORTS);
   const hasViewAuditPermission = hasPermission(userPermissions, PERMISSIONS.VIEW_AUDIT_LOGS);
-  
+
   // Check if user is admin/superuser
   const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
-  
+
   // Combined permission checks
   const canDeleteMeeting = isAdmin || hasDeleteMeetingPermission;
   const canUpdateMeeting = isAdmin || hasUpdateMeetingPermission;
@@ -1036,7 +1098,7 @@ const MeetingDetail = () => {
     }
     navigate(`/meetings/${id}/edit`);
   }, [navigate, id, canUpdateMeeting]);
-  
+
   const handleRecord = useCallback(() => {
     if (!hasRecordPermission) {
       setSnackbar({ open: true, message: 'You don\'t have permission to record meetings', severity: 'error' });
@@ -1149,8 +1211,7 @@ const MeetingDetail = () => {
       case 'notify': handleNotifyClick(); break;
       case 'share': setShareDialogOpen(true); break;
       case 'pdf': handlePrintPDF(); break;
-/*       case 'json': handleExportJSON(); break;
- */      case 'delete': handleDeleteClick(); break;
+      case 'delete': handleDeleteClick(); break;
       default: break;
     }
     setSpeedDialOpen(false);
@@ -1181,7 +1242,7 @@ const MeetingDetail = () => {
         <Container maxWidth="sm">
           <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
             <Box sx={{ width: 80, height: 80, borderRadius: '50%', bgcolor: alpha('#EF4444', 0.1), display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3 }}>
-              <ErrorOutlineIcon sx={{ fontSize: 48, color: '#EF4444' }} />
+              <ErrorOutlinedIcon sx={{ fontSize: 48, color: '#EF4444' }} />
             </Box>
             <Typography variant="h5" color="error" gutterBottom fontWeight={700}>Meeting Not Found</Typography>
             <Typography variant="body2" sx={{ mb: 4, color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
@@ -1344,7 +1405,7 @@ const MeetingDetail = () => {
           </MenuItem>
         )}
         {canUpdateMeeting && (
-          <MenuItem onClick={handleEdit}><ListItemIcon><EditIcon /></ListItemIcon><ListItemText>Edit Meeting</ListItemText></MenuItem>
+          <MenuItem onClick={handleEdit}><ListItemIcon><Edit /></ListItemIcon><ListItemText>Edit Meeting</ListItemText></MenuItem>
         )}
         <MenuItem onClick={handleStatusMenuOpen}><ListItemIcon>{getStatusIcon()}</ListItemIcon><ListItemText>Update Status</ListItemText></MenuItem>
         <MenuItem onClick={() => { setShareDialogOpen(true); handleMoreMenuClose(); }}><ListItemIcon><ShareIcon /></ListItemIcon><ListItemText>Share Meeting</ListItemText></MenuItem>
@@ -1357,7 +1418,7 @@ const MeetingDetail = () => {
         <Divider />
         {canDeleteMeeting && (
           <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
-            <ListItemIcon><DeleteIcon sx={{ color: 'error.main' }} /></ListItemIcon><ListItemText>Delete Meeting</ListItemText>
+            <ListItemIcon><Delete sx={{ color: 'error.main' }} /></ListItemIcon><ListItemText>Delete Meeting</ListItemText>
           </MenuItem>
         )}
       </Menu>

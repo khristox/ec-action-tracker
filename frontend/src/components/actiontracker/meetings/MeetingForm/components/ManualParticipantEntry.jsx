@@ -12,8 +12,8 @@ import {
   Alert
 } from '@mui/material';
 import {
-  PersonAdd as PersonAddIcon,
-  Close as CloseIcon,
+  PersonAdd as PersonAdd,
+  Close as Close,
   Email as EmailIcon,
   Phone as PhoneIcon,
   Work as WorkIcon,
@@ -249,7 +249,7 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
           variant="contained"
           onClick={handleAdd}
           disabled={!isFormValid}
-          startIcon={<PersonAddIcon />}
+          startIcon={<PersonAdd />}
           fullWidth
           size="large"
         >
@@ -260,7 +260,7 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
           <Button
             variant="outlined"
             onClick={onCancel}
-            startIcon={<CloseIcon />}
+            startIcon={<Close />}
             fullWidth
             size="large"
           >

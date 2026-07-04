@@ -5,8 +5,8 @@ import {
   Chip, IconButton, Tooltip, Button, Paper, alpha, LinearProgress,
   useMediaQuery, useTheme, Divider, Collapse, Drawer, AppBar, Toolbar,
 } from '@mui/material';
-import EditIcon from '@mui/icons-material/Edit';
-import AddIcon from '@mui/icons-material/Add';
+import Edit from '@mui/icons-material/Edit';
+import Add from '@mui/icons-material/Add';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import TodayIcon from '@mui/icons-material/Today';
 import RepeatIcon from '@mui/icons-material/Repeat';
@@ -19,7 +19,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import CloseIcon from '@mui/icons-material/Close';
+import Close from '@mui/icons-material/Close';
 import api from '../../../../services/api';
 import { formatDate, getRecurrenceDescription } from '../utils/helpers';
 
@@ -109,7 +109,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
             </Typography>
           </Box>
           <IconButton size="small" onClick={onClose} sx={{ mt: -0.5 }}>
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </Box>
@@ -243,7 +243,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
       }}>
         <Button
           variant="outlined"
-          startIcon={<EditIcon />}
+          startIcon={<Edit />}
           onClick={(e) => { onClose(); onEdit(meeting?.id); }}
           fullWidth
           sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
@@ -253,7 +253,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         <Button
           variant="outlined"
           color="success"
-          startIcon={<AddIcon />}
+          startIcon={<Add />}
           onClick={(e) => { onClose(); onGenerate(meeting); }}
           disabled={!hasNext}
           fullWidth
@@ -549,7 +549,7 @@ export const RecurringMeetingCard = ({
                   onClick={(e) => { e.stopPropagation(); onEdit(meeting?.id); }}
                   sx={{ borderRadius: 1.5, p: 1, '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) } }}
                 >
-                  <EditIcon sx={{ fontSize: 20 }} />
+                  <Edit sx={{ fontSize: 20 }} />
                 </IconButton>
               </Tooltip>
               {hasNext ? (
@@ -559,7 +559,7 @@ export const RecurringMeetingCard = ({
                     onClick={(e) => { e.stopPropagation(); onGenerate(meeting); }}
                     sx={{ borderRadius: 1.5, p: 1, '&:hover': { bgcolor: alpha(theme.palette.success.main, 0.1), color: 'success.main' } }}
                   >
-                    <AddIcon sx={{ fontSize: 20 }} />
+                    <Add sx={{ fontSize: 20 }} />
                   </IconButton>
                 </Tooltip>
               ) : (

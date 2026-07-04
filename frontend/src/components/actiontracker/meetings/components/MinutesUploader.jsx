@@ -1,7 +1,7 @@
 // components/MinutesUploader.jsx
 import React, { useState } from 'react';
 import { Upload, Button, Table, Form, Input, Card, Tabs, message } from 'antd';
-import { InboxOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { InboxOutlined, CheckCircleOutlinedd } from '@ant-design/icons';
 
 const { Dragger } = Upload;
 const { TabPane } = Tabs;
@@ -132,7 +132,7 @@ export default function MinutesUploader() {
 
           <Button 
             type="primary" 
-            icon={<CheckCircleOutlined />}
+            icon={<CheckCircleOutlinedd />}
             onClick={handleConfirm}
             style={{ marginTop: '16px' }}
           >

@@ -7,9 +7,9 @@ import {
   Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
   CircularProgress, IconButton, Chip, Divider, TextField, InputAdornment
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+import Add from '@mui/icons-material/Add';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import CloseIcon from '@mui/icons-material/Close';
+import Close from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
@@ -359,12 +359,19 @@ const Meetings = () => {
     showPast ? 1 : 0
   ].reduce((a, b) => a + b, 0);
 
-  // Get grid columns based on screen size
-  const getGridColumns = () => {
+  // ========== FIXED GRID CONFIGURATION ==========
+  // Get grid columns based on screen size - Ensures cards fill the row
+  const getGridColumns = useCallback(() => {
     if (isMobile) return '1fr';
     if (isTablet) return 'repeat(2, 1fr)';
-    return 'repeat(auto-fill, minmax(300px, 1fr))';
-  };
+    // Desktop: Use auto-fill with minmax to fill the row properly
+    // 'auto-fill' creates as many columns as possible
+    // 'minmax(280px, 1fr)' ensures each card is at least 280px but grows to fill space
+    return 'repeat(auto-fill, minmax(280px, 1fr))';
+  }, [isMobile, isTablet]);
+
+  // Count how many cards will be in the grid for debugging
+  const cardCount = meetings.length;
   
   return (
     <Box sx={{ 
@@ -410,7 +417,7 @@ const Meetings = () => {
             <Stack direction="row" spacing={1.5}>
               <Button 
                 variant="contained" 
-                startIcon={<AddIcon />} 
+                startIcon={<Add />} 
                 onClick={() => navigate('/meetings/create')} 
                 sx={{ 
                   borderRadius: 2.5, 
@@ -425,7 +432,7 @@ const Meetings = () => {
               </Button>
               <Button 
                 variant={tabValue === 1 ? "contained" : "outlined"} 
-                startIcon={<AddIcon />} 
+                startIcon={<Add />} 
                 onClick={() => navigate('/recurring-meetings/create')} 
                 sx={{ 
                   borderRadius: 2.5, 
@@ -544,7 +551,7 @@ const Meetings = () => {
                         endAdornment: searchTerm && (
                           <InputAdornment position="end">
                             <IconButton size="small" onClick={() => handleSearchTermChange('')}>
-                              <CloseIcon fontSize="small" />
+                              <Close fontSize="small" />
                             </IconButton>
                           </InputAdornment>
                         ),
@@ -670,17 +677,27 @@ const Meetings = () => {
             )}
           </Paper>
           
-          {/* Grid View */}
+          {/* ========== GRID VIEW - FIXED ========== */}
           {viewMode === 'grid' && (
             <>
               <Box sx={{ 
                 display: 'grid', 
                 gridTemplateColumns: getGridColumns(),
                 gap: { xs: 2, sm: 2.5, md: 3 },
-                width: '100%'
+                width: '100%',
+                // This ensures all grid items stretch to fill their cells
+                alignItems: 'stretch',
+                // This ensures the grid items are properly sized
+                '& > *': {
+                  width: '100%',
+                  height: '100%',
+                  minWidth: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }
               }}>
                 {loading ? (
-                  // Loading skeletons - use the same grid structure
+                  // Loading skeletons
                   Array.from({ length: isMobile ? 3 : 6 }).map((_, i) => (
                     <Skeleton 
                       key={i} 
@@ -704,30 +721,22 @@ const Meetings = () => {
                       </Button>
                     )}
                     {!hasActiveFilters && (
-                      <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<AddIcon />}>
+                      <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<Add />}>
                         Create Meeting
                       </Button>
                     )}
                   </Box>
                 ) : (
                   meetings.map((meeting) => (
-                    <Box 
+                    <MeetingCard 
                       key={meeting.id}
-                      sx={{ 
-                        width: '100%',
-                        height: '100%',
-                        display: 'flex'
-                      }}
-                    >
-                      <MeetingCard 
-                        meeting={meeting} 
-                        statusOptions={statusOptions} 
-                        onView={(id) => navigate(`/meetings/${id}`)} 
-                        onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
-                        onNotify={handleNotifyClick}
-                        onGenerateMeeting={handleGenerateMeeting}
-                      />
-                    </Box>
+                      meeting={meeting} 
+                      statusOptions={statusOptions} 
+                      onView={(id) => navigate(`/meetings/${id}`)} 
+                      onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
+                      onNotify={handleNotifyClick}
+                      onGenerateMeeting={handleGenerateMeeting}
+                    />
                   ))
                 )}
               </Box>
@@ -829,7 +838,7 @@ const Meetings = () => {
             }} 
             onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')}
           >
-            <AddIcon />
+            <Add />
           </Fab>
         </Stack>
       )}

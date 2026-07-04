@@ -28,7 +28,7 @@ import {
   Search as SearchIcon,
   CheckCircle as CheckCircleIcon,
   Refresh as RefreshIcon,
-  Close as CloseIcon
+  Close as Close
 } from '@mui/icons-material';
 import api from '../../../../../services/api';
 
@@ -193,7 +193,7 @@ export const OrganizationSelector = ({ value, onChange, disabled, required = tru
           MenuProps={{ open: false }} // Disable default menu
           endAdornment={
             value && !disabled ? (
-              <CloseIcon 
+              <Close 
                 fontSize="small" 
                 sx={{ 
                   mr: 1, 
@@ -367,7 +367,7 @@ export const OrganizationSelector = ({ value, onChange, disabled, required = tru
                 Showing {filteredDepartments.length} of {departments.length} departments
               </Typography>
               {value && (
-                <Button size="small" onClick={handleClear} startIcon={<CloseIcon />}>
+                <Button size="small" onClick={handleClear} startIcon={<Close />}>
                   Clear
                 </Button>
               )}

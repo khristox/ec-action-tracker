@@ -65,7 +65,7 @@ const ACTION_STATUS_ICONS = {
   in_progress: 'Pending',
   awaiting: 'WatchLater',
   awaiting_approval: 'Pending',
-  in_review: 'CheckCircleOutline',
+  in_review: 'CheckCircleOutlined',
   on_hold: 'PauseCircle',
   blocked: 'CancelOutlined',
   completed: 'CheckCircle',

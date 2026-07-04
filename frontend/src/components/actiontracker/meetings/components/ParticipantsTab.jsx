@@ -14,12 +14,12 @@ import {
   People as PeopleIcon,
   HourglassEmpty as HourglassEmptyIcon,
   Check as CheckIcon,
-  Cancel as CancelIcon,
-  PersonAdd as PersonAddIcon,
+  Cancel as Cancel,
+  PersonAdd as PersonAdd,
   Email as EmailIcon,
   Phone as PhoneIcon,
   Send as SendIcon,
-  Close as CloseIcon,
+  Close as Close,
   Message as MessageIcon,
   Lock as LockIcon,
   PlayCircle as PlayCircleIcon,
@@ -28,9 +28,9 @@ import {
   Person as PersonIcon,
   Star as StarIcon,
   AssignmentInd as SecretaryIcon,
-  GroupAdd as GroupAddIcon,
-  Save as SaveIcon,
-  Delete as DeleteIcon,
+  GroupAdd as GroupAdd,
+  Save as Save,
+  Delete as Delete,
   Refresh as RefreshIcon,
   Search as SearchIcon,
   VisibilityOff as VisibilityOffIcon,
@@ -130,7 +130,7 @@ const RemoveParticipantDialog = memo(({ open, onClose, onConfirm, participantNam
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
         <Stack direction="row" spacing={1} alignItems="center">
-          <DeleteIcon color="error" fontSize="small" />
+          <Delete color="error" fontSize="small" />
           <Typography variant="subtitle1" fontWeight={700}>Remove Participant</Typography>
         </Stack>
       </DialogTitle>
@@ -141,7 +141,7 @@ const RemoveParticipantDialog = memo(({ open, onClose, onConfirm, participantNam
       </DialogContent>
       <DialogActions sx={{ px: 2.5, pb: 2 }}>
         <Button size="small" onClick={onClose} disabled={isDeleting}>Cancel</Button>
-        <Button size="small" variant="contained" color="error" onClick={handleConfirm} disabled={isDeleting} startIcon={isDeleting ? <CircularProgress size={14} /> : <DeleteIcon />}>
+        <Button size="small" variant="contained" color="error" onClick={handleConfirm} disabled={isDeleting} startIcon={isDeleting ? <CircularProgress size={14} /> : <Delete />}>
           {isDeleting ? 'Removing…' : 'Remove'}
         </Button>
       </DialogActions>
@@ -179,7 +179,7 @@ const ApologyDialog = memo(({ open, onClose, onSubmit, participantName, initialM
             <MessageIcon color="warning" fontSize="small" />
             <Typography variant="subtitle1" fontWeight={700}>Absent with Apology</Typography>
           </Stack>
-          {!isSubmitting && !submitted && <IconButton size="small" onClick={onClose}><CloseIcon fontSize="small" /></IconButton>}
+          {!isSubmitting && !submitted && <IconButton size="small" onClick={onClose}><Close fontSize="small" /></IconButton>}
         </Stack>
       </DialogTitle>
       <DialogContent sx={{ pt: 0 }}>
@@ -449,11 +449,11 @@ const handleSubmit = async () => {
       <DialogTitle sx={{ pb: 1 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={1} alignItems="center">
-            <PersonAddIcon color="primary" fontSize="small" />
+            <PersonAdd color="primary" fontSize="small" />
             <Typography variant="subtitle1" fontWeight={700}>Add Participants</Typography>
           </Stack>
           <IconButton size="small" onClick={handleClose} disabled={isSubmitting}>
-            <CloseIcon fontSize="small" />
+            <Close fontSize="small" />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -678,7 +678,7 @@ const handleSubmit = async () => {
           variant="contained" 
           onClick={handleSubmit} 
           disabled={isSubmitting || (participantType === 'existing' && !selectedUser)}
-          startIcon={isSubmitting ? <CircularProgress size={14} /> : <SaveIcon />}
+          startIcon={isSubmitting ? <CircularProgress size={14} /> : <Save />}
         >
           {isSubmitting ? 'Adding…' : 'Add Participants'}
         </Button>
@@ -725,7 +725,7 @@ const StatusChip = memo(({ status, apologyComment }) => {
   const map = {
     attended:            { label: 'Attended', color: 'success', icon: <CheckIcon sx={{ fontSize: '13px !important' }} /> },
     absent_with_apology: { label: 'Apology',  color: 'warning', icon: <MessageIcon sx={{ fontSize: '13px !important' }} /> },
-    absent:              { label: 'Absent',   color: 'error',   icon: <CancelIcon sx={{ fontSize: '13px !important' }} /> },
+    absent:              { label: 'Absent',   color: 'error',   icon: <Cancel sx={{ fontSize: '13px !important' }} /> },
   };
   const cfg = map[status] || { label: 'Pending', color: 'default', icon: <HourglassEmptyIcon sx={{ fontSize: '13px !important' }} /> };
   const chip = <Chip size="small" label={cfg.label} color={cfg.color} icon={cfg.icon} sx={{ height: 20, fontSize: '0.68rem', '& .MuiChip-icon': { fontSize: 13 } }} />;
@@ -1079,7 +1079,7 @@ const ParticipantsTab = ({
                         </span></Tooltip>
                         <Tooltip title="Mark Absent"><span>
                           <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'absent')} disabled={currentStatus === 'absent' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'absent' ? 'error.main' : 'action.disabled' }}>
-                            <CancelIcon sx={{ fontSize: 15 }} />
+                            <Cancel sx={{ fontSize: 15 }} />
                           </IconButton>
                         </span></Tooltip>
                         <Tooltip title="Absent with Apology"><span>
@@ -1090,7 +1090,7 @@ const ParticipantsTab = ({
                         {!isChairperson && !isSecretary && (
                           <Tooltip title="Remove"><span>
                             <IconButton size="small" onClick={() => { setParticipantToRemove(participant); setShowRemoveDialog(true); }} disabled={loading} sx={{ p: 0.5, color: 'action.disabled', '&:hover': { color: 'error.main' } }}>
-                              <DeleteIcon sx={{ fontSize: 15 }} />
+                              <Delete sx={{ fontSize: 15 }} />
                             </IconButton>
                           </span></Tooltip>
                         )}
@@ -1173,7 +1173,7 @@ const ParticipantsTab = ({
                 {loading ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
               </IconButton>
             </Tooltip>
-            <Button size="small" variant="contained" startIcon={<PersonAddIcon sx={{ fontSize: 15 }} />} onClick={() => setShowAddDialog(true)} sx={{ height: 30, fontSize: '0.75rem', px: 1.5, borderRadius: 1.5 }}>
+            <Button size="small" variant="contained" startIcon={<PersonAdd sx={{ fontSize: 15 }} />} onClick={() => setShowAddDialog(true)} sx={{ height: 30, fontSize: '0.75rem', px: 1.5, borderRadius: 1.5 }}>
               Add
             </Button>
           </Stack>

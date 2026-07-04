@@ -19,8 +19,8 @@ import {
   Alert
 } from '@mui/material';
 import {
-  Close as CloseIcon,
-  PersonAdd as PersonAddIcon,
+  Close as Close,
+  PersonAdd as PersonAdd,
   Person as PersonIcon
 } from '@mui/icons-material';
 import api from '../../../services/api';
@@ -89,7 +89,7 @@ const AssignUserDialog = ({ open, action, onClose, onAssign }) => {
             Assign Action
           </Typography>
           <IconButton onClick={onClose} size="small">
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -142,7 +142,7 @@ const AssignUserDialog = ({ open, action, onClose, onAssign }) => {
                     ...InputProps,
                     startAdornment: (
                       <>
-                        <PersonAddIcon sx={{ color: 'action.active', mr: 1 }} />
+                        <PersonAdd sx={{ color: 'action.active', mr: 1 }} />
                         {InputProps?.startAdornment}
                       </>
                     ),
@@ -184,7 +184,7 @@ const AssignUserDialog = ({ open, action, onClose, onAssign }) => {
           variant="contained" 
           onClick={handleAssign} 
           disabled={!assignedToId || submitting || loading}
-          startIcon={submitting ? <CircularProgress size={16} /> : <PersonAddIcon />}
+          startIcon={submitting ? <CircularProgress size={16} /> : <PersonAdd />}
           sx={{ minWidth: 120 }}
         >
           {submitting ? 'Assigning...' : 'Assign Task'}

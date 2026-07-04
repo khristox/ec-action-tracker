@@ -36,7 +36,7 @@ import {
   LockOutlined,
   Visibility,
   VisibilityOff,
-  CheckCircleOutline,
+  CheckCircleOutlined,
 } from '@mui/icons-material';
 import { getProfile, updateProfile, updatePassword, clearProfileError, clearUpdateSuccess } from '../../store/slices/profileSlice';
 

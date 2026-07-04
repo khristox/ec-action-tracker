@@ -11,7 +11,7 @@
     Search as SearchIcon, Refresh as RefreshIcon, Assignment as AssignmentIcon,
     Schedule as ScheduleIcon, Person as PersonIcon, CheckCircle as CheckCircleIcon,
     Warning as WarningIcon, PlayCircle as PlayCircleIcon, Pending as PendingIcon,
-    Visibility as VisibilityIcon, Edit as EditIcon, FilterList as FilterIcon,
+    Visibility as VisibilityIcon, Edit as Edit, FilterList as FilterIcon,
     TrendingUp as TrendingUpIcon
   } from '@mui/icons-material';
 
@@ -170,7 +170,7 @@
                 <Grid item xs={12} sm={4}>
                   <Stack direction="row" spacing={1} justifyContent={isMobile ? 'flex-start' : 'flex-end'}>
                     <Tooltip title="View"><IconButton size="small" sx={{ border: '1px solid', borderColor: 'divider' }} onClick={() => navigate(`/actions/${action.id}`)}><VisibilityIcon fontSize="small" color="primary"/></IconButton></Tooltip>
-                    <Tooltip title="Edit"><IconButton size="small" sx={{ border: '1px solid', borderColor: 'divider' }} onClick={() => navigate(`/actions/${action.id}/edit`)}><EditIcon fontSize="small"/></IconButton></Tooltip>
+                    <Tooltip title="Edit"><IconButton size="small" sx={{ border: '1px solid', borderColor: 'divider' }} onClick={() => navigate(`/actions/${action.id}/edit`)}><Edit fontSize="small"/></IconButton></Tooltip>
                     
                     {action.overall_progress_percentage < 100 && (
                       <Button 

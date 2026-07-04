@@ -20,10 +20,10 @@ import {
   Box
 } from '@mui/material';
 import { 
-  Close as CloseIcon, 
-  Save as SaveIcon, 
+  Close as Close, 
+  Save as Save, 
   Assignment as AssignmentIcon,
-  Edit as EditIcon
+  Edit as Edit
 } from '@mui/icons-material';
 import { useDispatch } from 'react-redux';
 import { updateAction } from '../../../../store/slices/actionTracker/actionSlice';
@@ -106,7 +106,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
             Edit Action Item
           </Typography>
           <IconButton onClick={onClose} size="small">
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -140,7 +140,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
                 </Typography>
               )}
             </Box>
-            <EditIcon color="action" fontSize="small" />
+            <Edit color="action" fontSize="small" />
           </Stack>
         </Box>
 
@@ -207,7 +207,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
           variant="contained"
           onClick={handleSubmit}
           disabled={loading}
-          startIcon={loading ? <CircularProgress size={16} /> : <SaveIcon />}
+          startIcon={loading ? <CircularProgress size={16} /> : <Save />}
         >
           {loading ? 'Saving...' : 'Save Changes'}
         </Button>

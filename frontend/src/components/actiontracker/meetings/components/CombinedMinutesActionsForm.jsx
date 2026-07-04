@@ -8,11 +8,11 @@ import {
   useMediaQuery, useTheme, Chip
 } from '@mui/material';
 import {
-  Add as AddIcon,
-  Delete as DeleteIcon,
+  Add as Add,
+  Delete as Delete,
   Description as DescriptionIcon,
-  Close as CloseIcon,
-  Edit as EditIcon
+  Close as Close,
+  Edit as Edit
 } from '@mui/icons-material';
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -193,7 +193,7 @@ const CombinedMinutesActionsForm = ({
           </Stack>
           {isMobile && (
             <IconButton onClick={onClose} sx={{ color: 'white' }}>
-              <CloseIcon />
+              <Close />
             </IconButton>
           )}
         </DialogTitle>
@@ -260,7 +260,7 @@ const CombinedMinutesActionsForm = ({
               </Typography>
               {!showActionForm && (
                 <Button
-                  startIcon={<AddIcon />}
+                  startIcon={<Add />}
                   onClick={() => setShowActionForm(true)}
                   size="small"
                   variant="outlined"
@@ -313,10 +313,10 @@ const CombinedMinutesActionsForm = ({
                       </Box>
                       <Stack direction="row" spacing={1}>
                         <IconButton size="small" onClick={() => handleEditAction(index)}>
-                          <EditIcon fontSize="small" />
+                          <Edit fontSize="small" />
                         </IconButton>
                         <IconButton size="small" color="error" onClick={() => handleRemoveAction(index)}>
-                          <DeleteIcon fontSize="small" />
+                          <Delete fontSize="small" />
                         </IconButton>
                       </Stack>
                     </Stack>

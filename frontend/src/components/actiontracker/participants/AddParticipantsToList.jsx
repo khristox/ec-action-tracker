@@ -41,10 +41,10 @@ import {
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  Close as CloseIcon,
-  PersonAdd as PersonAddIcon,
+  Close as Close,
+  PersonAdd as PersonAdd,
   People as PeopleIcon,
-  GroupAdd as GroupAddIcon,
+  GroupAdd as GroupAdd,
   Clear as ClearIcon,
   CheckCircle as CheckCircleIcon,
   Email as EmailIcon,
@@ -498,7 +498,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                 },
                 transition: 'all 0.3s'
               }}>
-                <CloseIcon />
+                <Close />
               </IconButton>
             </Tooltip>
           </Box>
@@ -531,7 +531,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
               label="Search Users" 
             />
             <Tab 
-              icon={<PersonAddIcon />} 
+              icon={<PersonAdd />} 
               iconPosition="start" 
               label="Create New" 
             />
@@ -585,7 +585,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                     endAdornment: searchTerm && (
                       <InputAdornment position="end">
                         <IconButton size="small" onClick={() => setSearchTerm('')}>
-                          <CloseIcon fontSize="small" />
+                          <Close fontSize="small" />
                         </IconButton>
                       </InputAdornment>
                     )
@@ -627,7 +627,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                           variant="contained" 
                           onClick={handleSubmitSelected}
                           disabled={submitting}
-                          startIcon={submitting ? <CircularProgress size={16} /> : <GroupAddIcon />}
+                          startIcon={submitting ? <CircularProgress size={16} /> : <GroupAdd />}
                           sx={{ borderRadius: 2, fontWeight: 600 }}
                         >
                           {submitting ? 'Adding...' : `Add ${selectedParticipants.length}`}
@@ -681,7 +681,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                       <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
                         <Button
                           variant="outlined"
-                          startIcon={<PersonAddIcon />}
+                          startIcon={<PersonAdd />}
                           onClick={() => setActiveTab(1)}
                         >
                           Create New User
@@ -1193,7 +1193,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                       fullWidth
                       variant="contained"
                       size="large"
-                      startIcon={creating ? <CircularProgress size={20} /> : <PersonAddIcon />}
+                      startIcon={creating ? <CircularProgress size={20} /> : <PersonAdd />}
                       onClick={handleCreateParticipant}
                       disabled={creating}
                       sx={{ 
@@ -1249,7 +1249,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                 disabled={selectedParticipants.length === 0 || submitting}
                 fullWidth={isMobile}
                 size="large"
-                startIcon={submitting ? <CircularProgress size={20} /> : <GroupAddIcon />}
+                startIcon={submitting ? <CircularProgress size={20} /> : <GroupAdd />}
                 sx={{ 
                   fontWeight: 700,
                   borderRadius: 2,

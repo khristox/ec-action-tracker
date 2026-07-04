@@ -51,11 +51,11 @@ import {
   PictureAsPdf as PdfIcon,
   Image as ImageIcon,
   InsertDriveFile as FileIcon,
-  Delete as DeleteIcon,
+  Delete as Delete,
   Download as DownloadIcon,
   CloudUpload as UploadIcon,
   Refresh as RefreshIcon,
-  Close as CloseIcon,
+  Close as Close,
   Visibility as VisibilityIcon,
   Info as InfoIcon,
   ZoomIn as ZoomInIcon,
@@ -828,7 +828,7 @@ const handleUpload = async () => {
                                   disabled={deletingId === doc.id}
                                   sx={{ color: colors.error.main, '&:hover': { bgcolor: alpha(colors.error.main, 0.1) } }}
                                 >
-                                  {deletingId === doc.id ? <CircularProgress size={16} /> : <DeleteIcon fontSize="small" />}
+                                  {deletingId === doc.id ? <CircularProgress size={16} /> : <Delete fontSize="small" />}
                                 </IconButton>
                               </Tooltip>
                             </Stack>
@@ -915,7 +915,7 @@ const handleUpload = async () => {
               )}
               <Button 
                 fullWidth 
-                startIcon={<DeleteIcon />} 
+                startIcon={<Delete />} 
                 onClick={() => handleDelete(selectedDocForMenu)} 
                 color="error" 
                 sx={{ justifyContent: 'flex-start' }}
@@ -1050,7 +1050,7 @@ const handleUpload = async () => {
                   <FullscreenIcon />
                 </IconButton>
                 <IconButton onClick={handleClosePreview} size="small" sx={{ color: 'text.secondary' }}>
-                  <CloseIcon />
+                  <Close />
                 </IconButton>
               </Stack>
             </Stack>
@@ -1236,7 +1236,7 @@ const handleUpload = async () => {
             <Stack direction="row" justifyContent="space-between" alignItems="center">
               <Typography variant="h6" fontWeight={700} color="text.primary">Upload Document</Typography>
               <IconButton onClick={() => !uploading && setUploadDialogOpen(false)} size="small" sx={{ color: 'text.secondary' }}>
-                <CloseIcon />
+                <Close />
               </IconButton>
             </Stack>
           </DialogTitle>
@@ -1271,7 +1271,7 @@ const handleUpload = async () => {
                       </Box>
                       {!uploading && (
                         <IconButton size="small" onClick={() => setSelectedFile(null)} sx={{ color: 'text.secondary' }}>
-                          <CloseIcon fontSize="small" />
+                          <Close fontSize="small" />
                         </IconButton>
                       )}
                     </Stack>

@@ -4,7 +4,7 @@ import PendingIcon from '@mui/icons-material/Pending';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
+import Cancel from '@mui/icons-material/Cancel';
 import ScheduleOutlinedIcon from '@mui/icons-material/ScheduleOutlined';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { getStatusConfig } from '../utils/helpers';
@@ -15,7 +15,7 @@ const iconMap = {
   PlayCircleIcon: PlayCircleIcon,
   StopCircleIcon: StopCircleIcon,
   CheckCircleIcon: CheckCircleIcon,
-  CancelIcon: CancelIcon,
+  Cancel: Cancel,
   ScheduleOutlinedIcon: ScheduleOutlinedIcon,
   AccessTimeIcon: AccessTimeIcon,
 };

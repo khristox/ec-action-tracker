@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import {
   PhotoCamera, Edit, PersonOutline, EmailOutlined, PhoneOutlined,
-  DeleteOutline, CheckCircleOutline, Close, SaveOutlined, LocationOn,
+  DeleteOutline, CheckCircleOutlined, Close, SaveOutlined, LocationOn,
   WorkOutline, School, Description, Language, AccessTime, CalendarToday,
   Badge, Phone, Home, Business, Flag, AttachMoney, Search as SearchIcon,
   Public as PublicIcon, Apartment as ApartmentIcon, ChevronRight as ChevronRightIcon,
@@ -401,7 +401,7 @@ const LocationSearch = React.memo(({ value, onChange, onClear }) => {
                         <ListItemButton key={result.id} onClick={() => handleSelect(result)} selected={selectedLocation?.id === result.id} sx={{ py: 0.75 }}>
                           <ListItemIcon sx={{ minWidth: 32, color: li?.color }}>{li?.icon || <LocationOn fontSize="small" />}</ListItemIcon>
                           <ListItemText primary={result.name} secondary={`${result.code} · ${li?.name || `Level ${result.level}`}`} />
-                          {selectedLocation?.id === result.id && <CheckCircleOutline fontSize="small" color="success" />}
+                          {selectedLocation?.id === result.id && <CheckCircleOutlined fontSize="small" color="success" />}
                         </ListItemButton>
                       );
                     })}

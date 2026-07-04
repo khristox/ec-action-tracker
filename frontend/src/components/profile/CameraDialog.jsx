@@ -17,7 +17,7 @@ import {
   Box, Tooltip, Typography, Fade, Slider,
 } from '@mui/material';
 import {
-  PhotoCamera, CheckCircleOutline,
+  PhotoCamera, CheckCircleOutlined,
   FlipCameraAndroid as FlipCameraIcon,
   Close, Crop as CropIcon,
   ZoomIn, ZoomOut,
@@ -622,7 +622,7 @@ const CameraDialog = ({ open, onClose, onCapture }) => {
                 variant="contained"
                 onClick={handleConfirm}
                 disabled={isExporting}
-                startIcon={isExporting ? <CircularProgress size={16} color="inherit" /> : <CheckCircleOutline />}
+                startIcon={isExporting ? <CircularProgress size={16} color="inherit" /> : <CheckCircleOutlined />}
                 sx={{ borderRadius: 2, px: 3, fontWeight: 700 }}
               >
                 Use Photo

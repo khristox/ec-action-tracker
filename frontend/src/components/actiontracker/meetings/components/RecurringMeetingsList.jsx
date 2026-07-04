@@ -20,7 +20,7 @@ import {
   Warning as WarningIcon,
   Repeat as RepeatIcon,
   TuneRounded as TuneIcon,
-  Close as CloseIcon,
+  Close as Close,
 } from '@mui/icons-material';
 import { RecurringMeetingCard } from './RecurringMeetingCard';
 
@@ -106,7 +106,7 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
             Reset
           </Button>
           <IconButton size="small" onClick={onClose}>
-            <CloseIcon fontSize="small" />
+            <Close fontSize="small" />
           </IconButton>
         </Stack>
       </Stack>

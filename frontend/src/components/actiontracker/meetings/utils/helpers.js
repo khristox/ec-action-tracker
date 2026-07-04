@@ -12,7 +12,7 @@ export const STATUS_CONFIG_MAP = {
   'scheduled': { label: 'Scheduled', iconName: 'ScheduleOutlinedIcon', color: COLORS.scheduled, bgColor: alpha(COLORS.scheduled, 0.1) },
   'completed': { label: 'Completed', iconName: 'CheckCircleIcon', color: COLORS.completed, bgColor: alpha(COLORS.completed, 0.1) },
   'closed': { label: 'Closed', iconName: 'CheckCircleIcon', color: COLORS.closed, bgColor: alpha(COLORS.closed, 0.1) },
-  'cancelled': { label: 'Cancelled', iconName: 'CancelIcon', color: COLORS.cancelled, bgColor: alpha(COLORS.cancelled, 0.1) },
+  'cancelled': { label: 'Cancelled', iconName: 'Cancel', color: COLORS.cancelled, bgColor: alpha(COLORS.cancelled, 0.1) },
   'awaiting': { label: 'Awaiting', iconName: 'AccessTimeIcon', color: COLORS.awaiting, bgColor: alpha(COLORS.awaiting, 0.1) },
   'postponed': { label: 'Postponed', iconName: 'AccessTimeIcon', color: COLORS.postponed, bgColor: alpha(COLORS.postponed, 0.1) },
   'active': { label: 'Active', iconName: 'RepeatIcon', color: COLORS.success, bgColor: alpha(COLORS.success, 0.1) },

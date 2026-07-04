@@ -15,7 +15,7 @@ import {
   Description, Send, OpenInNew, AccessTime, Event, Info,
   PriorityHigh, CheckCircle, Cancel, PlayCircle, Pending,
   ExpandMore, ExpandLess, TaskAlt, Error as ErrorIcon,
-  WatchLater, CheckCircleOutline, PauseCircle, CancelOutlined,
+  WatchLater, CheckCircleOutlined, PauseCircle, CancelOutlined,
   HighlightOff, HourglassEmpty
 } from '@mui/icons-material';
 
@@ -83,7 +83,7 @@ const STATUS_CONFIG = {
     label: 'In Review', 
     color: '#A78BFA',
     bgColor: '#A78BFA',
-    icon: <CheckCircleOutline fontSize="small" />,
+    icon: <CheckCircleOutlined fontSize="small" />,
     muiColor: 'secondary'
   },
   on_hold: { 

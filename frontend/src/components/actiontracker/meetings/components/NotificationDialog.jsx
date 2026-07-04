@@ -22,7 +22,7 @@ import {
   Divider
 } from '@mui/material';
 import {
-  Close as CloseIcon,
+  Close as Close,
   Notifications as NotificationsIcon,
   Email as EmailIcon,
   WhatsApp as WhatsAppIcon,
@@ -195,7 +195,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
               '&:hover': { bgcolor: alpha(theme.palette.action.active, isDarkMode ? 0.2 : 0.1) }
             }}
           >
-            <CloseIcon fontSize="small" />
+            <Close fontSize="small" />
           </IconButton>
         </Stack>
       </DialogTitle>

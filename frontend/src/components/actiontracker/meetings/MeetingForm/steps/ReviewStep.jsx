@@ -7,7 +7,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Repeat as RepeatIcon,
   Update as UpdateIcon,
-  Save as SaveIcon,
+  Save as Save,
   Business as BusinessIcon,
   Domain as DepartmentIcon,
   LocationOn as LocationIcon,
@@ -203,7 +203,7 @@ export const ReviewStep = ({
         variant="contained"
         size="large"
         onClick={handleSubmit}
-        startIcon={isEditMode ? <UpdateIcon /> : <SaveIcon />}
+        startIcon={isEditMode ? <UpdateIcon /> : <Save />}
         disabled={apiLoading}
         sx={{ py: 1.5, bgcolor: '#7C3AED', '&:hover': { bgcolor: '#6D28D9' } }}
       >

@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import {
   LockOutlined, Visibility, VisibilityOff, SaveOutlined,
-  SecurityOutlined, CheckCircleOutline, RadioButtonUnchecked,
+  SecurityOutlined, CheckCircleOutlined, RadioButtonUnchecked,
 } from '@mui/icons-material';
 import { changePassword } from '../../store/slices/authSlice';
 
@@ -238,7 +238,7 @@ const SecuritySettings = () => {
                       <Grid item xs={6} key={i}>
                         <Stack direction="row" alignItems="center" spacing={1.5}>
                           {req.test ? 
-                            <CheckCircleOutline sx={{ fontSize: 18, color: colors.success }} /> : 
+                            <CheckCircleOutlined sx={{ fontSize: 18, color: colors.success }} /> : 
                             <RadioButtonUnchecked sx={{ fontSize: 18, color: alpha(theme.palette.text.disabled, 0.2) }} />
                           }
                           <Typography variant="caption" sx={{ color: req.test ? 'text.primary' : 'text.secondary', fontWeight: req.test ? 600 : 400 }}>

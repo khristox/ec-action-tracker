@@ -1,7 +1,7 @@
 // src/components/meetings/MeetingForm/components/ExistingUsersSelector.jsx
 import React, { useState, useEffect } from 'react';
 import { Stack, TextField, Paper, List, ListItemButton, ListItemAvatar, ListItemText, Avatar, Box, Typography, Button, CircularProgress, InputAdornment } from '@mui/material';
-import { Search as SearchIcon, PersonAdd as PersonAddIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
+import { Search as SearchIcon, PersonAdd as PersonAdd, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchUsers, selectUsers, selectUsersLoading } from '../../../../../store/slices/actionTracker/participantSlice';
 
@@ -90,7 +90,7 @@ export const ExistingUsersSelector = ({ onAddUser, existingParticipants, selecte
         variant="contained"
         onClick={handleAddUser}
         disabled={!selectedUser}
-        startIcon={<PersonAddIcon />}
+        startIcon={<PersonAdd />}
       >
         Add Selected User
       </Button>

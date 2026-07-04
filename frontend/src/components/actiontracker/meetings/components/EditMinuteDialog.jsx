@@ -17,7 +17,7 @@ import {
   useTheme,
   Box
 } from '@mui/material';
-import { Close as CloseIcon, Save as SaveIcon } from '@mui/icons-material';
+import { Close as Close, Save as Save } from '@mui/icons-material';
 import api from '../../../../services/api';
 import RichTextEditor from './RichTextEditor';
 
@@ -104,7 +104,7 @@ const EditMinuteDialog = ({ open, minute, onClose, onSave, meetingId }) => {
           </Typography>
           {isMobile && (
             <IconButton onClick={onClose} sx={{ color: 'white' }}>
-              <CloseIcon />
+              <Close />
             </IconButton>
           )}
         </Stack>
@@ -165,7 +165,7 @@ const EditMinuteDialog = ({ open, minute, onClose, onSave, meetingId }) => {
           variant="contained"
           onClick={handleSubmit}
           disabled={loading || !formData.topic.trim()}
-          startIcon={loading ? <CircularProgress size={16} /> : <SaveIcon />}
+          startIcon={loading ? <CircularProgress size={16} /> : <Save />}
         >
           {loading ? 'Saving...' : 'Save Changes'}
         </Button>

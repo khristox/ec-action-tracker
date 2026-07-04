@@ -22,8 +22,8 @@ import {
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  PersonAdd as PersonAddIcon,
-  Close as CloseIcon,
+  PersonAdd as PersonAdd,
+  Close as Close,
   CheckCircle as CheckCircleIcon,
   Group as GroupIcon,
   Person as PersonIcon,
@@ -219,7 +219,7 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
                 }}
                 edge="end"
               >
-                <CloseIcon fontSize="small" />
+                <Close fontSize="small" />
               </IconButton>
             </InputAdornment>
           )
@@ -231,7 +231,7 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Typography variant="h6">Assign To</Typography>
             <IconButton onClick={() => setSearchDialogOpen(false)} size="small">
-              <CloseIcon />
+              <Close />
             </IconButton>
           </Stack>
         </DialogTitle>
@@ -376,7 +376,7 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
             {/* Add New Person Section */}
             {!showManualForm ? (
               <Button
-                startIcon={<PersonAddIcon />}
+                startIcon={<PersonAdd />}
                 onClick={() => setShowManualForm(true)}
                 fullWidth
                 variant="outlined"

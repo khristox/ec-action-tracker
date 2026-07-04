@@ -31,8 +31,8 @@ import {
   StepContent
 } from '@mui/material';
 import {
-  Close as CloseIcon,
-  Save as SaveIcon,
+  Close as Close,
+  Save as Save,
   Public as PublicIcon,
   Flag as FlagIcon,
   Terrain as TerrainIcon,
@@ -44,7 +44,7 @@ import {
   ArrowBack as ArrowBackIcon,
   CheckCircle as CheckCircleIcon,
   AddCircle as AddCircleIcon,
-  Edit as EditIcon
+  Edit as Edit
 } from '@mui/icons-material';
 import api from '../../services/api';
 
@@ -647,7 +647,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
     if (editMode) {
       return (
         <Stack spacing={2}>
-          <Alert severity="warning" icon={<EditIcon />}>
+          <Alert severity="warning" icon={<Edit />}>
             Editing {ADDRESS_LEVELS[editingLevel].name}: {hierarchy[editingLevel]?.name}
           </Alert>
           
@@ -794,7 +794,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
               label={`${ADDRESS_LEVELS[parseInt(level)].name}: ${hierarchy[level].name}`}
               size="small"
               onDelete={() => handleEditLevel(parseInt(level))}
-              deleteIcon={<EditIcon />}
+              deleteIcon={<Edit />}
               sx={{
                 bgcolor: alpha(getLevelColor(ADDRESS_LEVELS[parseInt(level)].level), 0.1),
                 color: getLevelColor(ADDRESS_LEVELS[parseInt(level)].level),
@@ -839,7 +839,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
             </Typography>
           </Stack>
           <IconButton onClick={onClose} disabled={loading}>
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -911,7 +911,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
                 variant="contained"
                 onClick={handleUpdateLocation}
                 disabled={loading}
-                startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
+                startIcon={loading ? <CircularProgress size={20} /> : <Save />}
               >
                 Save Changes
               </Button>
@@ -950,7 +950,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
               variant="contained"
               onClick={editMode ? handleUpdateLocation : handleSaveNewLocation}
               disabled={loading || !currentFormData.name || (editMode ? false : (!currentFormData.code || codeAvailable === false))}
-              startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
+              startIcon={loading ? <CircularProgress size={20} /> : <Save />}
             >
               {editMode ? `Update ${currentLevel.name}` : `Save ${currentLevel.name}`}
             </Button>

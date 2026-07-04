@@ -13,12 +13,12 @@ import {
   Tooltip, Collapse, Skeleton,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon, Save as SaveIcon,
+  ArrowBack as ArrowBackIcon, Save as Save,
   Repeat as RepeatIcon, LocationOn as LocationIcon,
-  Schedule as ScheduleIcon, Cancel as CancelIcon,
+  Schedule as ScheduleIcon, Cancel as Cancel,
   Event as EventIcon, Update as UpdateIcon,
   Preview as PreviewIcon, Today as TodayIcon,
-  Close as CloseIcon, ChevronRight as ChevronRightIcon,
+  Close as Close, ChevronRight as ChevronRightIcon,
   CheckCircle as CheckCircleIcon, Info as InfoIcon,
   Public as PublicIcon, Flag as FlagIcon, Terrain as TerrainIcon,
   Home as HomeIcon, Business as BusinessIcon, Apartment as ApartmentIcon,
@@ -957,7 +957,7 @@ const EditRecurringMeeting = () => {
                 Edit Recurring Meeting
               </Typography>
               <IconButton edge="end" onClick={handleCancel}>
-                <CloseIcon />
+                <Close />
               </IconButton>
             </Toolbar>
           </AppBar>
@@ -978,7 +978,7 @@ const EditRecurringMeeting = () => {
               <Stack direction="row" spacing={1}>
                 <Button 
                   variant="outlined" 
-                  startIcon={<CancelIcon />} 
+                  startIcon={<Cancel />} 
                   onClick={handleCancel} 
                   disabled={saving}
                 >
@@ -1328,7 +1328,7 @@ const EditRecurringMeeting = () => {
                       icon={<TodayIcon />}
                       action={
                         <IconButton size="small" onClick={() => setShowPreview(false)}>
-                          <CloseIcon fontSize="small" />
+                          <Close fontSize="small" />
                         </IconButton>
                       }
                     >
@@ -1370,7 +1370,7 @@ const EditRecurringMeeting = () => {
                 <Stack direction={isMobile ? 'column' : 'row'} spacing={2} justifyContent="flex-end">
                   <Button
                     variant="outlined"
-                    startIcon={<CancelIcon />}
+                    startIcon={<Cancel />}
                     onClick={handleCancel}
                     disabled={saving}
                     size="large"

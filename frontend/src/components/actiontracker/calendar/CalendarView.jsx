@@ -26,7 +26,7 @@ import {
   Today as TodayIcon,
   Event as EventIcon,
   Search as SearchIcon,
-  Close as CloseIcon,
+  Close as Close,
   CalendarMonth as CalendarMonthIcon,
   AccessTime as AccessTimeIcon,
   ArrowForward as ArrowForwardIcon,
@@ -272,7 +272,7 @@ const MeetingDetailDrawer = React.memo(({ meeting, open, onClose, onViewFull }) 
             {meeting._title}
           </Typography>
           <IconButton size="small" onClick={onClose}>
-            <CloseIcon fontSize="small" />
+            <Close fontSize="small" />
           </IconButton>
         </Stack>
 
@@ -403,7 +403,7 @@ const EmptyState = ({ searchTerm, onClearSearch }) => {
           {searchTerm ? 'Try a different search term.' : 'Navigate to another month or check back later.'}
         </Typography>
         {searchTerm && (
-          <Button size="small" startIcon={<CloseIcon />} onClick={onClearSearch} sx={{ mt: 2 }}>
+          <Button size="small" startIcon={<Close />} onClick={onClearSearch} sx={{ mt: 2 }}>
             Clear Search
           </Button>
         )}
@@ -606,7 +606,7 @@ const MeetingCalendar = ({ userId }) => {
                   sx: { fontSize: '0.8rem', height: 32 },
                   startAdornment: <SearchIcon sx={{ fontSize: 16, mr: 0.5, color: 'text.disabled' }} />,
                   endAdornment: searchTerm
-                    ? <IconButton size="small" sx={{ p: 0.25 }} onClick={() => setSearchTerm('')}><CloseIcon sx={{ fontSize: 14 }} /></IconButton>
+                    ? <IconButton size="small" sx={{ p: 0.25 }} onClick={() => setSearchTerm('')}><Close sx={{ fontSize: 14 }} /></IconButton>
                     : null,
                 }
               }}

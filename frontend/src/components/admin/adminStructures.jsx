@@ -13,9 +13,9 @@ import {
 
 // Icons
 import {
-  Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
-  Refresh as RefreshIcon, Business as BusinessIcon, Close as CloseIcon,
-  Save as SaveIcon, Cancel as CancelIcon, AccountTree as AccountTreeIcon,
+  Add as Add, Edit as Edit, Delete as Delete,
+  Refresh as RefreshIcon, Business as BusinessIcon, Close as Close,
+  Save as Save, Cancel as Cancel, AccountTree as AccountTreeIcon,
   CheckCircle as CheckCircleIcon, Warning as WarningIcon,
   DragIndicator as DragIndicatorIcon, OpenWith as OpenWithIcon
 } from '@mui/icons-material';
@@ -176,7 +176,7 @@ const HorizontalTreeNode = ({
             <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end', mt: 1 }}>
               <Tooltip title="Edit">
                 <IconButton size="small" sx={{ color: 'white' }} onClick={() => onEdit('edit', node)}>
-                  <EditIcon fontSize="small" />
+                  <Edit fontSize="small" />
                 </IconButton>
               </Tooltip>
               <Tooltip title="Add Child">
@@ -187,7 +187,7 @@ const HorizontalTreeNode = ({
                     onClick={() => onAddChild('create', node)}
                     disabled={isMoveInProgress}
                   >
-                    <AddIcon fontSize="small" />
+                    <Add fontSize="small" />
                   </IconButton>
                 </span>
               </Tooltip>
@@ -199,7 +199,7 @@ const HorizontalTreeNode = ({
                     onClick={() => onDelete(node)}
                     disabled={isMoveInProgress}
                   >
-                    <DeleteIcon fontSize="small" />
+                    <Delete fontSize="small" />
                   </IconButton>
                 </span>
               </Tooltip>
@@ -792,7 +792,7 @@ export function AdminStructures() {
             </Tooltip>
             <Button 
               variant="contained" 
-              startIcon={<AddIcon />} 
+              startIcon={<Add />} 
               onClick={() => handleOpenDialog('create')}
               disabled={isMoveInProgress}
             >
@@ -830,7 +830,7 @@ export function AdminStructures() {
               }
             </Typography>
             <IconButton onClick={handleCloseDialog} disabled={loading}>
-              <CloseIcon />
+              <Close />
             </IconButton>
           </Box>
         </DialogTitle>
@@ -998,7 +998,7 @@ export function AdminStructures() {
                         onClick={handleSubmit} 
                         variant="contained" 
                         color="primary" 
-                        startIcon={<SaveIcon />} 
+                        startIcon={<Save />} 
                         disabled={loading}
                       >
                         {dialogMode === 'create' ? 'Create Department' : 'Save Changes'}
@@ -1009,14 +1009,14 @@ export function AdminStructures() {
               </Stepper>
               
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
-                <Button onClick={handleCloseDialog} startIcon={<CancelIcon />} disabled={loading}>
+                <Button onClick={handleCloseDialog} startIcon={<Cancel />} disabled={loading}>
                   Cancel
                 </Button>
                 {dialogMode === 'edit' && selectedNode && (
                   <Button 
                     color="error" 
                     onClick={() => handleDelete(selectedNode)} 
-                    startIcon={<DeleteIcon />} 
+                    startIcon={<Delete />} 
                     variant="outlined"
                     disabled={loading || isMoveInProgress}
                   >

@@ -11,11 +11,11 @@ import {
   Snackbar, AvatarGroup, Badge
 } from '@mui/material';  // Make sure all MUI imports are from here
 import {
-  Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon,
-  People as PeopleIcon, PersonAdd as PersonAddIcon,
+  Add as Add, Delete as Delete, Edit as Edit,
+  People as PeopleIcon, PersonAdd as PersonAdd,
   Refresh as RefreshIcon, Group as GroupIcon,
   Home as HomeIcon, ChevronRight as ChevronRightIcon,
-  Close as CloseIcon, Visibility as VisibilityIcon,
+  Close as Close, Visibility as VisibilityIcon,
   Email as EmailIcon, Phone as PhoneIcon, Business as BusinessIcon
 } from '@mui/icons-material';
 import {
@@ -208,7 +208,7 @@ const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefre
           </IconButton>
           <Button 
             variant="contained" 
-            startIcon={<PersonAddIcon />} 
+            startIcon={<PersonAdd />} 
             onClick={onAddMembers} 
             sx={{ borderRadius: 3, px: 3, fontWeight: 800 }}
           >
@@ -228,7 +228,7 @@ const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefre
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
             This list doesn't have any members yet.
           </Typography>
-          <Button variant="contained" startIcon={<PersonAddIcon />} onClick={onAddMembers}>
+          <Button variant="contained" startIcon={<PersonAdd />} onClick={onAddMembers}>
             Add Members
           </Button>
         </Paper>
@@ -311,7 +311,7 @@ const ViewMembersView = ({ list, members, loading, onBack, onAddMembers, onRefre
                         color="error" 
                         onClick={() => onDeleteMember(member)}
                       >
-                        <DeleteIcon fontSize="small" />
+                        <Delete fontSize="small" />
                       </IconButton>
                     </Tooltip>
                   </TableCell>
@@ -453,7 +453,7 @@ const ParticipantListsManager = () => {
           <Typography variant="body1" color="text.secondary">Organize and manage participant clusters</Typography>
         </Box>
         <Fab color="primary" variant="extended" onClick={() => setCreateDialogOpen(true)} sx={{ px: 4, borderRadius: 4, fontWeight: 800 }}>
-          <AddIcon sx={{ mr: 1 }} /> Create List
+          <Add sx={{ mr: 1 }} /> Create List
         </Fab>
       </Box>
 
@@ -470,7 +470,7 @@ const ParticipantListsManager = () => {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
             Create your first participant list to organize your participants.
           </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>
+          <Button variant="contained" startIcon={<Add />} onClick={() => setCreateDialogOpen(true)}>
             Create Your First List
           </Button>
         </Paper>
@@ -503,14 +503,14 @@ const ParticipantListsManager = () => {
                         onClick={(e) => { e.stopPropagation(); setEditingList(list); setCreateDialogOpen(true); }}
                         sx={{ color: 'text.secondary' }}
                       >
-                        <EditIcon fontSize="small" />
+                        <Edit fontSize="small" />
                       </IconButton>
                       <IconButton 
                         size="small" 
                         color="error" 
                         onClick={(e) => { e.stopPropagation(); setSelectedList(list); setDeleteDialogOpen(true); }}
                       >
-                        <DeleteIcon fontSize="small" />
+                        <Delete fontSize="small" />
                       </IconButton>
                     </Box>
                   </Box>

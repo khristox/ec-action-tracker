@@ -63,9 +63,9 @@ import {
   EditOutlined,
   SecurityOutlined,
   ClearOutlined,
-  InfoOutlined,
-  ErrorOutline,
-  CheckCircleOutline,
+  InfoOutlinedd,
+  ErrorOutlined,
+  CheckCircleOutlined,
   FilterListOutlined,
   CalendarTodayOutlined,
   ComputerOutlined,
@@ -271,7 +271,7 @@ const ObjectDiff = ({ oldObject, newObject }) => {
 
   if (differences.length === 0) {
     return (
-      <Alert severity="info" icon={<InfoOutlined />}>
+      <Alert severity="info" icon={<InfoOutlinedd />}>
         No changes detected in this audit log
       </Alert>
     );
@@ -318,7 +318,7 @@ const JsonDiffViewer = ({ log }) => {
         <Tab label="Old Values" value="old" icon={<RemoveCircleOutline />} iconPosition="start" />
         <Tab label="New Values" value="new" icon={<AddCircleOutline />} iconPosition="start" />
         {extraData && Object.keys(extraData).length > 0 && (
-          <Tab label="Extra Data" value="extra" icon={<InfoOutlined />} iconPosition="start" />
+          <Tab label="Extra Data" value="extra" icon={<InfoOutlinedd />} iconPosition="start" />
         )}
       </Tabs>
 
@@ -415,7 +415,7 @@ const getActionIcon = (action) => {
   if (actionUpper.includes('CREATE')) return <CreateOutlined fontSize="small" />;
   if (actionUpper.includes('UPDATE')) return <EditOutlined fontSize="small" />;
   if (actionUpper.includes('DELETE')) return <DeleteOutlined fontSize="small" />;
-  return <InfoOutlined fontSize="small" />;
+  return <InfoOutlinedd fontSize="small" />;
 };
 
 const getActionColor = (action) => {
@@ -535,7 +535,7 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
       </DialogTitle>
       <DialogContent dividers>
         <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ mb: 2 }}>
-          <Tab label="Overview" icon={<InfoOutlined />} iconPosition="start" />
+          <Tab label="Overview" icon={<InfoOutlinedd />} iconPosition="start" />
           <Tab label="Changes" icon={<DifferenceOutlined />} iconPosition="start" />
           <Tab label="Raw Data" icon={<CodeOutlined />} iconPosition="start" />
         </Tabs>
@@ -616,7 +616,7 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
             
             {log.error_message && (
               <Grid size={12}>
-                <Alert severity="error" icon={<ErrorOutline />}>
+                <Alert severity="error" icon={<ErrorOutlined />}>
                   <Typography variant="subtitle2" gutterBottom>Error Message</Typography>
                   <Typography variant="body2">{log.error_message}</Typography>
                 </Alert>
@@ -1090,13 +1090,13 @@ const AuditLogs = () => {
     { 
       title: 'Successful', 
       value: stats?.successful || 0, 
-      icon: <CheckCircleOutline />, 
+      icon: <CheckCircleOutlined />, 
       color: theme.palette.success.main,
     },
     { 
       title: 'Failed', 
       value: stats?.failed || 0, 
-      icon: <ErrorOutline />, 
+      icon: <ErrorOutlined />, 
       color: theme.palette.error.main,
     },
     { 

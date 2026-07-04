@@ -4,7 +4,7 @@ import {
   TableCell, Stack, Typography, Chip, IconButton
 } from '@mui/material';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import EditIcon from '@mui/icons-material/Edit';
+import Edit from '@mui/icons-material/Edit';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import RepeatIcon from '@mui/icons-material/Repeat';
 import { StatusChip } from './StatusChip';
@@ -45,7 +45,7 @@ export const MeetingTableView = ({ meetings, onView, onEdit, onNotify }) => {
                 <TableCell>
                   <Stack direction="row" spacing={0.5}>
                     <IconButton size="small" onClick={() => onView(meeting.id)}><ArrowForwardIcon fontSize="small" /></IconButton>
-                    <IconButton size="small" onClick={() => onEdit(meeting.id)}><EditIcon fontSize="small" /></IconButton>
+                    <IconButton size="small" onClick={() => onEdit(meeting.id)}><Edit fontSize="small" /></IconButton>
                     <IconButton size="small" onClick={() => onNotify(meeting)}><NotificationsIcon fontSize="small" /></IconButton>
                   </Stack>
                 </TableCell>

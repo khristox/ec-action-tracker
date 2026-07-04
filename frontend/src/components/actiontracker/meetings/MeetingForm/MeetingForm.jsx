@@ -10,7 +10,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { 
   ArrowBack as ArrowBackIcon, 
-  Close as CloseIcon,
+  Close as Close,
   NavigateBefore as NavigateBeforeIcon,
   NavigateNext as NavigateNextIcon,
   CheckCircle as CheckCircleIcon,
@@ -177,7 +177,7 @@ const MeetingForm = () => {
                 </Typography>
               </Box>
               <IconButton edge="end" onClick={handleCancel} size="small" sx={{ color: isLight ? '#1a1a2e' : '#ffffff' }}>
-                <CloseIcon />
+                <Close />
               </IconButton>
             </Toolbar>
             <LinearProgress 
@@ -238,7 +238,7 @@ const MeetingForm = () => {
               </Box>
               <Button 
                 variant="outlined" 
-                startIcon={<CloseIcon />} 
+                startIcon={<Close />} 
                 onClick={handleCancel} 
                 disabled={apiLoading} 
                 size="small"

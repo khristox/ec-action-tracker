@@ -17,8 +17,8 @@ import {
   FileTextOutlined, 
   UserOutlined, 
   BookOutlined, 
-  CheckCircleOutlined,
-  WarningOutlined,
+  CheckCircleOutlinedd,
+  WarningOutlinedd,
   CopyOutlined
 } from '@ant-design/icons';
 import { parseWordDocument, ParsedMinutes, MinuteEntry } from './minutesParser';
@@ -110,12 +110,12 @@ const MinutesViewer: React.FC<MinutesViewerProps> = ({ file, onParseComplete }) 
                     </Space>
                     <Space>
                       {minute.actionItems.length > 0 && (
-                        <Tag color="green" icon={<CheckCircleOutlined />}>
+                        <Tag color="green" icon={<CheckCircleOutlinedd />}>
                           {minute.actionItems.length} Action Items
                         </Tag>
                       )}
                       {minute.allToNote && (
-                        <Tag color="orange" icon={<WarningOutlined />}>
+                        <Tag color="orange" icon={<WarningOutlinedd />}>
                           ALL TO NOTE
                         </Tag>
                       )}

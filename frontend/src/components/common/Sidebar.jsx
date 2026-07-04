@@ -21,10 +21,10 @@ import {
   Help as HelpIcon, Star as StarIcon, Folder as FolderIcon,
   Home as HomeIcon, Business as BusinessIcon, LocationOn as LocationIcon,
   Person as PersonIcon, Email as EmailIcon, Phone as PhoneIcon,
-  Save as SaveIcon, Edit as EditIcon, Delete as DeleteIcon,
-  Add as AddIcon, Search as SearchIconAlt, FilterList as FilterIcon,
+  Save as Save, Edit as Edit, Delete as Delete,
+  Add as Add, Search as SearchIconAlt, FilterList as FilterIcon,
   Refresh as RefreshIcon, CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon, Warning as WarningIcon, Info as InfoIcon
+  Cancel as Cancel, Warning as WarningIcon, Info as InfoIcon
 } from '@mui/icons-material';
 
 import { fetchUserMenus, selectMenus, selectMenuLoading, resetMenuState } from '../../store/slices/menuSlice';
@@ -114,15 +114,15 @@ const materialIconMap = {
   'office': BusinessIcon,
   
   // CRUD Operations
-  'add': AddIcon,
-  'create': AddIcon,
-  'new': AddIcon,
-  'edit': EditIcon,
-  'update': EditIcon,
-  'delete': DeleteIcon,
-  'remove': DeleteIcon,
-  'save': SaveIcon,
-  'cancel': CancelIcon,
+  'add': Add,
+  'create': Add,
+  'new': Add,
+  'edit': Edit,
+  'update': Edit,
+  'delete': Delete,
+  'remove': Delete,
+  'save': Save,
+  'cancel': Cancel,
   
   // Actions
   'search': SearchIconAlt,
@@ -134,7 +134,7 @@ const materialIconMap = {
   'completed': CheckCircleIcon,
   'done': CheckCircleIcon,
   'warning': WarningIcon,
-  'error': CancelIcon,
+  'error': Cancel,
   'info': InfoIcon,
   
   // Default

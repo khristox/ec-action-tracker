@@ -29,8 +29,8 @@ import {
   alpha
 } from '@mui/material';
 import {
-  Close as CloseIcon,
-  Save as SaveIcon,
+  Close as Close,
+  Save as Save,
   LocationOn as LocationIcon,
   Public as PublicIcon,
   Apartment as ApartmentIcon,
@@ -217,7 +217,7 @@ const LocationForm = ({ open, onClose, onSuccess, initialData, mode = 'create', 
             disabled={loading}
             sx={{ color: 'text.secondary', '&:hover': { color: 'error.main', bgcolor: alpha(theme.palette.error.main, 0.1) } }}
           >
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -537,7 +537,7 @@ const LocationForm = ({ open, onClose, onSuccess, initialData, mode = 'create', 
           variant="contained"
           onClick={handleSubmit}
           disabled={loading || !formData.name || !formData.code || (codeAvailable === false && !isEdit)}
-          startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+          startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <Save />}
           sx={{ 
             px: 4,
             bgcolor: 'primary.main',

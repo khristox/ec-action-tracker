@@ -1,7 +1,7 @@
 // src/components/meetings/MeetingForm/components/ParticipantItem.jsx
 import React from 'react';
 import { ListItem, ListItemAvatar, ListItemText, Avatar, Stack, Typography, Chip, IconButton, Tooltip, Button } from '@mui/material';
-import { Delete as DeleteIcon, Email as EmailIcon, Phone as PhoneIcon, Title as TitleIcon, Work as WorkIcon } from '@mui/icons-material';
+import { Delete as Delete, Email as EmailIcon, Phone as PhoneIcon, Title as TitleIcon, Work as WorkIcon } from '@mui/icons-material';
 
 export const ParticipantItem = React.memo(({ 
   participant, 
@@ -15,7 +15,7 @@ export const ParticipantItem = React.memo(({
     secondaryAction={showActions && (
       <Tooltip title="Remove participant">
         <IconButton edge="end" onClick={() => onRemove(participant.id)}>
-          <DeleteIcon />
+          <Delete />
         </IconButton>
       </Tooltip>
     )}

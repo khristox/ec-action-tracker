@@ -25,7 +25,7 @@ import {
   GpsNotFixed as GpsNotFixedIcon,
   Lock as LockIcon,
   Info as InfoIcon,
-  Close as CloseIcon,
+  Close as Close,
   Help as HelpIcon
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -317,7 +317,7 @@ export const MeetingDetailsStep = ({
                 {isGpsValid && (
                   <Tooltip title="Clear GPS coordinates">
                     <IconButton size="small" onClick={clearGpsCoordinates}>
-                      <CloseIcon fontSize="small" />
+                      <Close fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 )}

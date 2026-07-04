@@ -6,14 +6,14 @@ import {
   Divider, useMediaQuery, useTheme, alpha, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-import CloseIcon from '@mui/icons-material/Close';
+import Close from '@mui/icons-material/Close';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
+import Cancel from '@mui/icons-material/Cancel';
 
 // Status color mapping based on common meeting statuses
 const getStatusColor = (statusId, statusOptions) => {
@@ -207,7 +207,7 @@ export const MobileFilterDrawer = ({
             aria-label="Close filters"
             size={isMobile ? 'small' : 'medium'}
           >
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
 
@@ -234,7 +234,7 @@ export const MobileFilterDrawer = ({
                   onClick={() => setLocalSearchTerm('')}
                   edge="end"
                 >
-                  <CloseIcon fontSize="small" />
+                  <Close fontSize="small" />
                 </IconButton>
               </InputAdornment>
             ),
@@ -321,7 +321,7 @@ export const MobileFilterDrawer = ({
               }}
             />
             <Chip
-              icon={localShowPast ? <CheckCircleIcon /> : <CancelIcon />}
+              icon={localShowPast ? <CheckCircleIcon /> : <Cancel />}
               label="Past"
               onClick={() => setLocalShowPast(!localShowPast)}
               color={localShowPast ? 'secondary' : 'default'}

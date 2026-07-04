@@ -9,12 +9,12 @@ import {
 } from '@mui/material';
 
 import { 
-  Add as AddIcon, 
+  Add as Add, 
   Visibility as AllIcon,
-  CheckCircleOutline as ActiveIcon,
+  CheckCircleOutlined as ActiveIcon,
   DoNotDisturbOn as InactiveIcon,
   EventNote as NoteIcon,
-  Close as CloseIcon
+  Close as Close
 } from '@mui/icons-material';
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -342,7 +342,7 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
             <Fade in={isStarted}>
               <Button 
                 variant="contained" 
-                startIcon={<AddIcon />} 
+                startIcon={<Add />} 
                 onClick={() => handleOpenForm()} 
                 disabled={loading}
                 sx={{ 
@@ -421,7 +421,7 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
               {editingAction ? 'Edit Action Item' : 'Add Action Item'}
             </Typography>
             <IconButton onClick={() => setActionDialogOpen(false)} size="small">
-              <CloseIcon />
+              <Close />
             </IconButton>
           </DialogTitle>
           

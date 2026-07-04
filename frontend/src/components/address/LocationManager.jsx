@@ -56,9 +56,9 @@ import {
   MenuItem as MenuItemComponent
 } from '@mui/material';
 import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
+  Add as Add,
+  Edit as Edit,
+  Delete as Delete,
   Refresh as RefreshIcon,
   Search as SearchIcon,
   FilterList as FilterListIcon,
@@ -885,7 +885,7 @@ const LocationManager = () => {
                 </Tooltip>
                 <Button 
                   variant="contained" 
-                  startIcon={<AddIcon />} 
+                  startIcon={<Add />} 
                   onClick={handleCreate}
                   sx={{ 
                     bgcolor: 'primary.main',
@@ -1304,7 +1304,7 @@ const LocationManager = () => {
                           <Stack alignItems="center" spacing={1}>
                             <LocationIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                             <Typography color="text.secondary">No locations found</Typography>
-                            <Button variant="outlined" startIcon={<AddIcon />} onClick={handleCreate} size="small">
+                            <Button variant="outlined" startIcon={<Add />} onClick={handleCreate} size="small">
                               Create your first {selectedMode === 'address' ? 'address' : 'building'}
                             </Button>
                           </Stack>
@@ -1377,7 +1377,7 @@ const LocationManager = () => {
                                     onClick={() => handleEdit(location)} 
                                     sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
                                   >
-                                    <EditIcon fontSize="small" />
+                                    <Edit fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
                                 <Tooltip title="Delete">
@@ -1386,7 +1386,7 @@ const LocationManager = () => {
                                     onClick={() => handleDelete(location)} 
                                     sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}
                                   >
-                                    <DeleteIcon fontSize="small" />
+                                    <Delete fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
                               </Stack>
@@ -1440,7 +1440,7 @@ const LocationManager = () => {
                 <Paper sx={{ p: 8, textAlign: 'center', bgcolor: 'background.paper' }}>
                   <LocationIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
                   <Typography color="text.secondary">No locations found</Typography>
-                  <Button variant="outlined" startIcon={<AddIcon />} onClick={handleCreate} sx={{ mt: 2 }}>
+                  <Button variant="outlined" startIcon={<Add />} onClick={handleCreate} sx={{ mt: 2 }}>
                     Create your first {selectedMode === 'address' ? 'address' : 'building'}
                   </Button>
                 </Paper>

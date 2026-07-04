@@ -16,7 +16,7 @@ import {
   Upload as UploadIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
-  Close as CloseIcon,
+  Close as Close,
   ArrowBack as ArrowBackIcon,
   Home as HomeIcon,
   CloudUpload as CloudUploadIcon,
@@ -292,7 +292,7 @@ const BulkImportPage = () => {
           sx={{ mb: 3, borderRadius: 2 }}
           action={
             <IconButton color="inherit" size="small" onClick={() => setError(null)}>
-              <CloseIcon fontSize="small" />
+              <Close fontSize="small" />
             </IconButton>
           }
         >

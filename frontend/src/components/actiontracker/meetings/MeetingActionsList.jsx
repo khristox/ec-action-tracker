@@ -41,7 +41,7 @@ import {
   alpha
 } from '@mui/material';
 import {
-  Edit as EditIcon,
+  Edit as Edit,
   Assignment as AssignmentIcon,
   Schedule as ScheduleIcon,
   CheckCircle as CheckCircleIcon,
@@ -50,10 +50,10 @@ import {
   Refresh as RefreshIcon,
   TrendingUp as TrendingUpIcon,
   Visibility as VisibilityIcon,
-  PersonAdd as PersonAddIcon,
-  Add as AddIcon,
-  Save as SaveIcon,
-  Close as CloseIcon,
+  PersonAdd as PersonAdd,
+  Add as Add,
+  Save as Save,
+  Close as Close,
   Lock as LockIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
@@ -381,7 +381,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               <span>
                 <Button
                   variant="contained"
-                  startIcon={!canEdit ? <LockIcon /> : <AddIcon />}
+                  startIcon={!canEdit ? <LockIcon /> : <Add />}
                   onClick={() => setShowAddActionDialog(true)}
                   size="small"
                   disabled={!canEdit}
@@ -591,7 +591,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               disabled={!canEdit}
                               sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
                             >
-                              <EditIcon fontSize="small" />
+                              <Edit fontSize="small" />
                             </IconButton>
                           </span>
                         </Tooltip>
@@ -603,7 +603,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               disabled={!canEdit}
                               sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}
                             >
-                              <PersonAddIcon fontSize="small" />
+                              <PersonAdd fontSize="small" />
                             </IconButton>
                           </span>
                         </Tooltip>
@@ -676,7 +676,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                 Update Progress
               </Typography>
               <IconButton onClick={() => setShowProgressDialog(false)} size="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'inherit' }}>
-                <CloseIcon />
+                <Close />
               </IconButton>
             </Stack>
           </DialogTitle>
@@ -827,7 +827,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               variant="contained"
               onClick={handleProgressUpdate}
               disabled={isUpdating || !selectedStatusId}
-              startIcon={isUpdating ? <CircularProgress size={16} /> : <SaveIcon />}
+              startIcon={isUpdating ? <CircularProgress size={16} /> : <Save />}
               sx={{
                 bgcolor: isDarkMode ? '#7C3AED' : undefined,
                 '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : undefined }

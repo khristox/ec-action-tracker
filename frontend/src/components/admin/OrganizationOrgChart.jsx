@@ -17,9 +17,9 @@ import {
   Snackbar
 } from '@mui/material';
 import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
+  Add as Add,
+  Edit as Edit,
+  Delete as Delete,
   AccountTree as TreeIcon
 } from '@mui/icons-material';
 import { Tree, TreeNode } from 'react-organizational-chart';
@@ -184,7 +184,7 @@ export const OrganizationChart = () => {
                       setDialogOpen(true);
                     }}
                   >
-                    <EditIcon fontSize="small" />
+                    <Edit fontSize="small" />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title="Add Child">
@@ -198,7 +198,7 @@ export const OrganizationChart = () => {
                       setDialogOpen(true);
                     }}
                   >
-                    <AddIcon fontSize="small" />
+                    <Add fontSize="small" />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title="Delete">
@@ -211,7 +211,7 @@ export const OrganizationChart = () => {
                       handleDeleteNode();
                     }}
                   >
-                    <DeleteIcon fontSize="small" />
+                    <Delete fontSize="small" />
                   </IconButton>
                 </Tooltip>
               </Box>
@@ -233,7 +233,7 @@ export const OrganizationChart = () => {
         </Typography>
         <Button
           variant="contained"
-          startIcon={<AddIcon />}
+          startIcon={<Add />}
           onClick={() => {
             setSelectedNode(null);
             setDialogMode('create');

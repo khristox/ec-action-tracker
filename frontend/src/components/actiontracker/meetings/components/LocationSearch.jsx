@@ -268,7 +268,7 @@ export const LocationSearch = React.memo(({ value, onChange, onClear, error, hel
                 size="small" 
                 color="success" 
                 onDelete={handleClear}
-                deleteIcon={<CloseIcon />}
+                deleteIcon={<Close />}
               />
             )}
           </Stack>

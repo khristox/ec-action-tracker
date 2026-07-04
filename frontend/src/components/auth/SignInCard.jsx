@@ -12,11 +12,12 @@ import {
   Chip
 } from '@mui/material';
 import {
-  Visibility, VisibilityOff, PersonOutline, LockOutlined,
-  Group, CheckCircleOutline, ErrorOutline, EmailOutlined,
+  Visibility, VisibilityOff, PersonOutlined, LockOutlined,
+  Group, CheckCircleOutlined, ErrorOutlined, EmailOutlined,
   CloseOutlined, Login, SendOutlined, WarningAmberOutlined,
   TimerOutlined, LockOutlined as LockIcon, RefreshOutlined
 } from '@mui/icons-material';
+
 import { 
   login, 
   clearError, 
@@ -582,7 +583,7 @@ const SignInCard = () => {
                 severity={remainingAttempts === 1 ? "error" : "warning"}
                 variant="outlined"
                 sx={{ mb: 2, borderRadius: 2 }}
-                icon={remainingAttempts === 1 ? <ErrorOutline /> : <WarningAmberOutlined />}
+                icon={remainingAttempts === 1 ? <ErrorOutlined /> : <WarningAmberOutlined />}
               >
                 <Typography variant="body2">
                   {remainingAttempts === 1 
@@ -614,7 +615,7 @@ const SignInCard = () => {
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonOutline color="action" />
+                      <PersonOutlined color="action" />
                     </InputAdornment>
                   ),
                 }
@@ -906,7 +907,7 @@ const SignInCard = () => {
               <Alert 
                 severity="success" 
                 sx={{ mt: 2 }}
-                icon={<CheckCircleOutline />}
+                icon={<CheckCircleOutlined />}
               >
                 Verification link sent! Please check your inbox and spam folder.
               </Alert>
@@ -954,7 +955,7 @@ const SignInCard = () => {
           severity="error" 
           variant="filled"
           onClose={handleCloseSnackbar}
-          icon={<ErrorOutline />}
+          icon={<ErrorOutlined />}
           sx={{ 
             width: '100%',
             minWidth: { xs: 'auto', sm: 300 },

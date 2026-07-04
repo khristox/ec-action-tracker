@@ -51,17 +51,17 @@ import {
   FormHelperText,
 } from '@mui/material';
 import {
-  Delete as DeleteIcon,
-  PersonAdd as PersonAddIcon,
-  Close as CloseIcon,
-  Cancel as CancelIcon,
+  Delete as Delete,
+  PersonAdd as PersonAdd,
+  Close as Close,
+  Cancel as Cancel,
   ArrowBack as ArrowBackIcon,
   ArrowForward as ArrowForwardIcon,
   CheckCircle as CheckCircleIcon,
   Event as EventIcon,
   LocationOn as LocationIcon,
   People as PeopleIcon,
-  Save as SaveIcon,
+  Save as Save,
   MyLocation as MyLocationIcon,
   GpsFixed as GpsFixedIcon,
   GpsNotFixed as GpsNotFixedIcon,
@@ -344,7 +344,7 @@ const LocationSearch = memo(({ value, onChange }) => {
         </Stack>
         <Stack direction="row" spacing={0.5}>
           <Button size="small" onClick={() => setExpanded(true)}>Change</Button>
-          <IconButton size="small" onClick={handleClearLocation}><CloseIcon fontSize="small" /></IconButton>
+          <IconButton size="small" onClick={handleClearLocation}><Close fontSize="small" /></IconButton>
         </Stack>
       </Box>
     );
@@ -371,7 +371,7 @@ const LocationSearch = memo(({ value, onChange }) => {
             <LocationIcon fontSize="small" sx={{ color: 'primary.main' }} />
             <Typography variant="body2" fontWeight={600}>Meeting Location</Typography>
           </Stack>
-          <IconButton size="small" onClick={() => setExpanded(false)}><CloseIcon fontSize="small" /></IconButton>
+          <IconButton size="small" onClick={() => setExpanded(false)}><Close fontSize="small" /></IconButton>
         </Stack>
 
         <ToggleButtonGroup value={locationMode} exclusive onChange={(e, val) => val && setLocationMode(val)} size="small" fullWidth>
@@ -622,7 +622,7 @@ const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
             <Alert
               severity="info"
               icon={<TodayIcon />}
-              action={<IconButton size="small" onClick={() => setShowPreview(false)}><CloseIcon fontSize="small" /></IconButton>}
+              action={<IconButton size="small" onClick={() => setShowPreview(false)}><Close fontSize="small" /></IconButton>}
             >
               <Typography variant="caption" fontWeight={600} gutterBottom display="block">Upcoming Occurrences</Typography>
               {loadingPreview ? (
@@ -885,7 +885,7 @@ const CreateMeeting = () => {
             <Toolbar sx={{ px: 1.5 }}>
               <IconButton edge="start" onClick={() => navigate('/meetings')}><ArrowBackIcon /></IconButton>
               <Typography variant="subtitle1" sx={{ flex: 1, textAlign: 'center', fontWeight: 600 }}>Create Meeting</Typography>
-              <IconButton edge="end" onClick={handleCancel}><CloseIcon /></IconButton>
+              <IconButton edge="end" onClick={handleCancel}><Close /></IconButton>
             </Toolbar>
           </AppBar>
         )}
@@ -897,7 +897,7 @@ const CreateMeeting = () => {
                 <Typography variant="h5" fontWeight={700} color="primary">Create New Meeting</Typography>
                 <Typography variant="caption" color="text.secondary">Fill in the details to schedule a new meeting</Typography>
               </Box>
-              <Button variant="outlined" size="small" startIcon={<CancelIcon />} onClick={handleCancel} disabled={apiLoading}>
+              <Button variant="outlined" size="small" startIcon={<Cancel />} onClick={handleCancel} disabled={apiLoading}>
                 Cancel
               </Button>
             </Box>
@@ -1076,7 +1076,7 @@ const CreateMeeting = () => {
                       <Box>
                         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1.5}>
                           <Typography variant="body2" fontWeight={600}>Individual Participants</Typography>
-                          <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddParticipantDialog(true)}>
+                          <Button size="small" variant="outlined" startIcon={<PersonAdd />} onClick={() => setShowAddParticipantDialog(true)}>
                             Add Participant
                           </Button>
                         </Stack>
@@ -1092,7 +1092,7 @@ const CreateMeeting = () => {
                                 <ListItem
                                   secondaryAction={
                                     <IconButton edge="end" size="small" onClick={() => handleRemoveParticipant(participant.id)}>
-                                      <DeleteIcon fontSize="small" />
+                                      <Delete fontSize="small" />
                                     </IconButton>
                                   }
                                 >
@@ -1251,7 +1251,7 @@ const CreateMeeting = () => {
                         variant="contained"
                         size="large"
                         onClick={handleSubmit}
-                        startIcon={<SaveIcon />}
+                        startIcon={<Save />}
                         disabled={apiLoading}
                         sx={{ bgcolor: '#7C3AED', '&:hover': { bgcolor: '#6D28D9' } }}
                       >

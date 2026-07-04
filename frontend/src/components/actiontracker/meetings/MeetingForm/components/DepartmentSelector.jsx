@@ -28,7 +28,7 @@ import {
 import {
   Domain as DepartmentIcon,
   Search as SearchIcon,
-  Close as CloseIcon,
+  Close as Close,
   CheckCircle as CheckCircleIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
@@ -237,7 +237,7 @@ export const DepartmentSelector = ({ value, onChange, disabled, required = false
           IconComponent={() => null}
           endAdornment={
             value && !disabled ? (
-              <CloseIcon 
+              <Close 
                 fontSize="small" 
                 sx={{ 
                   mr: 1, 
@@ -396,7 +396,7 @@ export const DepartmentSelector = ({ value, onChange, disabled, required = false
                 Showing {filteredDepartments.length} of {departments.length} departments
               </Typography>
               {value && (
-                <Button size="small" onClick={handleClear} startIcon={<CloseIcon />}>
+                <Button size="small" onClick={handleClear} startIcon={<Close />}>
                   Clear
                 </Button>
               )}

@@ -28,17 +28,17 @@ import {
   useTheme
 } from '@mui/material';
 import {
-  Close as CloseIcon,
+  Close as Close,
   VideoCall as VideoCallIcon,
   Link as LinkIcon,
   ContentCopy as ContentCopyIcon,
   CheckCircle as CheckCircleIcon,
-  Save as SaveIcon,
+  Save as Save,
   Phone as PhoneIcon,
   Security as SecurityIcon,
   AccessTime as AccessTimeIcon,
-  Add as AddIcon,
-  Delete as DeleteIcon,
+  Add as Add,
+  Delete as Delete,
   LocationOn as LocationIcon
 } from '@mui/icons-material';
 import api from '../../../../services/api';
@@ -218,7 +218,7 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
             </Box>
           </Stack>
           <IconButton onClick={onClose} disabled={loading}>
-            <CloseIcon />
+            <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
@@ -380,7 +380,7 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
                       value={newDialIn.number} 
                       onChange={(e) => setNewDialIn({...newDialIn, number: e.target.value})}
                     />
-                    <Button variant="outlined" size="small" onClick={handleAddDialInNumber} startIcon={<AddIcon />}>
+                    <Button variant="outlined" size="small" onClick={handleAddDialInNumber} startIcon={<Add />}>
                       Add
                     </Button>
                   </Stack>
@@ -487,7 +487,7 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
             variant="contained"
             onClick={handleSubmit}
             disabled={loading}
-            startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
+            startIcon={loading ? <CircularProgress size={20} /> : <Save />}
             sx={{ minWidth: 120 }}
           >
             {loading ? 'Saving...' : 'Save Changes'}

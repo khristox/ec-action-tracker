@@ -8,8 +8,8 @@ import {
   CircularProgress, Grid, Divider, FormHelperText
 } from '@mui/material';
 import {
-  Save as SaveIcon,
-  Cancel as CancelIcon,
+  Save as Save,
+  Cancel as Cancel,
   Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -338,7 +338,7 @@ const AssignAction = () => {
                   <Button
                     fullWidth
                     variant="outlined"
-                    startIcon={<CancelIcon />}
+                    startIcon={<Cancel />}
                     onClick={handleCancel}
                     disabled={submitting}
                     size="large"
@@ -350,7 +350,7 @@ const AssignAction = () => {
                   <Button
                     fullWidth
                     variant="contained"
-                    startIcon={submitting ? <CircularProgress size={20} /> : <SaveIcon />}
+                    startIcon={submitting ? <CircularProgress size={20} /> : <Save />}
                     type="submit"
                     disabled={submitting}
                     size="large"

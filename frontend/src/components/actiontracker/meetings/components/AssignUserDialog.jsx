@@ -7,7 +7,7 @@ import {
   useMediaQuery, useTheme, IconButton, Typography,
   Stack, Box
 } from '@mui/material';
-import { Close as CloseIcon, Assignment as AssignmentIcon } from '@mui/icons-material';
+import { Close as Close, Assignment as AssignmentIcon } from '@mui/icons-material';
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { addMinutes } from 'date-fns';
@@ -148,7 +148,7 @@ const AssignUserDialog = ({ open, action, onClose, onAssign, meetingId }) => {
           <Typography variant="h6" sx={{ fontWeight: 600 }}>Update Assignment</Typography>
           {isMobile && (
             <IconButton onClick={onClose} sx={{ color: 'white' }}>
-              <CloseIcon />
+              <Close />
             </IconButton>
           )}
         </DialogTitle>

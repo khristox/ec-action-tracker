@@ -44,9 +44,9 @@ import {
   EmailOutlined,
   BadgeOutlined,
   Group,
-  CheckCircleOutline,
-  ErrorOutline,
-  InfoOutlined,
+  CheckCircleOutlined,
+  ErrorOutlined,
+  InfoOutlinedd,
   HourglassEmpty,
   Refresh,
   Edit,
@@ -753,7 +753,7 @@ const SignUpCard = () => {
             <Fade in>
               <Alert 
                 severity="error" 
-                icon={<ErrorOutline />}
+                icon={<ErrorOutlined />}
                 sx={{ mb: 3 }}
                 onClose={() => dispatch(clearError())}
               >
@@ -774,7 +774,7 @@ const SignUpCard = () => {
           {registrationSuccess && (
             <Alert 
               severity="success" 
-              icon={<CheckCircleOutline />} 
+              icon={<CheckCircleOutlined />} 
               sx={{ mb: 3 }}
               action={
                 <Button color="inherit" size="small" onClick={() => setVerificationDialogOpen(true)}>
@@ -1018,7 +1018,7 @@ const SignUpCard = () => {
                 {formData.password && !hasFieldError('password') && (
                   <Box sx={{ mt: 1, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <InfoOutlined sx={{ fontSize: 14, color: passwordStrength.color }} />
+                      <InfoOutlinedd sx={{ fontSize: 14, color: passwordStrength.color }} />
                       <Typography variant="caption" sx={{ color: passwordStrength.color }}>
                         Password strength: {passwordStrength.label}
                       </Typography>
@@ -1175,7 +1175,7 @@ const SignUpCard = () => {
           onClose={handleCloseSnackbar} 
           severity="error" 
           variant="filled"
-          icon={<ErrorOutline />}
+          icon={<ErrorOutlined />}
           sx={{ width: '100%', boxShadow: 3 }}
         >
           <Typography variant="body2" fontWeight={500}>
@@ -1196,7 +1196,7 @@ const SignUpCard = () => {
           onClose={handleCloseSuccessSnackbar} 
           severity="success" 
           variant="filled"
-          icon={<CheckCircleOutline />}
+          icon={<CheckCircleOutlined />}
           sx={{ width: '100%', boxShadow: 3 }}
         >
           <Typography variant="body2" fontWeight={500}>

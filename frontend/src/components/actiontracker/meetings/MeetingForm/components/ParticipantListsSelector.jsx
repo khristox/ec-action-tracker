@@ -1,7 +1,7 @@
 // src/components/meetings/MeetingForm/components/ParticipantListsSelector.jsx
 import React, { useState, useEffect } from 'react';
 import { Stack, FormControl, InputLabel, Select, MenuItem, Paper, List, ListItem, ListItemAvatar, ListItemText, Avatar, Box, Typography, Button } from '@mui/material';
-import { GroupAdd as GroupAddIcon } from '@mui/icons-material';
+import { GroupAdd as GroupAdd } from '@mui/icons-material';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchParticipantLists, selectParticipantLists } from '../../../../../store/slices/actionTracker/participantSlice';
 
@@ -71,7 +71,7 @@ export const ParticipantListsSelector = ({ onAddFromList, selectedParticipantIds
             variant="contained"
             onClick={handleAddAll}
             disabled={availableParticipants.length === 0}
-            startIcon={<GroupAddIcon />}
+            startIcon={<GroupAdd />}
           >
             Add All ({availableParticipants.length}) Participants
           </Button>

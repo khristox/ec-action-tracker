@@ -14,10 +14,10 @@ import {
   SpeedDialIcon, useScrollTrigger, Fade,
 } from '@mui/material';
 import {
-  Delete as DeleteIcon, PersonAdd as PersonAddIcon, Close as CloseIcon,
-  Cancel as CancelIcon, ArrowBack as ArrowBackIcon, ArrowForward as ArrowForwardIcon,
+  Delete as Delete, PersonAdd as PersonAdd, Close as Close,
+  Cancel as Cancel, ArrowBack as ArrowBackIcon, ArrowForward as ArrowForwardIcon,
   CheckCircle as CheckCircleIcon, Event as EventIcon, LocationOn as LocationIcon,
-  People as PeopleIcon, Save as SaveIcon, MyLocation as MyLocationIcon,
+  People as PeopleIcon, Save as Save, MyLocation as MyLocationIcon,
   GpsFixed as GpsFixedIcon, GpsNotFixed as GpsNotFixedIcon,
   ExpandMore as ExpandMoreIcon, EditNote as SecretaryIcon, Search as SearchIcon,
   Apartment as ApartmentIcon, Business as BusinessIcon, Public as PublicIcon,
@@ -528,7 +528,7 @@ const MeetingForm = () => {
               <Typography variant="h6" sx={{ flex: 1, textAlign: 'center', fontWeight: 700 }}>
                 {isEditMode ? 'Edit Meeting' : 'New Meeting'}
               </Typography>
-              <IconButton edge="end" onClick={handleCancel}><CloseIcon /></IconButton>
+              <IconButton edge="end" onClick={handleCancel}><Close /></IconButton>
             </Toolbar>
           </AppBar>
         )}
@@ -547,7 +547,7 @@ const MeetingForm = () => {
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1}>
-                <Button variant="outlined" startIcon={<CancelIcon />} onClick={handleCancel} disabled={apiLoading}>Cancel</Button>
+                <Button variant="outlined" startIcon={<Cancel />} onClick={handleCancel} disabled={apiLoading}>Cancel</Button>
                 {isEditMode && (
                   <Button variant="outlined" color="info" startIcon={<VisibilityIcon />} onClick={() => navigate(`/meetings/${id}`)}>View</Button>
                 )}
@@ -718,7 +718,7 @@ const MeetingForm = () => {
                       <Typography variant="subtitle1" fontWeight={700}>
                         Participants ({meetingParticipants.length})
                       </Typography>
-                      <Button variant="outlined" startIcon={<PersonAddIcon />} onClick={() => setShowAddDialog(true)} disabled={apiLoading}>
+                      <Button variant="outlined" startIcon={<PersonAdd />} onClick={() => setShowAddDialog(true)} disabled={apiLoading}>
                         Add participant
                       </Button>
                     </Box>
@@ -840,7 +840,7 @@ const MeetingForm = () => {
                   variant="contained"
                   size="large"
                   onClick={handleSubmit}
-                  startIcon={isEditMode ? <UpdateIcon /> : <SaveIcon />}
+                  startIcon={isEditMode ? <UpdateIcon /> : <Save />}
                   disabled={apiLoading}
                   sx={{ py: 1.5 }}
                 >
@@ -878,7 +878,7 @@ const MeetingForm = () => {
             onOpen={() => setSpeedDialOpen(true)}
             open={speedDialOpen}
           >
-            <SpeedDialAction icon={<SaveIcon />} tooltipTitle="Save Draft" onClick={savePageState} />
+            <SpeedDialAction icon={<Save />} tooltipTitle="Save Draft" onClick={savePageState} />
             <SpeedDialAction icon={<RefreshIcon />} tooltipTitle="Reset" onClick={() => {
               if (window.confirm('Reset all form fields?')) {
                 setFormData({

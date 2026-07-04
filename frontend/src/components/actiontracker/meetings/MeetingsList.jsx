@@ -20,7 +20,7 @@ import {
   Avatar,
 } from '@mui/material';
 import {
-  Add as AddIcon,
+  Add as Add,
   Search as SearchIcon,
   FilterList as FilterIcon,
   Event as EventIcon,
@@ -111,7 +111,7 @@ const MeetingsList = () => {
           <Typography variant="h4" fontWeight="bold">Meetings</Typography>
           <Typography variant="body2" color="text.secondary">Manage and track all your meetings</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateMeeting}>Create Meeting</Button>
+        <Button variant="contained" startIcon={<Add />} onClick={handleCreateMeeting}>Create Meeting</Button>
       </Box>
 
       <Paper sx={{ p: 2, mb: 3 }}>
@@ -135,7 +135,7 @@ const MeetingsList = () => {
       {filteredMeetings.length === 0 ? (
         <Paper sx={{ p: 6, textAlign: 'center' }}>
           <Typography variant="h6" gutterBottom>No meetings found</Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateMeeting}>Create Meeting</Button>
+          <Button variant="contained" startIcon={<Add />} onClick={handleCreateMeeting}>Create Meeting</Button>
         </Paper>
       ) : (
         <Grid container spacing={3}>

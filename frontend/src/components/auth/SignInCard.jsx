@@ -1,4 +1,4 @@
-// SignInCard.jsx - FIXED VERSION (removed React.memo, added hard reload)
+// SignInCard.jsx - FIXED with Account Lock Popup Support
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -8,14 +8,23 @@ import {
   InputAdornment, IconButton, Alert, CircularProgress, Divider,
   Link, Snackbar, Slide, Dialog, DialogTitle, DialogContent,
   DialogContentText, DialogActions, Paper, FormControlLabel, Checkbox,
-  Zoom, Tooltip, useMediaQuery, useTheme, Fade
+  Zoom, Tooltip, useMediaQuery, useTheme, Fade, LinearProgress,
+  Chip
 } from '@mui/material';
 import {
   Visibility, VisibilityOff, PersonOutline, LockOutlined,
   Group, CheckCircleOutline, ErrorOutline, EmailOutlined,
-  CloseOutlined, Login, SendOutlined
+  CloseOutlined, Login, SendOutlined, WarningAmberOutlined,
+  TimerOutlined, LockOutlined as LockIcon, RefreshOutlined
 } from '@mui/icons-material';
-import { login, clearError, resetLoginSuccess, resendVerification } from '../../store/slices/authSlice';
+import { 
+  login, 
+  clearError, 
+  resendVerification,
+  updateLockTimer,
+  clearRateLimited,
+  resetRateLimit,
+} from '../../store/slices/authSlice';
 
 // ========== CONSTANTS ==========
 const VALIDATION_RULES = {
@@ -30,8 +39,9 @@ const VALIDATION_RULES = {
   }
 };
 
-const AUTO_HIDE_DURATION = 6000;
+const AUTO_HIDE_DURATION = 8000;
 const DEBOUNCE_DELAY = 300;
+const LOCK_COUNTDOWN_INTERVAL = 1000;
 
 // ========== TRANSITION COMPONENTS ==========
 const SlideTransition = React.forwardRef((props, ref) => <Slide {...props} ref={ref} direction="up" />);
@@ -97,14 +107,21 @@ const useDebounce = (value, delay) => {
   return debouncedValue;
 };
 
-// ========== MAIN COMPONENT (NO React.memo) ==========
+// ========== MAIN COMPONENT ==========
 const SignInCard = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
+  // Auth selectors
   const { isLoading, error, isAuthenticated, loginSuccess, verificationEmailSent } = useSelector((state) => state.auth);
+  const remainingAttempts = useSelector((state) => state.auth.remainingAttempts);
+  const isLocked = useSelector((state) => state.auth.isLocked);
+  const lockTimeRemaining = useSelector((state) => state.auth.lockTimeRemaining);
+  const isRateLimited = useSelector((state) => state.auth.isRateLimited);
+  const rateLimitRetryAfter = useSelector((state) => state.auth.rateLimitRetryAfter);
+  const failedAttempts = useSelector((state) => state.auth.failedAttempts);
   
   // State
   const [formData, setFormData] = useState({ username: '', password: '' });
@@ -117,6 +134,11 @@ const SignInCard = () => {
   const [resendSuccess, setResendSuccess] = useState(false);
   const [loginCompleted, setLoginCompleted] = useState(false);
   
+  // NEW: Account Lock Dialog State
+  const [lockDialogOpen, setLockDialogOpen] = useState(false);
+  const [lockDialogMessage, setLockDialogMessage] = useState('');
+  const [lockCountdown, setLockCountdown] = useState(0);
+  
   // Custom hooks
   const { capsLockOn, handleKeyPress } = useCapsLockDetector();
   const { validateField, isFormValid } = useFormValidation(formData);
@@ -125,6 +147,8 @@ const SignInCard = () => {
   // Refs
   const usernameRef = useRef(null);
   const formRef = useRef(null);
+  const lockTimerRef = useRef(null);
+  const lockDialogTimerRef = useRef(null);
   
   // Memoized values
   const errorMessage = useMemo(() => {
@@ -139,62 +163,168 @@ const SignInCard = () => {
            lowerError.includes('unverified');
   }, [errorMessage]);
   
+  // NEW: Improved account lock detection
+  const isAccountLockedError = useMemo(() => {
+    const lowerError = errorMessage.toLowerCase();
+    return lowerError.includes('locked') || 
+           lowerError.includes('temporarily locked') ||
+           lowerError.includes('account is temporarily locked');
+  }, [errorMessage]);
+  
+  const isRateLimitError = useMemo(() => {
+    const lowerError = errorMessage.toLowerCase();
+    return lowerError.includes('too many') || 
+           lowerError.includes('rate limit') ||
+           lowerError.includes('too many requests');
+  }, [errorMessage]);
+  
   const getFieldError = useCallback((name) => {
     return touched[name] ? validateField(name, formData[name]) : '';
   }, [touched, formData, validateField]);
   
-  // Navigation on auth success - FIXED with hard reload
+  // NEW: Extract lock time from error message
+  const extractLockTime = useCallback((message) => {
+    if (!message) return 0;
+    const match = message.match(/(\d+)\s*minute/);
+    if (match) {
+      return parseInt(match[1]) * 60; // Convert minutes to seconds
+    }
+    const secondMatch = message.match(/(\d+)\s*second/);
+    if (secondMatch) {
+      return parseInt(secondMatch[1]);
+    }
+    return 900; // Default 15 minutes
+  }, []);
+  
+  // NEW: Show lock dialog when account locked error is detected
+  useEffect(() => {
+    if (isAccountLockedError && errorMessage && !lockDialogOpen && !isLocked) {
+      const lockDuration = extractLockTime(errorMessage);
+      setLockCountdown(lockDuration);
+      setLockDialogMessage(errorMessage);
+      setLockDialogOpen(true);
+      
+      // Also set the lock state in Redux if not already set
+      if (!isLocked) {
+        // The lock state should already be set by the auth slice
+        // But we can ensure it's displayed correctly
+      }
+    }
+  }, [isAccountLockedError, errorMessage, lockDialogOpen, isLocked, extractLockTime]);
+  
+  // NEW: Countdown timer for lock dialog
+  useEffect(() => {
+    if (lockDialogOpen && lockCountdown > 0) {
+      if (lockDialogTimerRef.current) {
+        clearInterval(lockDialogTimerRef.current);
+      }
+      
+      lockDialogTimerRef.current = setInterval(() => {
+        setLockCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(lockDialogTimerRef.current);
+            lockDialogTimerRef.current = null;
+            // Auto close dialog when countdown reaches 0
+            setLockDialogOpen(false);
+            dispatch(resetRateLimit());
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, LOCK_COUNTDOWN_INTERVAL);
+      
+      return () => {
+        if (lockDialogTimerRef.current) {
+          clearInterval(lockDialogTimerRef.current);
+          lockDialogTimerRef.current = null;
+        }
+      };
+    }
+  }, [lockDialogOpen, lockCountdown, dispatch]);
+  
+  // Countdown timer for lock state (using Redux)
+  useEffect(() => {
+    if (isLocked && lockTimeRemaining > 0) {
+      if (lockTimerRef.current) {
+        clearInterval(lockTimerRef.current);
+      }
+      
+      lockTimerRef.current = setInterval(() => {
+        dispatch(updateLockTimer());
+      }, LOCK_COUNTDOWN_INTERVAL);
+      
+      return () => {
+        if (lockTimerRef.current) {
+          clearInterval(lockTimerRef.current);
+          lockTimerRef.current = null;
+        }
+      };
+    }
+  }, [isLocked, lockTimeRemaining, dispatch]);
+  
+  // Navigation on auth success
   useEffect(() => {
     if ((isAuthenticated || loginSuccess) && !loginCompleted) {
       console.log('Authentication successful, redirecting to dashboard...');
       setLoginCompleted(true);
       
-      // Use hard reload to ensure all components (Sidebar, Navbar) reload
-      window.location.href = '/dashboard';
+      const timer = setTimeout(() => {
+        window.location.href = '/dashboard';
+      }, 300);
+      
+      return () => clearTimeout(timer);
     }
   }, [isAuthenticated, loginSuccess, loginCompleted]);
   
-  // Reset login completed when component mounts
+  // Reset login completed when component unmounts
   useEffect(() => {
     return () => {
       setLoginCompleted(false);
+      if (lockTimerRef.current) {
+        clearInterval(lockTimerRef.current);
+      }
+      if (lockDialogTimerRef.current) {
+        clearInterval(lockDialogTimerRef.current);
+      }
     };
   }, []);
   
   // Handle unverified dialog
   useEffect(() => {
-    if (isUnverifiedError && !resendDialogOpen) {
+    if (isUnverifiedError && !resendDialogOpen && !isLocked && !isRateLimited && !lockDialogOpen) {
       const potentialEmail = debouncedUsername.includes('@') ? debouncedUsername : '';
       setResendEmail(potentialEmail);
       setResendDialogOpen(true);
       setResendSuccess(false);
     }
-  }, [isUnverifiedError, debouncedUsername, resendDialogOpen]);
+  }, [isUnverifiedError, debouncedUsername, resendDialogOpen, isLocked, isRateLimited, lockDialogOpen]);
   
-  // Handle error snackbar
+  // Handle error snackbar - Don't show snackbar for lock errors
   useEffect(() => {
-    if (errorMessage && !isUnverifiedError) {
+    if (errorMessage && !isUnverifiedError && !isAccountLockedError && !isRateLimitError) {
       setSnackbarOpen(true);
     }
-  }, [errorMessage, isUnverifiedError]);
+  }, [errorMessage, isUnverifiedError, isAccountLockedError, isRateLimitError]);
   
   // Focus username on mount
   useEffect(() => {
-    if (usernameRef.current) {
+    if (usernameRef.current && !isLocked && !isRateLimited) {
       const timer = setTimeout(() => usernameRef.current?.focus(), 100);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [isLocked, isRateLimited]);
   
   // Handle field changes
   const handleChange = useCallback((e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    // Reset login completed flag when user starts typing again
     if (loginCompleted) {
       setLoginCompleted(false);
     }
-  }, [loginCompleted]);
+    if (error) {
+      dispatch(clearError());
+    }
+  }, [loginCompleted, error, dispatch]);
   
   const handleBlur = useCallback((e) => {
     const { name } = e.target;
@@ -209,13 +339,14 @@ const SignInCard = () => {
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     
-    // Mark all fields as touched
+    if (isLocked || isRateLimited || lockDialogOpen) {
+      return;
+    }
+    
     setTouched({ username: true, password: true });
     
-    // Validate form
     if (!isFormValid) return;
     
-    // Clear previous errors and reset login completed
     dispatch(clearError());
     setLoginCompleted(false);
     
@@ -226,13 +357,12 @@ const SignInCard = () => {
       })).unwrap();
       
       console.log('Login API response:', result);
-      // Navigation will happen in useEffect when isAuthenticated or loginSuccess changes
       
     } catch (err) {
       console.debug('Login failed:', err);
       setLoginCompleted(false);
     }
-  }, [dispatch, formData, isFormValid]);
+  }, [dispatch, formData, isFormValid, isLocked, isRateLimited, lockDialogOpen]);
   
   // Handle resend verification
   const handleResendVerification = useCallback(async () => {
@@ -243,7 +373,6 @@ const SignInCard = () => {
       await dispatch(resendVerification(email)).unwrap();
       setResendSuccess(true);
       
-      // Auto close dialog after success
       const timer = setTimeout(() => {
         handleCloseDialog();
       }, 3000);
@@ -261,6 +390,17 @@ const SignInCard = () => {
     dispatch(clearError());
   }, [dispatch]);
   
+  // NEW: Close lock dialog
+  const handleCloseLockDialog = useCallback(() => {
+    setLockDialogOpen(false);
+    dispatch(clearError());
+    dispatch(resetRateLimit());
+    if (lockDialogTimerRef.current) {
+      clearInterval(lockDialogTimerRef.current);
+      lockDialogTimerRef.current = null;
+    }
+  }, [dispatch]);
+  
   // Close snackbar
   const handleCloseSnackbar = useCallback(() => {
     setSnackbarOpen(false);
@@ -270,11 +410,47 @@ const SignInCard = () => {
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (isFormValid && !isLoading) {
+      if (isFormValid && !isLoading && !isLocked && !isRateLimited && !lockDialogOpen) {
         handleSubmit(e);
       }
     }
-  }, [isFormValid, isLoading, handleSubmit]);
+  }, [isFormValid, isLoading, isLocked, isRateLimited, lockDialogOpen, handleSubmit]);
+  
+  // Get disabled state for form
+  const isFormDisabled = isLoading || isLocked || isRateLimited || lockDialogOpen;
+  
+  // Get button text based on state
+  const getButtonText = useCallback(() => {
+    if (isLoading) return <CircularProgress size={24} color="inherit" />;
+    if (isLocked || lockDialogOpen) {
+      const time = isLocked ? lockTimeRemaining : lockCountdown;
+      const mins = Math.floor(time / 60);
+      const secs = time % 60;
+      if (mins > 0) {
+        return `Account Locked (${mins}m ${secs}s)`;
+      }
+      return `Account Locked (${secs}s)`;
+    }
+    if (isRateLimited) {
+      const mins = Math.floor(rateLimitRetryAfter / 60);
+      const secs = rateLimitRetryAfter % 60;
+      if (mins > 0) {
+        return `Wait ${mins}m ${secs}s`;
+      }
+      return `Wait ${secs}s`;
+    }
+    return 'Sign In';
+  }, [isLoading, isLocked, isRateLimited, lockDialogOpen, lockTimeRemaining, lockCountdown, rateLimitRetryAfter]);
+  
+  // Format time helper
+  const formatTimeDisplay = useCallback((seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) {
+      return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+  }, []);
   
   // Show loading while redirecting
   if (loginCompleted) {
@@ -300,8 +476,29 @@ const SignInCard = () => {
           '&:hover': {
             boxShadow: isMobile ? 2 : 6,
           },
+          position: 'relative',
+          overflow: 'hidden',
         }}
       >
+        {/* Rate Limit / Lock Progress Bar */}
+        {(isLocked || isRateLimited) && (
+          <LinearProgress
+            variant="determinate"
+            value={isLocked ? ((lockTimeRemaining / (lockTimeRemaining + 1)) * 100) : ((rateLimitRetryAfter / (rateLimitRetryAfter + 1)) * 100)}
+            color={isLocked ? "error" : "warning"}
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              '& .MuiLinearProgress-bar': {
+                transition: 'transform 1s linear',
+              }
+            }}
+          />
+        )}
+        
         <CardContent sx={{ p: { xs: 3, sm: 4, md: 5 } }}>
           {/* Header */}
           <Box sx={{ textAlign: 'center', mb: 4 }}>
@@ -314,7 +511,88 @@ const SignInCard = () => {
             <Typography variant="body2" color="text.secondary">
               Sign in to manage your meetings and tasks
             </Typography>
+            
+            {/* Failed Attempts Indicator */}
+            {!isLocked && !lockDialogOpen && failedAttempts > 0 && (
+              <Chip
+                icon={<WarningAmberOutlined />}
+                label={`${failedAttempts} failed attempt${failedAttempts > 1 ? 's' : ''}`}
+                color="warning"
+                size="small"
+                sx={{ mt: 1.5 }}
+                variant="outlined"
+              />
+            )}
           </Box>
+          
+          {/* Account Locked Alert - Inline */}
+          {isLocked && (
+            <Fade in>
+              <Alert 
+                severity="error" 
+                variant="filled"
+                icon={<LockIcon />}
+                sx={{ mb: 2, borderRadius: 2 }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                  <strong>Account Temporarily Locked</strong>
+                  <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <TimerOutlined fontSize="small" />
+                    <Typography variant="body2" fontWeight="bold">
+                      {formatTimeDisplay(lockTimeRemaining)}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                  Too many failed login attempts. Please wait for the lock to expire.
+                </Typography>
+              </Alert>
+            </Fade>
+          )}
+          
+          {/* Rate Limited Alert */}
+          {isRateLimited && (
+            <Fade in>
+              <Alert 
+                severity="warning" 
+                variant="filled"
+                icon={<WarningAmberOutlined />}
+                sx={{ mb: 2, borderRadius: 2 }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                  <strong>Too Many Requests</strong>
+                  <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <TimerOutlined fontSize="small" />
+                    <Typography variant="body2" fontWeight="bold">
+                      {formatTimeDisplay(rateLimitRetryAfter)}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                  Please wait before trying again.
+                </Typography>
+              </Alert>
+            </Fade>
+          )}
+          
+          {/* Remaining Attempts Warning */}
+          {!isLocked && !lockDialogOpen && remainingAttempts !== null && remainingAttempts <= 3 && remainingAttempts > 0 && (
+            <Fade in>
+              <Alert 
+                severity={remainingAttempts === 1 ? "error" : "warning"}
+                variant="outlined"
+                sx={{ mb: 2, borderRadius: 2 }}
+                icon={remainingAttempts === 1 ? <ErrorOutline /> : <WarningAmberOutlined />}
+              >
+                <Typography variant="body2">
+                  {remainingAttempts === 1 
+                    ? '⚠️ Last attempt before account lock!'
+                    : `${remainingAttempts} attempts remaining before account lock.`
+                  }
+                </Typography>
+              </Alert>
+            </Fade>
+          )}
           
           {/* Form */}
           <form ref={formRef} onSubmit={handleSubmit} onKeyDown={handleKeyDown}>
@@ -329,7 +607,7 @@ const SignInCard = () => {
               onBlur={handleBlur}
               margin="normal"
               required
-              disabled={isLoading}
+              disabled={isFormDisabled}
               error={!!getFieldError('username')}
               helperText={getFieldError('username')}
               slotProps={{
@@ -355,7 +633,7 @@ const SignInCard = () => {
               onKeyPress={handleKeyPress}
               margin="normal"
               required
-              disabled={isLoading}
+              disabled={isFormDisabled}
               error={!!getFieldError('password')}
               helperText={
                 <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -382,7 +660,7 @@ const SignInCard = () => {
                           onClick={handleShowPasswordToggle}
                           onMouseDown={(e) => e.preventDefault()}
                           edge="end"
-                          disabled={isLoading}
+                          disabled={isFormDisabled}
                         >
                           {showPassword ? <VisibilityOff /> : <Visibility />}
                         </IconButton>
@@ -401,7 +679,7 @@ const SignInCard = () => {
                     checked={showPasswordCheckbox}
                     onChange={(e) => setShowPasswordCheckbox(e.target.checked)}
                     size="small"
-                    disabled={isLoading}
+                    disabled={isFormDisabled}
                   />
                 }
                 label={<Typography variant="caption" color="text.secondary">Show password</Typography>}
@@ -423,16 +701,17 @@ const SignInCard = () => {
               fullWidth
               variant="contained"
               size="large"
-              disabled={isLoading || !isFormValid}
-              startIcon={!isLoading && <Login />}
+              disabled={isFormDisabled || !isFormValid}
+              startIcon={!isLoading && !isLocked && !isRateLimited && !lockDialogOpen && <Login />}
               sx={{ 
                 mt: 3, 
                 mb: 2, 
                 py: { xs: 1.5, sm: 1.8 },
                 transition: 'all 0.2s ease',
+                position: 'relative',
               }}
             >
-              {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Sign In'}
+              {getButtonText()}
             </Button>
           </form>
           
@@ -455,6 +734,117 @@ const SignInCard = () => {
           </Button>
         </CardContent>
       </Card>
+      
+      {/* NEW: Account Lock Dialog */}
+      <Dialog
+        open={lockDialogOpen}
+        onClose={handleCloseLockDialog}
+        TransitionComponent={SlideTransition}
+        maxWidth="sm"
+        fullWidth
+        disableEscapeKeyDown
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: { xs: 2, sm: 3 },
+              overflow: 'hidden',
+              border: '2px solid',
+              borderColor: 'error.main',
+            }
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          bgcolor: 'error.main', 
+          color: 'white',
+          pb: 2,
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <LockIcon sx={{ fontSize: 32 }} />
+            <Box>
+              <Typography variant="h6" component="span" fontWeight="bold">
+                Account Locked
+              </Typography>
+              <Typography variant="caption" display="block" sx={{ opacity: 0.9 }}>
+                Security measure activated
+              </Typography>
+            </Box>
+          </Box>
+        </DialogTitle>
+        
+        <DialogContent sx={{ pt: 3 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert 
+              severity="error" 
+              variant="outlined"
+              sx={{ borderRadius: 2 }}
+            >
+              <Typography variant="body2">
+                {lockDialogMessage || 'Account temporarily locked due to multiple failed login attempts.'}
+              </Typography>
+            </Alert>
+            
+            <Paper 
+              variant="outlined" 
+              sx={{ 
+                p: 3, 
+                textAlign: 'center',
+                bgcolor: 'error.light',
+                borderRadius: 2,
+                borderColor: 'error.main',
+              }}
+            >
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Time remaining until unlock:
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <TimerOutlined color="error" sx={{ fontSize: 28 }} />
+                <Typography variant="h3" fontWeight="bold" color="error.main">
+                  {formatTimeDisplay(lockCountdown)}
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={(lockCountdown / (lockCountdown + 1)) * 100}
+                color="error"
+                sx={{ mt: 2, height: 8, borderRadius: 4 }}
+              />
+            </Paper>
+            
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              <Typography variant="body2">
+                <strong>Why is this happening?</strong> Too many failed login attempts triggered our security system.
+                This protects your account from unauthorized access.
+              </Typography>
+            </Alert>
+          </Box>
+        </DialogContent>
+        
+        <DialogActions sx={{ p: 3, flexDirection: 'column', gap: 1.5 }}>
+          <Button 
+            onClick={handleCloseLockDialog}
+            variant="contained"
+            color="error"
+            fullWidth
+            disabled={lockCountdown > 0}
+            startIcon={lockCountdown > 0 ? <TimerOutlined /> : <RefreshOutlined />}
+            sx={{ py: 1.5 }}
+          >
+            {lockCountdown > 0 ? `Wait ${formatTimeDisplay(lockCountdown)}` : 'Try Again'}
+          </Button>
+          <Button 
+            onClick={() => {
+              handleCloseLockDialog();
+              navigate('/forgot-password');
+            }}
+            variant="outlined"
+            fullWidth
+            sx={{ py: 1.5 }}
+          >
+            Forgot Password?
+          </Button>
+        </DialogActions>
+      </Dialog>
       
       {/* Verification Dialog */}
       <Dialog
@@ -580,5 +970,4 @@ const SignInCard = () => {
   );
 };
 
-// IMPORTANT: REMOVED React.memo - this was preventing navigation
 export default SignInCard;

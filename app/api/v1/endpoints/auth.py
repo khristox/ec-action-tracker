@@ -8,6 +8,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.account_lockout import (
+    is_locked,
+    record_failed_attempt,
+    clear_failed_attempts,
+    MAX_FAILED_ATTEMPTS,
+    LOCKOUT_DURATION_SECONDS,
+)
 from app.models.base import BaseModel
 from app.models.meetings.organization import OrganizationNode
 from app.models.meetings.user_department import UserDepartment
@@ -27,7 +34,7 @@ from app.db.base import get_db
 from app.models.role import Role
 from app.schemas.permission import PermissionResponse
 
-
+from app.core.limiter import limiter
 
 
 # Image Processing safely handled
@@ -229,32 +236,73 @@ async def resend_verification_email(
 
 
 @router.post("/login", response_model=Token, operation_id="auth_login")
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     db: AsyncSession = Depends(deps.get_db),
     form_data: OAuth2PasswordRequestForm = Depends(),
-    request: Request = None
 ) -> Any:
     """Login user"""
-    
+
+    identifier = form_data.username
+
+    # ── Account lockout check — before touching the DB or hashing a password ──
+    locked, seconds_remaining = await is_locked(identifier)
+    if locked:
+        minutes_remaining = max(1, seconds_remaining // 60)
+        await _log_audit_event(
+            db, "login", identifier, success=False,
+            error_message="Account locked due to repeated failed attempts",
+            request=request
+        )
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Account temporarily locked due to multiple failed login attempts. "
+                   f"Try again in {minutes_remaining} minute(s).",
+            headers={"Retry-After": str(seconds_remaining)},
+        )
+
     user = await user_crud.get_by_email(db, email=form_data.username) or \
            await user_crud.get_by_username(db, username=form_data.username)
-    
+
     if not user or not await user_crud.authenticate(db, username=user.username, password=form_data.password):
-        await _log_audit_event(db, "login", form_data.username, success=False, error_message="Invalid credentials", request=request)
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        attempt_count, just_locked = await record_failed_attempt(identifier)
+
+        await _log_audit_event(
+            db, "login", identifier, success=False,
+            error_message="Invalid credentials", request=request
+        )
+
+        if just_locked:
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Too many failed login attempts. Account locked for "
+                       f"{LOCKOUT_DURATION_SECONDS // 60} minutes.",
+                headers={"Retry-After": str(LOCKOUT_DURATION_SECONDS)},
+            )
+
+        remaining = max(0, MAX_FAILED_ATTEMPTS - attempt_count)
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid credentials. {remaining} attempt(s) remaining before account lockout."
+            if attempt_count > 0 else "Invalid credentials",
+        )
 
     if not user.is_verified:
         email_sent = await _send_verification_email(user)
         if email_sent:
             raise HTTPException(
-                status_code=403, 
+                status_code=403,
                 detail="Email not verified. A new verification link has been sent to your email."
             )
         else:
             raise HTTPException(
-                status_code=403, 
+                status_code=403,
                 detail="Email not verified. Unable to send verification email. Please contact support."
             )
+
+    # ── Success — clear any lockout state for this identifier ──
+    await clear_failed_attempts(identifier)
 
     access_token = create_access_token(
         data={"sub": user.username, "user_id": str(user.id), "roles": [r.code for r in user.roles]}
@@ -262,13 +310,13 @@ async def login(
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
     db.add(RefreshToken(
-        id=uuid.uuid4(), 
-        user_id=user.id, 
+        id=uuid.uuid4(),
+        user_id=user.id,
         token=refresh_token,
         expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     ))
     user.last_login = datetime.now(timezone.utc)
-    
+
     await _log_audit_event(db, "login", user.username, user_id=user.id, request=request)
     await db.commit()
 

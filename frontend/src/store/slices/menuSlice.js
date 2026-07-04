@@ -409,4 +409,22 @@ export const selectMenuStats = createSelector(
   })
 );
 
+// ==================== Menu-Gating Selectors ====================
+// Used by route guards (e.g. MenuProtectedRoute in App.jsx) to check
+// "is this menu code / path in what the user is actually entitled to see?"
+// Built off selectFlatMenus, which is already declared above, so these
+// must stay below it in the file — referencing a const selector before its
+// own declaration line runs throws a ReferenceError (temporal dead zone),
+// regardless of where it sits in the exports.
+
+export const selectAllowedMenuCodes = createSelector(
+  [selectFlatMenus],
+  (flatMenus) => new Set(flatMenus.filter(m => m.code).map(m => m.code))
+);
+
+export const selectAllowedMenuPaths = createSelector(
+  [selectFlatMenus],
+  (flatMenus) => new Set(flatMenus.filter(m => m.path).map(m => m.path))
+);
+
 export default menuSlice.reducer;

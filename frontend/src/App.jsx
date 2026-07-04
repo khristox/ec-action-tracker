@@ -35,6 +35,9 @@ import EditRecurringMeeting from './components/actiontracker/meetings/EditRecurr
 
 import { AdminStructures } from './components/admin/adminStructures';
 
+import { fetchUserMenus } from './store/slices/menuSlice'; // if not already imported
+import { selectAllowedMenuCodes, selectMenuLoading } from './store/slices/menuSlice';
+
 // ==================== Error Boundary ====================
 
 class ErrorBoundary extends React.Component {
@@ -377,6 +380,25 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
   return children;
 };
 
+
+const MenuProtectedRoute = ({ children, menuCode }) => {
+  const allowedMenuCodes = useSelector(selectAllowedMenuCodes);
+  const menusLoading = useSelector(selectMenuLoading);
+
+  // Not gated — nothing to check
+  if (!menuCode) return children;
+
+  // Menus haven't loaded yet — don't flash a false 403 while the fetch is in flight
+  if (menusLoading) {
+    return <LoadingScreen message="Checking access..." fullScreen={false} />;
+  }
+
+  if (!allowedMenuCodes.has(menuCode)) {
+    return <Navigate to="/forbidden" replace />;
+  }
+
+  return children;
+};
 // ==================== Public Route ====================
 
 const PublicRoute = ({ children }) => {
@@ -431,56 +453,54 @@ const routeConfig = {
 
   // Standard protected routes
   protectedRoutes: [
-    { path: 'dashboard',                          element: <Dashboard /> },
-    { path: 'actions',                            element: <ActionsList /> },
-    { path: 'actions/all',                        element: <AllActions /> },
-    { path: 'actions/my-tasks',                   element: <MyTasks /> },
-    { path: 'actions/:id',                        element: <ActionDetail /> },
-    { path: 'actions/overdue',                    element: <OverdueActions /> },
-    { path: 'actions/assign',                     element: <AssignAction /> },
-    { path: 'actions/assign/minute/:minuteId',    element: <AssignAction /> },
-    { path: 'actions/edit/:id',                   element: <AssignAction /> },
-    { path: 'actions/:id/assign',                 element: <AssignAction /> },
-    { path: 'actions/progress',                   element: <UpdateProgress /> },
-    { path: 'actions/:id/progress',               element: <UpdateProgress /> },
-    { path: 'participants',                       element: <ParticipantsLists /> },
-    { path: 'participants/create',                element: <CreateParticipant /> },
-    { path: 'participants/:id',                   element: <ParticipantDetail /> },
-    { path: 'participants/:id/edit',              element: <CreateParticipant /> },
-    { path: 'participants/import',                element: <BulkImportPage /> },
-    { path: 'participant-lists',                  element: <ParticipantListsManager /> },
-    { path: 'participant-lists/:id',              element: <ParticipantListsManager /> },
-    { path: 'participants/lists',                 element: <ParticipantListsManager /> },
-    { path: 'documents',                          element: <DocumentsList /> },
-    { path: 'documents/:category',               element: <DocumentsList /> },
-    { path: 'reports',                            element: <ReportsList /> },
-    { path: 'reports/:type',                      element: <ReportsList /> },
-    { path: 'calendar',                           element: <CalendarView /> },
-    { path: 'profile',                            element: <Profile /> },
-    { path: 'profile/:tab',                       element: <Profile /> },
-    { path: 'settings',                           element: <Settings /> },
-    { path: 'settings/profile',                   element: <ProfileSettings /> },
-    { path: 'settings/locations',                 element: <Locations /> },
-    { path: 'settings/security',                  element: <SecuritySettings /> },
-    { path: 'settings/notifications',             element: <NotificationSettings /> },
-    { path: 'settings/preferences',              element: <PreferenceSettings /> },
-    { path: 'settings/status',                    element: <Settings /> },
-    { path: 'settings/document-types',            element: <Settings /> },
-    { path: 'settings/users',                     element: <UserManagement /> },
-    { path: 'settings/roles',                     element: <RoleManagement /> },
-    { path: 'settings/audit',                     element: <AuditLogs /> },
-    { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment /> },
-    { path: 'settings/admin-structures/departments',      element: <AdminStructures /> },
+  { path: 'dashboard',                          element: <Dashboard /> }, // ungated
+  { path: 'actions',                            element: <ActionsList />,   menuCode: 'actions' },
+  { path: 'actions/all',                        element: <AllActions />,    menuCode: 'actions' },
+  { path: 'actions/my-tasks',                   element: <MyTasks />,       menuCode: 'actions' },
+  { path: 'actions/:id',                        element: <ActionDetail />,  menuCode: 'actions' },
+  { path: 'actions/overdue',                    element: <OverdueActions />,menuCode: 'actions' },
+  { path: 'actions/assign',                     element: <AssignAction />,  menuCode: 'actions' },
+  { path: 'actions/assign/minute/:minuteId',    element: <AssignAction />,  menuCode: 'actions' },
+  { path: 'actions/edit/:id',                   element: <AssignAction />,  menuCode: 'actions' },
+  { path: 'actions/:id/assign',                 element: <AssignAction />,  menuCode: 'actions' },
+  { path: 'actions/progress',                   element: <UpdateProgress />,menuCode: 'actions' },
+  { path: 'actions/:id/progress',               element: <UpdateProgress />,menuCode: 'actions' },
+  { path: 'participants',                       element: <ParticipantsLists />,       menuCode: 'participants' },
+  { path: 'participants/create',                element: <CreateParticipant />,       menuCode: 'participants' },
+  { path: 'participants/:id',                   element: <ParticipantDetail />,       menuCode: 'participants' },
+  { path: 'participants/:id/edit',              element: <CreateParticipant />,       menuCode: 'participants' },
+  { path: 'participants/import',                element: <BulkImportPage />,          menuCode: 'participants' },
+  { path: 'participant-lists',                  element: <ParticipantListsManager />, menuCode: 'participants' },
+  { path: 'participant-lists/:id',              element: <ParticipantListsManager />, menuCode: 'participants' },
+  { path: 'participants/lists',                 element: <ParticipantListsManager />, menuCode: 'participants' },
+  { path: 'documents',                          element: <DocumentsList />, menuCode: 'documents' },
+  { path: 'documents/:category',                element: <DocumentsList />, menuCode: 'documents' },
+  { path: 'reports',                            element: <ReportsList />,   menuCode: 'reports' },
+  { path: 'reports/:type',                      element: <ReportsList />,   menuCode: 'reports' },
+  { path: 'calendar',                           element: <CalendarView />,  menuCode: 'calendar' },
+  { path: 'profile',                            element: <Profile /> }, // ungated
+  { path: 'profile/:tab',                       element: <Profile /> }, // ungated
+  { path: 'settings',                           element: <Settings /> }, // ungated
+  { path: 'settings/profile',                   element: <ProfileSettings /> }, // ungated
+  { path: 'settings/locations',                 element: <Locations />,      menuCode: 'locations' },
+  { path: 'settings/security',                  element: <SecuritySettings /> }, // ungated
+  { path: 'settings/notifications',             element: <NotificationSettings /> }, // ungated
+  { path: 'settings/preferences',               element: <PreferenceSettings /> }, // ungated
+  { path: 'settings/status',                    element: <Settings /> },
+  { path: 'settings/document-types',            element: <Settings /> },
+  { path: 'settings/users',                     element: <UserManagement />,       menuCode: 'admin_users' },
+  { path: 'settings/roles',                     element: <RoleManagement />,       menuCode: 'admin_roles' },
+  { path: 'settings/audit',                     element: <AuditLogs />,            menuCode: 'admin_audit' },
+  { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment />,   menuCode: 'admin_role_menu' },
+  { path: 'settings/admin-structures/departments', element: <AdminStructures />,   menuCode: 'admin_structures' },
   ],
 
-  // Admin-only routes — these are separate from protectedRoutes above
-  // so they get the role guard applied. The settings/* variants above
-  // are intentionally left without a role guard (handled server-side).
   adminRoutes: [
-    { path: 'admin/users',  element: <UserManagement />,    roles: ['admin'] },
-    { path: 'admin/roles',  element: <RoleManagement />,    roles: ['admin'] },
-    { path: 'admin/audit',  element: <AuditLogs />,         roles: ['admin', 'auditor'] },
+    { path: 'admin/users',  element: <UserManagement />, roles: ['admin'],            menuCode: 'admin_users' },
+    { path: 'admin/roles',  element: <RoleManagement />, roles: ['admin'],            menuCode: 'admin_roles' },
+    { path: 'admin/audit',  element: <AuditLogs />,      roles: ['admin', 'auditor'], menuCode: 'admin_audit' },
   ],
+
 };
 
 // ==================== Suspense wrapper helper ====================
@@ -610,27 +630,35 @@ const AppContent = () => {
               />
             ))}
 
-            {/* Standard Protected Routes */}
-            {routeConfig.protectedRoutes.map(({ path, element }) => (
-              <Route
-                key={path}
-                path={path}
-                element={<Lazy>{element}</Lazy>}
-              />
-            ))}
 
-            {/* Admin Routes — role-guarded */}
-            {routeConfig.adminRoutes.map(({ path, element, roles }) => (
-              <Route
-                key={path}
-                path={path}
-                element={
-                  <ProtectedRoute requiredRoles={roles}>
-                    <Lazy>{element}</Lazy>
-                  </ProtectedRoute>
-                }
-              />
-            ))}
+      {/* Standard Protected Routes */}
+      {routeConfig.protectedRoutes.map(({ path, element, menuCode }) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            <MenuProtectedRoute menuCode={menuCode}>
+              <Lazy>{element}</Lazy>
+            </MenuProtectedRoute>
+          }
+        />
+      ))}
+
+      {/* Admin Routes — role-guarded AND menu-guarded */}
+      {routeConfig.adminRoutes.map(({ path, element, roles, menuCode }) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            <ProtectedRoute requiredRoles={roles}>
+              <MenuProtectedRoute menuCode={menuCode}>
+                <Lazy>{element}</Lazy>
+              </MenuProtectedRoute>
+            </ProtectedRoute>
+          }
+        />
+      ))}
+
           </Route>
 
           {/* Error Routes */}

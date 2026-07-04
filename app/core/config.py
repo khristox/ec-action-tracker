@@ -134,6 +134,10 @@ class Settings(BaseSettings):
         description="Password reset token expiration in hours"
     )
     
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_MAX_CONNECTIONS: int = 20
+
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

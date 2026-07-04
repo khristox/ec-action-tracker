@@ -1,4 +1,4 @@
-// store/slices/authSlice.js - IMPROVED VERSION (Fixed profile picture endpoints)
+// store/slices/authSlice.js - IMPROVED VERSION with Rate Limiting & Account Lock
 
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import apiClient from '../api/apiClient';
@@ -13,14 +13,20 @@ const STORAGE_KEYS = {
   USER: 'user',
   PROFILE_PICTURE: 'profile_picture',
   USER_PERMISSIONS: 'user_permissions',
+  AUTH_STATE: 'auth_state',
 };
 
 const CACHE_CONFIG = {
   PROFILE_PICTURE_TTL: 5 * 60 * 1000, // 5 minutes
+  PERMISSIONS_TTL: 10 * 60 * 1000, // 10 minutes
 };
 
-// Track last user ID for cache invalidation
-let lastUserId = null;
+// Rate limiting constants
+const RATE_LIMIT = {
+  MAX_ATTEMPTS: 5,
+  LOCK_DURATION: 15 * 60, // 15 minutes in seconds
+  ATTEMPT_WINDOW: 15 * 60, // 15 minutes in seconds
+};
 
 /* =========================
    2. Helper Functions
@@ -32,6 +38,9 @@ const normalizeError = (err) => {
   let fieldErrors = {};
   let status = err.response?.status || 500;
   let errorCode = null;
+  let retryAfter = null;
+  let remainingAttempts = null;
+  let lockDuration = null;
 
   if (responseData?.detail) {
     const detail = responseData.detail;
@@ -47,9 +56,13 @@ const normalizeError = (err) => {
       }
       if (detail.wait_minutes) {
         fieldErrors.wait_minutes = detail.wait_minutes;
+        lockDuration = detail.wait_minutes * 60;
       }
       if (detail.email_sent === false) {
         fieldErrors.email_sent = false;
+      }
+      if (detail.remaining_attempts !== undefined) {
+        remainingAttempts = detail.remaining_attempts;
       }
     }
     else if (Array.isArray(detail)) {
@@ -68,15 +81,38 @@ const normalizeError = (err) => {
     if (responseData.field) {
       fieldErrors[responseData.field] = message;
     }
+    if (responseData.remaining_attempts !== undefined) {
+      remainingAttempts = responseData.remaining_attempts;
+    }
   }
 
-  return { message: String(message), fieldErrors, status, errorCode };
+  // Check headers for rate limiting info
+  if (err.response?.headers) {
+    const retryHeader = err.response.headers['retry-after'];
+    if (retryHeader) {
+      retryAfter = parseInt(retryHeader);
+    }
+  }
+
+  return { 
+    message: String(message), 
+    fieldErrors, 
+    status, 
+    errorCode,
+    retryAfter,
+    remainingAttempts,
+    lockDuration,
+  };
 };
 
 const clearAuthStorage = () => {
   Object.values(STORAGE_KEYS).forEach(key => {
     localStorage.removeItem(key);
   });
+  // Clear rate limiting state
+  localStorage.removeItem('rate_limit_state');
+  localStorage.removeItem('failed_attempts');
+  localStorage.removeItem('lock_until');
 };
 
 const persistAuth = (data) => {
@@ -102,6 +138,13 @@ const persistAuth = (data) => {
   if (userToStore.permissions) {
     localStorage.setItem(STORAGE_KEYS.USER_PERMISSIONS, JSON.stringify(userToStore.permissions));
   }
+  
+  // Save auth state
+  const authState = {
+    isAuthenticated: true,
+    timestamp: Date.now(),
+  };
+  localStorage.setItem(STORAGE_KEYS.AUTH_STATE, JSON.stringify(authState));
 };
 
 const getCurrentUserId = () => {
@@ -151,14 +194,70 @@ const cacheProfilePicture = (pictureData) => {
   }
 };
 
+// Rate limiting helpers
+const getRateLimitState = () => {
+  try {
+    const state = JSON.parse(localStorage.getItem('rate_limit_state') || '{}');
+    return {
+      failedAttempts: state.failedAttempts || 0,
+      lockUntil: state.lockUntil || null,
+      remainingAttempts: state.remainingAttempts || RATE_LIMIT.MAX_ATTEMPTS,
+      lastAttemptTime: state.lastAttemptTime || null,
+    };
+  } catch {
+    return {
+      failedAttempts: 0,
+      lockUntil: null,
+      remainingAttempts: RATE_LIMIT.MAX_ATTEMPTS,
+      lastAttemptTime: null,
+    };
+  }
+};
+
+const saveRateLimitState = (state) => {
+  localStorage.setItem('rate_limit_state', JSON.stringify(state));
+};
+
+const isAccountLocked = () => {
+  const { lockUntil } = getRateLimitState();
+  if (!lockUntil) return false;
+  return Date.now() < lockUntil;
+};
+
+const getLockTimeRemaining = () => {
+  const { lockUntil } = getRateLimitState();
+  if (!lockUntil) return 0;
+  const remaining = Math.floor((lockUntil - Date.now()) / 1000);
+  return Math.max(0, remaining);
+};
+
+const resetRateLimitState = () => {
+  localStorage.removeItem('rate_limit_state');
+  localStorage.removeItem('failed_attempts');
+  localStorage.removeItem('lock_until');
+};
+
 /* =========================
-   3. Async Thunks (FIXED Profile Picture Endpoints)
+   3. Async Thunks with Rate Limiting
 ========================= */
 
 export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue, dispatch }) => {
     try {
+      // Check if account is locked before making request
+      const { lockUntil } = getRateLimitState();
+      if (lockUntil && Date.now() < lockUntil) {
+        const remaining = Math.floor((lockUntil - Date.now()) / 1000);
+        return rejectWithValue({
+          message: `Account is temporarily locked. Please wait ${Math.ceil(remaining / 60)} minutes.`,
+          status: 403,
+          errorCode: 'ACCOUNT_LOCKED',
+          lockDuration: remaining,
+          remainingAttempts: 0,
+        });
+      }
+
       const formData = new URLSearchParams();
       formData.append('username', credentials.username);
       formData.append('password', credentials.password);
@@ -169,6 +268,9 @@ export const login = createAsyncThunk(
       });
       
       const data = response.data;
+      
+      // Reset rate limit state on successful login
+      resetRateLimitState();
       
       // Fetch user permissions after login
       try {
@@ -189,16 +291,51 @@ export const login = createAsyncThunk(
       // Clear profile picture cache on login (force refresh)
       setProfilePicturePresence(false);
       cacheProfilePicture(null);
-      lastUserId = null;
       
       return data;
     } catch (err) {
       console.error('Login API error:', err.response?.data);
-      return rejectWithValue(normalizeError(err));
+      
+      // Handle rate limiting specifically
+      const errorData = normalizeError(err);
+      
+      // If we get a 429, update rate limit state
+      if (errorData.status === 429) {
+        const currentState = getRateLimitState();
+        saveRateLimitState({
+          ...currentState,
+          failedAttempts: currentState.failedAttempts + 1,
+          lastAttemptTime: Date.now(),
+        });
+      }
+      
+      // If account is locked (403 with lock message)
+      if (errorData.status === 403 && errorData.errorCode === 'ACCOUNT_LOCKED') {
+        const lockDuration = errorData.lockDuration || RATE_LIMIT.LOCK_DURATION;
+        saveRateLimitState({
+          failedAttempts: RATE_LIMIT.MAX_ATTEMPTS,
+          lockUntil: Date.now() + (lockDuration * 1000),
+          remainingAttempts: 0,
+          lastAttemptTime: Date.now(),
+        });
+      }
+      
+      // Handle invalid credentials with remaining attempts
+      if (errorData.status === 401 && errorData.remainingAttempts !== null) {
+        const currentState = getRateLimitState();
+        saveRateLimitState({
+          ...currentState,
+          remainingAttempts: errorData.remainingAttempts,
+          failedAttempts: RATE_LIMIT.MAX_ATTEMPTS - errorData.remainingAttempts,
+        });
+      }
+      
+      return rejectWithValue(errorData);
     }
   }
 );
 
+// Rest of your thunks remain the same, but with improved error handling
 export const register = createAsyncThunk(
   'auth/register',
   async (userData, { rejectWithValue }) => {
@@ -227,9 +364,35 @@ export const checkAuth = createAsyncThunk(
     const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
     if (!token) return rejectWithValue(null);
 
+    // Check if token is expired
     if (isTokenExpired(token)) {
       const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
       if (!refreshToken) {
+        clearAuthStorage();
+        return rejectWithValue(null);
+      }
+      // Try to refresh token
+      try {
+        const res = await apiClient.post('/auth/refresh', { refresh_token: refreshToken });
+        localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, res.data.access_token);
+        // Continue with new token
+        const userResponse = await apiClient.get('/auth/me');
+        const user = userResponse.data;
+        
+        let permissions = [];
+        try {
+          const permissionsResponse = await apiClient.get('/auth/me/permissions');
+          permissions = permissionsResponse.data || [];
+          user.permissions = permissions;
+        } catch (permError) {
+          console.warn('Could not fetch permissions after refresh:', permError);
+        }
+        
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+        localStorage.setItem(STORAGE_KEYS.USER_PERMISSIONS, JSON.stringify(permissions));
+        await dispatch(fetchProfilePicture());
+        return { token: res.data.access_token, user, permissions };
+      } catch (refreshErr) {
         clearAuthStorage();
         return rejectWithValue(null);
       }
@@ -257,6 +420,7 @@ export const checkAuth = createAsyncThunk(
       
       return { token, user, permissions };
     } catch (err) {
+      // If we get 401, try to refresh
       const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
       if (!refreshToken) {
         clearAuthStorage();
@@ -296,6 +460,7 @@ export const logout = createAsyncThunk(
       const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
       const accessToken = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
       clearAuthStorage();
+      resetRateLimitState();
       if (refreshToken) {
         await apiClient.post('/auth/logout', { refresh_token: refreshToken }, {
           headers: { Authorization: `Bearer ${accessToken}` }
@@ -308,12 +473,11 @@ export const logout = createAsyncThunk(
   }
 );
 
-// ✅ FIXED: Fetch CURRENT USER's profile picture (GET /auth/profile-picture)
+// Profile picture thunks (unchanged but with improved error handling)
 export const fetchProfilePicture = createAsyncThunk(
   'auth/fetchProfilePicture',
   async (_, { rejectWithValue }) => {
     try {
-      // Use the correct endpoint for current user
       const response = await apiClient.get('/auth/profile-picture');
       
       if (response.data?.has_picture && response.data?.profile_picture) {
@@ -333,12 +497,11 @@ export const fetchProfilePicture = createAsyncThunk(
         return { has_picture: false, profile_picture: null };
       }
       console.error('Fetch profile picture error:', err.response?.data);
-      return rejectWithValue(err.response?.data || { message: 'Failed to fetch profile picture' });
+      return rejectWithValue(normalizeError(err));
     }
   }
 );
 
-// ✅ FIXED: Fetch ANY user's profile picture by ID (GET /auth/{user_id}/profile-picture/base64)
 export const fetchUserProfilePicture = createAsyncThunk(
   'auth/fetchUserProfilePicture',
   async (userId, { rejectWithValue }) => {
@@ -359,12 +522,11 @@ export const fetchUserProfilePicture = createAsyncThunk(
         return { has_picture: false, profile_picture: null };
       }
       console.error('Fetch user profile picture error:', err.response?.data);
-      return rejectWithValue(err.response?.data || { message: 'Failed to fetch profile picture' });
+      return rejectWithValue(normalizeError(err));
     }
   }
 );
 
-// ✅ FIXED: Upload profile picture (PATCH /auth/profile-picture)
 export const uploadProfilePicture = createAsyncThunk(
   'auth/uploadProfilePicture',
   async (file, { rejectWithValue, dispatch }) => {
@@ -372,18 +534,14 @@ export const uploadProfilePicture = createAsyncThunk(
       const formData = new FormData();
       formData.append('file', file);
       
-      // Use the correct endpoint with multipart/form-data
       const response = await apiClient.patch('/auth/profile-picture', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
       
-      // Clear cache after upload
       setProfilePicturePresence(false);
       cacheProfilePicture(null);
-      
-      // Refresh profile picture after upload
       await dispatch(fetchProfilePicture());
       
       return response.data;
@@ -394,14 +552,12 @@ export const uploadProfilePicture = createAsyncThunk(
   }
 );
 
-// ✅ FIXED: Delete profile picture (DELETE /auth/profile-picture)
 export const deleteProfilePicture = createAsyncThunk(
   'auth/deleteProfilePicture',
   async (_, { rejectWithValue, dispatch }) => {
     try {
       const response = await apiClient.delete('/auth/profile-picture');
       
-      // Clear cache after deletion
       setProfilePicturePresence(false);
       cacheProfilePicture(null);
       
@@ -413,6 +569,7 @@ export const deleteProfilePicture = createAsyncThunk(
   }
 );
 
+// Other thunks (updateUserProfile, verifyEmail, etc.) remain similar but with normalizeError
 export const updateUserProfile = createAsyncThunk(
   'auth/updateProfile',
   async (userData, { rejectWithValue }) => {
@@ -561,6 +718,8 @@ export const hasAllPermissions = (permissions, requiredPermissions) => {
    5. Initial State
 ========================= */
 
+const rateLimitState = getRateLimitState();
+
 const initialState = {
   user: JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || 'null'),
   userPermissions: JSON.parse(localStorage.getItem(STORAGE_KEYS.USER_PERMISSIONS) || '[]'),
@@ -579,6 +738,15 @@ const initialState = {
   errorCode: null,
   profilePictureChecked: false,
   tokenExpiration: getTokenExpiration(localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN)),
+  
+  // Rate limiting state
+  failedAttempts: rateLimitState.failedAttempts || 0,
+  remainingAttempts: rateLimitState.remainingAttempts || RATE_LIMIT.MAX_ATTEMPTS,
+  isLocked: isAccountLocked(),
+  lockTimeRemaining: getLockTimeRemaining(),
+  lastAttemptTime: rateLimitState.lastAttemptTime || null,
+  isRateLimited: false,
+  rateLimitRetryAfter: 0,
 };
 
 /* =========================
@@ -608,6 +776,7 @@ const authSlice = createSlice({
     },
     logoutLocal: () => {
       clearAuthStorage();
+      resetRateLimitState();
       return { 
         ...initialState, 
         user: null, 
@@ -617,7 +786,13 @@ const authSlice = createSlice({
         fieldErrors: {},
         errorCode: null,
         profilePicture: null,
-        userPermissions: []
+        userPermissions: [],
+        failedAttempts: 0,
+        remainingAttempts: RATE_LIMIT.MAX_ATTEMPTS,
+        isLocked: false,
+        lockTimeRemaining: 0,
+        isRateLimited: false,
+        rateLimitRetryAfter: 0,
       };
     },
     updateUserEmail: (state, action) => {
@@ -645,6 +820,48 @@ const authSlice = createSlice({
       state.tokenExpiration = getTokenExpiration(action.payload);
       localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, action.payload);
     },
+    // Rate limiting reducers
+    updateLockTimer: (state) => {
+      if (state.isLocked && state.lockTimeRemaining > 0) {
+        state.lockTimeRemaining -= 1;
+        // Update lockUntil in localStorage
+        const rateState = getRateLimitState();
+        if (rateState.lockUntil) {
+          const newLockUntil = Date.now() + (state.lockTimeRemaining * 1000);
+          saveRateLimitState({
+            ...rateState,
+            lockUntil: newLockUntil,
+          });
+        }
+        if (state.lockTimeRemaining === 0) {
+          state.isLocked = false;
+          state.failedAttempts = 0;
+          state.remainingAttempts = RATE_LIMIT.MAX_ATTEMPTS;
+          resetRateLimitState();
+        }
+      }
+    },
+    setRateLimited: (state, action) => {
+      state.isRateLimited = true;
+      state.rateLimitRetryAfter = action.payload || 30;
+    },
+    clearRateLimited: (state) => {
+      state.isRateLimited = false;
+      state.rateLimitRetryAfter = 0;
+    },
+    setRemainingAttempts: (state, action) => {
+      state.remainingAttempts = action.payload;
+      state.failedAttempts = RATE_LIMIT.MAX_ATTEMPTS - action.payload;
+    },
+    resetRateLimit: (state) => {
+      state.failedAttempts = 0;
+      state.remainingAttempts = RATE_LIMIT.MAX_ATTEMPTS;
+      state.isLocked = false;
+      state.lockTimeRemaining = 0;
+      state.isRateLimited = false;
+      state.rateLimitRetryAfter = 0;
+      resetRateLimitState();
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -654,7 +871,6 @@ const authSlice = createSlice({
       })
       .addCase(checkAuth.fulfilled, (state, action) => {
         state.isAuthChecking = false;
-        
         state.user = action.payload.user;
         state.userPermissions = action.payload.permissions || [];
         state.token = action.payload.token;
@@ -663,10 +879,17 @@ const authSlice = createSlice({
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
+        // Reset rate limit state on successful auth
+        state.failedAttempts = 0;
+        state.remainingAttempts = RATE_LIMIT.MAX_ATTEMPTS;
+        state.isLocked = false;
+        state.lockTimeRemaining = 0;
+        state.isRateLimited = false;
+        state.rateLimitRetryAfter = 0;
+        resetRateLimitState();
       })
       .addCase(checkAuth.rejected, (state) => {
         state.isAuthChecking = false;
-        
         state.user = null;
         state.isAuthenticated = false;
         state.token = null;
@@ -681,6 +904,7 @@ const authSlice = createSlice({
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
+        state.isRateLimited = false;
       })
       .addCase(login.fulfilled, (state, action) => {
         state.isLoading = false;
@@ -691,11 +915,16 @@ const authSlice = createSlice({
         state.error = null;
         state.fieldErrors = {};
         state.errorCode = null;
+        state.isLocked = false;
+        state.lockTimeRemaining = 0;
+        state.failedAttempts = 0;
+        state.remainingAttempts = RATE_LIMIT.MAX_ATTEMPTS;
+        state.isRateLimited = false;
+        state.rateLimitRetryAfter = 0;
+        resetRateLimitState();
 
-        // FIX: build a proper user object from the flat login response
-        // action.payload.user is undefined — the API returns flat fields
         state.user = action.payload.user || {
-          id: action.payload.user_id,           // ← map user_id → id
+          id: action.payload.user_id,
           username: action.payload.username,
           email: action.payload.email,
           roles: action.payload.roles,
@@ -710,14 +939,39 @@ const authSlice = createSlice({
       })
       .addCase(login.rejected, (state, action) => {
         state.isLoading = false;
-        
         state.error = action.payload?.message || 'Login failed';
         state.fieldErrors = action.payload?.fieldErrors || {};
         state.errorCode = action.payload?.errorCode;
+        
+        // Handle rate limiting
+        if (action.payload?.status === 429) {
+          state.isRateLimited = true;
+          state.rateLimitRetryAfter = action.payload.retryAfter || 30;
+          state.failedAttempts += 1;
+          state.remainingAttempts = Math.max(0, RATE_LIMIT.MAX_ATTEMPTS - state.failedAttempts);
+        }
+        
+        // Handle account lock
+        if (action.payload?.errorCode === 'ACCOUNT_LOCKED' || action.payload?.status === 403) {
+          state.isLocked = true;
+          const lockDuration = action.payload.lockDuration || RATE_LIMIT.LOCK_DURATION;
+          state.lockTimeRemaining = lockDuration;
+          state.failedAttempts = RATE_LIMIT.MAX_ATTEMPTS;
+          state.remainingAttempts = 0;
+        }
+        
+        // Handle remaining attempts
+        if (action.payload?.status === 401 && action.payload.remainingAttempts !== null) {
+          state.remainingAttempts = action.payload.remainingAttempts;
+          state.failedAttempts = RATE_LIMIT.MAX_ATTEMPTS - action.payload.remainingAttempts;
+        }
+        
         state.userPermissions = [];
-        state.isAuthenticated = false;
+        if (action.payload?.status === 401) {
+          state.isAuthenticated = false;
+        }
       })
-      
+
       // ==================== REGISTER ====================
       .addCase(register.pending, (state) => {
         state.isLoading = true;
@@ -881,6 +1135,7 @@ const authSlice = createSlice({
       // ==================== LOGOUT ====================
       .addCase(logout.fulfilled, () => {
         clearAuthStorage();
+        resetRateLimitState();
         return { 
           ...initialState, 
           user: null, 
@@ -890,7 +1145,13 @@ const authSlice = createSlice({
           fieldErrors: {},
           errorCode: null,
           profilePicture: null,
-          userPermissions: []
+          userPermissions: [],
+          failedAttempts: 0,
+          remainingAttempts: RATE_LIMIT.MAX_ATTEMPTS,
+          isLocked: false,
+          lockTimeRemaining: 0,
+          isRateLimited: false,
+          rateLimitRetryAfter: 0,
         };
       })
       
@@ -930,9 +1191,14 @@ export const {
   setUserPermissions,
   clearProfilePictureCache,
   updateToken,
+  updateLockTimer,
+  setRateLimited,
+  clearRateLimited,
+  setRemainingAttempts,
+  resetRateLimit,
 } = authSlice.actions;
 
-// Selectors
+// Enhanced selectors
 export const selectAuth = (state) => state.auth;
 export const selectUser = (state) => state.auth.user;
 export const selectUserPermissions = (state) => state.auth.userPermissions;
@@ -951,6 +1217,32 @@ export const selectTokenExpiration = (state) => state.auth.tokenExpiration;
 export const selectIsTokenExpired = (state) => {
   const exp = state.auth.tokenExpiration;
   return exp ? exp < Date.now() : true;
+};
+
+// Rate limiting selectors
+export const selectFailedAttempts = (state) => state.auth.failedAttempts;
+export const selectRemainingAttempts = (state) => state.auth.remainingAttempts;
+export const selectIsLocked = (state) => state.auth.isLocked;
+export const selectLockTimeRemaining = (state) => state.auth.lockTimeRemaining;
+export const selectIsRateLimited = (state) => state.auth.isRateLimited;
+export const selectRateLimitRetryAfter = (state) => state.auth.rateLimitRetryAfter;
+export const selectLastAttemptTime = (state) => state.auth.lastAttemptTime;
+
+// Combined auth status selector
+export const selectAuthStatus = (state) => {
+  const auth = state.auth;
+  return {
+    isAuthenticated: auth.isAuthenticated,
+    isLoading: auth.isLoading,
+    isAuthChecking: auth.isAuthChecking,
+    isLocked: auth.isLocked,
+    isRateLimited: auth.isRateLimited,
+    hasError: !!auth.error,
+    error: auth.error,
+    remainingAttempts: auth.remainingAttempts,
+    lockTimeRemaining: auth.lockTimeRemaining,
+    rateLimitRetryAfter: auth.rateLimitRetryAfter,
+  };
 };
 
 export default authSlice.reducer;

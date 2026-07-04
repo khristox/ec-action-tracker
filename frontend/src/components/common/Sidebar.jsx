@@ -27,7 +27,7 @@ import {
   Cancel as CancelIcon, Warning as WarningIcon, Info as InfoIcon
 } from '@mui/icons-material';
 
-import { fetchUserMenus, selectMenus, resetMenuState } from '../../store/slices/menuSlice';
+import { fetchUserMenus, selectMenus, selectMenuLoading, resetMenuState } from '../../store/slices/menuSlice';
 import { selectUser, selectIsAuthenticated } from '../../store/slices/authSlice';
 
 const DRAWER_WIDTHS = { expanded: 280, collapsed: 72 };
@@ -221,7 +221,10 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   const user = useSelector(selectUser);
   const isLoggedIn = useSelector(selectIsAuthenticated);
   const menus = useSelector(selectMenus);
-  const menusLoading = useSelector((state) => state.menus?.loading);
+  
+  const menusLoading = useSelector(selectMenuLoading);
+
+  
 
   const previousUserId = useRef(null);
   const [openSubmenus, setOpenSubmenus] = useState({});

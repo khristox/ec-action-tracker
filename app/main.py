@@ -27,6 +27,11 @@ from app.db.base import async_engine
 from app.api.v1.api import api_router
 from sqlalchemy import text
 
+from app.core.redis_client import init_redis, close_redis, get_redis
+from app.core.limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -128,6 +133,23 @@ async def check_app_health() -> dict:
         "api_prefix": settings.API_V1_STR
     }
 
+
+async def check_redis_health() -> dict:
+    """Check Redis connectivity and health"""
+    r = get_redis()
+    if r is None:
+        return {"status": "unavailable", "connected": False}
+    try:
+        await r.ping()
+        info = await r.info("server")
+        return {
+            "status": "healthy",
+            "connected": True,
+            "version": info.get("redis_version", "unknown"),
+        }
+    except Exception as e:
+        logger.warning(f"Redis health check failed: {e}")
+        return {"status": "unhealthy", "connected": False, "error": str(e)}
 # ==================== APP INITIALIZATION ====================
 
 @asynccontextmanager
@@ -143,8 +165,13 @@ async def lifespan(app: FastAPI):
         logger.info(f"✅ Database connected: {db_health['type']} {db_health['version']}")
     else:
         logger.error(f"❌ Database connection failed: {db_health.get('error', 'Unknown error')}")
+
+    await init_redis()
     
     yield
+
+    await close_redis()
+    logger.info("🛑 Redis connection closed")
     
     if async_engine:
         await async_engine.dispose()
@@ -158,6 +185,11 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# ==================== RATE LIMITER ====================
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # ==================== CORS CONFIGURATION ====================
 
@@ -305,40 +337,37 @@ async def health_check():
 
 @app.get("/health/detailed", tags=["Health"])
 async def detailed_health_check():
-    """
-    Detailed health check with database, system, and application status.
-    Useful for deep monitoring and debugging.
-    """
-    # Check all components in parallel
     import asyncio
-    db_health, system_health, app_health = await asyncio.gather(
+    db_health, system_health, app_health, redis_health = await asyncio.gather(
         check_database_health(),
         check_system_health(),
-        check_app_health()
+        check_app_health(),
+        check_redis_health(),
     )
-    
+
     overall_status = "healthy"
     if db_health["status"] != "healthy" or system_health["status"] not in ["healthy", "degraded"]:
         overall_status = "unhealthy"
-    elif system_health["status"] == "degraded":
+    elif system_health["status"] == "degraded" or redis_health["status"] != "healthy":
         overall_status = "degraded"
-    
+
     response = {
         "status": overall_status,
         "timestamp": datetime.utcnow().isoformat(),
-        "uptime": None,  # Could track startup time
+        "uptime": None,
         "components": {
             "database": db_health,
             "system": system_health,
-            "application": app_health
+            "application": app_health,
+            "redis": redis_health,
         }
     }
-    
-    # Return 503 if unhealthy
+
     if overall_status == "unhealthy":
         raise HTTPException(status_code=503, detail=response)
-    
+
     return response
+
 
 @app.get("/health/ready", tags=["Health"])
 async def readiness_check():

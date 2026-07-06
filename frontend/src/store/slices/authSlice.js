@@ -266,39 +266,55 @@ export const login = createAsyncThunk(
       const response = await apiClient.post('/auth/login', formData, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
-      
+
       const data = response.data;
-      
+
       // Reset rate limit state on successful login
       resetRateLimitState();
-      
+
+      const authHeaders = { Authorization: `Bearer ${data.access_token}` };
+
       // Fetch user permissions after login
+      let permissions = [];
       try {
         const permissionsResponse = await apiClient.get('/auth/me/permissions', {
-          headers: { Authorization: `Bearer ${data.access_token}` }
+          headers: authHeaders,
         });
-        data.permissions = permissionsResponse.data || [];
-        if (data.user) {
-          data.user.permissions = permissionsResponse.data;
-        }
+        permissions = permissionsResponse.data || [];
       } catch (permError) {
         console.warn('Could not fetch permissions:', permError);
-        data.permissions = [];
+        permissions = [];
       }
-      
+      data.permissions = permissions;
+
+      // Fetch the full user profile so `user` has the SAME shape after
+      // login as it does after checkAuth/refresh (is_superuser, first_name,
+      // last_name, is_active, etc. all live only on /auth/me — the login
+      // endpoint's payload is flat and doesn't include them).
+      try {
+        const meResponse = await apiClient.get('/auth/me', {
+          headers: authHeaders,
+        });
+        data.user = { ...meResponse.data, permissions };
+      } catch (meError) {
+        console.warn('Could not fetch full user profile after login:', meError);
+        // Fall back to whatever the login endpoint gave us directly, so
+        // login.fulfilled's fallback-object branch still has something to work with.
+      }
+
       persistAuth(data);
-      
+
       // Clear profile picture cache on login (force refresh)
       setProfilePicturePresence(false);
       cacheProfilePicture(null);
-      
+
       return data;
     } catch (err) {
       console.error('Login API error:', err.response?.data);
-      
+
       // Handle rate limiting specifically
       const errorData = normalizeError(err);
-      
+
       // If we get a 429, update rate limit state
       if (errorData.status === 429) {
         const currentState = getRateLimitState();
@@ -308,7 +324,7 @@ export const login = createAsyncThunk(
           lastAttemptTime: Date.now(),
         });
       }
-      
+
       // If account is locked (403 with lock message)
       if (errorData.status === 403 && errorData.errorCode === 'ACCOUNT_LOCKED') {
         const lockDuration = errorData.lockDuration || RATE_LIMIT.LOCK_DURATION;
@@ -319,7 +335,7 @@ export const login = createAsyncThunk(
           lastAttemptTime: Date.now(),
         });
       }
-      
+
       // Handle invalid credentials with remaining attempts
       if (errorData.status === 401 && errorData.remainingAttempts !== null) {
         const currentState = getRateLimitState();
@@ -329,7 +345,7 @@ export const login = createAsyncThunk(
           failedAttempts: RATE_LIMIT.MAX_ATTEMPTS - errorData.remainingAttempts,
         });
       }
-      
+
       return rejectWithValue(errorData);
     }
   }

@@ -15,12 +15,12 @@ import {
 import {
   SaveOutlined,
   CancelOutlined,
-  PersonOutline,
+  PersonOutlined,
   EmailOutlined,
   PhoneOutlined,
   CakeOutlined,
   LocationOnOutlined,
-  WorkOutline,
+  WorkOutlined,
   SchoolOutlined,
 } from '@mui/icons-material';
 import { updateProfile, clearUpdateSuccess } from '../../store/slices/profileSlice';
@@ -160,7 +160,7 @@ const ProfileForm = ({ profile }) => {
         {!isEditing ? (
           <Button
             variant="contained"
-            startIcon={<PersonOutline />}
+            startIcon={<PersonOutlined />}
             onClick={() => setIsEditing(true)}
           >
             Edit Profile
@@ -209,7 +209,7 @@ const ProfileForm = ({ profile }) => {
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonOutline color="action" />
+                      <PersonOutlined color="action" />
                     </InputAdornment>
                   ),
                 },
@@ -229,7 +229,7 @@ const ProfileForm = ({ profile }) => {
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonOutline color="action" />
+                      <PersonOutlined color="action" />
                     </InputAdornment>
                   ),
                 },
@@ -408,7 +408,7 @@ const ProfileForm = ({ profile }) => {
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <WorkOutline color="action" />
+                      <WorkOutlined color="action" />
                     </InputAdornment>
                   ),
                 },

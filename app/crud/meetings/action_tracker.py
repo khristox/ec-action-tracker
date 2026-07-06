@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.v1.endpoints.action_tracker.audit_logger import log_audit
 from app.crud.base import CRUDBase
+from app.core.minio_client import minio_service
 from app.models.meetings.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
     Participant, ParticipantList, ActionStatusHistory, ActionComment, 
@@ -1666,30 +1667,44 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
         document_type_id: Optional[UUID],
         user_id: UUID
     ) -> MeetingDocument:
-        """Upload a document to a meeting - saves file to disk"""
+        """
+        Upload a document to a meeting - saves the file to MinIO object
+        storage (bucket configured via MINIO_BUCKET_NAME) rather than local
+        disk. `file_path` on the model now stores the MinIO object key, not
+        a filesystem path.
+        """
+        object_name = None
         try:
-            # Create upload directory if it doesn't exist
-            upload_dir = Path("uploads/meeting_documents")
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Read file content
+            # Read the file's bytes exactly once — this is the single point
+            # where the UploadFile's stream gets consumed. (Do not read it
+            # again anywhere upstream in the endpoint, or this will receive
+            # an empty stream.)
             file_content = await file.read()
             file_size = len(file_content)
             
-            # Generate unique filename to avoid collisions
+            # Build a unique object key, namespaced by meeting_id so objects
+            # are easy to browse/audit directly in MinIO.
             file_extension = os.path.splitext(file.filename)[1]
-            unique_filename = f"{uuid4()}{file_extension}"
-            file_path = upload_dir / unique_filename
+            object_name = f"meeting_documents/{meeting_id}/{uuid4()}{file_extension}"
             
-            # Save the file to disk
-            with open(file_path, "wb") as buffer:
-                buffer.write(file_content)
+            # Upload to MinIO first. If this raises, we bail out before ever
+            # touching the DB — no orphaned DB record pointing at a MinIO
+            # object that was never actually written.
+            minio_service.upload_bytes(
+                object_name=object_name,
+                data=file_content,
+                content_type=file.content_type,
+            )
             
-            # Prepare document data
+            # Prepare document data. `file_path` is repurposed to hold the
+            # MinIO object key so no DB migration is needed for this change;
+            # if you'd rather rename the column to something like
+            # `storage_key`, that's a follow-up migration you can make
+            # later without touching this logic.
             document_data = {
                 "meeting_id": meeting_id,
                 "file_name": file.filename,
-                "file_path": str(file_path),
+                "file_path": object_name,
                 "file_size": file_size,
                 "mime_type": file.content_type,
                 "title": title,
@@ -1717,6 +1732,10 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
             
         except Exception as e:
             await db.rollback()
+            # If the MinIO upload succeeded but the DB insert failed, clean
+            # up the now-orphaned object rather than leaking storage.
+            if object_name:
+                minio_service.delete_object(object_name)
             logger.error(f"Failed to upload document: {str(e)}")
             raise ValueError(f"Failed to upload document: {str(e)}")
     
@@ -1752,7 +1771,11 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
             raise HTTPException(status_code=500, detail=str(e))
     
     async def delete(self, db: AsyncSession, id: UUID, user_id: UUID, soft_delete: bool = True) -> Optional[MeetingDocument]:
-        """Delete a document"""
+        """
+        Delete a document.
+        On hard delete, also removes the object from MinIO (rather than the
+        old `os.remove(local_path)` disk cleanup).
+        """
         try:
             db_obj = await self.get(db, id)
             if not db_obj:
@@ -1762,9 +1785,11 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
                 db_obj.is_active = False
                 await self._update_audit_fields(db_obj, user_id)
             else:
-                # Hard delete - also remove file from disk
-                if db_obj.file_path and os.path.exists(db_obj.file_path):
-                    os.remove(db_obj.file_path)
+                # Hard delete — remove the object from MinIO first (best
+                # effort; delete_object() swallows errors if it's already
+                # gone), then remove the DB row.
+                if db_obj.file_path:
+                    minio_service.delete_object(db_obj.file_path)
                 await db.delete(db_obj)
             
             await db.commit()

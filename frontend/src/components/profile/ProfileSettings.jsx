@@ -9,9 +9,9 @@ import {
   ToggleButton, ToggleButtonGroup, Tab, Tabs
 } from '@mui/material';
 import {
-  PhotoCamera, Edit, PersonOutline, EmailOutlined, PhoneOutlined,
-  DeleteOutline, CheckCircleOutlined, Close, SaveOutlined, LocationOn,
-  WorkOutline, School, Description, Language, AccessTime, CalendarToday,
+  PhotoCamera, Edit, PersonOutlined, EmailOutlined, PhoneOutlined,
+  DeleteOutlined, CheckCircleOutlined, Close, SaveOutlined, LocationOn,
+  WorkOutlined, School, Description, Language, AccessTime, CalendarToday,
   Badge, Phone, Home, Business, Flag, AttachMoney, Search as SearchIcon,
   Public as PublicIcon, Apartment as ApartmentIcon, ChevronRight as ChevronRightIcon,
   Flag as FlagIcon, Terrain as TerrainIcon, MeetingRoom as MeetingRoomIcon,
@@ -800,7 +800,7 @@ const ProfileSettings = () => {
                           disabled={isDeleting}
                           sx={{ position: 'absolute', bottom: 0, left: 0, bgcolor: 'error.main', color: 'white', '&:hover': { bgcolor: 'error.dark' }, width: 32, height: 32 }}
                         >
-                          {isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteOutline sx={{ fontSize: 16 }} />}
+                          {isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteOutlined sx={{ fontSize: 16 }} />}
                         </IconButton>
                       </Tooltip>
                     )}

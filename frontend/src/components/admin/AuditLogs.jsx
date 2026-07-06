@@ -55,7 +55,7 @@ import {
   RefreshOutlined,
   DownloadOutlined,
   VisibilityOutlined,
-  PersonOutline,
+  PersonOutlined,
   LoginOutlined,
   LogoutOutlined,
   CreateOutlined,
@@ -63,7 +63,7 @@ import {
   EditOutlined,
   SecurityOutlined,
   ClearOutlined,
-  InfoOutlinedd,
+  InfoOutlined,
   ErrorOutlined,
   CheckCircleOutlined,
   FilterListOutlined,
@@ -74,8 +74,8 @@ import {
   CloseOutlined,
   ExpandMoreOutlined,
   DifferenceOutlined,
-  AddCircleOutline,
-  RemoveCircleOutline,
+  AddCircleOutlined,
+  RemoveCircleOutlined,
   ChangeCircleOutlined,
   CodeOutlined,
   ContentCopyOutlined,
@@ -182,7 +182,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
         <Grid size={{ xs: 12, md: 6 }}>
           <Box sx={{ p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.08), height: '100%' }}>
             <Typography variant="caption" color="error" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <RemoveCircleOutline fontSize="small" />
+              <RemoveCircleOutlined fontSize="small" />
               Old Value
             </Typography>
             <Box
@@ -208,7 +208,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
         <Grid size={{ xs: 12, md: 6 }}>
           <Box sx={{ p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.08), height: '100%' }}>
             <Typography variant="caption" color="success.main" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <AddCircleOutline fontSize="small" />
+              <AddCircleOutlined fontSize="small" />
               New Value
             </Typography>
             <Box
@@ -271,7 +271,7 @@ const ObjectDiff = ({ oldObject, newObject }) => {
 
   if (differences.length === 0) {
     return (
-      <Alert severity="info" icon={<InfoOutlinedd />}>
+      <Alert severity="info" icon={<InfoOutlined />}>
         No changes detected in this audit log
       </Alert>
     );
@@ -315,10 +315,10 @@ const JsonDiffViewer = ({ log }) => {
     <Box>
       <Tabs value={viewMode} onChange={(e, v) => setViewMode(v)} sx={{ mb: 2 }}>
         <Tab label="Changes View" value="diff" icon={<DifferenceOutlined />} iconPosition="start" />
-        <Tab label="Old Values" value="old" icon={<RemoveCircleOutline />} iconPosition="start" />
-        <Tab label="New Values" value="new" icon={<AddCircleOutline />} iconPosition="start" />
+        <Tab label="Old Values" value="old" icon={<RemoveCircleOutlined />} iconPosition="start" />
+        <Tab label="New Values" value="new" icon={<AddCircleOutlined />} iconPosition="start" />
         {extraData && Object.keys(extraData).length > 0 && (
-          <Tab label="Extra Data" value="extra" icon={<InfoOutlinedd />} iconPosition="start" />
+          <Tab label="Extra Data" value="extra" icon={<InfoOutlined />} iconPosition="start" />
         )}
       </Tabs>
 
@@ -415,7 +415,7 @@ const getActionIcon = (action) => {
   if (actionUpper.includes('CREATE')) return <CreateOutlined fontSize="small" />;
   if (actionUpper.includes('UPDATE')) return <EditOutlined fontSize="small" />;
   if (actionUpper.includes('DELETE')) return <DeleteOutlined fontSize="small" />;
-  return <InfoOutlinedd fontSize="small" />;
+  return <InfoOutlined fontSize="small" />;
 };
 
 const getActionColor = (action) => {
@@ -535,7 +535,7 @@ const EnhancedDetailsDialog = ({ open, log, onClose }) => {
       </DialogTitle>
       <DialogContent dividers>
         <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ mb: 2 }}>
-          <Tab label="Overview" icon={<InfoOutlinedd />} iconPosition="start" />
+          <Tab label="Overview" icon={<InfoOutlined />} iconPosition="start" />
           <Tab label="Changes" icon={<DifferenceOutlined />} iconPosition="start" />
           <Tab label="Raw Data" icon={<CodeOutlined />} iconPosition="start" />
         </Tabs>

@@ -23,12 +23,12 @@ import {
   Paper,
 } from '@mui/material';
 import {
-  PersonOutline,
+  PersonOutlined,
   EmailOutlined,
   PhoneOutlined,
   CakeOutlined,
   LocationOnOutlined,
-  WorkOutline,
+  WorkOutlined,
   SchoolOutlined,
   EditOutlined,
   SaveOutlined,
@@ -526,7 +526,7 @@ const Profile = () => {
                       InputProps={{
                         startAdornment: (
                           <InputAdornment position="start">
-                            <WorkOutline color="action" />
+                            <WorkOutlined color="action" />
                           </InputAdornment>
                         ),
                       }}

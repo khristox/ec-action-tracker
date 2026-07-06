@@ -9,7 +9,7 @@ import {
   CloseOutlined, EditOutlined, LockOutlined, EmailOutlined,
   PhoneOutlined, BusinessOutlined, VerifiedUserOutlined,
   LockOpenOutlined, AdminPanelSettingsOutlined, GroupsOutlined,
-  ApartmentOutlined, LinkOutlined, PersonOutlineOutlined,
+  ApartmentOutlined, LinkOutlined, PersonOutlined,
   AccessTimeOutlined, BadgeOutlined
 } from '@mui/icons-material';
 import { useDispatch } from 'react-redux';
@@ -291,7 +291,7 @@ const UserDetailPanel = ({ user, onClose, onUpdated, departmentAssignments = [] 
 
         {/* User Information */}
         <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <PersonOutlineOutlined fontSize="small" />
+          <PersonOutlined fontSize="small" />
           User Information
         </Typography>
 

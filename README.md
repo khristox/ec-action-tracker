@@ -44,3 +44,14 @@ docker-compose logs -f app
 
 # Run local development
 python app/main.py
+
+
+
+# RUn Monop
+docker run -d \
+  -p 9000:9000 \
+  -p 9001:9001 \
+  -v /home/chris/Chr/Apps/ECATMIS/minio-data:/data \
+  -e "MINIO_ROOT_USER=minioadmin" \
+  -e "MINIO_ROOT_PASSWORD=minioadmin" \
+  minio/minio server /data --console-address ":9001"

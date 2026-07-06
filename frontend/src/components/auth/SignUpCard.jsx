@@ -39,14 +39,14 @@ import {
 import {
   Visibility,
   VisibilityOff,
-  PersonOutline,
+  PersonOutlined,
   LockOutlined,
   EmailOutlined,
   BadgeOutlined,
   Group,
   CheckCircleOutlined,
   ErrorOutlined,
-  InfoOutlinedd,
+  InfoOutlined,
   HourglassEmpty,
   Refresh,
   Edit,
@@ -832,7 +832,7 @@ const SignUpCard = () => {
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <PersonOutline color="action" />
+                        <PersonOutlined color="action" />
                       </InputAdornment>
                     ),
                     endAdornment: (
@@ -1018,7 +1018,7 @@ const SignUpCard = () => {
                 {formData.password && !hasFieldError('password') && (
                   <Box sx={{ mt: 1, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <InfoOutlinedd sx={{ fontSize: 14, color: passwordStrength.color }} />
+                      <InfoOutlined sx={{ fontSize: 14, color: passwordStrength.color }} />
                       <Typography variant="caption" sx={{ color: passwordStrength.color }}>
                         Password strength: {passwordStrength.label}
                       </Typography>

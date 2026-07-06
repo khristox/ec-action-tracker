@@ -803,6 +803,13 @@ class RoleSeeder:
 
 
 class UserSeeder:
+    # Any user assigned one of these role codes in users.txt is seeded as
+    # a superuser. is_superuser is a separate boolean flag on the User
+    # model (checked by the frontend for hard-gated pages like User
+    # Management) — it is NOT implied by role assignment automatically, so
+    # it must be set explicitly here at creation time.
+    SUPERUSER_ROLE_CODES = {"admin", "super_admin"}
+
     @staticmethod
     async def seed(db: AsyncSession, users: List[Dict[str, Any]]) -> int:
         """Seed users from loaded data"""
@@ -815,6 +822,9 @@ class UserSeeder:
             result = await db.execute(select(User).where(User.username == user_data["username"]))
             existing = result.scalar_one_or_none()
             if not existing:
+                user_role_codes_lower = {r.strip().lower() for r in user_data["roles"]}
+                is_superuser = bool(user_role_codes_lower & UserSeeder.SUPERUSER_ROLE_CODES)
+
                 new_user = User(
                     email=user_data["email"],
                     username=user_data["username"],
@@ -822,7 +832,8 @@ class UserSeeder:
                     last_name=user_data["last_name"],
                     hashed_password=get_password_hash(user_data["password"]),
                     is_verified=user_data["is_verified"],
-                    is_active=user_data["is_active"]
+                    is_active=user_data["is_active"],
+                    is_superuser=is_superuser,
                 )
                 db.add(new_user)
                 await db.flush()
@@ -837,7 +848,8 @@ class UserSeeder:
                             )
                         )
                 created += 1
-                logger.info(f"   ✅ Created user: {user_data['username']}")
+                superuser_note = " (superuser)" if is_superuser else ""
+                logger.info(f"   ✅ Created user: {user_data['username']}{superuser_note}")
         
         await db.commit()
         logger.info(f"✅ Created {created} users")

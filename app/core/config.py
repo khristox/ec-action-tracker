@@ -275,6 +275,19 @@ class Settings(BaseSettings):
             logger.info("Auto-converted DATABASE_URL for Docker")
         return v
 
+    @field_validator("REDIS_URL", mode="before")
+    @classmethod
+    def validate_redis_url(cls, v: str) -> str:
+        """Auto-adjust Redis URL for Docker so a missing/blank env var doesn't
+        silently fall back to localhost inside a container."""
+        if v and is_running_in_docker() and ('localhost' in v or '127.0.0.1' in v):
+            v = v.replace('localhost', 'redis').replace('127.0.0.1', 'redis')
+            logger.warning(
+                "⚠️ REDIS_URL pointed at localhost inside Docker - "
+                f"auto-converted to '{v}'. Set REDIS_URL explicitly to silence this."
+            )
+        return v
+
 
 # Create settings instance
 try:

@@ -3,7 +3,19 @@
 //   1. AuthReloader removed — it caused a timing race that prevented menu fetches
 //   2. Route config cleaned up — adminRoutes deduplicated from protectedRoutes
 //   3. preloadRoleBasedComponents called once, not twice
-//   4. Minor cleanup throughout
+//   4. Access control is menu-driven only: a page renders iff its menuCode is
+//      in the user's allowed menu list. The old role-based gate on adminRoutes
+//      has been removed so behavior is consistent with the rest of the app.
+//   5. Added the missing '/forbidden' route so denied access shows the
+//      Forbidden page instead of falling through to the 404 catch-all.
+//   6. Minor cleanup throughout
+//   7. NEW: settings/users (User Management) is now gated on user.is_superuser
+//      instead of a role-code array. The backend doesn't put "admin"/
+//      "super_admin" into user.roles — superuser status is carried on the
+//      boolean `is_superuser` field from /auth/me — so the old
+//      `roles: ['admin', 'super_admin']` check always failed and sent
+//      superusers to /forbidden. ProtectedRoute now accepts a
+//      `requireSuperuser` prop that checks that flag directly.
 
 import React, {
   useEffect,
@@ -206,19 +218,28 @@ const preloadCriticalComponents = async () => {
   );
 };
 
-const preloadRoleBasedComponents = async (userRoles) => {
+const preloadRoleBasedComponents = async (userRoles, isSuperuser) => {
   const roleComponents = {
     admin:   ['UserManagement', 'RoleManagement', 'RoleMenuAssignment', 'AuditLogs', 'Locations'],
     user:    ['Profile', 'ProfileSettings'],
     manager: ['ReportsList', 'CalendarView'],
   };
 
-  const roleCodes = userRoles.map(role => typeof role === 'object' ? role.code : role);
+  const roleCodes = (userRoles || []).map(role => typeof role === 'object' ? role.code : role);
   const toPreload = roleCodes.flatMap(code => roleComponents[code] || []);
 
-  if (toPreload.length > 0) {
+  // Superusers don't necessarily carry an 'admin' role code (roles can be
+  // empty while is_superuser is true), so make sure admin-area components
+  // still get preloaded for them.
+  if (isSuperuser) {
+    toPreload.push(...roleComponents.admin);
+  }
+
+  const uniqueToPreload = [...new Set(toPreload)];
+
+  if (uniqueToPreload.length > 0) {
     await Promise.allSettled(
-      toPreload.map(name => loadComponent(name, 1, 500).catch(err =>
+      uniqueToPreload.map(name => loadComponent(name, 1, 500).catch(err =>
         console.warn(`[Preload] Failed: ${name}`, err)
       ))
     );
@@ -345,15 +366,29 @@ const RecordingRouteWrapper = ({ children }) => (
 );
 
 // ==================== Protected Route ====================
+// NOTE: requiredRoles / requiredPermissions are still supported here for
+// any route that genuinely needs a hard role gate, and requireSuperuser is
+// for routes gated on the user.is_superuser boolean (e.g. User Management).
+// Access to individual pages/menus is otherwise controlled by
+// MenuProtectedRoute below. See adminRoutes further down — it intentionally
+// no longer uses requiredRoles, so a user's access is driven solely by
+// their assigned menu list.
 
-const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = [] }) => {
+const ProtectedRoute = ({
+  children,
+  requiredRoles = [],
+  requiredPermissions = [],
+  requireSuperuser = false,
+}) => {
   const { isAuthenticated, isAuthChecking, user } = useSelector(selectAuth);
   const location = useLocation();
 
+  console.log('DEBUG user:', user);
+
   // Preload role-based components as soon as we know who the user is
   useEffect(() => {
-    if (user?.roles?.length > 0) {
-      preloadRoleBasedComponents(user.roles);
+    if (user?.roles?.length > 0 || user?.is_superuser) {
+      preloadRoleBasedComponents(user.roles, user.is_superuser);
     }
   }, [user]);
 
@@ -365,15 +400,23 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Hard gate on is_superuser. This is a boolean flag from /auth/me, not a
+  // role code — the backend does not populate user.roles with 'admin' or
+  // 'super_admin' for superusers, so this MUST be checked separately from
+  // requiredRoles below rather than folded into it.
+  if (requireSuperuser && !user?.is_superuser) {
+    return <Navigate to="/forbidden" replace />;
+  }
+
   if (requiredRoles.length > 0) {
     const userRoleCodes = (user?.roles || []).map(r => typeof r === 'object' ? r.code : r);
-    const hasRole = requiredRoles.some(r => userRoleCodes.includes(r));
+    const hasRole = requiredRoles.some(r => userRoleCodes.includes(r)) || user?.is_superuser;
     if (!hasRole) return <Navigate to="/forbidden" replace />;
   }
 
   if (requiredPermissions.length > 0) {
     const userPermissions = user?.permissions || [];
-    const hasPermission = requiredPermissions.some(p => userPermissions.includes(p));
+    const hasPermission = requiredPermissions.some(p => userPermissions.includes(p)) || user?.is_superuser;
     if (!hasPermission) return <Navigate to="/forbidden" replace />;
   }
 
@@ -382,11 +425,18 @@ const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = []
 
 
 const MenuProtectedRoute = ({ children, menuCode }) => {
+  const { user } = useSelector(selectAuth);
   const allowedMenuCodes = useSelector(selectAllowedMenuCodes);
   const menusLoading = useSelector(selectMenuLoading);
 
   // Not gated — nothing to check
   if (!menuCode) return children;
+
+  // Superusers see everything regardless of their assigned menu list.
+  // Menu assignment and is_superuser are two independent systems on the
+  // backend — a superuser account can easily lack a given menuCode in
+  // their allowed-menu list without that meaning they should be blocked.
+  if (user?.is_superuser) return children;
 
   // Menus haven't loaded yet — don't flash a false 403 while the fetch is in flight
   if (menusLoading) {
@@ -399,10 +449,13 @@ const MenuProtectedRoute = ({ children, menuCode }) => {
 
   return children;
 };
+
+
 // ==================== Public Route ====================
 
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, isAuthChecking } = useSelector(selectAuth);
+  
   const location = useLocation();
   const from = location.state?.from?.pathname || '/dashboard';
 
@@ -416,6 +469,18 @@ const PublicRoute = ({ children }) => {
 // ==================== Route Config ====================
 // Admin routes that also appear in protectedRoutes have been removed from
 // adminRoutes to avoid duplicate route registration.
+//
+// Access model: a page is gated purely by `menuCode` by default. If the
+// user's allowed-menu list (fetched from the backend) contains that code,
+// they can see the page — regardless of role. Pages with no `menuCode` are
+// ungated. A route can opt into an additional hard gate on top of the menu
+// check by adding either:
+//   - `superuserOnly: true`   → requires user.is_superuser
+//   - `roles: [...]`          → requires one of these role codes (or superuser)
+// Currently only settings/users uses a hard gate (superuserOnly), since
+// User Management should only be reachable by superusers regardless of
+// whatever menus happen to be assigned. adminRoutes remain menu-only with
+// no extra gate (see rendering in AppContent below).
 
 const routeConfig = {
   publicRoutes: [
@@ -426,8 +491,9 @@ const routeConfig = {
   ],
 
   errorRoutes: [
-    { path: '/403', element: <Forbidden /> },
-    { path: '/404', element: <NotFound /> },
+    { path: '/403',        element: <Forbidden /> },
+    { path: '/forbidden',  element: <Forbidden /> },
+    { path: '/404',        element: <NotFound /> },
   ],
 
   // ONLY the recording page gets MeetingRecorderProvider (microphone prompt)
@@ -488,17 +554,22 @@ const routeConfig = {
   { path: 'settings/preferences',               element: <PreferenceSettings /> }, // ungated
   { path: 'settings/status',                    element: <Settings /> },
   { path: 'settings/document-types',            element: <Settings /> },
-  { path: 'settings/users',                     element: <UserManagement />,       menuCode: 'admin_users' },
+  // User Management is now gated on is_superuser instead of a role-code
+  // array — the backend doesn't put 'admin'/'super_admin' into user.roles,
+  // so the old `roles` check always failed for real superusers.
+  { path: 'settings/users',                     element: <UserManagement />,       menuCode: 'admin_users', superuserOnly: true },
   { path: 'settings/roles',                     element: <RoleManagement />,       menuCode: 'admin_roles' },
   { path: 'settings/audit',                     element: <AuditLogs />,            menuCode: 'admin_audit' },
   { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment />,   menuCode: 'admin_role_menu' },
   { path: 'settings/admin-structures/departments', element: <AdminStructures />,   menuCode: 'admin_structures' },
   ],
 
+  // Menu-gated only — no separate role check. A user sees these iff the
+  // corresponding menuCode is in their allowed-menu list.
   adminRoutes: [
-    { path: 'admin/users',  element: <UserManagement />, roles: ['admin'],            menuCode: 'admin_users' },
-    { path: 'admin/roles',  element: <RoleManagement />, roles: ['admin'],            menuCode: 'admin_roles' },
-    { path: 'admin/audit',  element: <AuditLogs />,      roles: ['admin', 'auditor'], menuCode: 'admin_audit' },
+    { path: 'admin/users',  element: <UserManagement />, menuCode: 'admin_users' },
+    { path: 'admin/roles',  element: <RoleManagement />, menuCode: 'admin_roles' },
+    { path: 'admin/audit',  element: <AuditLogs />,      menuCode: 'admin_audit' },
   ],
 
 };
@@ -631,8 +702,41 @@ const AppContent = () => {
             ))}
 
 
-      {/* Standard Protected Routes */}
-      {routeConfig.protectedRoutes.map(({ path, element, menuCode }) => (
+      {/* Standard Protected Routes — menu-gated by default. A route can opt
+          into an additional hard gate on top of the menu check via either
+          `superuserOnly` (checks user.is_superuser) or `roles` (checks role
+          codes). Currently only settings/users uses superuserOnly.
+          Everything else stays menu-only. */}
+      {routeConfig.protectedRoutes.map(({ path, element, menuCode, roles, superuserOnly }) => {
+        const gated = (
+          <MenuProtectedRoute menuCode={menuCode}>
+            <Lazy>{element}</Lazy>
+          </MenuProtectedRoute>
+        );
+
+        const needsHardGate = superuserOnly || (roles && roles.length > 0);
+
+        return (
+          <Route
+            key={path}
+            path={path}
+            element={
+              needsHardGate
+                ? (
+                  <ProtectedRoute requiredRoles={roles || []} requireSuperuser={!!superuserOnly}>
+                    {gated}
+                  </ProtectedRoute>
+                )
+                : gated
+            }
+          />
+        );
+      })}
+
+      {/* Admin Routes — menu-gated only, same access model as everything else.
+          No separate role check: visibility is driven entirely by whether
+          the user's assigned menus include this route's menuCode. */}
+      {routeConfig.adminRoutes.map(({ path, element, menuCode }) => (
         <Route
           key={path}
           path={path}
@@ -640,21 +744,6 @@ const AppContent = () => {
             <MenuProtectedRoute menuCode={menuCode}>
               <Lazy>{element}</Lazy>
             </MenuProtectedRoute>
-          }
-        />
-      ))}
-
-      {/* Admin Routes — role-guarded AND menu-guarded */}
-      {routeConfig.adminRoutes.map(({ path, element, roles, menuCode }) => (
-        <Route
-          key={path}
-          path={path}
-          element={
-            <ProtectedRoute requiredRoles={roles}>
-              <MenuProtectedRoute menuCode={menuCode}>
-                <Lazy>{element}</Lazy>
-              </MenuProtectedRoute>
-            </ProtectedRoute>
           }
         />
       ))}

@@ -14,13 +14,14 @@ from functools import lru_cache
 import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.api import deps
 from app.crud.meetings.action_tracker import meeting_crud, meeting_document
+from app.core.minio_client import minio_service
 from app.models.general.dynamic_attribute import Attribute, AttributeGroup
 from app.models.user import User
 from app.models.meetings.action_tracker import MeetingDocument, Meeting
@@ -38,12 +39,12 @@ except ImportError:
 # OCR imports with graceful fallback
 try:
     import pytesseract
-    from pdf2image import convert_from_path
+    from pdf2image import convert_from_bytes
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
     pytesseract = None
-    convert_from_path = None
+    convert_from_bytes = None
     logging.warning("OCR libraries not available. OCR functionality will be disabled.")
 
 logger = logging.getLogger(__name__)
@@ -558,21 +559,26 @@ async def delete_document(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Delete a document (hard delete with file removal)."""
+    """Delete a document (hard delete, including its object in MinIO)."""
     document = await meeting_document.get(db, document_id)
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    
-    # Delete the file from server
-    if document.file_path and os.path.exists(document.file_path):
-        try:
-            os.remove(document.file_path)
-            logger.info(f"Deleted file: {document.file_path}")
-        except Exception as e:
-            logger.error(f"Error deleting file: {e}")
-    
-    await meeting_document.remove(db, id=document_id, user=current_user.id, soft_delete=False)
-    
+
+    # NOTE: object-storage cleanup now happens inside
+    # CRUDMeetingDocument.delete() itself (it calls minio_service.delete_object
+    # internally when soft_delete=False) — this endpoint used to duplicate
+    # that logic with a local `os.remove(document.file_path)` call, which
+    # would silently do nothing once file_path became a MinIO object key
+    # instead of a filesystem path.
+    #
+    # Also fixed a latent bug: this endpoint was calling
+    # `meeting_document.remove(db, id=..., user=..., soft_delete=False)`,
+    # but CRUDMeetingDocument has no `remove` method — only
+    # `delete(db, id, user_id, soft_delete)`. That mismatch would have
+    # raised the same class of TypeError we chased down for uploads, the
+    # first time anyone actually deleted a document through this endpoint.
+    await meeting_document.delete(db, id=document_id, user_id=current_user.id, soft_delete=False)
+
     return None
 
 
@@ -641,26 +647,34 @@ async def download_document(
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
         )
     
-    # Original file download
-    if not document.file_path or not os.path.exists(document.file_path):
-        logger.error(f"File not found on server: {document.file_path}")
+    # Original file download — served via a short-lived presigned MinIO URL
+    # instead of streaming bytes through this server. `document.file_path`
+    # holds the MinIO object key (see CRUDMeetingDocument.upload_document),
+    # not a filesystem path anymore.
+    if not document.file_path or not minio_service.object_exists(document.file_path):
+        logger.error(f"Object not found in MinIO: {document.file_path}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found on server: {document.file_name}"
+            detail=f"File not found in storage: {document.file_name}"
         )
-    
-    # Determine the correct media type
-    media_type = document.mime_type or "application/octet-stream"
-    
-    return FileResponse(
-        path=document.file_path,
+
+    presigned_url = minio_service.get_presigned_download_url(
+        object_name=document.file_path,
         filename=document.file_name,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{document.file_name.replace(' ', '_')}",
-            "Cache-Control": "private, max-age=3600",
-        }
     )
+
+    # 307 preserves the original method (GET) and is followed transparently
+    # by both plain navigation and XHR/fetch-based blob requests (i.e. the
+    # frontend's `api.get(..., { responseType: 'blob' })` preview/download
+    # calls don't need to change).
+    #
+    # IMPORTANT: because this redirects to a different origin (MinIO's own
+    # host:port), the *final* response needs CORS headers allowing your
+    # frontend's origin, or the browser will block the blob-fetch with a
+    # CORS error even though the redirect itself succeeded. This has to be
+    # configured on the MinIO server/bucket — no backend code change here
+    # can satisfy it. See the note in app/core/minio_client.py.
+    return RedirectResponse(url=presigned_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.post("/document/{document_id}/ocr")
@@ -684,8 +698,8 @@ async def process_document_ocr(
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     
-    if not document.file_path or not os.path.exists(document.file_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
+    if not document.file_path or not minio_service.object_exists(document.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
     
     supported_mimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff', 'image/bmp']
     if document.mime_type not in supported_mimes:
@@ -695,12 +709,17 @@ async def process_document_ocr(
         )
     
     try:
+        # Pull the object into memory from MinIO once. Both pdf2image
+        # (via convert_from_bytes) and PIL (via BytesIO) work directly off
+        # bytes, so there's no need to write anything to local disk anymore.
+        file_bytes = await run_in_thread(minio_service.download_bytes, document.file_path)
+        
         extracted_text = ""
         pages_processed = 0
         structured_data = None
         
         if document.mime_type == 'application/pdf':
-            images = await run_in_thread(convert_from_path, document.file_path)
+            images = await run_in_thread(convert_from_bytes, file_bytes)
             pages_processed = len(images)
             
             for i, image in enumerate(images):
@@ -709,7 +728,7 @@ async def process_document_ocr(
         
         elif document.mime_type and document.mime_type.startswith('image/'):
             from PIL import Image
-            image = Image.open(document.file_path)
+            image = Image.open(io.BytesIO(file_bytes))
             extracted_text = await run_in_thread(pytesseract.image_to_string, image, lang=language)
             pages_processed = 1
         

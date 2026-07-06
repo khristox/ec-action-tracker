@@ -99,6 +99,24 @@ class RoleMenuCRUD:
         """Get role menu tree with permissions"""
         try:
             async for db in get_db():
+                # NOTE: this query was originally written for MySQL and used
+                # syntax that Postgres either rejects outright or silently
+                # mishandles:
+                #   - CAST(... AS CHAR(1000)) -> CHAR(n) in Postgres is a
+                #     fixed-length, blank-padded type, not a MySQL-style
+                #     variable-length string; TEXT is the portable choice.
+                #   - m.is_active = 1 / rmp.id IS NOT NULL comparisons against
+                #     bare integer literals -> is_active is a boolean column,
+                #     and Postgres does not implicitly cast int to bool the
+                #     way MySQL does.
+                #   - COALESCE(rmp.can_view, 0) -> same boolean/integer
+                #     COALESCE type mismatch as in get_role_menus_for_assignment;
+                #     defaults now match the True/True/False convention used
+                #     everywhere else in this file (assign_menu_to_role, etc).
+                #   - CONCAT(p.tree_path, '/', c.id) -> Postgres does support
+                #     CONCAT(), so this line itself was fine, but c.id is a
+                #     UUID and needs an explicit ::text cast to concatenate
+                #     cleanly rather than relying on implicit stringification.
                 query = text("""
                 WITH RECURSIVE menu_hierarchy AS (
                     SELECT 
@@ -110,16 +128,16 @@ class RoleMenuCRUD:
                         m.parent_id,
                         m.sort_order,
                         m.is_active,
-                        COALESCE(rmp.can_view, 0) as can_view,
-                        COALESCE(rmp.can_access, 0) as can_access,
-                        COALESCE(rmp.can_show_mb_bottom, 0) as can_show_mb_bottom,
+                        COALESCE(rmp.can_view, true) as can_view,
+                        COALESCE(rmp.can_access, true) as can_access,
+                        COALESCE(rmp.can_show_mb_bottom, false) as can_show_mb_bottom,
                         CASE WHEN rmp.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned,
                         0 as depth,
-                        CAST(m.id AS CHAR(1000)) as tree_path
+                        CAST(m.id AS TEXT) as tree_path
                     FROM menus m
                     LEFT JOIN role_menu_permissions rmp 
                         ON rmp.menu_id = m.id AND rmp.role_id = :role_id
-                    WHERE m.parent_id IS NULL AND m.is_active = 1
+                    WHERE m.parent_id IS NULL AND m.is_active = true
                     
                     UNION ALL
                     
@@ -132,17 +150,17 @@ class RoleMenuCRUD:
                         c.parent_id,
                         c.sort_order,
                         c.is_active,
-                        COALESCE(rmp.can_view, 0) as can_view,
-                        COALESCE(rmp.can_access, 0) as can_access,
-                        COALESCE(rmp.can_show_mb_bottom, 0) as can_show_mb_bottom,
+                        COALESCE(rmp.can_view, true) as can_view,
+                        COALESCE(rmp.can_access, true) as can_access,
+                        COALESCE(rmp.can_show_mb_bottom, false) as can_show_mb_bottom,
                         CASE WHEN rmp.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned,
                         p.depth + 1,
-                        CONCAT(p.tree_path, '/', c.id)
+                        CONCAT(p.tree_path, '/', CAST(c.id AS TEXT))
                     FROM menus c
                     INNER JOIN menu_hierarchy p ON c.parent_id = p.id
                     LEFT JOIN role_menu_permissions rmp 
                         ON rmp.menu_id = c.id AND rmp.role_id = :role_id
-                    WHERE c.is_active = 1
+                    WHERE c.is_active = true
                 )
                 SELECT * FROM menu_hierarchy
                 ORDER BY tree_path
@@ -194,8 +212,19 @@ class RoleMenuCRUD:
         """Get all menus with assignment status for a role. Used in the assignment form UI."""
         try:
             async for db in get_db():
+                # NOTE: :role_id (SQLAlchemy named bind param), not $1
+                # (asyncpg positional placeholder). text() compiles bind
+                # params by name via the dict passed to execute() - a raw
+                # $1 in the SQL string is invisible to SQLAlchemy's param
+                # binding, so it reaches the driver as a literal with no
+                # value supplied, causing "the server expects 1 argument
+                # for this query, 0 were passed".
+                #
+                # parent_id is cast to ::text in the ORDER BY because it's
+                # a UUID column - COALESCE(uuid_col, '0') fails since '0'
+                # isn't a valid UUID, so both sides must be text instead.
                 query = text("""
-                SELECT 
+               SELECT
                     m.id as menu_id,
                     m.code,
                     m.title,
@@ -205,15 +234,15 @@ class RoleMenuCRUD:
                     m.sort_order,
                     m.is_active,
                     CASE WHEN rmp.id IS NOT NULL THEN 1 ELSE 0 END as is_assigned,
-                    COALESCE(rmp.can_view, 1) as can_view,
-                    COALESCE(rmp.can_access, 1) as can_access,
-                    COALESCE(rmp.can_show_mb_bottom, 0) as can_show_mb_bottom,
+                    COALESCE(rmp.can_view, true) as can_view,
+                    COALESCE(rmp.can_access, true) as can_access,
+                    COALESCE(rmp.can_show_mb_bottom, false) as can_show_mb_bottom,
                     rmp.id as permission_id
                 FROM menus m
-                LEFT JOIN role_menu_permissions rmp 
+                LEFT JOIN role_menu_permissions rmp
                     ON rmp.menu_id = m.id AND rmp.role_id = :role_id
-                WHERE m.is_active = 1
-                ORDER BY COALESCE(m.parent_id, '0'), m.sort_order, m.title
+                WHERE m.is_active = true
+                ORDER BY COALESCE(m.parent_id::text, '0'), m.sort_order, m.title
                 """)
                 
                 result = await db.execute(query, {'role_id': str(role_id)})

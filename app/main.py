@@ -15,6 +15,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from datetime import datetime
+
+
 import platform
 import sys
 
@@ -27,10 +29,13 @@ from app.db.base import async_engine
 from app.api.v1.api import api_router
 from sqlalchemy import text
 
+
 from app.core.redis_client import init_redis, close_redis, get_redis
 from app.core.limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+
+from app.core.minio_client import minio_service
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -167,12 +172,16 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Database connection failed: {db_health.get('error', 'Unknown error')}")
 
     await init_redis()
-    
+    minio_service.ensure_bucket()
+
     yield
 
     await close_redis()
     logger.info("🛑 Redis connection closed")
     
+    
+
+
     if async_engine:
         await async_engine.dispose()
         logger.info("🛑 Database connections closed")

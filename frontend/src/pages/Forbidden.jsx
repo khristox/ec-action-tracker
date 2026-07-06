@@ -11,7 +11,11 @@ const Forbidden = () => {
       <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
         <LockIcon sx={{ fontSize: 80, color: 'error.main', mb: 2 }} />
         <Typography variant="h4" fontWeight="bold" gutterBottom>Access Denied</Typography>
-        <Typography variant="body1" color="text.secondary" paragraph>You don't have permission to access this page.</Typography>
+       <Typography variant="h4" fontWeight="bold" gutterBottom>Access Denied</Typography>
+<Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+  You don't have permission to access this page.
+</Typography>
+<Button variant="contained" onClick={() => navigate('/dashboard')}>Go to Dashboard</Button>
         <Button variant="contained" onClick={() => navigate('/dashboard')}>Go to Dashboard</Button>
       </Paper>
     </Container>

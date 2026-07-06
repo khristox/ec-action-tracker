@@ -204,3 +204,5 @@ $RECYCLE.BIN/
 # Linux
 .directory
 *.directory
+minio-data/
+minio-data/*

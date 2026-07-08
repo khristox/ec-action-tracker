@@ -262,6 +262,11 @@ class Meeting(Base):
         back_populates="meetings",
         lazy="selectin"
     )
+
+    # Reminder tracking
+    reminder_sent_at = Column(DateTime(timezone=True), nullable=True)  # When reminders were last sent
+    reminder_sent_count = Column(Integer, nullable=False, default=0)  # How many times reminders were sent
+    
     
     # ==================== Properties ====================
     

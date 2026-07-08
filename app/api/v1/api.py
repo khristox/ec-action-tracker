@@ -28,11 +28,9 @@ try:
     from app.api.v1.endpoints.action_tracker.recurring_meeting_routes import router as recurr_meetings
     from app.api.v1.endpoints.action_tracker.organization import router as menus_organisation
     from app.api.v1.endpoints.action_tracker.organization import router_departments as departments
-
-
     
-
-
+    # Import notifications router
+    from app.api.v1.endpoints.notifications import router as notifications_router
     
     logger.info("✅ All routers imported successfully")
 except ImportError as e:
@@ -48,7 +46,7 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(roles_router, prefix="/roles", tags=["roles"])
 api_router.include_router(permissions_router, prefix="/permissions", tags=["permissions"])
 api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
-api_router.include_router(users_dep_router,prefix="/departments", tags=["Departments"])
+api_router.include_router(users_dep_router, prefix="/departments", tags=["departments"])
 
 # System & Audit
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
@@ -59,47 +57,52 @@ api_router.include_router(attributes_router, prefix="/attributes", tags=["attrib
 api_router.include_router(locations_router, prefix="/locations", tags=["locations"])
 api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 
-api_router.include_router(menus_organisation, prefix="/organization", tags=["Organization"])
-api_router.include_router(departments, prefix="/departments", tags=["Departments"])
+# Organization & Departments
+api_router.include_router(menus_organisation, prefix="/organization", tags=["organization"])
+api_router.include_router(departments, prefix="/departments", tags=["departments"])
 
-
-
+# Action Tracker Menus
 api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
 
+# Charts
 api_router.include_router(chart_data, prefix="/charts", tags=["charts"])
 
-api_router.include_router(meeting_report,prefix="/meetings",tags=["meeting-report"])
+# Meeting Reports
+api_router.include_router(meeting_report, prefix="/meetings", tags=["meeting-report"])
 
+# Meeting Minutes
+api_router.include_router(meeting_minutes, prefix="/meetings", tags=["meeting-minutes"])
 
-api_router.include_router(meeting_minutes,prefix="/meetings",tags=["Meeting Minutes"])
+# Role Menu Permissions
+api_router.include_router(role_menu_permissions, prefix="/role-menu-permissions", tags=["role-menu-permissions"])
 
-api_router.include_router(role_menu_permissions,prefix="/role-menu-permissions",tags=["Role Menu Permission"])
+# Recurring Meetings
+api_router.include_router(recurr_meetings, prefix="/recurring-meetings", tags=["recurring-meetings"])
 
-api_router.include_router(recurr_meetings,prefix="/recurring-meetings",tags=["Recurring Meetings"])
-
-
-
-
-#recordings_router.include_router(recordings_router, prefix="/meetings/{meeting_id}/recordings", tags=["meeting-recordings"])
-
+# Meeting Recordings
 api_router.include_router(
     recordings_router,
     prefix="/meetings",
     tags=["meeting-recordings"]
 )
 
-
 # Action Tracker (this already includes all sub-routers)
 api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker-documents"])
 
-
+# Meeting Participants
 api_router.include_router(
     meeting_participants_router,
     prefix="/meetings",
     tags=["meetings-participants"]
 )
 
-# DO NOT add import_export separately here - it should be inside action_tracker_router
+# ==================== NOTIFICATIONS ROUTER ====================
+# Add notifications router
+api_router.include_router(
+    notifications_router,
+    prefix="/notifications",
+    tags=["notifications"]
+)
 
 # Log summary
 logger.info(f"✅ API Router configured with {len(api_router.routes)} routes")

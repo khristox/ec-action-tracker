@@ -1,4 +1,4 @@
-// CreateMeeting.jsx - Rewritten for compact, full-width UI/UX
+// CreateMeeting.jsx - Fully Improved with proper date handling
 
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -174,7 +174,146 @@ const quillModules = (isMobile) => ({
 
 const quillFormats = ['header', 'bold', 'italic', 'underline', 'strike', 'list', 'link'];
 
-// ==================== Helpers ====================
+// ==================== Helper Functions ====================
+
+/**
+ * Safely format a date value for display
+ * Handles both string (YYYY-MM-DD) and Date objects
+ */
+const safeFormatDate = (value) => {
+  if (!value) return 'Not set';
+  
+  // If it's already a Date object and valid
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toLocaleDateString();
+  }
+  
+  // If it's a string
+  if (typeof value === 'string') {
+    // Check if it's in YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString();
+      }
+    }
+    
+    // Try to parse as ISO string
+    try {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString();
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return 'Invalid date';
+};
+
+/**
+ * Safely format a time value for display
+ * Handles both string (HH:mm:ss) and Date objects
+ */
+const safeFormatTime = (value) => {
+  if (!value) return 'Not set';
+  
+  // If it's already a Date object and valid
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  
+  // If it's a string
+  if (typeof value === 'string') {
+    // If it's in HH:mm:ss format
+    if (/^\d{2}:\d{2}(:\d{2})?$/.test(value)) {
+      const [hours, minutes] = value.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes, 0, 0);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+    
+    // Try to parse as ISO string
+    try {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return 'Invalid time';
+};
+
+/**
+ * Safely parse date for DatePicker
+ * Converts string to Date object
+ */
+const safeParseDateForPicker = (value) => {
+  if (!value) return null;
+  
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+  
+  if (typeof value === 'string') {
+    // If it's in YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      return new Date(Date.UTC(year, month - 1, day));
+    }
+    
+    try {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Safely parse time for TimePicker
+ * Converts string to Date object
+ */
+const safeParseTimeForPicker = (value) => {
+  if (!value) return null;
+  
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+  
+  if (typeof value === 'string') {
+    // If it's in HH:mm:ss format
+    if (/^\d{2}:\d{2}(:\d{2})?$/.test(value)) {
+      const [hours, minutes, seconds = '00'] = value.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes, seconds, 0);
+      return date;
+    }
+    
+    try {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return null;
+};
 
 const alphaHelper = (color, opacity) => {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(color);
@@ -194,7 +333,7 @@ const getLevelInfo = (location) => {
   return ADDRESS_LEVELS.find((l) => l.level === location.level);
 };
 
-// ==================== Location Search (compact, collapsible) ====================
+// ==================== Location Search Component ====================
 
 const LocationSearch = memo(({ value, onChange }) => {
   const theme = useTheme();
@@ -275,7 +414,6 @@ const LocationSearch = memo(({ value, onChange }) => {
   useEffect(() => {
     const timer = setTimeout(() => searchLocations(searchTerm), 500);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, locationMode]);
 
   const handleSelectLocation = (location) => {
@@ -421,7 +559,7 @@ const LocationSearch = memo(({ value, onChange }) => {
 
 LocationSearch.displayName = 'LocationSearch';
 
-// ==================== Recurring Meeting Section (compact) ====================
+// ==================== Recurring Meeting Section ====================
 
 const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
   const theme = useTheme();
@@ -471,7 +609,6 @@ const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
 
   useEffect(() => {
     if (showPreview && recurrence?.enabled) fetchPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPreview, recurrence]);
 
   const toggleDay = (day) => {
@@ -486,7 +623,6 @@ const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
 
   return (
     <Stack spacing={2}>
-      {/* Compact toggle row */}
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ py: 0.5 }}>
         <Stack direction="row" alignItems="center" spacing={1.5}>
           <RepeatIcon fontSize="small" color={isRecurring ? 'primary' : 'action'} />
@@ -705,6 +841,22 @@ const CreateMeeting = () => {
   const chairpersonName = useMemo(() => chairperson?.name || 'Not selected', [chairperson]);
   const isRecurring = useMemo(() => recurrence?.enabled === true, [recurrence]);
 
+  // ===== Fixed: Safe date/time values for pickers =====
+  const datePickerValue = useMemo(
+    () => safeParseDateForPicker(formData?.meeting_date),
+    [formData?.meeting_date]
+  );
+
+  const startTimePickerValue = useMemo(
+    () => safeParseTimeForPicker(formData?.start_time),
+    [formData?.start_time]
+  );
+
+  const endTimePickerValue = useMemo(
+    () => safeParseTimeForPicker(formData?.end_time),
+    [formData?.end_time]
+  );
+
   useEffect(() => {
     dispatch(fetchParticipantLists());
     dispatch(fetchParticipants({ limit: 100 }));
@@ -758,6 +910,8 @@ const CreateMeeting = () => {
   };
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  
+  // ===== Fixed: These handlers now store Date objects properly =====
   const handleDateChange = (date) => setFormData({ ...formData, meeting_date: date });
   const handleStartTimeChange = (time) => setFormData({ ...formData, start_time: time });
   const handleEndTimeChange = (time) => setFormData({ ...formData, end_time: time });
@@ -819,14 +973,31 @@ const CreateMeeting = () => {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      // ===== Fixed: Properly handle date/time objects =====
       const meetingDate = formData.meeting_date;
-      const startDateTime = new Date(meetingDate);
-      startDateTime.setHours(formData.start_time.getHours(), formData.start_time.getMinutes());
+      let startDateTime, endDateTime = null;
 
-      let endDateTime = null;
-      if (formData.end_time) {
-        endDateTime = new Date(meetingDate);
-        endDateTime.setHours(formData.end_time.getHours(), formData.end_time.getMinutes());
+      if (meetingDate) {
+        if (meetingDate instanceof Date && !isNaN(meetingDate.getTime())) {
+          startDateTime = new Date(meetingDate);
+          if (formData.start_time) {
+            if (formData.start_time instanceof Date && !isNaN(formData.start_time.getTime())) {
+              startDateTime.setHours(formData.start_time.getHours(), formData.start_time.getMinutes());
+            }
+          }
+
+          if (formData.end_time) {
+            if (formData.end_time instanceof Date && !isNaN(formData.end_time.getTime())) {
+              endDateTime = new Date(meetingDate);
+              endDateTime.setHours(formData.end_time.getHours(), formData.end_time.getMinutes());
+            }
+          }
+        }
+      }
+
+      // Fallback if date isn't properly set
+      if (!startDateTime) {
+        startDateTime = new Date();
       }
 
       const meetingPayload = {
@@ -877,6 +1048,11 @@ const CreateMeeting = () => {
     }
   };
 
+  // ===== Fixed: Safe formatted date/time for display =====
+  const formattedDate = useMemo(() => safeFormatDate(formData.meeting_date), [formData.meeting_date]);
+  const formattedStartTime = useMemo(() => safeFormatTime(formData.start_time), [formData.start_time]);
+  const formattedEndTime = useMemo(() => safeFormatTime(formData.end_time), [formData.end_time]);
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: { xs: 10, sm: 4 } }}>
@@ -904,7 +1080,6 @@ const CreateMeeting = () => {
           )}
 
           <Grid container spacing={2.5}>
-            {/* Main form column */}
             <Grid size={{ xs: 12, md: 8 }}>
               <Paper sx={{ p: { xs: 2, sm: 2.5, md: 3 }, borderRadius: { xs: 2, md: 3 }, position: 'relative', overflow: 'hidden' }}>
                 {apiLoading && (
@@ -955,7 +1130,7 @@ const CreateMeeting = () => {
                         <Grid size={{ xs: 12, sm: 6 }}>
                           <DatePicker
                             label="Meeting Date"
-                            value={formData.meeting_date}
+                            value={datePickerValue}
                             onChange={handleDateChange}
                             slotProps={{ textField: { fullWidth: true, required: true, size: 'small' } }}
                           />
@@ -963,7 +1138,7 @@ const CreateMeeting = () => {
                         <Grid size={{ xs: 6, sm: 3 }}>
                           <TimePicker
                             label="Start Time"
-                            value={formData.start_time}
+                            value={startTimePickerValue}
                             onChange={handleStartTimeChange}
                             slotProps={{ textField: { fullWidth: true, required: true, size: 'small' } }}
                           />
@@ -971,7 +1146,7 @@ const CreateMeeting = () => {
                         <Grid size={{ xs: 6, sm: 3 }}>
                           <TimePicker
                             label="End Time"
-                            value={formData.end_time}
+                            value={endTimePickerValue}
                             onChange={handleEndTimeChange}
                             slotProps={{ textField: { fullWidth: true, size: 'small' } }}
                           />
@@ -1008,7 +1183,6 @@ const CreateMeeting = () => {
 
                       <LocationSearch value={formData.location_details} onChange={handleLocationSelect} />
 
-                      {/* GPS — compact single row */}
                       <Box>
                         <Stack direction="row" alignItems="center" justifyContent="space-between">
                           <Stack direction="row" alignItems="center" spacing={1}>
@@ -1176,7 +1350,7 @@ const CreateMeeting = () => {
                   </Grow>
                 )}
 
-                {/* Step 4: Review */}
+                {/* Step 4: Review - FIXED: Uses safe date formatting helpers */}
                 {activeStep === 3 && (
                   <Grow in timeout={300}>
                     <Stack spacing={2}>
@@ -1200,7 +1374,7 @@ const CreateMeeting = () => {
                           </Grid>
                           <Grid size={{ xs: 12, sm: 6 }}>
                             <Typography variant="body2">
-                              <strong>Date & Time:</strong> {formData.meeting_date?.toLocaleDateString()} at {formData.start_time?.toLocaleTimeString()}
+                              <strong>Date & Time:</strong> {formattedDate} at {formattedStartTime}
                             </Typography>
                           </Grid>
                           <Grid size={{ xs: 12, sm: 6 }}>
@@ -1281,7 +1455,7 @@ const CreateMeeting = () => {
               </Paper>
             </Grid>
 
-            {/* Summary sidebar — fills remaining width, stays visible while scrolling */}
+            {/* Summary sidebar — FIXED: Uses safe date formatting */}
             {isDesktop && (
               <Grid size={{ xs: 12, md: 4 }}>
                 <Paper sx={{ p: 2.5, borderRadius: 3, position: 'sticky', top: 24 }}>
@@ -1295,8 +1469,7 @@ const CreateMeeting = () => {
                     <Box>
                       <Typography variant="caption" color="text.secondary">Date & Time</Typography>
                       <Typography variant="body2">
-                        {formData.meeting_date ? formData.meeting_date.toLocaleDateString() : 'Not set'}
-                        {formData.start_time && ` · ${formData.start_time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                        {formattedDate} · {formattedStartTime}
                       </Typography>
                     </Box>
                     <Box>

@@ -7,17 +7,17 @@
 
 <div class="meeting-details">
     <h3>{{ meeting_title }}</h3>
-    
+
     <div class="detail-row">
         <span class="detail-label">⏰ Starts in:</span>
         <span class="detail-value">{{ time_until }}</span>
     </div>
-    
+
     <div class="detail-row">
-        <span class="detail-label">📅 Date & Time:</span>
+        <span class="detail-label">📅 When:</span>
         <span class="detail-value">{{ meeting_datetime }}</span>
     </div>
-    
+
     {% if platform == 'physical' %}
         <div class="detail-row">
             <span class="detail-label">📍 Location:</span>
@@ -26,7 +26,7 @@
     {% else %}
         {% if meeting_link %}
             <div class="detail-row">
-                <span class="detail-label">🔗 Meeting Link:</span>
+                <span class="detail-label">🔗 Link:</span>
                 <span class="detail-value">
                     <a href="{{ meeting_link }}">{{ meeting_link }}</a>
                 </span>
@@ -41,12 +41,21 @@
 </div>
 {% endif %}
 
-<p>Please don't forget to:</p>
-<ul>
-    <li>✓ Prepare any necessary materials</li>
-    <li>✓ Test your audio/video setup (for online meetings)</li>
-    <li>✓ Review the agenda</li>
-</ul>
+{% if meeting_detail_link %}
+<div class="divider"></div>
+<p style="text-align: center;">
+    <a href="{{ meeting_detail_link }}" style="color: {{ primary_color }}; font-weight: 600; text-decoration: none;">View full meeting details &rarr;</a>
+</p>
+{% endif %}
+
+<div class="info-box">
+    <strong>Before you join:</strong>
+    <ul style="margin-top: 8px; padding-left: 20px;">
+        <li>Prepare any necessary materials</li>
+        <li>Test your audio/video setup (for online meetings)</li>
+        <li>Review the agenda</li>
+    </ul>
+</div>
 
 <p>We look forward to your participation!</p>
 

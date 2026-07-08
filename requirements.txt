@@ -16,6 +16,7 @@ asyncpg==0.30.0
 attrs==26.1.0
 bcrypt==4.0.1
 beautifulsoup4==4.14.3
+black==26.5.1
 brotli==1.2.0
 build==1.4.4
 certifi==2026.2.25
@@ -54,6 +55,7 @@ MarkupSafe==3.0.3
 mdurl==0.1.2
 minio==7.2.20
 multidict==6.7.1
+mypy_extensions==1.1.0
 numpy==2.4.4
 openai==2.33.0
 openpyxl==3.1.5
@@ -61,11 +63,13 @@ oracledb==3.4.2
 packaging==26.1
 pandas==3.0.1
 passlib==1.7.4
+pathspec==1.1.1
 pdf2image==1.17.0
 pdfminer.six==20251230
 pdfplumber==0.11.9
 pillow==12.2.0
 pip-tools==7.5.3
+platformdirs==4.10.0
 propcache==0.4.1
 psycopg2-binary==2.9.10
 pyasn1==0.6.3
@@ -89,6 +93,7 @@ python-docx==1.2.0
 python-dotenv==1.0.0
 python-jose==3.3.0
 python-multipart==0.0.9
+pytokens==0.4.1
 PyYAML==6.0.3
 redis==8.0.1
 reportlab==4.4.10

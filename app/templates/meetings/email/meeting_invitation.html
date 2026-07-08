@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Meeting Invitation - {{ organization_name }}</title>
+
+<style>
+    body {
+        margin: 0;
+        padding: 20px;
+        background-color: #f4f6f9;
+        font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+        color: #333333;
+        line-height: 1.6;
+    }
+    .container {
+        max-width: 680px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    }
+    .header {
+        background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+        color: white;
+        padding: 35px 40px;
+        text-align: center;
+    }
+    .brand {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        margin-bottom: 12px;
+    }
+    .logo {
+        width: 78px;
+        height: 78px;
+        background: white;
+        border-radius: 10px;
+        padding: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    .logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    .header h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 600;
+    }
+    .subtitle {
+        margin: 8px 0 0 0;
+        opacity: 0.95;
+        font-size: 15px;
+    }
+
+    .content {
+        padding: 40px;
+    }
+    h2 {
+        color: #1f2937;
+        margin-top: 0;
+        font-size: 26px;
+    }
+    p {
+        font-size: 16px;
+        color: #4b5563;
+    }
+
+    .info-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 24px 0;
+        background: #f8fafc;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .info-table td {
+        padding: 14px 20px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .info-table td:first-child {
+        font-weight: 600;
+        color: #374151;
+        width: 160px;
+        background: #f1f5f9;
+    }
+    .info-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .button {
+        display: inline-block;
+        background: #2563eb;
+        color: #ffffff !important;
+        padding: 15px 32px;
+        font-size: 16px;
+        font-weight: 600;
+        text-decoration: none;
+        border-radius: 8px;
+        margin: 25px 0;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+        transition: all 0.3s ease;
+    }
+    .button:hover {
+        background: #1d4ed8;
+        transform: translateY(-2px);
+    }
+
+    .section {
+        margin-top: 40px;
+    }
+    .section h3 {
+        color: #1e40af;
+        border-bottom: 2px solid #e5e7eb;
+        padding-bottom: 10px;
+        margin-bottom: 16px;
+    }
+
+    .participants {
+        background: #f8fafc;
+        padding: 18px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+    }
+
+    .note {
+        background: #fefce8;
+        border-left: 5px solid #eab308;
+        padding: 18px;
+        border-radius: 6px;
+        margin: 20px 0;
+    }
+
+    .footer {
+        background: #f8fafc;
+        text-align: center;
+        padding: 28px 40px;
+        color: #64748b;
+        font-size: 13.5px;
+        border-top: 1px solid #e2e8f0;
+    }
+    .footer strong {
+        color: #334155;
+    }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <!-- HEADER -->
+    <div class="header">
+        <div class="brand">
+            {% if logo_info and logo_info.type == 'url' %}
+                <div class="logo">
+                    <img src="{{ logo_info.value }}" alt="{{ organization_name }}">
+                </div>
+            {% elif logo_info and logo_info.type == 'cid' %}
+                <div class="logo">
+                    <img src="cid:{{ logo_cid }}" alt="{{ organization_name }}">
+                </div>
+            {% endif %}
+            
+            <div>
+                <h1>{{ organization_name }}</h1>
+                <div class="subtitle">Meeting Invitation</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content">
+
+        <h2>{{ meeting_title or meeting.title }}</h2>
+        
+        {% if meeting_description or meeting.description %}
+            <p>{{ meeting_description or meeting.description }}</p>
+        {% endif %}
+
+        <p>Dear <strong>{{ participant_name }}</strong>,</p>
+        
+        <p>You have been invited to attend the following meeting:</p>
+
+        <table class="info-table">
+            <tr>
+                <td>Date</td>
+                <td><strong>{{ meeting_date }}</strong></td>
+            </tr>
+            <tr>
+                <td>Time</td>
+                <td><strong>{{ meeting_time }}</strong></td>
+            </tr>
+            <tr>
+                <td>Venue</td>
+                <td>
+                    {% if is_virtual %}
+                        <strong>Virtual Meeting</strong>
+                    {% else %}
+                        {{ location_text }}
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Status</td>
+                <td>{{ status_name or "Scheduled" }}</td>
+            </tr>
+            {% if meeting_link %}
+            <tr>
+                <td>Joining Link</td>
+                <td><a href="{{ meeting_link }}">{{ meeting_link }}</a></td>
+            </tr>
+            {% endif %}
+            {% if passcode %}
+            <tr>
+                <td>Passcode</td>
+                <td><strong>{{ passcode }}</strong></td>
+            </tr>
+            {% endif %}
+        </table>
+
+        {% if meeting_link %}
+        <div style="text-align: center;">
+            <a href="{{ meeting_link }}" class="button">Join the Meeting</a>
+        </div>
+        {% endif %}
+
+        {% if agenda_items and agenda_items|length > 0 %}
+        <div class="section">
+            <h3>Agenda</h3>
+            <ul style="padding-left: 20px;">
+                {% for item in agenda_items %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="section">
+            <h3>Participants</h3>
+            <div class="participants">
+                <strong>{{ participants_count }}</strong> Total Participants 
+                • <strong>{{ chairpersons_count or 0 }}</strong> Chairperson(s) 
+                • <strong>{{ secretaries_count or 0 }}</strong> Secretary(s)
+            </div>
+        </div>
+
+        {% if custom_message %}
+        <div class="section">
+            <h3>Additional Information</h3>
+            <div class="note">
+                {{ custom_message | safe }}
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <strong>{{ organization_name }}</strong><br><br>
+        This is an automated notification from the Meeting Management System.<br>
+        © {{ year }} {{ organization_name }} • All Rights Reserved
+    </div>
+
+</div>
+
+</body>
+</html>

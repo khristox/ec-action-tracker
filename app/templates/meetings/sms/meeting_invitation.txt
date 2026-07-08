@@ -1,0 +1,26 @@
+🏛️ *{{ organization_name or 'Organization' }}*
+
+📋 *Meeting Invitation*
+
+Dear {{ participant_name or 'Participant' }},
+
+*{{ meeting.title }}*
+{{ meeting.description or '' }}
+
+📅 *Date:* {{ meeting_date }}
+⏰ *Time:* {{ meeting_time }}
+📍 *Location:* {{ location_text }}
+👥 *Participants:* {{ participants_count }}
+
+{% if meeting_link %}🔗 *Join:* {{ meeting_link }}{% endif %}
+
+{% if agenda_items %}
+*Agenda:*
+{% for item in agenda_items %}• {{ item }}
+{% endfor %}
+{% endif %}
+
+{% if custom_message %}📝 *Note:* {{ custom_message }}{% endif %}
+
+---
+*{{ organization_name or 'Organization' }}* - Meeting Management System

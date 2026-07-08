@@ -10,14 +10,13 @@ import {
   Stack,
   Chip,
   InputAdornment,
-  IconButton,
-  Tooltip,
   Fade,
   alpha,
   useTheme,
   Skeleton,
   Alert,
-  Divider,
+  Tooltip,
+  IconButton,
 } from '@mui/material';
 import {
   Title as TitleIcon,
@@ -25,14 +24,12 @@ import {
   Event as EventIcon,
   AccessTime as AccessTimeIcon,
   Business as BusinessIcon,
-  Public as PublicIcon,
   Lock as LockIcon,
-  People as PeopleIcon,
-  Clear as ClearIcon,
   CheckCircle as CheckCircleIcon,
   Info as InfoIcon,
   Warning as WarningIcon,
   Schedule as ScheduleIcon,
+  Help as HelpIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
@@ -72,10 +69,112 @@ const VALIDATION_MESSAGES = {
 };
 
 // ============================================================================
+// Helper Functions - UTC Date Handling
+// ============================================================================
+
+/**
+ * Safely parse a date value to a Date object using UTC
+ * Handles strings in YYYY-MM-DD format and Date objects
+ */
+const safeParseDate = (value) => {
+  if (!value) return null;
+  
+  // If it's already a Date object and valid, return it
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+  
+  // If it's a string
+  if (typeof value === 'string') {
+    // If it's in YYYY-MM-DD format, parse as UTC
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map(Number);
+      return new Date(Date.UTC(year, month - 1, day));
+    }
+    
+    // Try to parse as ISO string
+    try {
+      const parsed = new Date(value);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Safely parse a time value to a Date object
+ * Handles strings in HH:mm:ss format and Date objects
+ */
+const safeParseTime = (value) => {
+  if (!value) return null;
+  
+  // If it's already a Date object and valid, return it
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+  
+  // If it's a string
+  if (typeof value === 'string') {
+    // If it's in HH:mm:ss format
+    if (/^\d{2}:\d{2}(:\d{2})?$/.test(value)) {
+      const [hours, minutes, seconds = '00'] = value.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes, seconds, 0);
+      return date;
+    }
+    
+    // Try to parse as ISO string
+    try {
+      const parsed = new Date(value);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Format a date for display using UTC
+ */
+const formatDateUTC = (value) => {
+  if (!value) return null;
+  const date = safeParseDate(value);
+  if (!date) return null;
+  try {
+    return format(date, 'PPP');
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Format a time for display
+ */
+const formatTimeDisplay = (value) => {
+  if (!value) return null;
+  const time = safeParseTime(value);
+  if (!time) return null;
+  try {
+    return format(time, 'p');
+  } catch {
+    return null;
+  }
+};
+
+// ============================================================================
 // Sub-Components
 // ============================================================================
 
-const SectionHeader = ({ icon: Icon, title, status, statusText }) => (
+const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) => (
   <Typography
     variant="subtitle2"
     fontWeight={600}
@@ -88,6 +187,13 @@ const SectionHeader = ({ icon: Icon, title, status, statusText }) => (
   >
     <Icon sx={{ fontSize: 18, color: '#667eea' }} />
     {title}
+    {tooltip && (
+      <Tooltip title={tooltip} arrow>
+        <IconButton size="small" sx={{ p: 0 }}>
+          <HelpIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+        </IconButton>
+      </Tooltip>
+    )}
     {status && (
       <Chip
         label={statusText || '✓ Complete'}
@@ -98,7 +204,9 @@ const SectionHeader = ({ icon: Icon, title, status, statusText }) => (
       />
     )}
   </Typography>
-);
+));
+
+SectionHeader.displayName = 'SectionHeader';
 
 const SectionPaper = ({ children, ...props }) => {
   const theme = useTheme();
@@ -131,7 +239,7 @@ const SectionPaper = ({ children, ...props }) => {
   );
 };
 
-const FormTextField = ({ 
+const FormTextField = memo(({ 
   icon: Icon, 
   required = false, 
   error = false, 
@@ -180,7 +288,9 @@ const FormTextField = ({
       {...props}
     />
   );
-};
+});
+
+FormTextField.displayName = 'FormTextField';
 
 // ============================================================================
 // Main Component
@@ -265,24 +375,75 @@ export const BasicInfoStep = memo(({
   );
 
   const isFormValid = useMemo(() => {
-    // Check required fields
     if (!isTitleFilled) return false;
     if (!isDateFilled) return false;
     if (!isStartTimeFilled) return false;
-    
-    // Check title length
     if (formData?.title?.length < 3) return false;
     if (formData?.title?.length > 200) return false;
     
-    // Check time validation
     if (formData?.start_time && formData?.end_time) {
-      const start = new Date(formData.start_time);
-      const end = new Date(formData.end_time);
-      if (end <= start) return false;
+      const start = safeParseTime(formData.start_time);
+      const end = safeParseTime(formData.end_time);
+      if (start && end && end <= start) return false;
     }
     
     return true;
   }, [formData, isTitleFilled, isDateFilled, isStartTimeFilled]);
+
+  // ==========================================================================
+  // Memoized Picker Values - UTC Date Handling
+  // ==========================================================================
+
+  const datePickerValue = useMemo(
+    () => safeParseDate(formData?.meeting_date),
+    [formData?.meeting_date]
+  );
+
+  const startTimePickerValue = useMemo(
+    () => safeParseTime(formData?.start_time),
+    [formData?.start_time]
+  );
+
+  const endTimePickerValue = useMemo(
+    () => safeParseTime(formData?.end_time),
+    [formData?.end_time]
+  );
+
+  // ==========================================================================
+  // Schedule Display - Uses UTC
+  // ==========================================================================
+
+  const scheduleDisplay = useMemo(() => {
+    if (!isDateFilled || !isStartTimeFilled) return null;
+    
+    const date = safeParseDate(formData.meeting_date);
+    const start = safeParseTime(formData.start_time);
+    
+    if (!date || !start) return null;
+    
+    try {
+      const dateFormatted = format(date, 'PPP');
+      const startFormatted = format(start, 'p');
+      let endFormatted = null;
+      
+      if (formData.end_time) {
+        const end = safeParseTime(formData.end_time);
+        if (end) {
+          endFormatted = format(end, 'p');
+        }
+      }
+      
+      return {
+        date: dateFormatted,
+        startTime: startFormatted,
+        endTime: endFormatted,
+        full: `${dateFormatted} at ${startFormatted}${endFormatted ? ` - ${endFormatted}` : ''}`,
+      };
+    } catch (error) {
+      console.warn('Error formatting schedule:', error);
+      return null;
+    }
+  }, [formData.meeting_date, formData.start_time, formData.end_time, isDateFilled, isStartTimeFilled]);
 
   // ==========================================================================
   // Callbacks
@@ -313,8 +474,8 @@ export const BasicInfoStep = memo(({
     }
 
     if (fieldName === 'meeting_date' && value) {
-      const date = new Date(value);
-      if (!isValid(date)) {
+      const date = safeParseDate(value);
+      if (!date) {
         return VALIDATION_MESSAGES.meeting_date.invalid;
       }
     }
@@ -325,7 +486,6 @@ export const BasicInfoStep = memo(({
   const handleFieldChange = useCallback((fieldName) => (event) => {
     const value = event?.target?.value || event;
     
-    // Update form data
     if (handleChange) {
       handleChange(event);
     } else {
@@ -335,72 +495,18 @@ export const BasicInfoStep = memo(({
       }));
     }
 
-    // Mark as touched
     handleFieldTouch(fieldName);
 
-    // Validate
     const error = validateField(fieldName, value);
     setLocalErrors(prev => ({
       ...prev,
       [fieldName]: error,
     }));
 
-    // Notify parent of validation change
     if (onValidationChange) {
       onValidationChange(fieldName, !error);
     }
   }, [handleChange, setFormData, handleFieldTouch, validateField, onValidationChange]);
-
-  // ==========================================================================
-  // Formatted Values for Display
-  // ==========================================================================
-
-  const formatDateTime = useCallback((date, time) => {
-    if (!date || !time) return '';
-    try {
-      const dateObj = typeof date === 'string' ? parseISO(date) : date;
-      const timeObj = typeof time === 'string' ? parseISO(time) : time;
-      
-      if (!isValid(dateObj) || !isValid(timeObj)) return '';
-      
-      const combined = new Date(dateObj);
-      combined.setHours(timeObj.getHours(), timeObj.getMinutes());
-      
-      return format(combined, 'PPP p');
-    } catch {
-      return '';
-    }
-  }, []);
-
-  const getScheduleDisplay = useMemo(() => {
-    if (!isDateFilled || !isStartTimeFilled) return null;
-    
-    const dateStr = formData.meeting_date;
-    const startStr = formData.start_time;
-    const endStr = formData.end_time;
-    
-    try {
-      const date = typeof dateStr === 'string' ? parseISO(dateStr) : dateStr;
-      const start = typeof startStr === 'string' ? parseISO(startStr) : startStr;
-      
-      if (!isValid(date) || !isValid(start)) return null;
-      
-      const startDisplay = format(start, 'p');
-      const endDisplay = endStr ? format(
-        typeof endStr === 'string' ? parseISO(endStr) : endStr, 
-        'p'
-      ) : null;
-      
-      return {
-        date: format(date, 'PPP'),
-        startTime: startDisplay,
-        endTime: endDisplay,
-        full: `${format(date, 'PPP')} at ${startDisplay}${endDisplay ? ` - ${endDisplay}` : ''}`,
-      };
-    } catch {
-      return null;
-    }
-  }, [formData.meeting_date, formData.start_time, formData.end_time, isDateFilled, isStartTimeFilled]);
 
   // ==========================================================================
   // Render
@@ -431,6 +537,7 @@ export const BasicInfoStep = memo(({
               title="Meeting Details"
               status={isTitleFilled ? 'complete' : null}
               statusText={isTitleFilled ? '✓ Title set' : undefined}
+              tooltip="Provide a clear, descriptive title for your meeting"
             />
 
             <FormTextField
@@ -444,8 +551,26 @@ export const BasicInfoStep = memo(({
               icon={TitleIcon}
               success={isTitleFilled}
               error={!!(localErrors.title || errors.title)}
-              helperText={localErrors.title || errors.title || `Min 3, Max 200 characters (${formData?.title?.length || 0}/200)`}
+              helperText={
+                localErrors.title || 
+                errors.title || 
+                `${formData?.title?.length || 0}/200 characters`
+              }
               disabled={apiLoading || isSubmitting}
+              slotProps={{
+                input: {
+                  endAdornment: formData?.title && formData.title.length > 0 && (
+                    <InputAdornment position="end">
+                      <Chip
+                        label={`${formData.title.length}/200`}
+                        size="small"
+                        color={formData.title.length > 190 ? 'warning' : 'default'}
+                        sx={{ height: 20, fontSize: '0.65rem' }}
+                      />
+                    </InputAdornment>
+                  ),
+                },
+              }}
               inputProps={{
                 maxLength: 200,
                 'aria-label': 'Meeting title',
@@ -472,7 +597,7 @@ export const BasicInfoStep = memo(({
         </SectionPaper>
 
         {/* ============================================
-             Schedule Section
+             Schedule Section - FIXED UTC DATE HANDLING
              ============================================ */}
         <SectionPaper>
           <Stack spacing={2}>
@@ -481,21 +606,23 @@ export const BasicInfoStep = memo(({
               title="Schedule"
               status={isScheduleComplete ? 'complete' : null}
               statusText={isScheduleComplete ? '✓ Scheduled' : undefined}
+              tooltip="Set the date and time for your meeting"
             />
 
             <Grid container spacing={1.5}>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <DatePicker
                   label="Meeting Date *"
-                  value={formData?.meeting_date || null}
+                  value={datePickerValue}
                   onChange={handleDateChange}
                   disabled={apiLoading || isSubmitting}
+                  format="PPP"
                   slotProps={{
                     textField: {
                       required: true,
                       size: 'small',
                       error: !!(localErrors.meeting_date || errors.meeting_date),
-                      helperText: localErrors.meeting_date || errors.meeting_date,
+                      helperText: localErrors.meeting_date || errors.meeting_date || 'Select a date for the meeting',
                       sx: {
                         '& .MuiOutlinedInput-root': {
                           bgcolor: isLight ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.05)',
@@ -523,7 +650,7 @@ export const BasicInfoStep = memo(({
               <Grid size={{ xs: 6, sm: 3 }}>
                 <TimePicker
                   label="Start Time *"
-                  value={formData?.start_time || null}
+                  value={startTimePickerValue}
                   onChange={handleStartTimeChange}
                   disabled={apiLoading || isSubmitting}
                   slotProps={{
@@ -531,7 +658,7 @@ export const BasicInfoStep = memo(({
                       required: true,
                       size: 'small',
                       error: !!(localErrors.start_time || errors.start_time),
-                      helperText: localErrors.start_time || errors.start_time,
+                      helperText: localErrors.start_time || errors.start_time || 'Select the start time',
                       sx: {
                         '& .MuiOutlinedInput-root': {
                           bgcolor: isLight ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.05)',
@@ -559,14 +686,14 @@ export const BasicInfoStep = memo(({
               <Grid size={{ xs: 6, sm: 3 }}>
                 <TimePicker
                   label="End Time"
-                  value={formData?.end_time || null}
+                  value={endTimePickerValue}
                   onChange={handleEndTimeChange}
                   disabled={apiLoading || isSubmitting}
                   slotProps={{
                     textField: {
                       size: 'small',
                       error: !!(localErrors.end_time || errors.end_time),
-                      helperText: localErrors.end_time || errors.end_time,
+                      helperText: localErrors.end_time || errors.end_time || 'Select the end time (optional)',
                       sx: {
                         '& .MuiOutlinedInput-root': {
                           bgcolor: isLight ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.05)',
@@ -594,7 +721,7 @@ export const BasicInfoStep = memo(({
             </Grid>
 
             {/* Schedule Summary */}
-            {getScheduleDisplay && (
+            {scheduleDisplay && (
               <Fade in timeout={400}>
                 <Alert
                   icon={<ScheduleIcon />}
@@ -611,7 +738,7 @@ export const BasicInfoStep = memo(({
                       <strong>Meeting scheduled for:</strong>
                     </Typography>
                     <Typography variant="body2">
-                      {getScheduleDisplay.full}
+                      {scheduleDisplay.full}
                     </Typography>
                   </Stack>
                 </Alert>
@@ -620,11 +747,18 @@ export const BasicInfoStep = memo(({
 
             {/* Time Validation Warning */}
             {formData?.start_time && formData?.end_time && (
-              new Date(formData.end_time) <= new Date(formData.start_time) && (
-                <Alert severity="error" icon={<WarningIcon />}>
-                  End time must be after start time
-                </Alert>
-              )
+              (() => {
+                const start = safeParseTime(formData.start_time);
+                const end = safeParseTime(formData.end_time);
+                if (start && end && end <= start) {
+                  return (
+                    <Alert severity="error" icon={<WarningIcon />}>
+                      End time must be after start time
+                    </Alert>
+                  );
+                }
+                return null;
+              })()
             )}
           </Stack>
         </SectionPaper>
@@ -753,9 +887,14 @@ export const BasicInfoStep = memo(({
                 <li>Title must be at least 3 characters</li>
               )}
               {formData?.start_time && formData?.end_time && 
-               new Date(formData.end_time) <= new Date(formData.start_time) && (
-                <li>End time must be after start time</li>
-              )}
+                (() => {
+                  const start = safeParseTime(formData.start_time);
+                  const end = safeParseTime(formData.end_time);
+                  return start && end && end <= start && (
+                    <li>End time must be after start time</li>
+                  );
+                })()
+              }
             </ul>
           </Alert>
         )}

@@ -16,9 +16,9 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from datetime import datetime
 
-
 import platform
 import sys
+import asyncio
 
 # 1. LOAD ENVIRONMENT VARIABLES FIRST
 load_dotenv()
@@ -29,13 +29,15 @@ from app.db.base import async_engine
 from app.api.v1.api import api_router
 from sqlalchemy import text
 
-
 from app.core.redis_client import init_redis, close_redis, get_redis
 from app.core.limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.minio_client import minio_service
+
+# ==================== IMPORT REMINDER SCHEDULER ====================
+from app.services.reminder_scheduler import reminder_scheduler
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -155,10 +157,12 @@ async def check_redis_health() -> dict:
     except Exception as e:
         logger.warning(f"Redis health check failed: {e}")
         return {"status": "unhealthy", "connected": False, "error": str(e)}
+
 # ==================== APP INITIALIZATION ====================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan manager - handles startup and shutdown events."""
     logger.info("🚀 Action Tracker STARTUP")
     logger.info(f"🔗 ROOT_PATH: '{ROOT_PATH}' (empty = local dev)")
     logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
@@ -171,20 +175,49 @@ async def lifespan(app: FastAPI):
     else:
         logger.error(f"❌ Database connection failed: {db_health.get('error', 'Unknown error')}")
 
+    # Initialize Redis
     await init_redis()
+    logger.info("✅ Redis initialized")
+
+    # Initialize MinIO bucket
     minio_service.ensure_bucket()
+    logger.info("✅ MinIO bucket ensured")
 
-    yield
+    # ==================== START REMINDER SCHEDULER ====================
+    # Create a background task for the reminder scheduler
+    scheduler_task = asyncio.create_task(reminder_scheduler.start())
+    logger.info("✅ Meeting reminder scheduler started in background")
 
+    # Store the task so we can cancel it on shutdown
+    app.state.scheduler_task = scheduler_task
+
+    yield  # Application runs here
+
+    # ==================== SHUTDOWN CLEANUP ====================
+    logger.info("🛑 Shutting down Action Tracker...")
+
+    # Stop the reminder scheduler
+    if hasattr(app.state, 'scheduler_task'):
+        app.state.scheduler_task.cancel()
+        try:
+            await app.state.scheduler_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("✅ Reminder scheduler stopped")
+
+    # Close Redis connection
     await close_redis()
-    logger.info("🛑 Redis connection closed")
-    
-    
+    logger.info("✅ Redis connection closed")
 
-
+    # Close database connections
     if async_engine:
         await async_engine.dispose()
-        logger.info("🛑 Database connections closed")
+        logger.info("✅ Database connections closed")
+
+    logger.info("🛑 Action Tracker shutdown complete")
+
+
+# ==================== CREATE FASTAPI APP ====================
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -194,6 +227,9 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ==================== RATE LIMITER ====================
 app.state.limiter = limiter
@@ -341,7 +377,8 @@ async def health_check():
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
         "service": settings.PROJECT_NAME,
-        "version": settings.VERSION
+        "version": settings.VERSION,
+        "reminder_scheduler": "running" if hasattr(app.state, 'scheduler_task') and not app.state.scheduler_task.done() else "stopped"
     }
 
 @app.get("/health/detailed", tags=["Health"])
@@ -360,6 +397,9 @@ async def detailed_health_check():
     elif system_health["status"] == "degraded" or redis_health["status"] != "healthy":
         overall_status = "degraded"
 
+    # Add scheduler status
+    scheduler_status = "running" if hasattr(app.state, 'scheduler_task') and not app.state.scheduler_task.done() else "stopped"
+
     response = {
         "status": overall_status,
         "timestamp": datetime.utcnow().isoformat(),
@@ -369,6 +409,10 @@ async def detailed_health_check():
             "system": system_health,
             "application": app_health,
             "redis": redis_health,
+            "reminder_scheduler": {
+                "status": scheduler_status,
+                "running": scheduler_status == "running"
+            }
         }
     }
 

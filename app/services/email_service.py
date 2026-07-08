@@ -1,5 +1,6 @@
 # app/services/email_service.py - FIXED for STARTTLS
 
+from email.mime.image import MIMEImage
 import smtplib
 import ssl
 import socket
@@ -115,6 +116,103 @@ class EmailService:
     @property
     def frontend_url(self) -> str:
         return getattr(settings, 'FRONTEND_URL', 'http://localhost:8001')
+
+
+
+
+# === NEW: Support for CID images ===
+    def _create_email_message(
+        self, 
+        to_email: str, 
+        subject: str, 
+        html_content: str, 
+        logo_info: Optional[Dict] = None
+    ) -> MIMEMultipart:
+        """Create MIME message with optional embedded logo"""
+        message = MIMEMultipart("related")
+        message["Subject"] = subject
+        message["From"] = f"{self.config.from_name} <{self.config.from_email}>"
+        message["To"] = to_email
+        message["Date"] = formatdate(localtime=True)
+        message["Message-ID"] = make_msgid()
+
+        # Alternative text + HTML
+        plain_text = re.sub(r'<[^>]+>', '', html_content)
+        plain_text = re.sub(r'\n\s*\n', '\n\n', plain_text).strip()
+
+        message.attach(MIMEText(plain_text, "plain", "utf-8"))
+        message.attach(MIMEText(html_content, "html", "utf-8"))
+
+        # Attach logo as embedded image (CID)
+        if logo_info and logo_info.get("type") == "cid":
+            image = MIMEImage(logo_info["data"], _subtype=logo_info["mime_type"].split('/')[-1])
+            image.add_header('Content-ID', f'<{logo_info["cid"]}>')
+            image.add_header('Content-Disposition', 'inline', filename=f"logo{Path(logo_info.get('mime_type','')).suffix or '.jpg'}")
+            message.attach(image)
+            logger.info(f"📎 Embedded logo with CID: {logo_info['cid']}")
+
+        return message
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((smtplib.SMTPServerDisconnected, socket.timeout, ConnectionError))
+    )
+    def _send_email_sync(self, to_email: str, subject: str, html_content: str, logo_info: Optional[Dict] = None) -> Tuple[bool, str]:
+        """Send email with support for embedded images"""
+        if not self.config.is_configured:
+            return False, "Email service not configured"
+
+        server = None
+        try:
+            message = self._create_email_message(to_email, subject, html_content, logo_info)
+
+            server = self._create_smtp_connection()
+
+            if self.config.username and self.config.password:
+                server.login(self.config.username, self.config.password)
+
+            server.send_message(message)
+            logger.info(f"✅ Email sent successfully to {to_email}")
+            return True, ""
+
+        except Exception as e:
+            logger.error(f"❌ Failed to send email: {e}")
+            return False, str(e)
+        finally:
+            if server:
+                try:
+                    server.quit()
+                except:
+                    pass
+
+    async def send_email(
+        self, 
+        to_email: str, 
+        subject: str, 
+        html_content: str, 
+        logo_info: Optional[Dict] = None
+    ) -> bool:
+        """Async email send with logo support"""
+        if not to_email:
+            return False
+
+        try:
+            loop = asyncio.get_running_loop()
+            success, error_msg = await loop.run_in_executor(
+                None, 
+                self._send_email_sync, 
+                to_email, 
+                subject, 
+                html_content,
+                logo_info
+            )
+            return success
+        except Exception as e:
+            logger.error(f"Unexpected error sending email: {e}")
+            return False
+
+
 
     def _get_secret_key(self) -> str:
         if hasattr(settings.SECRET_KEY, 'get_secret_value'):

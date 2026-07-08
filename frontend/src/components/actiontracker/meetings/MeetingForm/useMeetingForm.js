@@ -1,4 +1,5 @@
 // src/components/meetings/MeetingForm/useMeetingForm.js
+
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -21,9 +22,14 @@ import {
   clearCurrentMeeting
 } from '../../../../store/slices/actionTracker/meetingSlice';
 
-// Helper function to clean payload - remove all unwanted fields
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Clean payload - remove all unwanted fields (whitelist approach)
+ */
 const cleanPayload = (obj) => {
-  // List of fields to KEEP (whitelist approach)
   const allowedFields = [
     'title', 'description', 'meeting_date', 'start_time', 'end_time',
     'location_text', 'location_id', 'gps_coordinates', 'agenda',
@@ -33,7 +39,6 @@ const cleanPayload = (obj) => {
   
   const cleaned = {};
   Object.keys(obj).forEach(key => {
-    // Only keep allowed fields
     if (allowedFields.includes(key)) {
       const value = obj[key];
       if (value !== undefined && 
@@ -46,7 +51,10 @@ const cleanPayload = (obj) => {
   });
   return cleaned;
 };
-// Helper to extract error message
+
+/**
+ * Extract error message from API error
+ */
 const getErrorMessage = (error) => {
   if (error.response?.data?.detail) {
     if (Array.isArray(error.response.data.detail)) {
@@ -57,6 +65,95 @@ const getErrorMessage = (error) => {
   return error.message || 'An unexpected error occurred';
 };
 
+/**
+ * Format a Date object to YYYY-MM-DD using LOCAL components.
+ *
+ * The DatePicker (MUI + AdapterDateFns) always hands back a Date
+ * representing LOCAL midnight of the picked calendar day - it has no
+ * concept of UTC. Reading UTC components (getUTCFullYear/getUTCDate) off
+ * that Date shifts the day backward for any timezone ahead of UTC: local
+ * midnight of July 8 in UTC+3 is 2026-07-07T21:00:00Z, so getUTCDate()
+ * would wrongly return 7. This is what caused meeting_date to save one day
+ * behind. A plain calendar date has no time-of-day meaning, so it must
+ * stay entirely in local-component arithmetic and never touch UTC or
+ * toISOString().
+ */
+const formatDateLocal = (date) => {
+  if (!date) return null;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return null;
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Parse a YYYY-MM-DD string to a Date at LOCAL midnight - matches what the
+ * DatePicker itself produces, so the same calendar day survives every
+ * round trip through form state regardless of the browser's timezone
+ * offset.
+ */
+const parseDateLocal = (dateStr) => {
+  if (!dateStr) return null;
+  
+  // If it's already a Date object
+  if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
+    return dateStr;
+  }
+  
+  // If it's a string in YYYY-MM-DD format
+  if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  
+  // Try parsing as ISO string
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return d;
+  } catch {
+    // Ignore
+  }
+  
+  return null;
+};
+
+/**
+ * Parse time string to Date object
+ */
+const parseTime = (timeStr) => {
+  if (!timeStr) return null;
+  
+  if (timeStr instanceof Date && !isNaN(timeStr.getTime())) {
+    return timeStr;
+  }
+  
+  if (typeof timeStr === 'string') {
+    // If it's in HH:mm:ss format
+    if (/^\d{2}:\d{2}(:\d{2})?$/.test(timeStr)) {
+      const [hours, minutes, seconds = '00'] = timeStr.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes, seconds, 0);
+      return date;
+    }
+    
+    try {
+      const d = new Date(timeStr);
+      if (!isNaN(d.getTime())) return d;
+    } catch {
+      // Ignore
+    }
+  }
+  
+  return null;
+};
+
+// ============================================================================
+// Main Hook
+// ============================================================================
+
 export const useMeetingForm = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -65,13 +162,25 @@ export const useMeetingForm = () => {
   const isEditMode = Boolean(id);
   const returnPath = location.state?.from || '/meetings';
 
+  // ==========================================================================
+  // Refs
+  // ==========================================================================
+
   const initialParticipantsLoaded = useRef(false);
   const isMounted = useRef(true);
+
+  // ==========================================================================
+  // Redux Selectors
+  // ==========================================================================
 
   const meetingParticipants = useSelector(selectMeetingParticipantsAll);
   const chairperson = useSelector(selectMeetingChairperson);
   const participantsLoading = useSelector(selectParticipantsLoading);
   const { isLoading: submitting, success } = useSelector(state => state.meetings);
+
+  // ==========================================================================
+  // Local State
+  // ==========================================================================
 
   // Form state
   const [activeStep, setActiveStep] = useState(0);
@@ -113,8 +222,11 @@ export const useMeetingForm = () => {
   const [restrictedDepartmentName, setRestrictedDepartmentName] = useState('');
   const [gpsEnabled, setGpsEnabled] = useState(false);
   const [departmentsList, setDepartmentsList] = useState([]);
-  
-  // Computed values
+
+  // ==========================================================================
+  // Computed Values
+  // ==========================================================================
+
   const apiLoading = submitting || participantsLoading || formLoading || isSubmitting;
   const chairpersonName = useMemo(() => chairperson?.name || 'Not selected', [chairperson]);
   const pageTitle = isEditMode ? 'Edit Meeting' : 'Create New Meeting';
@@ -135,7 +247,9 @@ export const useMeetingForm = () => {
     [meetingParticipants]
   );
 
-  // ==================== Department Helpers ====================
+  // ==========================================================================
+  // Department Helpers
+  // ==========================================================================
   
   const fetchUserDepartments = useCallback(async () => {
     try {
@@ -186,7 +300,9 @@ export const useMeetingForm = () => {
     setFormDirty(true);
   }, []);
 
-  // ==================== Lifecycle ====================
+  // ==========================================================================
+  // Lifecycle Hooks
+  // ==========================================================================
   
   useEffect(() => {
     isMounted.current = true;
@@ -245,9 +361,12 @@ export const useMeetingForm = () => {
       dispatch(fetchMeetingById(id)).unwrap()
         .then(async (meeting) => {
           if (meeting && isMounted.current) {
-            const meetingDate = new Date(meeting.meeting_date);
-            const startTime = meeting.start_time ? new Date(meeting.start_time) : null;
-            const endTime = meeting.end_time ? new Date(meeting.end_time) : null;
+            // Parse dates using LOCAL midnight - see formatDateLocal/
+            // parseDateLocal comments above for why UTC was wrong here.
+            const meetingDate = parseDateLocal(meeting.meeting_date);
+            const startTime = parseTime(meeting.start_time);
+            const endTime = parseTime(meeting.end_time);
+            
             setFormData({
               title: meeting.title || '',
               description: meeting.description || '',
@@ -268,6 +387,7 @@ export const useMeetingForm = () => {
               gps_latitude: meeting.gps_coordinates?.split(',')[0] || '',
               gps_longitude: meeting.gps_coordinates?.split(',')[1] || '',
             });
+            
             if (meeting.gps_coordinates) setGpsEnabled(true);
             setVisibility(meeting.visibility || 'open');
             
@@ -317,25 +437,93 @@ export const useMeetingForm = () => {
     };
   }, [dispatch, success]);
 
-  // ==================== Form Handlers ====================
+  // ==========================================================================
+  // Form Handlers
+  // ==========================================================================
   
   const handleChange = useCallback((e) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
     setFormDirty(true);
   }, []);
 
+  /**
+   * Handle date change - stores as YYYY-MM-DD string using LOCAL components.
+   * The DatePicker gives us local midnight of the picked day; formatting
+   * with local components (not UTC) preserves the exact calendar day the
+   * user selected, regardless of timezone.
+   */
   const handleDateChange = useCallback((date) => {
-    setFormData(prev => ({ ...prev, meeting_date: date }));
+    if (!date) {
+      setFormData(prev => ({ ...prev, meeting_date: null }));
+      setFormDirty(true);
+      return;
+    }
+
+    // Parse the date
+    let dateObj = date;
+    if (typeof date === 'string') {
+      dateObj = new Date(date);
+    }
+
+    if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
+      console.warn('Invalid date received:', date);
+      return;
+    }
+
+    // Format as YYYY-MM-DD using LOCAL components
+    const formattedDate = formatDateLocal(dateObj);
+
+    setFormData(prev => ({ 
+      ...prev, 
+      meeting_date: formattedDate
+    }));
     setFormDirty(true);
   }, []);
 
+  /**
+   * Handle start time change - stores as Date object
+   */
   const handleStartTimeChange = useCallback((time) => {
-    setFormData(prev => ({ ...prev, start_time: time }));
+    if (!time) {
+      setFormData(prev => ({ ...prev, start_time: null }));
+      setFormDirty(true);
+      return;
+    }
+
+    const timeObj = parseTime(time);
+    if (!timeObj) {
+      console.warn('Invalid start time received:', time);
+      return;
+    }
+
+    setFormData(prev => ({ 
+      ...prev, 
+      start_time: timeObj 
+    }));
     setFormDirty(true);
   }, []);
 
+  /**
+   * Handle end time change - stores as Date object
+   */
   const handleEndTimeChange = useCallback((time) => {
-    setFormData(prev => ({ ...prev, end_time: time }));
+    if (!time) {
+      setFormData(prev => ({ ...prev, end_time: null }));
+      setFormDirty(true);
+      return;
+    }
+
+    const timeObj = parseTime(time);
+    if (!timeObj) {
+      console.warn('Invalid end time received:', time);
+      return;
+    }
+
+    setFormData(prev => ({ 
+      ...prev, 
+      end_time: timeObj 
+    }));
     setFormDirty(true);
   }, []);
 
@@ -369,7 +557,9 @@ export const useMeetingForm = () => {
     setFormDirty(true);
   }, []);
 
-  // ==================== Participant Handlers ====================
+  // ==========================================================================
+  // Participant Handlers
+  // ==========================================================================
   
   const handleAddExistingUser = useCallback((user) => {
     dispatch(addCustomParticipant({ 
@@ -426,7 +616,9 @@ export const useMeetingForm = () => {
     });
   }, [dispatch]);
 
-  // ==================== Navigation Handlers ====================
+  // ==========================================================================
+  // Navigation Handlers
+  // ==========================================================================
   
   const handleNext = useCallback(() => {
     if (activeStep === 0 && !isValid) {
@@ -460,68 +652,95 @@ export const useMeetingForm = () => {
     }
   }, [formDirty, navigate, returnPath, dispatch]);
 
-  // ==================== Submission Handler ====================
+  // ==========================================================================
+  // Submission Handler
+  // ==========================================================================
   
-const buildMeetingPayload = useCallback(() => {
-  const meetingDate = formData.meeting_date;
-  const startDateTime = new Date(meetingDate);
-  startDateTime.setHours(formData.start_time.getHours(), formData.start_time.getMinutes());
+  const buildMeetingPayload = useCallback(() => {
+    // Get the date as a string in YYYY-MM-DD format - this is already
+    // correct (produced by formatDateLocal in handleDateChange, or
+    // parseDateLocal + re-formatted on load), so it's sent through as-is
+    // below rather than being rebuilt from startDateTime.toISOString(),
+    // which was the second point where the day used to shift.
+    const meetingDateStr = formData.meeting_date;
+    
+    // Create start datetime
+    let startDateTime = null;
+    if (meetingDateStr) {
+      // Parse the date string at local midnight
+      const dateObj = parseDateLocal(meetingDateStr);
+      if (dateObj) {
+        startDateTime = new Date(dateObj);
+        if (formData.start_time) {
+          const startTime = parseTime(formData.start_time);
+          if (startTime) {
+            startDateTime.setHours(startTime.getHours(), startTime.getMinutes());
+          }
+        }
+      }
+    }
 
-  let endDateTime = null;
-  if (formData.end_time) {
-    endDateTime = new Date(meetingDate);
-    endDateTime.setHours(formData.end_time.getHours(), formData.end_time.getMinutes());
-  }
+    let endDateTime = null;
+    if (startDateTime && formData.end_time) {
+      const endTime = parseTime(formData.end_time);
+      if (endTime) {
+        endDateTime = new Date(startDateTime);
+        endDateTime.setHours(endTime.getHours(), endTime.getMinutes());
+        // If end time is before start time, add a day
+        if (endDateTime <= startDateTime) {
+          endDateTime.setDate(endDateTime.getDate() + 1);
+        }
+      }
+    }
 
-  const chairpersonParticipant = meetingParticipants.find(p => p.is_chairperson === true);
+    const chairpersonParticipant = meetingParticipants.find(p => p.is_chairperson === true);
 
-  // Clean participants - only include allowed fields
-  const cleanParticipants = meetingParticipants.map(p => {
-    const participant = {
-      id: p.is_existing ? p.id : undefined,
-      name: p.name,
-      email: p.email || null,
-      telephone: p.telephone || null,
-      title: p.title || null,
-      organization: p.organization || null,
-      is_chairperson: Boolean(p.is_chairperson),
-      is_secretary: p.name === formData.secretary_name,
-    };
-    // Remove undefined values
-    Object.keys(participant).forEach(key => {
-      if (participant[key] === undefined) delete participant[key];
+    // Clean participants - only include allowed fields
+    const cleanParticipants = meetingParticipants.map(p => {
+      const participant = {
+        id: p.is_existing ? p.id : undefined,
+        name: p.name,
+        email: p.email || null,
+        telephone: p.telephone || null,
+        title: p.title || null,
+        organization: p.organization || null,
+        is_chairperson: Boolean(p.is_chairperson),
+        is_secretary: p.name === formData.secretary_name,
+      };
+      // Remove undefined values
+      Object.keys(participant).forEach(key => {
+        if (participant[key] === undefined) delete participant[key];
+      });
+      return participant;
     });
-    return participant;
-  });
 
-  const payload = {
-    title: formData.title,
-    description: formData.description || null,
-    meeting_date: startDateTime.toISOString().split('T')[0],
-    start_time: startDateTime.toISOString(),
-    end_time: endDateTime ? endDateTime.toISOString() : null,
-    location_text: formData.location_text || null,
-    location_id: formData.location_id || null,
-    gps_coordinates: (gpsEnabled && formData.gps_latitude && formData.gps_longitude) 
-      ? `${formData.gps_latitude},${formData.gps_longitude}` 
-      : null,
-    agenda: formData.agenda || null,
-    secretary_name: formData.secretary_name || null,
-    chairperson_name: chairpersonParticipant?.name || null,
-    organization_id: restrictedDepartmentId || null,
-    visibility: visibility,
-    restricted_department_id: visibility === 'department' ? restrictedDepartmentId : null,
-    custom_participants: cleanParticipants,
-  };
+    const payload = {
+      title: formData.title,
+      description: formData.description || null,
+      // Send the already-correct YYYY-MM-DD string directly - do NOT
+      // rebuild it from startDateTime.toISOString().split('T')[0]; that
+      // round-trips a local-time Date through UTC and shifts the day for
+      // any timezone ahead of UTC.
+      meeting_date: meetingDateStr || null,
+      start_time: startDateTime ? startDateTime.toISOString() : null,
+      end_time: endDateTime ? endDateTime.toISOString() : null,
+      location_text: formData.location_text || null,
+      location_id: formData.location_id || null,
+      gps_coordinates: (gpsEnabled && formData.gps_latitude && formData.gps_longitude) 
+        ? `${formData.gps_latitude},${formData.gps_longitude}` 
+        : null,
+      agenda: formData.agenda || null,
+      secretary_name: formData.secretary_name || null,
+      chairperson_name: chairpersonParticipant?.name || null,
+      organization_id: restrictedDepartmentId || null,
+      visibility: visibility,
+      restricted_department_id: visibility === 'department' ? restrictedDepartmentId : null,
+      custom_participants: cleanParticipants,
+    };
 
-  // Log the payload before cleaning to debug
- 
-  
-  const cleaned = cleanPayload(payload);
-  
-  return cleaned;
-}, [formData, gpsEnabled, meetingParticipants, visibility, restrictedDepartmentId]);
-
+    const cleaned = cleanPayload(payload);
+    return cleaned;
+  }, [formData, gpsEnabled, meetingParticipants, visibility, restrictedDepartmentId]);
 
   const buildRecurringPayload = useCallback((basePayload) => {
     if (!recurrence) return basePayload;
@@ -570,22 +789,20 @@ const buildMeetingPayload = useCallback(() => {
     try {
       const basePayload = buildMeetingPayload();
 
-    
-    // Manually remove any remaining unwanted fields
-    delete basePayload.has_online_meeting;
-    delete basePayload.has_physical_meeting;
-    delete basePayload.platform;
-    delete basePayload.meeting_link;
-    delete basePayload.passcode;
-    delete basePayload.dial_in_numbers;
-    delete basePayload.venue;
-    delete basePayload.address;
-    delete basePayload.location_instructions;
-    delete basePayload.send_reminders;
-    delete basePayload.reminder_minutes_before;
-    delete basePayload.meeting_id_online;
-    delete basePayload.meeting_id;
-    
+      // Manually remove any remaining unwanted fields
+      delete basePayload.has_online_meeting;
+      delete basePayload.has_physical_meeting;
+      delete basePayload.platform;
+      delete basePayload.meeting_link;
+      delete basePayload.passcode;
+      delete basePayload.dial_in_numbers;
+      delete basePayload.venue;
+      delete basePayload.address;
+      delete basePayload.location_instructions;
+      delete basePayload.send_reminders;
+      delete basePayload.reminder_minutes_before;
+      delete basePayload.meeting_id_online;
+      delete basePayload.meeting_id;
 
       if (isRecurring && recurrence) {
         if (mappingsLoading) {
@@ -594,15 +811,15 @@ const buildMeetingPayload = useCallback(() => {
           return;
         }
         const recurringPayload = buildRecurringPayload(basePayload);
-         await api.post('/recurring-meetings/', recurringPayload);
+        await api.post('/recurring-meetings/', recurringPayload);
         setSnackbar({ open: true, message: 'Recurring meeting created successfully!', severity: 'success' });
       } 
       else if (isEditMode) {
-         await dispatch(updateMeeting({ id, data: basePayload })).unwrap();
+        await dispatch(updateMeeting({ id, data: basePayload })).unwrap();
         setSnackbar({ open: true, message: 'Meeting updated successfully!', severity: 'success' });
       } 
       else {
-         await dispatch(createMeeting(basePayload)).unwrap();
+        await dispatch(createMeeting(basePayload)).unwrap();
         setSnackbar({ open: true, message: 'Meeting created successfully!', severity: 'success' });
       }
 
@@ -623,6 +840,10 @@ const buildMeetingPayload = useCallback(() => {
     recurrence, mappingsLoading, buildMeetingPayload, buildRecurringPayload,
     dispatch, id, navigate, returnPath
   ]);
+
+  // ==========================================================================
+  // Return
+  // ==========================================================================
 
   return {
     // State

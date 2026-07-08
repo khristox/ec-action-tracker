@@ -109,6 +109,8 @@ const COMPONENT_IMPORTS = {
   'EditMeeting':            () => import('./components/actiontracker/meetings/EditMeeting'),
   'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm/MeetingForm'),
   'MeetingRecorder':        () => import('./components/actiontracker/meetings/MeetingRecorder'),
+  'MeetingEmailNotifications': () => import('./components/actiontracker/meetings/components/meetings/MeetingEmailNotifications'),
+
 
   'RecurringMeetingDetail': () => import('./components/actiontracker/meetings/RecurringMeetingDetail'),
 
@@ -264,6 +266,8 @@ const CreateMeeting    = createLazyComponent('CreateMeeting');
 const MeetingDetail    = createLazyComponent('MeetingDetail');
 const EditMeeting      = createLazyComponent('EditMeeting');
 const MeetingRecorder  = createLazyComponent('MeetingRecorder');
+const MeetingEmailNotifications = createLazyComponent('MeetingEmailNotifications'); // ← add this
+
 
 // Actions
 const ActionsList      = createLazyComponent('ActionsList');
@@ -502,11 +506,12 @@ const routeConfig = {
   ],
 
   // Regular meeting routes — no microphone access
-  regularMeetingRoutes: [
-    { path: 'meetings',             element: <Meetings /> },
-    { path: 'meetings/create',      element: <MeetingForm /> },
-    { path: 'meetings/:id',         element: <MeetingDetail /> },
-    { path: 'meetings/:id/edit',    element: <MeetingForm /> },
+ regularMeetingRoutes: [
+    { path: 'meetings',                   element: <Meetings /> },
+    { path: 'meetings/create',            element: <MeetingForm /> },
+    { path: 'meetings/:id',               element: <MeetingDetail /> },
+    { path: 'meetings/:id/edit',          element: <MeetingForm /> },
+    { path: 'meetings/:id/notifications', element: <MeetingEmailNotifications /> },
   ],
 
     // ADD RECURRING MEETING ROUTES HERE

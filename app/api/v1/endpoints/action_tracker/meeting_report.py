@@ -43,7 +43,7 @@ def get_logo_base64():
         Path("public/logo1.png"),
         Path("../public/logo1.png"),
         Path("static/images/logo1.png"),
-        Path("app/static/images/logo1.png"),
+        Path("static/images/logo1.png"),
     ]
 
     for logo_path in logo_paths:

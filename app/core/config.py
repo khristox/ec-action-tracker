@@ -145,6 +145,18 @@ class Settings(BaseSettings):
         extra="ignore",
         use_enum_values=True
     )
+
+    # Logo Settings
+    ORGANIZATION_NAME: str = "Electoral Commission"
+    LOGO_URL: Optional[str] = None 
+    FOOTER_LOGO_URL: Optional[str] = None
+    LOGO_ALT_TEXT: str = "EC"
+    LOGO_USE_BASE64: bool = True 
+    LOGO_LOCAL_PATH: str = "/static/images/logo.jpg"
+    
+    # Email Settings
+    EMAIL_FROM_NAME: str = "Meeting Management System"
+    EMAIL_FROM_ADDRESS: str = "noreply@yourdomain.com"
     
     @field_validator("EMAIL_PASSWORD", mode="before")
     @classmethod

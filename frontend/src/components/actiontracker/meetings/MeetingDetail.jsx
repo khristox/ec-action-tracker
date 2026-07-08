@@ -91,6 +91,7 @@ import {
   Code as CodeIcon,
   ViewStream as ViewStreamIcon,
   ViewAgenda as ViewAgendaIcon,
+  MarkEmailRead as MarkEmailReadIcon,
 } from '@mui/icons-material';
 import {
   fetchMeetingById,
@@ -584,9 +585,14 @@ const HeaderBar = memo(({
   onViewModeChange,
   canSendNotifications,
   hasUpdatePermission,
+  emailSentCount,
+  emailFailedCount,
+  onEmailHistoryOpen,
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
+
+  const emailTooltipTitle = `${emailSentCount} email${emailSentCount !== 1 ? 's' : ''} sent${emailFailedCount ? ` \u00b7 ${emailFailedCount} failed` : ''}`;
 
   return (
     <AppBar
@@ -621,6 +627,13 @@ const HeaderBar = memo(({
                 </Badge>
               </IconButton>
             )}
+            <Tooltip title={emailTooltipTitle} arrow>
+              <IconButton onClick={onEmailHistoryOpen}>
+                <Badge badgeContent={emailSentCount} color="success" max={99}>
+                  <MarkEmailReadIcon />
+                </Badge>
+              </IconButton>
+            </Tooltip>
             <IconButton onClick={onRefresh}><RefreshIcon /></IconButton>
             <IconButton onClick={onMoreMenuOpen}><MoreVertIcon /></IconButton>
           </Stack>
@@ -635,6 +648,13 @@ const HeaderBar = memo(({
                 </IconButton>
               </Tooltip>
             )}
+            <Tooltip title={emailTooltipTitle} arrow>
+              <IconButton onClick={onEmailHistoryOpen} size="small">
+                <Badge badgeContent={emailSentCount} color="success" max={99}>
+                  <MarkEmailReadIcon />
+                </Badge>
+              </IconButton>
+            </Tooltip>
             <Tooltip title="Refresh"><IconButton onClick={onRefresh} size="small"><RefreshIcon /></IconButton></Tooltip>
             {hasUpdatePermission && (
               <Tooltip title="Edit Meeting"><IconButton onClick={onEdit} size="small"><Edit /></IconButton></Tooltip>
@@ -874,6 +894,33 @@ const MeetingDetail = () => {
 
   const [viewMode, setViewMode] = useState('simple');
 
+  // ==== Email notification badge count ====
+  // Only fetched to drive the header badge/tooltip count - clicking the
+  // icon navigates to a dedicated full page (MeetingEmailNotifications)
+  // rather than opening an in-place dialog.
+  const [emailNotifications, setEmailNotifications] = useState([]);
+
+  const fetchEmailNotifications = useCallback(async () => {
+    if (!id) return;
+    try {
+      const response = await api.get('/notifications', {
+        params: { meeting_id: id, channel: 'email', limit: 50 }
+      });
+      setEmailNotifications(response.data?.items || []);
+    } catch (err) {
+      console.error('Error fetching email notification count:', err);
+    }
+  }, [id]);
+
+  const emailSentCount = useMemo(
+    () => emailNotifications.filter((n) => n.status === 'successful').length,
+    [emailNotifications]
+  );
+  const emailFailedCount = useMemo(
+    () => emailNotifications.filter((n) => n.status === 'failed').length,
+    [emailNotifications]
+  );
+
   const handleViewModeChange = useCallback((mode) => {
     setViewMode(mode);
   }, []);
@@ -928,43 +975,12 @@ const MeetingDetail = () => {
   );
 
   // ---- FIX: always render Tabs/TabPanels with a value that's actually visible ----
-  // `tabValue` state can briefly point at a tab that isn't in
-  // `visibleTabsForMode` — e.g. on first mount, before permissions have
-  // loaded, "Minutes" (value 0) isn't visible yet. If we render <Tabs
-  // value={tabValue}> directly in that window, MUI logs "None of the Tabs'
-  // children match with 0" because nothing with that value exists among the
-  // rendered <Tab>s. `effectiveTabValue` is computed synchronously during
-  // render (not just via the effect below) so the very first paint is
-  // already valid — the effect then persists that correction into state so
-  // other code reading `tabValue` directly (handlers, etc.) stays in sync.
   const isTabValueVisible = visibleTabsForMode.some((t) => t.value === tabValue);
   const effectiveTabValue = isTabValueVisible
     ? tabValue
     : (visibleTabsForMode[0]?.value ?? tabValue);
 
   // ---- FIX: keep the selected tab in sync with what's actually visible ----
-  // Previously, the Tabs component derived its `value` from the *position*
-  // of the active tab inside the permission/mode-filtered array
-  // (`activeVisibleIndex`), while each <Tab> had no explicit `value` (so MUI
-  // assigned them positional values 0,1,2...). Meanwhile the <TabPanel>s
-  // below kept switching on the raw `tabValue` state (the tab's real
-  // `value`, e.g. 0 for "Minutes").
-  //
-  // These two are not the same number once any earlier tab is filtered out
-  // — e.g. "Minutes" (value 0) requires VIEW_MINUTES. If that check is false
-  // (either the user genuinely lacks it, or permissions simply haven't
-  // finished loading yet), "Minutes" drops out of the visible array,
-  // "Documents" becomes position 0, and the Tabs bar highlights it as
-  // selected — but the TabPanel below still matches on tabValue === 0,
-  // which is still "Minutes". Result: "Documents" is shown as the active
-  // tab while Meeting Minutes' own Access Denied panel renders under it.
-  //
-  // Fix: give every <Tab> its real `value`, use that value directly for
-  // both the Tabs and TabPanels (no positional translation), and whenever
-  // the currently selected tab is no longer visible, persist a snap to the
-  // first tab that is (effectiveTabValue above already handles this for the
-  // current render; this effect keeps `tabValue` state itself correct for
-  // subsequent renders/handlers).
   useEffect(() => {
     if (visibleTabsForMode.length === 0) return;
     if (!isTabValueVisible) {
@@ -1087,6 +1103,7 @@ const MeetingDetail = () => {
     if (id) {
       fetchMeeting();
       fetchParticipants();
+      fetchEmailNotifications();
       dispatch(fetchActionTrackerAttributes());
     }
     return () => {
@@ -1094,15 +1111,16 @@ const MeetingDetail = () => {
       dispatch(clearNotificationError());
       dispatch(clearLastNotificationResult());
     };
-  }, [id, dispatch, fetchMeeting, fetchParticipants]);
+  }, [id, dispatch, fetchMeeting, fetchParticipants, fetchEmailNotifications]);
 
   useEffect(() => {
     if (lastNotificationResult) {
       setSnackbar({ open: true, message: `✅ Notifications sent to ${lastNotificationResult.sent} participants!`, severity: 'success' });
       setNotificationDialogOpen(false);
+      fetchEmailNotifications();
       dispatch(clearLastNotificationResult());
     }
-  }, [lastNotificationResult, dispatch]);
+  }, [lastNotificationResult, dispatch, fetchEmailNotifications]);
 
   useEffect(() => {
     if (notificationError) {
@@ -1117,7 +1135,8 @@ const MeetingDetail = () => {
     setInitialLoadComplete(false);
     fetchMeeting();
     fetchParticipants();
-  }, [fetchMeeting, fetchParticipants]);
+    fetchEmailNotifications();
+  }, [fetchMeeting, fetchParticipants, fetchEmailNotifications]);
 
   const handleBack = useCallback(() => navigate('/meetings'), [navigate]);
   const handleEdit = useCallback(() => {
@@ -1168,20 +1187,24 @@ const MeetingDetail = () => {
   }, [fetchParticipants, canSendNotifications]);
 
   const handleSendNotifications = useCallback((notificationData) => {
-    if (!notificationData.type || notificationData.type.length === 0) {
+    if (!notificationData.notification_type || notificationData.notification_type.length === 0) {
       setSnackbar({ open: true, message: 'Please select at least one notification type', severity: 'warning' });
       return;
     }
-    if (notificationData.type.includes('email') && !hasSendEmailNotificationPermission) {
+    if (notificationData.notification_type.includes('email') && !hasSendEmailNotificationPermission) {
       setSnackbar({ open: true, message: 'You do not have permission to send email notifications', severity: 'error' });
       return;
     }
-    if (notificationData.type.includes('in_app') && !hasSendInAppNotificationPermission) {
+    if (notificationData.notification_type.includes('in_app') && !hasSendInAppNotificationPermission) {
       setSnackbar({ open: true, message: 'You do not have permission to send in-app notifications', severity: 'error' });
       return;
     }
     dispatch(sendMeetingNotifications({ meetingId: id, notificationData }));
   }, [id, dispatch, hasSendEmailNotificationPermission, hasSendInAppNotificationPermission]);
+
+  const handleEmailHistoryOpen = useCallback(() => {
+    navigate(`/meetings/${id}/notifications`);
+  }, [navigate, id]);
 
   const handleStatusMenuOpen = (event) => setStatusMenuAnchor(event.currentTarget);
   const handleStatusMenuClose = () => setStatusMenuAnchor(null);
@@ -1249,8 +1272,6 @@ const MeetingDetail = () => {
   const handleSnackbarClose = () => setSnackbar((prev) => ({ ...prev, open: false }));
   const handleErrorClose = () => { setLocalError(null); dispatch(clearMeetingState()); };
 
-  // Direct value-based tab change — no positional translation needed since
-  // each <Tab> now carries its real `tab.value`.
   const handleTabChange = useCallback((_, newValue) => {
     setTabValue(newValue);
   }, []);
@@ -1315,6 +1336,9 @@ const MeetingDetail = () => {
         onViewModeChange={handleViewModeChange}
         canSendNotifications={canSendNotifications}
         hasUpdatePermission={canUpdateMeeting}
+        emailSentCount={emailSentCount}
+        emailFailedCount={emailFailedCount}
+        onEmailHistoryOpen={handleEmailHistoryOpen}
       />
 
       <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
@@ -1425,6 +1449,10 @@ const MeetingDetail = () => {
             <ListItemText>Send Notifications</ListItemText>
           </MenuItem>
         )}
+        <MenuItem onClick={() => { handleEmailHistoryOpen(); handleMoreMenuClose(); }}>
+          <ListItemIcon><Badge badgeContent={emailSentCount} color="success" max={99}><MarkEmailReadIcon /></Badge></ListItemIcon>
+          <ListItemText>View Email Notifications</ListItemText>
+        </MenuItem>
         {canUpdateMeeting && (
           <MenuItem onClick={handleEdit}><ListItemIcon><Edit /></ListItemIcon><ListItemText>Edit Meeting</ListItemText></MenuItem>
         )}

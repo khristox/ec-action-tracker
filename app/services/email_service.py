@@ -1,5 +1,4 @@
 # app/services/email_service.py - FIXED for STARTTLS
-
 from email.mime.image import MIMEImage
 import smtplib
 import ssl
@@ -15,11 +14,9 @@ from email.utils import formatdate, make_msgid
 from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime, timedelta
 from pathlib import Path
-
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from dataclasses import dataclass, field
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -30,6 +27,7 @@ template_env = Environment(
     loader=FileSystemLoader(template_dir),
     autoescape=True
 )
+
 
 @dataclass
 class EmailConfig:
@@ -48,16 +46,16 @@ class EmailConfig:
     @classmethod
     def from_settings(cls) -> "EmailConfig":
         password = cls._extract_password()
-        
+
         # Get settings with proper defaults for STARTTLS
         use_ssl = getattr(settings, 'EMAIL_USE_SSL', False)
         use_tls = getattr(settings, 'EMAIL_USE_TLS', True)
-        
+
         # Validation: Can't have both SSL and TLS
         if use_ssl and use_tls:
             logger.warning("⚠️ Both EMAIL_USE_SSL and EMAIL_USE_TLS are True. Using SSL (higher priority).")
             use_tls = False
-        
+
         config = cls(
             host=getattr(settings, 'EMAIL_HOST', None),
             port=int(getattr(settings, 'EMAIL_PORT', 587)),  # Default to 587 (STARTTLS)
@@ -70,7 +68,7 @@ class EmailConfig:
             timeout=int(getattr(settings, 'EMAIL_TIMEOUT', 30)),
         )
         config.is_configured = config._validate()
-        
+
         # Log the configuration mode
         if config.is_configured:
             if config.use_ssl:
@@ -79,13 +77,13 @@ class EmailConfig:
                 logger.info(f"📧 Email mode: STARTTLS on port {config.port}")
             else:
                 logger.warning(f"📧 Email mode: Unencrypted on port {config.port}")
-        
+
         return config
 
     @staticmethod
     def _extract_password() -> str:
         password_raw = getattr(settings, 'EMAIL_PASSWORD', None)
-        if not password_raw: 
+        if not password_raw:
             return ''
         if hasattr(password_raw, 'get_secret_value'):
             return password_raw.get_secret_value()
@@ -102,13 +100,13 @@ class EmailConfig:
             return False
         return True
 
+
 class EmailService:
     def __init__(self):
         self.config = EmailConfig.from_settings()
         self._secret_key = self._get_secret_key()
         self._algorithm = getattr(settings, 'ALGORITHM', 'HS256')
         self._project_name = getattr(settings, 'PROJECT_NAME', 'Action Tracker')
-
         if self.config.is_configured:
             # Test connection asynchronously to avoid blocking startup
             asyncio.create_task(self._test_and_log_connection_async())
@@ -117,42 +115,73 @@ class EmailService:
     def frontend_url(self) -> str:
         return getattr(settings, 'FRONTEND_URL', 'http://localhost:8001')
 
+    # === CID image support ===
 
-
-
-# === NEW: Support for CID images ===
     def _create_email_message(
-        self, 
-        to_email: str, 
-        subject: str, 
-        html_content: str, 
-        logo_info: Optional[Dict] = None
-    ) -> MIMEMultipart:
-        """Create MIME message with optional embedded logo"""
-        message = MIMEMultipart("related")
-        message["Subject"] = subject
-        message["From"] = f"{self.config.from_name} <{self.config.from_email}>"
-        message["To"] = to_email
-        message["Date"] = formatdate(localtime=True)
-        message["Message-ID"] = make_msgid()
+            self,
+            to_email: str,
+            subject: str,
+            html_content: str,
+            logo_info: Optional[Dict] = None
+        ) -> MIMEMultipart:
+            """Create MIME message with optional embedded logo.
 
-        # Alternative text + HTML
-        plain_text = re.sub(r'<[^>]+>', '', html_content)
-        plain_text = re.sub(r'\n\s*\n', '\n\n', plain_text).strip()
+            Structure matters here: `multipart/related`'s first sub-part is
+            its "root" per RFC 2387 - if plain text and HTML were both
+            attached flat under `related` (as this used to do), most clients
+            treat the plain-text part as the actual message and ignore the
+            HTML entirely, which is why formatted emails were showing up as
+            raw stripped-tag text. text/plain and text/html need to live
+            inside their own nested `multipart/alternative` (html last =
+            preferred), and only the CID image sits alongside it under the
+            outer `related` container.
+            """
+            has_cid_logo = bool(logo_info and logo_info.get("type") == "cid")
 
-        message.attach(MIMEText(plain_text, "plain", "utf-8"))
-        message.attach(MIMEText(html_content, "html", "utf-8"))
+            # Outer container: only needs to be "related" when there's an
+            # embedded image resource to relate to the HTML. Otherwise plain
+            # "alternative" is the correct (and simpler) container.
+            message = MIMEMultipart("related") if has_cid_logo else MIMEMultipart("alternative")
+            message["Subject"] = subject
+            message["From"] = f"{self.config.from_name} <{self.config.from_email}>"
+            message["To"] = to_email
+            message["Date"] = formatdate(localtime=True)
+            message["Message-ID"] = make_msgid()
 
-        # Attach logo as embedded image (CID)
-        if logo_info and logo_info.get("type") == "cid":
-            image = MIMEImage(logo_info["data"], _subtype=logo_info["mime_type"].split('/')[-1])
-            image.add_header('Content-ID', f'<{logo_info["cid"]}>')
-            image.add_header('Content-Disposition', 'inline', filename=f"logo{Path(logo_info.get('mime_type','')).suffix or '.jpg'}")
-            message.attach(image)
-            logger.info(f"📎 Embedded logo with CID: {logo_info['cid']}")
+            plain_text = re.sub(r'<[^>]+>', '', html_content)
+            plain_text = re.sub(r'\n\s*\n', '\n\n', plain_text).strip()
 
-        return message
+            if has_cid_logo:
+                # Nest text/plain + text/html inside their own alternative
+                # block first, THEN attach that block (and the image) to the
+                # outer related container.
+                alt_part = MIMEMultipart("alternative")
+                alt_part.attach(MIMEText(plain_text, "plain", "utf-8"))
+                alt_part.attach(MIMEText(html_content, "html", "utf-8"))
+                message.attach(alt_part)
 
+                image = MIMEImage(logo_info["data"], _subtype=logo_info["mime_type"].split('/')[-1])
+                image.add_header('Content-ID', f'<{logo_info["cid"]}>')
+                image.add_header('Content-Disposition', 'inline', filename=f"logo{Path(logo_info.get('mime_type','')).suffix or '.jpg'}")
+                message.attach(image)
+                logger.info(f"📎 Embedded logo with CID: {logo_info['cid']}")
+            else:
+                # No image resource to relate - plain alternative is correct.
+                # Order matters: html LAST = preferred, per RFC 2046.
+                message.attach(MIMEText(plain_text, "plain", "utf-8"))
+                message.attach(MIMEText(html_content, "html", "utf-8"))
+
+            return message
+
+
+    # NOTE: this used to be defined TWICE in this file - once here (with
+    # logo_info/CID support) and again further down without it. Since
+    # Python class bodies execute top-to-bottom, the second definition
+    # silently overwrote this one, meaning any call passing logo_info=...
+    # (e.g. from reminder_scheduler.py) raised a TypeError, because the
+    # active method didn't accept that parameter. The duplicate has been
+    # removed - this is now the only definition, and it already handles
+    # the no-logo case fine (logo_info defaults to None).
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -162,23 +191,31 @@ class EmailService:
         """Send email with support for embedded images"""
         if not self.config.is_configured:
             return False, "Email service not configured"
-
         server = None
         try:
             message = self._create_email_message(to_email, subject, html_content, logo_info)
-
             server = self._create_smtp_connection()
-
             if self.config.username and self.config.password:
                 server.login(self.config.username, self.config.password)
-
             server.send_message(message)
             logger.info(f"✅ Email sent successfully to {to_email}")
             return True, ""
-
+        except smtplib.SMTPAuthenticationError as e:
+            error_msg = f"Authentication failed: {e}"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg
+        except smtplib.SMTPRecipientsRefused as e:
+            error_msg = f"Recipient refused: {e}"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg
+        except smtplib.SMTPServerDisconnected as e:
+            error_msg = f"Server disconnected: {e}"
+            logger.error(f"❌ {error_msg}")
+            raise  # Let retry handler deal with this
         except Exception as e:
-            logger.error(f"❌ Failed to send email: {e}")
-            return False, str(e)
+            error_msg = f"Failed to send: {e}"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg
         finally:
             if server:
                 try:
@@ -187,32 +224,35 @@ class EmailService:
                     pass
 
     async def send_email(
-        self, 
-        to_email: str, 
-        subject: str, 
-        html_content: str, 
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
         logo_info: Optional[Dict] = None
     ) -> bool:
-        """Async email send with logo support"""
+        """Send email asynchronously, with optional embedded logo support"""
         if not to_email:
+            logger.warning("No recipient email provided")
             return False
-
+        if not self.config.is_configured:
+            logger.warning("Email service not configured, skipping email send")
+            return False
         try:
             loop = asyncio.get_running_loop()
             success, error_msg = await loop.run_in_executor(
-                None, 
-                self._send_email_sync, 
-                to_email, 
-                subject, 
+                None,
+                self._send_email_sync,
+                to_email,
+                subject,
                 html_content,
                 logo_info
             )
+            if not success:
+                logger.error(f"Email send failed: {error_msg}")
             return success
         except Exception as e:
-            logger.error(f"Unexpected error sending email: {e}")
+            logger.error(f"❌ Unexpected error sending email to {to_email}: {e}")
             return False
-
-
 
     def _get_secret_key(self) -> str:
         if hasattr(settings.SECRET_KEY, 'get_secret_value'):
@@ -229,37 +269,37 @@ class EmailService:
         """
         logger.debug(f"🔌 Connecting to {self.config.host}:{self.config.port} "
                     f"(SSL={self.config.use_ssl}, TLS={self.config.use_tls})")
-        
+
         try:
             # Case 1: SSL (direct SSL connection)
             if self.config.use_ssl:
                 context = ssl.create_default_context()
                 server = smtplib.SMTP_SSL(
-                    self.config.host, 
-                    self.config.port, 
-                    context=context, 
+                    self.config.host,
+                    self.config.port,
+                    context=context,
                     timeout=self.config.timeout
                 )
                 logger.debug("✅ SSL connection established")
-            
+
             # Case 2: STARTTLS or Plain
             else:
                 server = smtplib.SMTP(
-                    self.config.host, 
-                    self.config.port, 
+                    self.config.host,
+                    self.config.port,
                     timeout=self.config.timeout
                 )
                 logger.debug("✅ Plain SMTP connection established")
-                
+
                 # Upgrade to TLS if requested
                 if self.config.use_tls:
                     server.ehlo()  # Required for STARTTLS
                     server.starttls()
                     server.ehlo()  # Re-identify after TLS
                     logger.debug("✅ STARTTLS upgrade successful")
-            
+
             return server
-            
+
         except (smtplib.SMTPConnectError, smtplib.SMTPAuthenticationError,
                 socket.timeout, ConnectionRefusedError) as e:
             logger.error(f"❌ SMTP connection failed: {e}")
@@ -295,8 +335,17 @@ class EmailService:
             logger.error(f"❌ Template error ({template_name}): {e}")
             raise
 
-    # --- Token Management ---
+    def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
+        """
+        Public wrapper around _render_template. For callers that need the
+        rendered HTML without sending it immediately - e.g.
+        reminder_scheduler.py renders meeting_reminder.html here, then logs
+        the exact content to the notifications table before/independently
+        of the actual SMTP send via send_email().
+        """
+        return self._render_template(template_name, context)
 
+    # --- Token Management ---
     def generate_verification_token(self, user_id: str, email: str) -> str:
         """Generate JWT token for email verification"""
         expire = datetime.utcnow() + timedelta(hours=getattr(settings, 'EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS', 24))
@@ -328,140 +377,43 @@ class EmailService:
             return None
 
     # --- Email Sending Logic ---
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((smtplib.SMTPServerDisconnected, socket.timeout, ConnectionError))
-    )
-    def _send_email_sync(self, to_email: str, subject: str, html_content: str) -> Tuple[bool, str]:
-        """Blocking SMTP send with retry logic"""
-        if not self.config.is_configured:
-            return False, "Email service not configured"
-
-        server = None
-        try:
-            # Create multipart message
-            message = MIMEMultipart("alternative")
-            message["Subject"] = subject
-            message["From"] = f"{self.config.from_name} <{self.config.from_email}>"
-            message["To"] = to_email
-            message["Date"] = formatdate(localtime=True)
-            message["Message-ID"] = make_msgid(domain=self.config.host.split('.')[0] if self.config.host else 'localhost')
-
-            # Create plain text version by stripping HTML
-            plain_text = re.sub(r'<[^>]+>', '', html_content)
-            plain_text = re.sub(r'\n\s*\n', '\n\n', plain_text).strip()
-            
-            # Attach both versions
-            text_part = MIMEText(plain_text, "plain", "utf-8")
-            html_part = MIMEText(html_content, "html", "utf-8")
-            
-            message.attach(text_part)
-            message.attach(html_part)
-
-            # Create connection and send
-            server = self._create_smtp_connection()
-            
-            # Login if credentials provided
-            if self.config.username and self.config.password:
-                server.login(self.config.username, self.config.password)
-                logger.debug("✅ SMTP authentication successful")
-            
-            # Send the email
-            server.send_message(message)
-            logger.info(f"✅ Email sent successfully to {to_email}")
-            return True, ""
-            
-        except smtplib.SMTPAuthenticationError as e:
-            error_msg = f"Authentication failed: {e}"
-            logger.error(f"❌ {error_msg}")
-            return False, error_msg
-        except smtplib.SMTPRecipientsRefused as e:
-            error_msg = f"Recipient refused: {e}"
-            logger.error(f"❌ {error_msg}")
-            return False, error_msg
-        except smtplib.SMTPServerDisconnected as e:
-            error_msg = f"Server disconnected: {e}"
-            logger.error(f"❌ {error_msg}")
-            raise  # Let retry handler deal with this
-        except Exception as e:
-            error_msg = f"Failed to send: {e}"
-            logger.error(f"❌ {error_msg}")
-            return False, error_msg
-        finally:
-            if server:
-                try:
-                    server.quit()
-                except:
-                    pass
-
-    async def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
-        """Send email asynchronously"""
-        if not to_email:
-            logger.warning("No recipient email provided")
-            return False
-
-        if not self.config.is_configured:
-            logger.warning("Email service not configured, skipping email send")
-            return False
-
-        try:
-            loop = asyncio.get_running_loop()
-            success, error_msg = await loop.run_in_executor(
-                None, 
-                self._send_email_sync, 
-                to_email, 
-                subject, 
-                html_content
-            )
-            
-            if not success:
-                logger.error(f"Email send failed: {error_msg}")
-            
-            return success
-            
-        except Exception as e:
-            logger.error(f"❌ Unexpected error sending email to {to_email}: {e}")
-            return False
+    # (duplicate _send_email_sync / send_email definitions that used to be
+    # here have been removed - see the single definitions above)
 
     async def send_verification_email(self, to_email: str, token: str, username: str) -> Dict[str, Any]:
         """Send verification email to user"""
         start_time = time.time()
-        
+
         if not all([to_email, token, username]):
             return {"success": False, "message": "Missing required parameters"}
-        
+
         if not self.config.is_configured:
             return {"success": False, "message": "Email service not configured"}
-
         try:
             verification_url = f"{self.frontend_url}/verify-email?token={token}"
-            
+
             logger.info(f"📧 Sending verification email to: {to_email}")
             logger.debug(f"   Verification URL: {verification_url}")
-            
+
             # Render HTML template
             html_content = self._render_template("verification.html", {
                 "username": username,
                 "verification_url": verification_url,
                 "expires_in_hours": getattr(settings, 'EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS', 24)
             })
-            
+
             subject = f"Verify Your Email Address - {self._project_name}"
-            
+
             # Send email
             success = await self.send_email(to_email, subject, html_content)
-
             elapsed = time.time() - start_time
-            
+
             if success:
                 logger.info(f"✅ Verification email sent to {to_email} in {elapsed:.2f}s")
                 return {"success": True, "message": "Verification email sent"}
             else:
                 logger.error(f"❌ Failed to send verification email to {to_email}")
                 return {"success": False, "message": "Failed to send verification email"}
-
         except Exception as e:
             logger.error(f"❌ Failed to send verification email: {e}", exc_info=True)
             return {"success": False, "message": str(e)}
@@ -470,20 +422,18 @@ class EmailService:
         """Send welcome email after verification"""
         if not to_email or not self.config.is_configured:
             return False
-        
+
         try:
             html_content = self._render_template("welcome.html", {
                 "username": first_name or username,
                 "login_url": f"{self.frontend_url}/login"
             })
-            
+
             subject = f"Welcome to {self._project_name}!"
             success = await self.send_email(to_email, subject, html_content)
-
             if success:
                 logger.info(f"✅ Welcome email sent to {to_email}")
             return success
-
         except Exception as e:
             logger.error(f"❌ Failed to send welcome email: {e}")
             return False
@@ -492,23 +442,21 @@ class EmailService:
         """Send password reset email"""
         if not to_email or not self.config.is_configured:
             return False
-        
+
         try:
             reset_url = f"{self.frontend_url}/reset-password?token={token}"
-            
+
             html_content = self._render_template("password_reset.html", {
                 "username": username,
                 "reset_url": reset_url,
                 "expires_in_hours": getattr(settings, 'PASSWORD_RESET_TOKEN_EXPIRE_HOURS', 1)
             })
-            
+
             subject = f"Reset Your Password - {self._project_name}"
             success = await self.send_email(to_email, subject, html_content)
-
             if success:
                 logger.info(f"✅ Password reset email sent to {to_email}")
             return success
-
         except Exception as e:
             logger.error(f"❌ Failed to send password reset email: {e}")
             return False
@@ -530,10 +478,10 @@ class EmailService:
         server = None
         try:
             server = self._create_smtp_connection()
-            
+
             if self.config.username and self.config.password:
                 server.login(self.config.username, self.config.password)
-            
+
             server.quit()
             return True, "Connection successful"
         except Exception as e:
@@ -549,8 +497,6 @@ class EmailService:
         """Check if email service is configured"""
         return self.config.is_configured
 
-    # Add this method to your EmailService class (add it after generate_verification_token)
-
     def generate_password_reset_token(self, user_id: str, email: str) -> str:
         """Generate JWT token for password reset"""
         expire = datetime.utcnow() + timedelta(hours=getattr(settings, 'PASSWORD_RESET_TOKEN_EXPIRE_HOURS', 1))
@@ -565,6 +511,7 @@ class EmailService:
         token = jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
         logger.info(f"🔐 Generated password reset token for {email}")
         return token
+
 
 # Create singleton instance
 email_service = EmailService()

@@ -126,6 +126,8 @@ import MeetingRecorder from './MeetingRecorder';
 import api from '../../../services/api';
 import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
 
+import MeetingEmailNotifications from './components/meetings/MeetingEmailNotifications.jsx';
+
 // ==================== Permission Constants ====================
 const PERMISSIONS = {
   DELETE_MEETING: 'meeting:delete',
@@ -891,6 +893,7 @@ const MeetingDetail = () => {
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  
 
   const [viewMode, setViewMode] = useState('simple');
 

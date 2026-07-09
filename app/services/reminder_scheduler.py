@@ -151,19 +151,19 @@ class ReminderScheduler:
                 await db.rollback()
 
     async def _reminders_already_sent(self, db: AsyncSession, meeting_id) -> bool:
-        """Check if reminders already sent for this meeting."""
-        now = self._get_current_time()
-        one_hour_ago = now - timedelta(hours=1)
+            """Check if reminders already sent for this meeting."""
+            now = self._get_current_time()
+            one_hour_ago = now - timedelta(hours=1)
 
-        result = await db.execute(
-            select(Notification).where(
-                Notification.meeting_id == meeting_id,
-                Notification.template_name == "meeting_reminder",
-                Notification.status == NotificationStatus.SUCCESSFUL,
-                Notification.sent_at >= one_hour_ago
+            result = await db.execute(
+                select(Notification.id).where(
+                    Notification.meeting_id == meeting_id,
+                    Notification.template_name == "meeting_reminder",
+                    Notification.status == NotificationStatus.SUCCESSFUL,
+                    Notification.sent_at >= one_hour_ago
+                ).limit(1)
             )
-        )
-        return result.scalar_one_or_none() is not None
+            return result.first() is not None
 
     async def _send_reminder_to_participant(
         self,

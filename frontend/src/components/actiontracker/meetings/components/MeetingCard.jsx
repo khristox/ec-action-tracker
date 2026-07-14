@@ -30,9 +30,8 @@ import {
   CalendarToday,
   ChevronRight
 } from '@mui/icons-material';
-import { formatDate, formatTime, getStatusConfig } from '../utils/helpers';
 
-// ============ COLORS - Define locally to avoid import issues ============
+// ============ COLORS ============
 const COLORS = {
   primary: '#1976d2',
   secondary: '#dc004e',
@@ -51,70 +50,164 @@ const COLORS = {
   }
 };
 
-// ============ DEFAULT STATUS CONFIG ============
-const DEFAULT_STATUS_CONFIG = {
-  label: 'Unknown',
-  color: '#9E9E9E',
-  bgColor: '#F5F5F5',
-  textColor: '#424242'
+// ============ STATUS MAPPINGS ============
+// Map for MUI Chip colors (standard MUI color names)
+const STATUS_MUI_COLOR_MAP = {
+  'STARTED': 'success',
+  'ENDED': 'default',
+  'PENDING': 'warning',
+  'CANCELED': 'error',
+  'SCHEDULED': 'info',
+  'POSTPONED': 'warning',
+  'DRAFT': 'secondary',
+  'IN_PROGRESS': 'success',
+  'COMPLETED': 'default',
+  'UPCOMING': 'info',
 };
 
-// ============ HELPERS ============
-const getStatusColor = (status) => {
-  const statusMap = {
-    'scheduled': '#1976d2',
-    'in_progress': '#ed6c02',
-    'completed': '#2e7d32',
-    'cancelled': '#d32f2f',
-    'postponed': '#9c27b0',
-    'pending': '#0288d1',
+// Map for hex colors (for borders, backgrounds, etc.)
+const STATUS_HEX_COLOR_MAP = {
+  'STARTED': '#2e7d32',
+  'ENDED': '#757575',
+  'PENDING': '#ed6c02',
+  'CANCELED': '#d32f2f',
+  'SCHEDULED': '#0288d1',
+  'POSTPONED': '#ed6c02',
+  'DRAFT': '#9c27b0',
+  'IN_PROGRESS': '#2e7d32',
+  'COMPLETED': '#757575',
+  'UPCOMING': '#0288d1',
+};
+
+const STATUS_BG_COLOR_MAP = {
+  'STARTED': '#e8f5e9',
+  'ENDED': '#f5f5f5',
+  'PENDING': '#fff3e0',
+  'CANCELED': '#ffebee',
+  'SCHEDULED': '#e3f2fd',
+  'POSTPONED': '#f3e5f5',
+  'DRAFT': '#f3e5f5',
+  'IN_PROGRESS': '#e8f5e9',
+  'COMPLETED': '#f5f5f5',
+  'UPCOMING': '#e3f2fd',
+};
+
+const STATUS_LABEL_MAP = {
+  'STARTED': 'Started',
+  'ENDED': 'Ended',
+  'PENDING': 'Pending',
+  'CANCELED': 'Canceled',
+  'SCHEDULED': 'Scheduled',
+  'POSTPONED': 'Postponed',
+  'DRAFT': 'Draft',
+  'IN_PROGRESS': 'In Progress',
+  'COMPLETED': 'Completed',
+  'UPCOMING': 'Upcoming',
+};
+
+// ============ STATUS EXTRACTION HELPER ============
+/**
+ * Extract status information from meeting object
+ * Handles both string status and object status with short_name
+ */
+const extractStatusInfo = (meeting) => {
+  // DEBUG: Log what we're receiving
+  console.log('Extracting status from meeting:', {
+    id: meeting?.id,
+    title: meeting?.title,
+    status: meeting?.status,
+    status_type: typeof meeting?.status,
+    status_id: meeting?.status_id,
+  });
+
+  // Case 1: Status is an object with short_name (API response)
+  if (meeting?.status && typeof meeting.status === 'object') {
+    const shortName = meeting.status.short_name?.toUpperCase() || '';
+    const name = meeting.status.name || '';
+    const label = shortName || name || 'Unknown';
+    
+    // Use color from status object if available, otherwise use mapping
+    const color = meeting.status.color || STATUS_MUI_COLOR_MAP[shortName] || 'default';
+    const hexColor = meeting.status.hex_color || STATUS_HEX_COLOR_MAP[shortName] || '#757575';
+    const bgColor = meeting.status.bg_color || STATUS_BG_COLOR_MAP[shortName] || '#f5f5f5';
+    
+    return {
+      label,
+      color, // MUI color name (success, warning, error, etc.)
+      hexColor,
+      bgColor,
+      shortName,
+      raw: meeting.status,
+    };
+  }
+
+  // Case 2: Status is a string
+  if (typeof meeting?.status === 'string') {
+    const upper = meeting.status.toUpperCase();
+    const label = STATUS_LABEL_MAP[upper] || meeting.status;
+    const color = STATUS_MUI_COLOR_MAP[upper] || 'default';
+    const hexColor = STATUS_HEX_COLOR_MAP[upper] || '#757575';
+    const bgColor = STATUS_BG_COLOR_MAP[upper] || '#f5f5f5';
+    
+    return {
+      label,
+      color,
+      hexColor,
+      bgColor,
+      shortName: upper,
+      raw: meeting.status,
+    };
+  }
+
+  // Case 3: Try to use status_id with meeting status object
+  if (meeting?.status_id && meeting?.status && typeof meeting.status === 'object') {
+    const shortName = meeting.status.short_name?.toUpperCase() || '';
+    if (shortName) {
+      const label = meeting.status.short_name || meeting.status.name || 'Unknown';
+      const color = meeting.status.color || STATUS_MUI_COLOR_MAP[shortName] || 'default';
+      const hexColor = meeting.status.hex_color || STATUS_HEX_COLOR_MAP[shortName] || '#757575';
+      const bgColor = meeting.status.bg_color || STATUS_BG_COLOR_MAP[shortName] || '#f5f5f5';
+      
+      return {
+        label,
+        color,
+        hexColor,
+        bgColor,
+        shortName,
+        raw: meeting.status,
+      };
+    }
+  }
+
+  // Case 4: No status found
+  return {
+    label: 'Unknown',
+    color: 'default',
+    hexColor: '#757575',
+    bgColor: '#f5f5f5',
+    shortName: '',
+    raw: null,
   };
-  return statusMap[status] || '#9E9E9E';
 };
 
-const getStatusBgColor = (status) => {
-  const statusMap = {
-    'scheduled': '#e3f2fd',
-    'in_progress': '#fff3e0',
-    'completed': '#e8f5e9',
-    'cancelled': '#fbe9e7',
-    'postponed': '#f3e5f5',
-    'pending': '#e1f5fe',
-  };
-  return statusMap[status] || '#f5f5f5';
-};
-
-const getStatusLabel = (status) => {
-  const statusMap = {
-    'scheduled': 'Scheduled',
-    'in_progress': 'In Progress',
-    'completed': 'Completed',
-    'cancelled': 'Cancelled',
-    'postponed': 'Postponed',
-    'pending': 'Pending',
-  };
-  return statusMap[status] || 'Unknown';
-};
-
-// ============ SUB-COMPONENTS ============
-const StatusChip = React.memo(({ status, config }) => {
-  // Safe fallback if config is undefined
-  const safeConfig = config || DEFAULT_STATUS_CONFIG;
-  const label = safeConfig.label || getStatusLabel(status) || 'Unknown';
-  const color = safeConfig.color || getStatusColor(status) || '#9E9E9E';
-  const bgColor = safeConfig.bgColor || getStatusBgColor(status) || '#F5F5F5';
+// ============ COMPONENTS ============
+const StatusChip = React.memo(({ statusInfo }) => {
+  // Safely get values with fallbacks
+  const label = statusInfo?.label || 'Unknown';
+  const color = statusInfo?.color || 'default';
   
   return (
     <Chip
       label={label}
       size="small"
+      color={color}
       sx={{
-        bgcolor: bgColor,
-        color: color,
         fontWeight: 700,
         borderRadius: 1.5,
         height: 24,
         fontSize: '0.7rem',
+        textTransform: 'uppercase',
+        letterSpacing: '0.3px',
         '& .MuiChip-label': { px: 1.2 }
       }}
     />
@@ -228,34 +321,14 @@ export const MeetingCard = ({
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   
-  // Memoize computed values with safe fallbacks
-  const statusConfig = useMemo(() => {
-    try {
-      // Try to get config from statusOptions if provided
-      if (statusOptions && meeting?.status) {
-        const found = statusOptions.find(s => s.id === meeting.status || s.value === meeting.status);
-        if (found) {
-          return {
-            label: found.label || found.name || getStatusLabel(meeting.status),
-            color: found.color || getStatusColor(meeting.status),
-            bgColor: found.bgColor || found.backgroundColor || getStatusBgColor(meeting.status),
-            textColor: found.textColor || found.color || '#424242'
-          };
-        }
-      }
-      
-      // Fallback to default status mapping
-      return {
-        label: getStatusLabel(meeting?.status),
-        color: getStatusColor(meeting?.status),
-        bgColor: getStatusBgColor(meeting?.status),
-        textColor: getStatusColor(meeting?.status) || '#424242'
-      };
-    } catch (error) {
-      console.warn('Error getting status config:', error);
-      return DEFAULT_STATUS_CONFIG;
-    }
-  }, [meeting?.status, statusOptions]);
+  // If meeting is undefined, return null
+  if (!meeting) {
+    console.warn('MeetingCard: meeting prop is undefined');
+    return null;
+  }
+
+  // Extract status information - THIS IS THE KEY FIX
+  const statusInfo = useMemo(() => extractStatusInfo(meeting), [meeting]);
   
   const isRecurring = useMemo(() => 
     meeting?.is_recurring || meeting?.recurring_meeting_id,
@@ -280,9 +353,16 @@ export const MeetingCard = ({
     [meeting?.participants_count, meeting?.participants]
   );
 
+  // Date formatting with safe fallbacks
   const formattedDate = useMemo(() => {
     try {
-      return formatDate(meeting?.meeting_date) || 'Date TBD';
+      if (!meeting?.meeting_date) return 'Date TBD';
+      const date = new Date(meeting.meeting_date);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
     } catch {
       return 'Date TBD';
     }
@@ -290,8 +370,12 @@ export const MeetingCard = ({
   
   const formattedTime = useMemo(() => {
     try {
-      const start = formatTime(meeting?.start_time) || 'TBD';
-      const end = formatTime(meeting?.end_time) || 'TBD';
+      const start = meeting?.start_time 
+        ? new Date(meeting.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        : 'TBD';
+      const end = meeting?.end_time 
+        ? new Date(meeting.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        : 'TBD';
       return `${start} - ${end}`;
     } catch {
       return 'Time TBD';
@@ -335,14 +419,10 @@ export const MeetingCard = ({
 
   const isCompact = isMobile || isTablet;
 
-  // If meeting is undefined, return null
-  if (!meeting) {
-    return null;
-  }
-
-  // Safely get colors with fallbacks
-  const statusColor = statusConfig?.color || getStatusColor(meeting.status) || '#9E9E9E';
-  const statusBgColor = statusConfig?.bgColor || getStatusBgColor(meeting.status) || '#F5F5F5';
+  // Safely get colors from statusInfo with fallbacks
+  const statusColor = statusInfo?.hexColor || '#757575';
+  const statusBgColor = statusInfo?.bgColor || '#f5f5f5';
+  const statusMuiColor = statusInfo?.color || 'default';
 
   return (
     <Card
@@ -401,7 +481,7 @@ export const MeetingCard = ({
           spacing={1}
         >
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-            <StatusChip status={meeting.status} config={statusConfig} />
+            <StatusChip statusInfo={statusInfo} />
             {isRecurring && (
               <Chip
                 icon={<Repeat sx={{ fontSize: 14 }} />}

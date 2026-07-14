@@ -12,5 +12,33 @@ rm -rf static/*
 cp -r frontend/dist/* static/
 
 cp -r frontend/dist/* dist/
-  zip -r dist/ecatmis_deploy.zip . -x "frontend/*" "venv/*" "backup/*" "dist/*" ".git/*" "build/*" "alembic/*" "app/api/*" "app/crud/*" "app/models/*" "app/schemas/*" "app/core/*" "app/db/*"
+zip -r dist/ecatmis_deploy.zip . \
+  -x "frontend/*" \
+     "frontend/node_modules/*" \
+     "node_modules/*" \
+     "venv/*" \
+     "backup/*" \
+     "dist/*" \
+     ".git/*" \
+     "build/*" \
+     "data/*" \
+     "minio-data/*" \
+     "__pycache__/*" \
+     "*.pyc" \
+     ".pytest_cache/*" \
+     ".mypy_cache/*" \
+     ".DS_Store" \
+     "venv/*" \
+     "backup/*" \
+     "dist/*" \
+     ".git/*" \
+     "build/*" \
+     "alembic/*" \
+     "app/api/*" \
+     "app/crud/*" \
+     "app/models/*" \
+     "app/schemas/*" \
+     "app/core/*" \
+     "app/db/*" \
+     "data/*"
   

@@ -1,83 +1,232 @@
-# .dockerignore
-
-# Exclude frontend source
+# ============================================
+# FRONTEND
+# ============================================
 frontend/
 frontend_src/
 node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
 
-# Exclude database migration files
+# ============================================
+# DATABASE & MIGRATIONS
+# ============================================
+# Exclude alembic source files but keep the versions directory if needed
 alembic/
-alembic.ini
+!alembic/versions/
+!alembic.ini
+*.sqlite
+*.db
+*.sqlite3
 
-# Exclude scripts and tests
+# ============================================
+# SCRIPTS & TESTS
+# ============================================
 scripts/
 tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+*.cover
 
-# Exclude uploads and their contents
+# ============================================
+# UPLOADS & MEDIA
+# ============================================
 uploads/
 uploads/*
+media/
+media/*
+static/
+static/*
+!static/.gitkeep
 
-# Exclude Docker files
+# ============================================
+# DOCKER FILES
+# ============================================
 docker*
 Dockerfile*
 docker-compose*
 .dockerignore
+*.dockerfile
 
-# Exclude Python cache
+# ============================================
+# PYTHON CACHE
+# ============================================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+*.so
+*.dylib
+*.dll
+*.egg-info/
+*.egg
+dist/
+build/
+develop-eggs/
+downloads/
+eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.manifest
+*.spec
 
-# Exclude virtual environments
+# ============================================
+# VIRTUAL ENVIRONMENTS
+# ============================================
 venv/
 env/
 .venv/
 ENV/
+env.bak/
+venv.bak/
+.venv.bak/
 
-# Exclude IDE files
+# ============================================
+# IDE & EDITOR
+# ============================================
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+*.class
+*.iml
+.project
+.pydevproject
+.settings/
+*.sublime-*
+*.code-workspace
 
-# Exclude git
+# ============================================
+# VERSION CONTROL
+# ============================================
 .git/
 .gitignore
+.gitattributes
+.gitmodules
+.svn/
+.hg/
 
-# Exclude logs
+# ============================================
+# LOGS
+# ============================================
 logs/
 *.log
+*.pid
+*.seed
+*.pid.lock
 
-# Exclude backup files
+# ============================================
+# BACKUPS & TEMPORARY
+# ============================================
 backup/
 *.bak
-
-# Exclude temporary files
+*.backup
 *.tmp
 *.temp
+*.swp
+*.swo
+*~
+tmp/
+temp/
+.terraform/
 
-# Exclude OS files
+# ============================================
+# OS FILES
+# ============================================
 .DS_Store
 Thumbs.db
+.desktop.ini
+*.orig
 
-# Exclude environment files
+# ============================================
+# ENVIRONMENT FILES
+# ============================================
 .env
 .env.*
 !.env.docker
+!.env.example
+.venv/
+.envrc
+*.env
+local.env
 
-# Exclude build artifacts
+# ============================================
+# BUILD ARTIFACTS
+# ============================================
 dist/
 build/
 *.egg-info/
+*.egg
+.eggs/
+*.whl
+*.tar.gz
+*.zip
 
-# Exclude documentation
+# ============================================
+# DOCUMENTATION
+# ============================================
 README.md
 *.md
 docs/
+*.rst
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE
+LICENSE.txt
 
-# Exclude static source (if you have a separate static source)
-# Note: Keep the compiled static folder
-!static/
+# ============================================
+# STATIC SOURCE (keep compiled static)
+# ============================================
 static_src/
+!static/
+!static/.gitkeep
+
+# ============================================
+# CONFIGURATION FILES (Optional)
+# ============================================
+*.yaml.sample
+*.yml.sample
+*.conf.sample
+*.config.sample
+
+# ============================================
+# NODE/NPM/YARN
+# ============================================
+node_modules/
+package-lock.json
+yarn.lock
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# ============================================
+# RUNTIME DATA
+# ============================================
+*.pid
+*.sock
+*.socket
+*.port
+
+# ============================================
+# MISC
+# ============================================
+.coverage
+.coveragerc
+.tox
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+data/

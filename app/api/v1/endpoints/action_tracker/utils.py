@@ -1,15 +1,16 @@
 # app/api/v1/endpoints/action_tracker/utils.py
 
+import logging
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime
-import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.meetings.action_tracker import Meeting, MeetingParticipant, MeetingMinutes, MeetingDocument
 from app.models.meetings.organization import OrganizationNode
+from app.models.general.dynamic_attribute import Attribute
 from app.schemas.action_tracker import (
     MeetingResponse, MeetingParticipantResponse, MeetingMinutesResponse, 
     MeetingDocumentResponse, AttributeResponse
@@ -86,26 +87,128 @@ async def fetch_department_names_from_db(
     return department_name, department_path, department_code, restricted_department_name
 
 
-def build_status_response(meeting_obj: Meeting) -> Optional[AttributeResponse]:
-    """Build status response from meeting status relationship"""
-    if not meeting_obj.status:
-        return None
-    status_obj = meeting_obj.status
-    
-    return AttributeResponse(
+async def fetch_status_from_db(db: AsyncSession, status_id: UUID) -> Optional[AttributeResponse]:
+    """
+    Fetch status from database by ID and return as AttributeResponse.
+    """
+    try:
+        query = select(Attribute).where(
+            Attribute.id == status_id,
+            Attribute.is_active == True
+        )
+        result = await db.execute(query)
+        status_obj = result.scalar_one_or_none()
+        
+        if not status_obj:
+            logger.warning(f"Status with id {status_id} not found")
+            return None
+        
+        # Get short_name from the status object
+        short_name = getattr(status_obj, 'short_name', None)
+        if short_name:
+            short_name = short_name.lower()
+        else:
+            # Try to extract from code
+            code = getattr(status_obj, 'code', '')
+            if code.startswith('MEETING_STATUS_'):
+                short_name = code.replace('MEETING_STATUS_', '').lower()
+            else:
+                short_name = 'pending'
+        
+        # Get color from extra_metadata or use default
+        color = '#6B7280'
+        extra_metadata = getattr(status_obj, 'extra_metadata', None)
+        if extra_metadata and isinstance(extra_metadata, dict):
+            color = extra_metadata.get('color', '#6B7280')
+        
+        return AttributeResponse(
             id=status_obj.id,
             code=getattr(status_obj, 'code', None),
             name=getattr(status_obj, 'name', None),
-            short_name=getattr(status_obj, 'short_name', None),
+            short_name=short_name,
             description=getattr(status_obj, 'description', None),
-            extra_metadata=getattr(status_obj, 'extra_metadata', None),
-            color=getattr(status_obj, 'color', ''),  # Fixed: use getattr with default
-            sort_order=getattr(status_obj, 'sort_order', None),
+            extra_metadata=extra_metadata,
+            color=color,
+            sort_order=getattr(status_obj, 'sort_order', 0),
             group_id=getattr(status_obj, 'group_id', None),
             created_at=getattr(status_obj, 'created_at', None),
             updated_at=getattr(status_obj, 'updated_at', None),
             is_active=getattr(status_obj, 'is_active', True)
         )
+    except Exception as e:
+        logger.error(f"Failed to fetch status for {status_id}: {e}")
+        return None
+
+
+async def build_status_response(meeting_obj: Meeting, db: AsyncSession) -> Optional[AttributeResponse]:
+    """
+    Build status response from meeting status relationship.
+    If status relationship is not loaded, query it from the database.
+    
+    Args:
+        meeting_obj: The Meeting ORM object
+        db: Database session for querying status if not loaded
+    
+    Returns:
+        AttributeResponse or None
+    """
+    # If status relationship is loaded, use it
+    if hasattr(meeting_obj, 'status') and meeting_obj.status:
+        status_obj = meeting_obj.status
+        short_name = getattr(status_obj, 'short_name', None)
+        if short_name:
+            short_name = short_name.lower()
+        else:
+            code = getattr(status_obj, 'code', '')
+            if code.startswith('MEETING_STATUS_'):
+                short_name = code.replace('MEETING_STATUS_', '').lower()
+            else:
+                short_name = 'pending'
+        
+        color = '#6B7280'
+        extra_metadata = getattr(status_obj, 'extra_metadata', None)
+        if extra_metadata and isinstance(extra_metadata, dict):
+            color = extra_metadata.get('color', '#6B7280')
+        
+        return AttributeResponse(
+            id=status_obj.id,
+            code=getattr(status_obj, 'code', None),
+            name=getattr(status_obj, 'name', None),
+            short_name=short_name,
+            description=getattr(status_obj, 'description', None),
+            extra_metadata=extra_metadata,
+            color=color,
+            sort_order=getattr(status_obj, 'sort_order', 0),
+            group_id=getattr(status_obj, 'group_id', None),
+            created_at=getattr(status_obj, 'created_at', None),
+            updated_at=getattr(status_obj, 'updated_at', None),
+            is_active=getattr(status_obj, 'is_active', True)
+        )
+    
+    # If status relationship is not loaded but status_id exists, query it
+    if meeting_obj.status_id and db:
+        return await fetch_status_from_db(db, meeting_obj.status_id)
+    
+    # If status_id exists but no db provided, create a basic response from the ID
+    if meeting_obj.status_id:
+        # Try to infer status from common IDs (fallback)
+        # This is not ideal but better than null
+        return AttributeResponse(
+            id=meeting_obj.status_id,
+            code="MEETING_STATUS_UNKNOWN",
+            name="Unknown Status",
+            short_name="unknown",
+            description="Status not loaded",
+            extra_metadata={"color": "#6B7280"},
+            color="#6B7280",
+            sort_order=0,
+            group_id=None,
+            created_at=None,
+            updated_at=None,
+            is_active=True
+        )
+    
+    return None
 
 
 def build_participants_list(meeting_obj: Meeting) -> List[MeetingParticipantResponse]:
@@ -222,16 +325,16 @@ def get_safe_attribute(obj, attr_name: str, default=None):
     return getattr(obj, attr_name, default)
 
 
-def build_meeting_response(
+async def build_meeting_response(
     meeting_obj: Meeting, 
-    db: Optional[AsyncSession] = None
+    db: AsyncSession
 ) -> MeetingResponse:
     """
-    Build a MeetingResponse from a Meeting ORM object with department names.
+    Build a MeetingResponse from a Meeting ORM object.
     
     Args:
         meeting_obj: The Meeting ORM object
-        db: Optional database session for fetching department names if not loaded
+        db: Database session for fetching related data
     
     Returns:
         MeetingResponse: The built response object
@@ -240,22 +343,9 @@ def build_meeting_response(
     # ========== Get Department Names ==========
     department_name, department_path, department_code, restricted_department_name = build_department_name_from_relationship(meeting_obj)
     
-    # If relationships weren't loaded and db is provided, fetch from DB
-    if db and (meeting_obj.department_id and not department_name) or (meeting_obj.restricted_department_id and not restricted_department_name):
-        db_dept_name, db_dept_path, db_dept_code, db_restricted_name =  fetch_department_names_from_db(
-            db,
-            department_id=meeting_obj.department_id if not department_name else None,
-            restricted_department_id=meeting_obj.restricted_department_id if not restricted_department_name else None
-        )
-        
-        # Merge fetched values
-        department_name = department_name or db_dept_name
-        department_path = department_path or db_dept_path
-        department_code = department_code or db_dept_code
-        restricted_department_name = restricted_department_name or db_restricted_name
-    
     # ========== Build Response Components ==========
-    status_response = build_status_response(meeting_obj)
+    # Await the async status response
+    status_response = await build_status_response(meeting_obj, db)
     participants = build_participants_list(meeting_obj)
     minutes = build_minutes_list(meeting_obj)
     documents = build_documents_list(meeting_obj)

@@ -61,8 +61,6 @@ api_router.include_router(menus_router, prefix="/menus", tags=["menus"])
 api_router.include_router(menus_organisation, prefix="/organization", tags=["organization"])
 api_router.include_router(departments, prefix="/departments", tags=["departments"])
 
-# Action Tracker Menus
-api_router.include_router(menus_router, prefix="/action-tracker", tags=["menus"])
 
 # Charts
 api_router.include_router(chart_data, prefix="/charts", tags=["charts"])

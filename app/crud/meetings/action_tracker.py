@@ -1516,16 +1516,7 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
             )
         )
         meeting = result.scalar_one_or_none()
-        
-        # Debug: Print the actual values from the ORM object
-        if meeting:
-            print(f"=== ORM Meeting Object ===")
-            print(f"  visibility: {meeting.visibility}")
-            print(f"  restricted_department_id: {meeting.restricted_department_id}")
-            print(f"  department_id: {meeting.department_id}")
-            print(f"  Has attribute 'visibility': {hasattr(meeting, 'visibility')}")
-            print(f"  Has attribute 'restricted_department_id': {hasattr(meeting, 'restricted_department_id')}")
-        
+           
         return meeting
 
 
@@ -1849,7 +1840,6 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                     assigned_at=datetime.now(),
                     due_date=action_data.get('due_date'),
                     priority=action_data.get('priority', 2),
-                    estimated_hours=action_data.get('estimated_hours'),
                     remarks=action_data.get('remarks'),
                     created_by_id=assigned_by_id,
                     created_at=datetime.now(),
@@ -2414,7 +2404,6 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.rollback()
             raise ValueError(f"Failed to add status history: {str(e)}")
 
-
     async def update_progress(
         self,
         db: AsyncSession,
@@ -2426,39 +2415,29 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         Update action progress percentage and status.
         """
         try:
-            # Get the action
             action = await self.get(db, action_id)
             if not action:
                 return None
             
-            # Store old progress for history
             old_progress = action.overall_progress_percentage
             old_status_id = action.overall_status_id
             
-            # Update progress
             action.overall_progress_percentage = progress_update.progress_percentage
             
-            # Update status if provided
             if progress_update.individual_status_id:
                 action.overall_status_id = progress_update.individual_status_id
             
-            # Handle completion status
             if progress_update.progress_percentage >= 100:
                 if not action.completed_at:
                     action.completed_at = datetime.now()
             elif action.completed_at:
-                # Reopen if progress is less than 100 but was completed
                 action.completed_at = None
             
-            # Set start date if not set and progress > 0
-            if progress_update.progress_percentage > 0 and not action.start_date:
-                action.start_date = datetime.now()
+            # start_date block removed — no such column on MeetingAction
             
-            # Update audit fields
             action.updated_at = datetime.now()
             action.updated_by_id = user_id
             
-            # Add status history entry
             status_history = ActionStatusHistory(
                 action_id=action_id,
                 individual_status_id=progress_update.individual_status_id,
@@ -2478,6 +2457,10 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         except Exception as e:
             await db.rollback()
             raise ValueError(f"Failed to update progress: {str(e)}")
+        
+
+    
+    
 
     async def update_progress_remove(
         self,
@@ -2647,87 +2630,62 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
 # MEETING MINUTES CRUD
 # ============================================================================
 
-class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingMinutesUpdate], AuditMixin):
-    """CRUD operations for MeetingMinutes entity"""
+class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingMinutesUpdate]):
+    """CRUD operations for meeting minutes"""
     
-    async def create(
-        self, db: AsyncSession, meeting_id: UUID, obj_in: MeetingMinutesCreate, created_by_id: UUID
+    async def create_default_minute(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        action_description: str,
+        user_id: UUID
     ) -> MeetingMinutes:
-        """Create meeting minutes"""
-        try:
-            minutes_data = obj_in.model_dump()
-            db_obj = MeetingMinutes(meeting_id=meeting_id, **minutes_data)
-            await self._set_audit_fields(db_obj, created_by_id=created_by_id, updated_by_id=created_by_id)
-            
-            db.add(db_obj)
-            await db.commit()
-            await db.refresh(db_obj)
-            return db_obj
-        except Exception as e:
-            await db.rollback()
-            raise ValueError(f"Failed to create minutes: {str(e)}")
-    
-    async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingMinutes]:
-        """Get minutes by ID"""
-        result = await db.execute(
-            select(MeetingMinutes)
-            .options(selectinload(MeetingMinutes.actions))
-            .where(MeetingMinutes.id == id, MeetingMinutes.is_active == True)
+        """
+        Create a default minute for a meeting when no minutes exist.
+        
+        Args:
+            db: Database session
+            meeting_id: ID of the meeting
+            action_description: Description of the action being created
+            user_id: ID of the user creating the action
+        
+        Returns:
+            Created MeetingMinutes object
+        """
+        now = datetime.now()
+        default_minute = MeetingMinutes(
+            meeting_id=meeting_id,
+            topic=f"Action Item - {now.strftime('%Y-%m-%d %H:%M')}",
+            discussion=f"Auto-created from action: {action_description[:100]}...",
+            timestamp=now,
+            recorded_by_id=user_id,
+            created_by_id=user_id,
+            created_at=now,
+            is_active=True
         )
-        return result.scalar_one_or_none()
+        
+        db.add(default_minute)
+        await db.commit()
+        await db.refresh(default_minute)
+        return default_minute
     
-    async def get_by_meeting(
-        self, db: AsyncSession, meeting_id: UUID, skip: int = DEFAULT_SKIP, limit: int = DEFAULT_LIMIT
+    async def get_minutes_by_meeting(
+        self,
+        db: AsyncSession,
+        meeting_id: UUID,
+        skip: int = 0,
+        limit: int = 100
     ) -> List[MeetingMinutes]:
         """Get all minutes for a meeting"""
-        result = await db.execute(
-            select(MeetingMinutes)
-            .options(
-                selectinload(MeetingMinutes.actions),
-                selectinload(MeetingMinutes.recorded_by)
+        query = select(MeetingMinutes).where(
+            and_(
+                MeetingMinutes.meeting_id == meeting_id,
+                MeetingMinutes.is_active == True
             )
-            .where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.is_active == True)
-            .offset(skip)
-            .limit(min(limit, MAX_LIMIT))
-            .order_by(MeetingMinutes.timestamp.desc())
-        )
+        ).offset(skip).limit(limit).order_by(MeetingMinutes.created_at.desc())
+        
+        result = await db.execute(query)
         return result.scalars().all()
-    
-    async def update(
-        self, db: AsyncSession, id: UUID, obj_in: MeetingMinutesUpdate, updated_by_id: UUID
-    ) -> Optional[MeetingMinutes]:
-        """Update minutes"""
-        try:
-            db_obj = await self.get(db, id)
-            if not db_obj:
-                return None
-            
-            update_data = obj_in.model_dump(exclude_unset=True)
-            for field, value in update_data.items():
-                if value is not None:
-                    setattr(db_obj, field, value)
-            
-            await self._update_audit_fields(db_obj, updated_by_id)
-            await db.commit()
-            await db.refresh(db_obj)
-            return db_obj
-        except Exception as e:
-            await db.rollback()
-            raise ValueError(f"Failed to update minutes: {str(e)}")
-    
-    async def soft_delete(self, db: AsyncSession, id: UUID, deleted_by_id: UUID) -> Optional[MeetingMinutes]:
-        """Soft delete minutes"""
-        try:
-            db_obj = await self.get(db, id)
-            if db_obj:
-                db_obj.is_active = False
-                await self._update_audit_fields(db_obj, deleted_by_id)
-                await db.commit()
-                await db.refresh(db_obj)
-            return db_obj
-        except Exception as e:
-            await db.rollback()
-            raise ValueError(f"Failed to delete minutes: {str(e)}")
 
 
     async def get_meeting_minutes(
@@ -2735,71 +2693,115 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         db: AsyncSession,
         meeting_id: UUID,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        include_actions: bool = True
     ) -> List[MeetingMinutes]:
         """
-        Get all minutes for a specific meeting
+        Get all minutes for a meeting with pagination.
         """
-        result = await db.execute(
-            select(MeetingMinutes)
-            .where(MeetingMinutes.meeting_id == meeting_id)
-            .where(MeetingMinutes.is_active == True)
-            .offset(skip)
-            .limit(limit)
-            .order_by(MeetingMinutes.created_at.desc())
+        query = select(MeetingMinutes).where(
+            MeetingMinutes.meeting_id == meeting_id,
+            MeetingMinutes.is_active == True
         )
-        return result.scalars().all()
-    
-    async def get_minutes_with_actions(
-        self,
-        db: AsyncSession,
-        meeting_id: UUID,
-        skip: int = 0,
-        limit: int = 100
-    ) -> List[MeetingMinutes]:
-        """
-        Get minutes with their actions eagerly loaded
-        """
-        from sqlalchemy.orm import selectinload
         
-        result = await db.execute(
-            select(MeetingMinutes)
-            .where(MeetingMinutes.meeting_id == meeting_id)
-            .where(MeetingMinutes.is_active == True)
-            .options(
+        if include_actions:
+            query = query.options(
                 selectinload(MeetingMinutes.actions),
-                selectinload(MeetingMinutes.recorded_by),
                 selectinload(MeetingMinutes.created_by),
-                selectinload(MeetingMinutes.updated_by)
+                selectinload(MeetingMinutes.recorded_by)
             )
-            .offset(skip)
-            .limit(limit)
-            .order_by(MeetingMinutes.created_at.desc())
-        )
-        return result.scalars().all()
-    
-    async def get_minute_by_id_with_actions(
+        
+        query = query.order_by(MeetingMinutes.created_at.desc()).offset(skip).limit(min(limit, 100))
+        
+        result = await db.execute(query)
+        minutes = result.scalars().all()
+        
+        # DON'T try to set properties - they are already available via relationships
+        # Just return the minutes as-is
+        
+        return minutes
+
+
+    async def get_minute_by_id(
         self,
         db: AsyncSession,
         minute_id: UUID
     ) -> Optional[MeetingMinutes]:
-        """
-        Get a single minute with its actions
-        """
-        from sqlalchemy.orm import selectinload
-        
-        result = await db.execute(
-            select(MeetingMinutes)
-            .where(MeetingMinutes.id == minute_id)
-            .where(MeetingMinutes.is_active == True)
-            .options(
-                selectinload(MeetingMinutes.actions),
-                selectinload(MeetingMinutes.recorded_by),
-                selectinload(MeetingMinutes.created_by),
-                selectinload(MeetingMinutes.updated_by)
-            )
+        """Get a single minute by ID with relationships loaded"""
+        query = select(MeetingMinutes).where(
+            MeetingMinutes.id == minute_id,
+            MeetingMinutes.is_active == True
+        ).options(
+            selectinload(MeetingMinutes.actions),
+            selectinload(MeetingMinutes.created_by),
+            selectinload(MeetingMinutes.recorded_by)
         )
+        
+        result = await db.execute(query)
+        minute = result.scalar_one_or_none()
+        
+        if minute:
+            if minute.created_by:
+                minute.created_by_name = minute.created_by.username
+            if minute.recorded_by:
+                minute.recorded_by_name = minute.recorded_by.username
+        
+        return minute
+
+
+    async def get_comment(
+        self,
+        db: AsyncSession,
+        comment_id: UUID
+    ) -> Optional[ActionComment]:
+        """
+        Get a comment by ID.
+        
+        Args:
+            db: Database session
+            comment_id: ID of the comment to retrieve
+        
+        Returns:
+            ActionComment object if found, None otherwise
+        """
+        query = select(ActionComment).where(
+            ActionComment.id == comment_id,
+            ActionComment.is_active == True
+        )
+        result = await db.execute(query)
         return result.scalar_one_or_none()
+
+
+    async def delete_comment(
+        self,
+        db: AsyncSession,
+        comment_id: UUID,
+        user_id: UUID
+    ) -> None:
+        """
+        Soft delete a comment.
+        
+        Args:
+            db: Database session
+            comment_id: ID of the comment to delete
+            user_id: ID of the user performing the deletion
+        """
+        comment = await self.get_comment(db, comment_id)
+        if not comment:
+            raise ValueError(f"Comment with id {comment_id} not found")
+        
+        comment.is_active = False
+        comment.updated_by_id = user_id
+        comment.updated_at = datetime.now(timezone.utc)
+        
+        await db.commit()
+        
+
+
+# Singleton instance
+meeting_minutes = CRUDMeetingMinutes(MeetingMinutes)
+
+
 # ============================================================================
 # MEETING PARTICIPANT CRUD
 # ============================================================================

@@ -17,20 +17,25 @@ import {
   Select,
   MenuItem,
   Grid,
-  Box
+  Box,
+  useTheme,
+  alpha
 } from '@mui/material';
 import { 
-  Close as Close, 
-  Save as Save, 
+  Close, 
+  Save, 
   Assignment as AssignmentIcon,
-  Edit as Edit
+  Edit
 } from '@mui/icons-material';
 import { useDispatch } from 'react-redux';
 import { updateAction } from '../../../../store/slices/actionTracker/actionSlice';
 import { format } from 'date-fns';
 
 const EditActionDialog = ({ open, action, onClose, onSave }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
   const dispatch = useDispatch();
+  
   const [formData, setFormData] = useState({
     description: '',
     remarks: '',
@@ -99,51 +104,102 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ pb: 1 }}>
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="md" 
+      fullWidth
+      PaperProps={{
+        sx: {
+          // Sleek, elevated dark surface instead of flat pitch black
+          backgroundImage: 'none',
+          bgcolor: isDarkMode ? '#111827' : 'background.paper', // Deep Slate/Midnight Blue-Gray
+          border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
+          boxShadow: isDarkMode 
+            ? '0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5)' 
+            : theme.shadows[16],
+        }
+      }}
+    >
+      <DialogTitle sx={{ pb: 1.5, pt: 2.5 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6" fontWeight={700}>
+          <Typography variant="h6" fontWeight={700} color={isDarkMode ? '#f3f4f6' : 'text.primary'}>
             Edit Action Item
           </Typography>
-          <IconButton onClick={onClose} size="small">
+          <IconButton 
+            onClick={onClose} 
+            size="small"
+            sx={{ 
+              color: isDarkMode ? 'grey.400' : 'text.secondary',
+              '&:hover': { bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
+            }}
+          >
             <Close />
           </IconButton>
         </Stack>
       </DialogTitle>
-      <Divider />
-      <DialogContent sx={{ pt: 2 }}>
+      
+      <Divider sx={{ borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'divider' }} />
+      
+      <DialogContent sx={{ pt: 3 }}>
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
             {error}
           </Alert>
         )}
 
-        {/* Current Action Card */}
-        <Box sx={{ bgcolor: '#f8fafc', p: 2, borderRadius: 2, border: '1px solid #e2e8f0', mb: 3 }}>
-          <Stack direction="row" spacing={1.5} alignItems="flex-start">
-            <AssignmentIcon color="primary" sx={{ mt: 0.5 }} />
+        {/* Premium Information Card */}
+        <Box 
+          sx={{ 
+            bgcolor: isDarkMode 
+              ? 'rgba(30, 41, 59, 0.5)' // Elegant semi-translucent Indigo/Slate
+              : '#f8fafc', 
+            p: 2.5, 
+            borderRadius: '12px', 
+            border: '1px solid',
+            borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.06)' : '#e2e8f0', 
+            mb: 4,
+            boxShadow: isDarkMode ? 'inset 0 1px 1px rgba(255,255,255,0.03)' : 'none'
+          }}
+        >
+          <Stack direction="row" spacing={2} alignItems="flex-start">
+            <AssignmentIcon 
+              sx={{ 
+                mt: 0.5, 
+                color: isDarkMode ? '#60a5fa' : theme.palette.primary.main // Vibrant ice blue in dark mode
+              }} 
+            />
             <Box flex={1}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" fontWeight={600} color={isDarkMode ? 'grey.400' : 'text.secondary'}>
                 Current Action
               </Typography>
-              <Typography variant="body2" fontWeight={500}>
+              <Typography 
+                variant="body2" 
+                fontWeight={500} 
+                color={isDarkMode ? '#f3f4f6' : 'text.primary'} 
+                sx={{ mt: 0.5, lineHeight: 1.6 }}
+              >
                 {action?.description}
               </Typography>
-              {action?.due_date && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  Original Due: {format(new Date(action.due_date), 'MMM d, yyyy')}
-                </Typography>
-              )}
-              {action?.priority && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  Current Priority: {getPriorityLabel(action.priority)}
-                </Typography>
-              )}
+              
+              <Stack direction="row" spacing={2} sx={{ mt: 1.5 }} flexWrap="wrap" gap={1}>
+                {action?.due_date && (
+                  <Typography variant="caption" color={isDarkMode ? 'grey.400' : 'text.secondary'}>
+                    📅 Original Due: <strong>{format(new Date(action.due_date), 'MMM d, yyyy')}</strong>
+                  </Typography>
+                )}
+                {action?.priority && (
+                  <Typography variant="caption" color={isDarkMode ? 'grey.400' : 'text.secondary'}>
+                    ⚡ Priority: <strong>{getPriorityLabel(action.priority)}</strong>
+                  </Typography>
+                )}
+              </Stack>
             </Box>
-            <Edit color="action" fontSize="small" />
+            <Edit sx={{ color: isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)' }} fontSize="small" />
           </Stack>
         </Box>
 
+        {/* Form Fields */}
         <Stack spacing={3}>
           <TextField
             fullWidth
@@ -155,6 +211,11 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
             multiline
             rows={3}
             placeholder="Update action description..."
+            sx={{
+              '& .MuiInputBase-root': {
+                bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
+              }
+            }}
           />
 
           <TextField
@@ -166,6 +227,11 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
             multiline
             rows={2}
             placeholder="Update remarks..."
+            sx={{
+              '& .MuiInputBase-root': {
+                bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
+              }
+            }}
           />
 
           <Grid container spacing={2}>
@@ -178,6 +244,12 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
                 value={formData.due_date}
                 onChange={handleChange}
                 helperText="Select new due date (optional)"
+                InputLabelProps={{ shrink: true }}
+                sx={{
+                  '& .MuiInputBase-root': {
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
+                  }
+                }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -188,6 +260,9 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
                   value={formData.priority}
                   onChange={handleChange}
                   label="Priority"
+                  sx={{
+                    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.01)' : 'transparent',
+                  }}
                 >
                   <MenuItem value={1}>🔴 High - Urgent</MenuItem>
                   <MenuItem value={2}>🟠 Medium - Normal</MenuItem>
@@ -199,8 +274,16 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
           </Grid>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ p: 2.5, pt: 0 }}>
-        <Button onClick={onClose} disabled={loading}>
+      
+      <DialogActions sx={{ p: 3, pt: 2, gap: 1 }}>
+        <Button 
+          onClick={onClose} 
+          disabled={loading}
+          sx={{ 
+            color: isDarkMode ? 'grey.300' : 'text.secondary',
+            '&:hover': { bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }
+          }}
+        >
           Cancel
         </Button>
         <Button
@@ -208,6 +291,16 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
           onClick={handleSubmit}
           disabled={loading}
           startIcon={loading ? <CircularProgress size={16} /> : <Save />}
+          sx={{
+            borderRadius: '8px',
+            textTransform: 'none',
+            fontWeight: 600,
+            px: 3,
+            bgcolor: isDarkMode ? '#3b82f6' : theme.palette.primary.main, // Premium blue accent
+            '&:hover': {
+              bgcolor: isDarkMode ? '#2563eb' : theme.palette.primary.dark,
+            }
+          }}
         >
           {loading ? 'Saving...' : 'Save Changes'}
         </Button>

@@ -7,7 +7,7 @@ import {
   FormControlLabel, Alert, Snackbar, CircularProgress, InputAdornment,
   Tooltip, Card, CardContent, Stack, Divider, useTheme, useMediaQuery,
   Collapse, Badge, alpha, Autocomplete, Fade, Checkbox, ListItemText,
-  Skeleton
+  Skeleton, Tab, Tabs
 } from '@mui/material';
 import {
   SearchOutlined, EditOutlined, DeleteOutlined, LockOutlined,
@@ -20,6 +20,7 @@ import {
   CancelOutlined, TuneOutlined, ChevronRightOutlined, FolderOutlined,
   FolderOpenOutlined, SwapHorizOutlined, CheckBoxOutlined,
   CheckBoxOutlineBlankOutlined, WarningAmberOutlined,
+  PersonOutlineOutlined, KeyOutlined, AssignmentOutlined,
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -121,139 +122,584 @@ const DeptPill = ({ assignment, onUnlink, compact = false }) => {
   );
 };
 
-const StatCard = ({ label, value, icon, color, isLoading }) => (
-  <Paper
-    elevation={0}
-    sx={{
-      p: { xs: 1.5, sm: 2 },
-      borderRadius: 2,
-      border: '1px solid',
-      borderColor: 'divider',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 0.5,
-      transition: 'all 0.2s',
-      '&:hover': {
-        borderColor: 'primary.main',
-        bgcolor: (theme) => alpha(theme.palette.primary.main, 0.02),
-      },
-    }}
-  >
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        fontWeight={600}
-        sx={{ textTransform: 'uppercase', letterSpacing: 0.6, fontSize: '0.62rem' }}
-      >
-        {label}
-      </Typography>
-      <Box sx={{ color, '& svg': { fontSize: 16 } }}>{icon}</Box>
-    </Box>
-    {isLoading ? (
-      <Skeleton variant="text" width={50} height={40} />
-    ) : (
-      <Typography variant="h4" fontWeight={800} color={color} sx={{ lineHeight: 1 }}>
-        {value}
-      </Typography>
-    )}
-  </Paper>
-);
-
-// ─── Compact Stat Card for Mobile ──────────────────────────────────────────
-const CompactStatCard = ({ label, value, icon, color, isLoading }) => (
-  <Box
-    sx={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 0.75,
-      px: 1.5,
-      py: 0.75,
-      borderRadius: 2,
-      border: '1px solid',
-      borderColor: 'divider',
-      whiteSpace: 'nowrap',
-      minWidth: 'fit-content',
-      bgcolor: 'background.paper',
-      flexShrink: 0,
-      transition: 'all 0.2s',
-      '&:hover': {
-        borderColor: color,
-        bgcolor: (t) => alpha(t.palette.primary.main, 0.02),
-      },
-    }}
-  >
-    <Box sx={{ color, display: 'flex', '& svg': { fontSize: 16 } }}>{icon}</Box>
-    <Box>
-      <Typography 
-        variant="caption" 
-        color="text.secondary" 
-        sx={{ fontSize: '0.55rem', display: 'block', lineHeight: 1.1, textTransform: 'uppercase', letterSpacing: 0.3 }}
-      >
-        {label}
-      </Typography>
-      {isLoading ? (
-        <Skeleton variant="text" width={20} height={16} />
-      ) : (
-        <Typography variant="body2" fontWeight={700} color={color} sx={{ lineHeight: 1.2 }}>
-          {value}
-        </Typography>
-      )}
-    </Box>
-  </Box>
-);
-
-const RoleChip = ({ role, onChange, disabled }) => {
-  const cfg = ROLE_PALETTE[role] || ROLE_PALETTE.member;
+// ─── Improved Compact Stats ──────────────────────────────────────────────────
+const ImprovedStatCard = ({ label, value, icon, color, isLoading, trend }) => {
+  const theme = useTheme();
   return (
-    <FormControl size="small" sx={{ minWidth: 110 }} disabled={disabled}>
-      <Select
-        value={role}
-        onChange={(e) => onChange(e.target.value)}
-        variant="outlined"
+    <Paper
+      elevation={0}
+      sx={{
+        p: 1.5,
+        borderRadius: 2,
+        border: '1px solid',
+        borderColor: 'divider',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.5,
+        transition: 'all 0.2s',
+        '&:hover': {
+          borderColor: 'primary.main',
+          bgcolor: (theme) => alpha(theme.palette.primary.main, 0.02),
+          transform: 'translateY(-1px)',
+          boxShadow: theme.shadows[1],
+        },
+      }}
+    >
+      <Box
         sx={{
-          height: 26,
-          fontSize: '0.72rem',
-          fontWeight: 600,
-          color: cfg.textColor,
-          bgcolor: cfg.bgColor,
-          '& .MuiOutlinedInput-notchedOutline': {
-            borderColor: cfg.borderColor,
-          },
-          '&:hover .MuiOutlinedInput-notchedOutline': {
-            borderColor: cfg.textColor,
-          },
-          '& .MuiSelect-icon': { color: cfg.textColor, fontSize: 16 },
-          borderRadius: 1,
-        }}
-        MenuProps={{ 
-          PaperProps: { 
-            sx: { mt: 0.5, borderRadius: 1.5, maxHeight: 200 } 
-          } 
+          width: 40,
+          height: 40,
+          borderRadius: 1.5,
+          bgcolor: alpha(color || theme.palette.primary.main, 0.1),
+          color: color || theme.palette.primary.main,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          '& svg': { fontSize: 20 },
         }}
       >
-        {ASSIGNABLE_ROLES.map((r) => {
-          const c = ROLE_PALETTE[r];
-          return (
-            <MenuItem key={r} value={r} sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
-              <Box
-                component="span"
-                sx={{
-                  display: 'inline-block',
-                  width: 8, height: 8, borderRadius: '50%',
-                  bgcolor: c.textColor, mr: 1, flexShrink: 0,
-                }}
-              />
-              {c.label}
-            </MenuItem>
-          );
-        })}
-      </Select>
-    </FormControl>
+        {icon}
+      </Box>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        {isLoading ? (
+          <Skeleton variant="text" width={40} height={28} />
+        ) : (
+          <Typography variant="h6" fontWeight={700} color={color || 'text.primary'} sx={{ lineHeight: 1.2 }}>
+            {value}
+          </Typography>
+        )}
+        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.68rem', fontWeight: 500, display: 'block' }}>
+          {label}
+        </Typography>
+      </Box>
+      {trend && (
+        <Chip
+          label={`+${trend}`}
+          size="small"
+          color="success"
+          sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }}
+        />
+      )}
+    </Paper>
   );
 };
 
-// ─── Recursive Department Tree Node ──────────────────────────────────────────
+// ─── Improved User Form ─────────────────────────────────────────────────────
+const UserForm = ({
+  mode,
+  formData,
+  setFormData,
+  passwordData,
+  setPasswordData,
+  formErrors,
+  rolesList,
+  departments,
+  selectedUser,
+}) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [activeTab, setActiveTab] = useState(0);
+  const [rolesMenuOpen, setRolesMenuOpen] = useState(false);
+
+  const getRoleDetails = (roleCode) => {
+    const role = rolesList?.find((r) => r.code === roleCode);
+    return {
+      name: role?.name || roleCode,
+      color: roleCode === 'admin' ? 'error' : 
+             roleCode === 'super_admin' ? 'warning' : 
+             roleCode === 'superuser' ? 'warning' : 'primary',
+    };
+  };
+
+  // Auto-select admin role when superuser is checked
+  const handleSuperuserToggle = (checked) => {
+    setFormData((p) => {
+      const newData = { ...p, is_superuser: checked };
+      if (checked) {
+        // Find admin role in rolesList
+        const adminRole = rolesList?.find((r) => r.code === 'admin');
+        if (adminRole && !newData.roles.includes('admin')) {
+          newData.roles = [...newData.roles, 'admin'];
+        }
+      } else {
+        // Remove admin role when unchecking superuser
+        newData.roles = newData.roles.filter((r) => r !== 'admin');
+      }
+      return newData;
+    });
+  };
+
+  // Handle role selection - prevent deselecting admin if superuser
+  const handleRoleChange = (event) => {
+    const value = event.target.value;
+    const selectedRoles = typeof value === 'string' ? value.split(',') : value;
+    
+    // If user is superuser, ensure admin role is always selected
+    if (formData.is_superuser) {
+      const adminRole = rolesList?.find((r) => r.code === 'admin');
+      if (adminRole && !selectedRoles.includes('admin')) {
+        // Admin role was deselected - prevent it
+        // You could show a snackbar or alert here
+        // For now, we'll add it back
+        selectedRoles.push('admin');
+      }
+    }
+    
+    setFormData((p) => ({
+      ...p,
+      roles: selectedRoles,
+    }));
+  };
+
+  // Check if admin is auto-selected
+  const isAdminAutoSelected = useMemo(() => {
+    if (!formData.is_superuser) return false;
+    const adminRole = rolesList?.find((r) => r.code === 'admin');
+    return adminRole && formData.roles.includes('admin');
+  }, [formData.is_superuser, formData.roles, rolesList]);
+
+  const tabs = [
+    { label: 'Personal Info', icon: <PersonOutlineOutlined /> },
+    { label: 'Security', icon: <KeyOutlined /> },
+    { label: 'Permissions', icon: <AssignmentOutlined /> },
+  ];
+
+  return (
+    <Box>
+      {/* Tabs for better organization */}
+      <Tabs
+        value={activeTab}
+        onChange={(_, v) => setActiveTab(v)}
+        variant={isMobile ? 'fullWidth' : 'standard'}
+        sx={{
+          mb: 3,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          '& .MuiTab-root': {
+            textTransform: 'none',
+            fontWeight: 600,
+            minHeight: 40,
+            fontSize: '0.8rem',
+          },
+        }}
+      >
+        {tabs.map((tab) => (
+          <Tab key={tab.label} icon={tab.icon} label={isMobile ? null : tab.label} />
+        ))}
+      </Tabs>
+
+      {/* Personal Info Tab */}
+      {activeTab === 0 && (
+        <Stack spacing={2.5}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+            <Avatar
+              sx={{
+                width: 64,
+                height: 64,
+                bgcolor: formData.is_superuser ? 'warning.main' : 'primary.main',
+                fontSize: 24,
+                fontWeight: 700,
+              }}
+            >
+              {formData.first_name?.[0]?.toUpperCase() || formData.username?.[0]?.toUpperCase() || 'U'}
+            </Avatar>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                {mode === 'edit' ? `Editing ${selectedUser?.username}` : 'New User'}
+              </Typography>
+              <Typography variant="caption" color="text.disabled">
+                {mode === 'edit' ? 'Update user information' : 'Create a new user account'}
+              </Typography>
+            </Box>
+          </Box>
+
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="First Name"
+                name="first_name"
+                size="small"
+                fullWidth
+                value={formData.first_name}
+                onChange={(e) => setFormData((p) => ({ ...p, first_name: e.target.value }))}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <PersonOutlineOutlined sx={{ fontSize: 18, color: 'text.disabled' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="Last Name"
+                name="last_name"
+                size="small"
+                fullWidth
+                value={formData.last_name}
+                onChange={(e) => setFormData((p) => ({ ...p, last_name: e.target.value }))}
+              />
+            </Grid>
+          </Grid>
+
+          <TextField
+            label="Email Address"
+            name="email"
+            size="small"
+            fullWidth
+            required
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value.trim() }))}
+            error={!!formErrors.email}
+            helperText={formErrors.email || 'Required for login and notifications'}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <EmailOutlined sx={{ fontSize: 18, color: 'text.disabled' }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          <TextField
+            label="Username"
+            name="username"
+            size="small"
+            fullWidth
+            required
+            value={formData.username}
+            onChange={(e) => setFormData((p) => ({ ...p, username: e.target.value.trim() }))}
+            error={!!formErrors.username}
+            helperText={formErrors.username || 'Unique identifier for login'}
+          />
+
+          <TextField
+            label="Phone Number"
+            name="phone"
+            size="small"
+            fullWidth
+            value={formData.phone}
+            onChange={(e) => setFormData((p) => ({ ...p, phone: e.target.value }))}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <PhoneOutlined sx={{ fontSize: 18, color: 'text.disabled' }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Stack>
+      )}
+
+      {/* Security Tab */}
+      {activeTab === 1 && (
+        <Stack spacing={2.5}>
+          {mode === 'create' ? (
+            <>
+              <Alert severity="info" sx={{ borderRadius: 1.5 }}>
+                Set a strong password for the new user account.
+              </Alert>
+              <TextField
+                label="Password"
+                name="password"
+                type="password"
+                size="small"
+                fullWidth
+                required
+                value={passwordData.password}
+                onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
+                error={!!formErrors.password}
+                helperText={formErrors.password || 'At least 8 characters with mix of letters and numbers'}
+              />
+              <TextField
+                label="Confirm Password"
+                name="confirm_password"
+                type="password"
+                size="small"
+                fullWidth
+                required
+                value={passwordData.confirm_password}
+                onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
+                error={!!formErrors.confirm_password}
+                helperText={formErrors.confirm_password}
+              />
+            </>
+          ) : mode === 'reset' ? (
+            <>
+              <Alert severity="warning" sx={{ borderRadius: 1.5 }}>
+                This will reset the password for <strong>{selectedUser?.username}</strong>
+              </Alert>
+              <TextField
+                label="New Password"
+                name="password"
+                type="password"
+                size="small"
+                fullWidth
+                value={passwordData.password}
+                onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
+                error={!!formErrors.password}
+                helperText={formErrors.password || 'At least 8 characters'}
+              />
+              <TextField
+                label="Confirm New Password"
+                name="confirm_password"
+                type="password"
+                size="small"
+                fullWidth
+                value={passwordData.confirm_password}
+                onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
+                error={!!formErrors.confirm_password}
+                helperText={formErrors.confirm_password}
+              />
+            </>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <LockOutlined sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+              <Typography variant="body2" color="text.secondary">
+                Password cannot be changed in edit mode.
+              </Typography>
+              <Typography variant="caption" color="text.disabled">
+                Use the "Reset Password" action to change user password.
+              </Typography>
+            </Box>
+          )}
+        </Stack>
+      )}
+
+      {/* Permissions Tab */}
+      {activeTab === 2 && (
+        <Stack spacing={3}>
+          {/* Account Status */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: alpha(theme.palette.background.default, 0.5),
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
+              Account Status
+            </Typography>
+            <Stack spacing={1.5}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.is_active}
+                    onChange={(e) => setFormData((p) => ({ ...p, is_active: e.target.checked }))}
+                    color="success"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      Active Account
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Inactive users cannot log in
+                    </Typography>
+                  </Box>
+                }
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.is_verified}
+                    onChange={(e) => setFormData((p) => ({ ...p, is_verified: e.target.checked }))}
+                    color="info"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      Verified Email
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Verified users have confirmed their email
+                    </Typography>
+                  </Box>
+                }
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.is_superuser}
+                    onChange={(e) => handleSuperuserToggle(e.target.checked)}
+                    color="warning"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight={500}>
+                      Super Admin
+                      {formData.is_superuser && (
+                        <Chip
+                          label="Auto-assigns admin role"
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                          sx={{ ml: 1, height: 20, fontSize: '0.6rem' }}
+                        />
+                      )}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Full system access with all permissions
+                    </Typography>
+                  </Box>
+                }
+              />
+            </Stack>
+          </Paper>
+
+          {/* Role Assignment */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: alpha(theme.palette.background.default, 0.5),
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
+              Role Assignment
+            </Typography>
+            
+            {isAdminAutoSelected && (
+              <Alert severity="info" sx={{ mb: 2, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
+                Admin role is automatically assigned for Super Admin users and cannot be removed
+              </Alert>
+            )}
+            
+            <FormControl size="small" fullWidth>
+              <Select
+                multiple
+                open={rolesMenuOpen}
+                onOpen={() => setRolesMenuOpen(true)}
+                onClose={() => setRolesMenuOpen(false)}
+                value={formData.roles}
+                onChange={handleRoleChange}
+                renderValue={(sel) => (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {sel.length === 0 ? (
+                      <Typography variant="body2" color="text.disabled">
+                        No roles assigned
+                      </Typography>
+                    ) : (
+                      sel.map((v) => (
+                        <Chip
+                          key={v}
+                          label={getRoleDetails(v).name}
+                          size="small"
+                          color={getRoleDetails(v).color}
+                          variant="outlined"
+                          sx={{ fontWeight: 600 }}
+                        />
+                      ))
+                    )}
+                  </Box>
+                )}
+              >
+                {(rolesList || []).map((r) => {
+                  const isAdmin = r.code === 'admin';
+                  const isDisabled = formData.is_superuser && isAdmin;
+                  
+                  return (
+                    <MenuItem 
+                      key={r.id} 
+                      value={r.code}
+                      disabled={isDisabled}
+                      sx={{
+                        opacity: isDisabled ? 0.7 : 1,
+                        '&.Mui-disabled': {
+                          opacity: 0.7,
+                        },
+                      }}
+                    >
+                      <Checkbox
+                        size="small"
+                        checked={formData.roles.includes(r.code)}
+                        sx={{ mr: 0.5, p: 0.5 }}
+                        disabled={isDisabled}
+                      />
+                      <ListItemText
+                        primary={r.name}
+                        secondary={r.description}
+                        primaryTypographyProps={{ fontSize: '0.9rem' }}
+                        secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                      />
+                      {isDisabled && (
+                        <Chip
+                          label="Auto-assigned"
+                          size="small"
+                          color="info"
+                          sx={{ ml: 1, height: 20, fontSize: '0.6rem' }}
+                        />
+                      )}
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            </FormControl>
+          </Paper>
+
+          {/* Department Assignment */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: alpha(theme.palette.background.default, 0.5),
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 2 }}>
+              Department Access
+            </Typography>
+            <Autocomplete
+              multiple
+              options={departments}
+              getOptionLabel={(o) => o.name}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              value={departments.filter((d) => formData.department_ids.includes(d.id))}
+              onChange={(_, v) => setFormData((p) => ({ ...p, department_ids: v.map((d) => d.id) }))}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Select Departments"
+                  size="small"
+                  placeholder="Search departments..."
+                  helperText="Users can only access assigned departments"
+                />
+              )}
+              renderTags={(val, getTagProps) =>
+                val.map((opt, i) => (
+                  <Chip
+                    key={opt.id}
+                    label={opt.name}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    {...getTagProps({ index: i })}
+                  />
+                ))
+              }
+            />
+          </Paper>
+        </Stack>
+      )}
+    </Box>
+  );
+};
+
+// ─── Dept Tree Node ──────────────────────────────────────────────────────────
 const DeptTreeNode = ({
   node,
   level = 0,
@@ -453,7 +899,57 @@ const DiffRow = ({ icon, color, children }) => (
   </Box>
 );
 
-// ─── Department Dialog ────────────────────────────────────────────────────────
+const RoleChip = ({ role, onChange, disabled }) => {
+  const cfg = ROLE_PALETTE[role] || ROLE_PALETTE.member;
+  return (
+    <FormControl size="small" sx={{ minWidth: 110 }} disabled={disabled}>
+      <Select
+        value={role}
+        onChange={(e) => onChange(e.target.value)}
+        variant="outlined"
+        sx={{
+          height: 26,
+          fontSize: '0.72rem',
+          fontWeight: 600,
+          color: cfg.textColor,
+          bgcolor: cfg.bgColor,
+          '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: cfg.borderColor,
+          },
+          '&:hover .MuiOutlinedInput-notchedOutline': {
+            borderColor: cfg.textColor,
+          },
+          '& .MuiSelect-icon': { color: cfg.textColor, fontSize: 16 },
+          borderRadius: 1,
+        }}
+        MenuProps={{ 
+          PaperProps: { 
+            sx: { mt: 0.5, borderRadius: 1.5, maxHeight: 200 } 
+          } 
+        }}
+      >
+        {ASSIGNABLE_ROLES.map((r) => {
+          const c = ROLE_PALETTE[r];
+          return (
+            <MenuItem key={r} value={r} sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
+              <Box
+                component="span"
+                sx={{
+                  display: 'inline-block',
+                  width: 8, height: 8, borderRadius: '50%',
+                  bgcolor: c.textColor, mr: 1, flexShrink: 0,
+                }}
+              />
+              {c.label}
+            </MenuItem>
+          );
+        })}
+      </Select>
+    </FormControl>
+  );
+};
+
+// ─── Department Dialog ──────────────────────────────────────────────────────
 const DepartmentDialog = ({
   open, onClose, user, departments, currentAssignments, onSave, saving,
 }) => {
@@ -975,7 +1471,9 @@ const UserManagement = () => {
     const role = rolesList?.find((r) => r.code === roleCode);
     return {
       name: role?.name || roleCode,
-      color: roleCode === 'admin' ? 'error' : roleCode === 'super_admin' ? 'warning' : 'primary',
+      color: roleCode === 'admin' ? 'error' : 
+             roleCode === 'super_admin' ? 'warning' : 
+             roleCode === 'superuser' ? 'warning' : 'primary',
     };
   };
 
@@ -1145,11 +1643,27 @@ const UserManagement = () => {
     setDialogMode('edit');
     setSelectedUser(user);
     const assignments = userDepartmentsMap[user.id] || [];
+    
+    // Start with user's current roles
+    let roles = [...(user.roles || [])];
+    
+    // If user is superuser, ensure admin role is present
+    if (user.is_superuser) {
+      const adminRole = rolesList?.find((r) => r.code === 'admin');
+      if (adminRole && !roles.includes('admin')) {
+        roles.push('admin');
+      }
+    }
+    
     setFormData({
-      email: user.email, username: user.username,
-      first_name: user.first_name || '', last_name: user.last_name || '',
-      phone: user.phone || '', roles: [...(user.roles || [])],
-      is_active: user.is_active, is_verified: user.is_verified,
+      email: user.email,
+      username: user.username,
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      phone: user.phone || '',
+      roles: roles,
+      is_active: user.is_active,
+      is_verified: user.is_verified,
       is_superuser: user.is_superuser || false,
       department_ids: assignments.map((a) => a.department_id),
     });
@@ -1177,11 +1691,15 @@ const UserManagement = () => {
   const handleOpenCreate = () => {
     setDialogMode('create');
     setSelectedUser(null);
-    setFormData({ 
-      email:'', username:'', first_name:'', last_name:'', phone:'',
-      roles:[], is_active:true, is_verified:false, is_superuser:false, department_ids:[] 
+    setFormData({
+      email: '', username: '', first_name: '', last_name: '', phone: '',
+      roles: [],
+      is_active: true,
+      is_verified: false,
+      is_superuser: false,
+      department_ids: [],
     });
-    setPasswordData({ password:'', confirm_password:'' });
+    setPasswordData({ password: '', confirm_password: '' });
     setFormErrors({});
     setDialogOpen(true);
   };
@@ -1207,7 +1725,19 @@ const UserManagement = () => {
     setIsSubmitting(true);
     try {
       if (dialogMode === 'create') {
-        const created = await dispatch(createUser({ ...formData, password: passwordData.password })).unwrap();
+        // Ensure superusers have admin role
+        const submitData = { ...formData };
+        if (submitData.is_superuser) {
+          const adminRole = rolesList?.find((r) => r.code === 'admin');
+          if (adminRole && !submitData.roles.includes('admin')) {
+            submitData.roles = [...submitData.roles, 'admin'];
+          }
+        }
+        
+        const created = await dispatch(createUser({ 
+          ...submitData, 
+          password: passwordData.password 
+        })).unwrap();
 
         if (formData.department_ids?.length && created?.id) {
           await api.post(`/users/${created.id}/departments`, {
@@ -1219,20 +1749,32 @@ const UserManagement = () => {
 
         setSnackbar({ open: true, message: 'User created successfully', severity: 'success' });
       } else if (dialogMode === 'edit') {
+        // Ensure superusers have admin role
+        let roles = [...(formData.roles || [])];
+        if (formData.is_superuser) {
+          const adminRole = rolesList?.find((r) => r.code === 'admin');
+          if (adminRole && !roles.includes('admin')) {
+            roles = [...roles, 'admin'];
+          }
+        } else {
+          // If not superuser, remove admin role
+          roles = roles.filter((r) => r !== 'admin');
+        }
+        
         await dispatch(updateUser({
-          id: selectedUser.id, 
-          email: formData.email, 
+          id: selectedUser.id,
+          email: formData.email,
           username: formData.username,
-          first_name: formData.first_name, 
+          first_name: formData.first_name,
           last_name: formData.last_name,
-          phone: formData.phone, 
+          phone: formData.phone,
           is_active: formData.is_active,
-          is_verified: formData.is_verified, 
+          is_verified: formData.is_verified,
           is_superuser: formData.is_superuser,
         })).unwrap();
 
         const prevRoles = [...(selectedUser.roles || [])].sort();
-        const nextRoles = [...(formData.roles || [])].sort();
+        const nextRoles = [...roles].sort();
         if (JSON.stringify(prevRoles) !== JSON.stringify(nextRoles)) {
           await dispatch(updateUserRoles({ id: selectedUser.id, roles: nextRoles })).unwrap();
         }
@@ -1285,11 +1827,11 @@ const UserManagement = () => {
   }), [users, total]);
 
   const STAT_CARDS = [
-    { label: 'Total users', value: stats.total, icon: <PeopleAltOutlined />, color: 'text.primary' },
-    { label: 'Active', value: stats.active, icon: <LockOpenOutlined />, color: 'success.main' },
-    { label: 'Verified', value: stats.verified, icon: <VerifiedUserOutlined />, color: 'info.main' },
-    { label: 'Admins', value: stats.admins, icon: <AdminPanelSettingsOutlined />, color: 'warning.main' },
-    { label: 'Super admins', value: stats.superadmins, icon: <ShieldOutlined />, color: 'error.main' },
+    { label: 'Total Users', value: stats.total, icon: <PeopleAltOutlined />, color: theme.palette.primary.main },
+    { label: 'Active', value: stats.active, icon: <LockOpenOutlined />, color: theme.palette.success.main },
+    { label: 'Verified', value: stats.verified, icon: <VerifiedUserOutlined />, color: theme.palette.info.main },
+    { label: 'Admins', value: stats.admins, icon: <AdminPanelSettingsOutlined />, color: theme.palette.warning.main },
+    { label: 'Super Admins', value: stats.superadmins, icon: <ShieldOutlined />, color: theme.palette.error.main },
   ];
 
   // ── Mobile card ──────────────────────────────────────────────────────────────
@@ -1462,7 +2004,7 @@ const UserManagement = () => {
         </Box>
       </Box>
 
-      {/* Stats - Mobile Optimized */}
+      {/* Improved Stats - Compact Layout */}
       <Box sx={{ mb: 3 }}>
         {isMobile ? (
           // Scrollable horizontal row for mobile
@@ -1479,18 +2021,18 @@ const UserManagement = () => {
             }}
           >
             {STAT_CARDS.map((s) => (
-              <CompactStatCard key={s.label} {...s} isLoading={isLoading} />
+              <ImprovedStatCard key={s.label} {...s} isLoading={isLoading} />
             ))}
           </Box>
         ) : (
-          // Grid for desktop
+          // Grid with improved stats - 5 columns on desktop
           <Box sx={{
             display: 'grid',
             gridTemplateColumns: 'repeat(5, 1fr)',
             gap: 1.5,
           }}>
             {STAT_CARDS.map((s) => (
-              <StatCard key={s.label} {...s} isLoading={isLoading} />
+              <ImprovedStatCard key={s.label} {...s} isLoading={isLoading} />
             ))}
           </Box>
         )}
@@ -1710,11 +2252,11 @@ const UserManagement = () => {
         saving={savingDepts}
       />
 
-      {/* Create / edit / delete / reset dialog */}
+      {/* Improved Create / edit / delete / reset dialog */}
       <Dialog
         open={dialogOpen}
         onClose={() => !isSubmitting && setDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
         fullScreen={isMobile}
         TransitionComponent={Fade}
@@ -1722,6 +2264,7 @@ const UserManagement = () => {
           sx: { 
             borderRadius: isMobile ? 0 : 2.5,
             maxHeight: '90vh',
+            overflow: 'hidden',
           } 
         }}
       >
@@ -1732,14 +2275,41 @@ const UserManagement = () => {
           pb: 2, 
           display: 'flex', 
           justifyContent: 'space-between', 
-          alignItems: 'center' 
+          alignItems: 'center',
+          bgcolor: (t) => alpha(t.palette.primary.main, 0.02),
         }}>
-          <span>
-            {dialogMode === 'create' && 'Create new user'}
-            {dialogMode === 'edit' && `Edit · ${selectedUser?.username}`}
-            {dialogMode === 'delete' && 'Confirm delete'}
-            {dialogMode === 'reset' && `Reset password · ${selectedUser?.username}`}
-          </span>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: 1.5,
+                bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {dialogMode === 'create' && <PersonAddOutlined color="primary" />}
+              {dialogMode === 'edit' && <EditOutlined color="primary" />}
+              {dialogMode === 'delete' && <DeleteOutlined color="error" />}
+              {dialogMode === 'reset' && <KeyOutlined color="warning" />}
+            </Box>
+            <Box>
+              <Typography variant="h6" fontWeight={700}>
+                {dialogMode === 'create' && 'Create New User'}
+                {dialogMode === 'edit' && `Edit ${selectedUser?.username}`}
+                {dialogMode === 'delete' && 'Delete User'}
+                {dialogMode === 'reset' && `Reset Password · ${selectedUser?.username}`}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {dialogMode === 'create' && 'Add a new user to the system'}
+                {dialogMode === 'edit' && 'Update user information and permissions'}
+                {dialogMode === 'delete' && 'Permanently remove this user account'}
+                {dialogMode === 'reset' && 'Set a new password for the user'}
+              </Typography>
+            </Box>
+          </Box>
           {isMobile && (
             <IconButton size="small" onClick={() => !isSubmitting && setDialogOpen(false)}>
               <CloseOutlined fontSize="small" />
@@ -1748,215 +2318,36 @@ const UserManagement = () => {
         </DialogTitle>
 
         <DialogContent sx={{ 
-          pt: 2.5, 
+          pt: 3, 
           px: { xs: 2, sm: 3 },
           overflowY: 'auto',
+          flex: 1,
         }}>
           {dialogMode === 'delete' ? (
             <Alert severity="error" icon={<WarningAmberOutlined />} sx={{ borderRadius: 1.5 }}>
-              Delete <strong>{fullName(selectedUser)}</strong> (@{selectedUser?.username}) permanently?
-              This will remove their account, role assignments, and department access. This cannot be undone.
+              <Typography variant="body1" fontWeight={600} gutterBottom>
+                Are you sure you want to delete this user?
+              </Typography>
+              <Typography variant="body2">
+                This will permanently remove <strong>{fullName(selectedUser)}</strong> (@{selectedUser?.username}) 
+                from the system, including their account, role assignments, and department access.
+              </Typography>
+              <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+                This action cannot be undone.
+              </Typography>
             </Alert>
-          ) : dialogMode === 'reset' ? (
-            <Stack spacing={2}>
-              <TextField 
-                label="New password" 
-                name="password" 
-                type="password" 
-                size="small" 
-                fullWidth
-                value={passwordData.password}
-                onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
-                error={!!formErrors.password} 
-                helperText={formErrors.password || 'At least 8 characters'} 
-              />
-              <TextField 
-                label="Confirm password" 
-                name="confirm_password" 
-                type="password" 
-                size="small" 
-                fullWidth
-                value={passwordData.confirm_password}
-                onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
-                error={!!formErrors.confirm_password} 
-                helperText={formErrors.confirm_password} 
-              />
-            </Stack>
           ) : (
-            <Stack spacing={2}>
-              <Grid container spacing={1.5}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField 
-                    label="First name" 
-                    name="first_name" 
-                    size="small" 
-                    fullWidth
-                    value={formData.first_name}
-                    onChange={(e) => setFormData((p) => ({ ...p, first_name: e.target.value }))} 
-                  />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField 
-                    label="Last name" 
-                    name="last_name" 
-                    size="small" 
-                    fullWidth
-                    value={formData.last_name}
-                    onChange={(e) => setFormData((p) => ({ ...p, last_name: e.target.value }))} 
-                  />
-                </Grid>
-              </Grid>
-              <TextField 
-                label="Email" 
-                name="email" 
-                size="small" 
-                fullWidth 
-                required
-                value={formData.email}
-                onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value.trim() }))}
-                error={!!formErrors.email} 
-                helperText={formErrors.email} 
-              />
-              <TextField 
-                label="Username" 
-                name="username" 
-                size="small" 
-                fullWidth 
-                required
-                value={formData.username}
-                onChange={(e) => setFormData((p) => ({ ...p, username: e.target.value.trim() }))}
-                error={!!formErrors.username} 
-                helperText={formErrors.username} 
-              />
-              <TextField 
-                label="Phone" 
-                name="phone" 
-                size="small" 
-                fullWidth
-                value={formData.phone}
-                onChange={(e) => setFormData((p) => ({ ...p, phone: e.target.value }))} 
-              />
-
-              {dialogMode === 'create' && (
-                <>
-                  <TextField 
-                    label="Password" 
-                    name="password" 
-                    type="password" 
-                    size="small" 
-                    fullWidth 
-                    required
-                    value={passwordData.password}
-                    onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
-                    error={!!formErrors.password} 
-                    helperText={formErrors.password || 'At least 8 characters'} 
-                  />
-                  <TextField 
-                    label="Confirm password" 
-                    name="confirm_password" 
-                    type="password" 
-                    size="small" 
-                    fullWidth 
-                    required
-                    value={passwordData.confirm_password}
-                    onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
-                    error={!!formErrors.confirm_password} 
-                    helperText={formErrors.confirm_password} 
-                  />
-                </>
-              )}
-
-              <FormControl size="small" fullWidth>
-                <InputLabel>Roles</InputLabel>
-                <Select
-                  multiple
-                  open={rolesMenuOpen}
-                  onOpen={() => setRolesMenuOpen(true)}
-                  onClose={() => setRolesMenuOpen(false)}
-                  value={formData.roles}
-                  label="Roles"
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setFormData((p) => ({
-                      ...p,
-                      roles: typeof value === 'string' ? value.split(',') : value,
-                    }));
-                  }}
-                  renderValue={(sel) => (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {sel.length === 0
-                        ? <Typography variant="body2" color="text.disabled">No roles assigned</Typography>
-                        : sel.map((v) => (
-                            <Chip key={v} label={getRoleDetails(v).name} size="small" />
-                          ))}
-                    </Box>
-                  )}
-                >
-                  {(rolesList || []).map((r) => (
-                    <MenuItem key={r.id} value={r.code}>
-                      <Checkbox
-                        size="small"
-                        checked={formData.roles.includes(r.code)}
-                        sx={{ mr: 0.5, p: 0.5 }}
-                      />
-                      <ListItemText primary={r.name} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <Autocomplete
-                multiple
-                options={departments}
-                getOptionLabel={(o) => o.name}
-                isOptionEqualToValue={(o, v) => o.id === v.id}
-                value={departments.filter((d) => formData.department_ids.includes(d.id))}
-                onChange={(_, v) => setFormData((p) => ({ ...p, department_ids: v.map((d) => d.id) }))}
-                renderInput={(params) => (
-                  <TextField 
-                    {...params} 
-                    label="Departments" 
-                    size="small" 
-                    placeholder="Select departments..."
-                  />
-                )}
-                renderTags={(val, getTagProps) =>
-                  val.map((opt, i) => (
-                    <Chip 
-                      key={opt.id} 
-                      label={opt.name} 
-                      size="small" 
-                      {...getTagProps({ index: i })} 
-                    />
-                  ))
-                }
-              />
-
-              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                <FormControlLabel
-                  control={<Switch 
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData((p) => ({ ...p, is_active: e.target.checked }))} 
-                  />}
-                  label="Active"
-                />
-                <FormControlLabel
-                  control={<Switch 
-                    checked={formData.is_verified}
-                    onChange={(e) => setFormData((p) => ({ ...p, is_verified: e.target.checked }))} 
-                  />}
-                  label="Verified"
-                />
-                <FormControlLabel
-                  control={<Switch 
-                    checked={formData.is_superuser} 
-                    color="warning"
-                    onChange={(e) => setFormData((p) => ({ ...p, is_superuser: e.target.checked }))} 
-                  />}
-                  label="Super admin"
-                />
-              </Box>
-            </Stack>
+            <UserForm
+              mode={dialogMode}
+              formData={formData}
+              setFormData={setFormData}
+              passwordData={passwordData}
+              setPasswordData={setPasswordData}
+              formErrors={formErrors}
+              rolesList={rolesList}
+              departments={departments}
+              selectedUser={selectedUser}
+            />
           )}
         </DialogContent>
 
@@ -1965,9 +2356,10 @@ const UserManagement = () => {
           py: 2, 
           borderTop: '1px solid', 
           borderColor: 'divider', 
-          gap: 1 
+          gap: 1,
+          bgcolor: (t) => alpha(t.palette.background.paper, 0.9),
         }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting}>
+          <Button onClick={() => setDialogOpen(false)} disabled={isSubmitting} sx={{ borderRadius: 1.5 }}>
             Cancel
           </Button>
           <Button
@@ -1975,14 +2367,27 @@ const UserManagement = () => {
             variant="contained"
             color={dialogMode === 'delete' ? 'error' : 'primary'}
             disabled={isSubmitting}
-            sx={{ minWidth: 130 }}
-          >
-            {isSubmitting ? <CircularProgress size={20} color="inherit" /> : (
+            sx={{ 
+              minWidth: 150, 
+              borderRadius: 1.5, 
+              fontWeight: 700,
+              px: 3,
+            }}
+            startIcon={isSubmitting ? null : (
               <>
-                {dialogMode === 'create' && 'Create user'}
-                {dialogMode === 'edit' && 'Save changes'}
-                {dialogMode === 'delete' && 'Delete user'}
-                {dialogMode === 'reset' && 'Reset password'}
+                {dialogMode === 'create' && <PersonAddOutlined />}
+                {dialogMode === 'edit' && <EditOutlined />}
+                {dialogMode === 'delete' && <DeleteOutlined />}
+                {dialogMode === 'reset' && <KeyOutlined />}
+              </>
+            )}
+          >
+            {isSubmitting ? <CircularProgress size={22} color="inherit" /> : (
+              <>
+                {dialogMode === 'create' && 'Create User'}
+                {dialogMode === 'edit' && 'Save Changes'}
+                {dialogMode === 'delete' && 'Delete User'}
+                {dialogMode === 'reset' && 'Reset Password'}
               </>
             )}
           </Button>

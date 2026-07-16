@@ -3,15 +3,16 @@ Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
 
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
+import uuid
 
 from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from app.db.base import Base
 from app.db.types import UUID as CustomUUID
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 # ==================== Association Tables ====================
 
@@ -67,6 +68,24 @@ class Participant(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
     
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "email": self.email,
+            "telephone": self.telephone,
+            "title": self.title,
+            "organization": self.organization,
+            "notes": self.notes,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+    
+    def __repr__(self) -> str:
+        return f"<Participant id={self.id} name='{self.name}'>"
+
+
 class ParticipantList(Base):
     """Depends on Participant and User"""
     __tablename__ = "participant_lists"
@@ -100,6 +119,75 @@ class ParticipantList(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
+    
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "description": self.description,
+            "is_global": self.is_global,
+            "participant_count": len(self.participants) if self.participants else 0,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+    
+    def __repr__(self) -> str:
+        return f"<ParticipantList id={self.id} name='{self.name}'>"
+
+
+
+class ActionStatus(Base):
+    """Action status lookup table"""
+    __tablename__ = "action_statuses"
+    __table_args__ = (
+        Index('ix_action_statuses_code', 'code'),
+        Index('ix_action_statuses_is_active', 'is_active'),
+        Index('ix_action_statuses_sort_order', 'sort_order'),
+    )
+    
+    id = Column(CustomUUID, primary_key=True, default=uuid4)
+    code = Column(String(50), nullable=False, unique=True)  # 'PENDING', 'IN_PROGRESS', 'COMPLETED', 'OVERDUE', 'BLOCKED'
+    name = Column(String(100), nullable=False)  # 'Pending', 'In Progress', 'Completed', 'Overdue', 'Blocked'
+    short_name = Column(String(20), nullable=True)  # 'PENDING', 'IN_PROGRESS', etc.
+    description = Column(Text, nullable=True)
+    color = Column(String(20), nullable=True)  # For UI display
+    sort_order = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Audit fields
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    actions = relationship("MeetingAction", back_populates="overall_status", foreign_keys="MeetingAction.overall_status_id", lazy="selectin")
+    
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by.username if self.created_by else None
+    
+    @property
+    def updated_by_name(self) -> Optional[str]:
+        return self.updated_by.username if self.updated_by else None
+    
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "code": self.code,
+            "name": self.name,
+            "short_name": self.short_name,
+            "description": self.description,
+            "color": self.color,
+            "sort_order": self.sort_order,
+            "is_active": self.is_active,
+        }
+    
+    def __repr__(self) -> str:
+        return f"<ActionStatus id={self.id} code='{self.code}' name='{self.name}'>"
 
 
 class Meeting(Base):
@@ -141,7 +229,7 @@ class Meeting(Base):
     # Meeting platform fields
     platform = Column(String(100), nullable=True)
     meeting_link = Column(String(500), nullable=True)
-    meeting_id_online = Column(String(255), nullable=True)  # Add this field
+    meeting_id_online = Column(String(255), nullable=True)
     passcode = Column(String(100), nullable=True)
     dial_in_numbers = Column(JSON, nullable=True)
     
@@ -154,7 +242,7 @@ class Meeting(Base):
     chairperson_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
     secretary_id = Column(CustomUUID, ForeignKey("meeting_participants.id", ondelete="SET NULL"), nullable=True)
     
-    # Status (FK to Attribute)
+    # Status (FK to MeetingStatus)
     status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
     
     # Recurring Meeting Support
@@ -162,9 +250,13 @@ class Meeting(Base):
     recurring_meeting_id = Column(CustomUUID, ForeignKey('recurring_meetings.id', ondelete='SET NULL'), nullable=True)
     occurrence_number = Column(Integer, nullable=True)  # Which occurrence number this is
     
-    # Visibility fields (organization_id REMOVED)
+    # Visibility fields
     visibility = Column(String(50), default="open", nullable=False)
     restricted_department_id = Column(CustomUUID, ForeignKey("organization_nodes.id"), nullable=True)
+    
+    # Reminder tracking
+    reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+    reminder_sent_count = Column(Integer, nullable=False, default=0)
     
     # Audit fields
     created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
@@ -186,8 +278,9 @@ class Meeting(Base):
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     
-    # Status
+    # Status - using MeetingStatus model
     status = relationship("Attribute", foreign_keys=[status_id], lazy="selectin")
+
     
     # Participants
     participants = relationship(
@@ -198,7 +291,7 @@ class Meeting(Base):
         lazy="selectin"
     )
     
-    # Department relationships with explicit foreign_keys
+    # Department relationships
     department = relationship(
         "OrganizationNode",
         foreign_keys=[department_id],
@@ -262,11 +355,6 @@ class Meeting(Base):
         back_populates="meetings",
         lazy="selectin"
     )
-
-    # Reminder tracking
-    reminder_sent_at = Column(DateTime(timezone=True), nullable=True)  # When reminders were last sent
-    reminder_sent_count = Column(Integer, nullable=False, default=0)  # How many times reminders were sent
-    
     
     # ==================== Properties ====================
     
@@ -280,22 +368,18 @@ class Meeting(Base):
     
     @property
     def chairperson_name_from_participant(self) -> Optional[str]:
-        """Get chairperson name from the participant relationship"""
         return self.chairperson.name if self.chairperson else self.chairperson_name
     
     @property
     def secretary_name_from_participant(self) -> Optional[str]:
-        """Get secretary name from the participant relationship"""
         return self.secretary.name if self.secretary else None
     
     @property
     def participant_count(self) -> int:
-        """Get total number of participants"""
         return len(self.participants) if self.participants else 0
     
     @property
     def duration(self) -> Optional[str]:
-        """Get formatted duration"""
         if self.duration_minutes:
             hours = self.duration_minutes // 60
             minutes = self.duration_minutes % 60
@@ -306,39 +390,36 @@ class Meeting(Base):
     
     @property
     def is_online(self) -> bool:
-        """Check if meeting is online"""
         return self.platform and self.platform != 'physical'
     
     @property
     def has_meeting_link(self) -> bool:
-        """Check if meeting has a link"""
         return bool(self.meeting_link)
+    
+    @property
+    def status_display(self) -> str:
+        """Get status display name"""
+        if self.status:
+            return self.status.name
+        return 'Scheduled'
+    
+    @property
+    def status_color(self) -> Optional[str]:
+        """Get status color for UI"""
+        if self.status:
+            return self.status.color
+        return None
     
     # ==================== Methods ====================
     
     def calculate_duration(self) -> Optional[int]:
-        """Calculate duration in minutes from start and end times"""
         if self.start_time and self.end_time:
             delta = self.end_time - self.start_time
             self.duration_minutes = int(delta.total_seconds() / 60)
             return self.duration_minutes
         return None
     
-    def get_status_value(self) -> Optional[str]:
-        """Get status attribute value"""
-        if self.status and self.status.extra_metadata:
-            import json
-            metadata = self.status.extra_metadata
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except:
-                    pass
-            return metadata.get('value')
-        return None
-    
     def to_dict(self, include_relationships: bool = False) -> dict:
-        """Convert meeting to dictionary"""
         data = {
             "id": str(self.id),
             "title": self.title,
@@ -359,7 +440,8 @@ class Meeting(Base):
             "chairperson_id": str(self.chairperson_id) if self.chairperson_id else None,
             "secretary_id": str(self.secretary_id) if self.secretary_id else None,
             "status_id": str(self.status_id) if self.status_id else None,
-            "status_value": self.get_status_value(),
+            "status_display": self.status_display,
+            "status_color": self.status_color,
             "is_recurring": self.is_recurring,
             "recurring_meeting_id": str(self.recurring_meeting_id) if self.recurring_meeting_id else None,
             "occurrence_number": self.occurrence_number,
@@ -372,7 +454,8 @@ class Meeting(Base):
             "is_active": self.is_active,
             "participant_count": self.participant_count,
             "duration": self.duration,
-            "is_online": self.is_online
+            "is_online": self.is_online,
+            "has_meeting_link": self.has_meeting_link,
         }
         
         if include_relationships:
@@ -382,21 +465,9 @@ class Meeting(Base):
         
         return data
     
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Meeting id={self.id} title='{self.title[:50]}' date={self.meeting_date}>"
-class MeetingStatus(Base):
-    """Meeting status lookup table"""
-    __tablename__ = "meeting_statuses"
-    
-    id = Column(CustomUUID, primary_key=True, default=uuid4)
-    code = Column(String(50), nullable=False, unique=True)  # 'scheduled', 'ongoing', 'completed', 'cancelled'
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    color = Column(String(20), nullable=True)  # For UI display
-    sort_order = Column(Integer, default=0)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
 
 class MeetingParticipant(Base):
     """Depends on Meeting"""
@@ -418,9 +489,8 @@ class MeetingParticipant(Base):
     title = Column(String(255), nullable=True)
     organization = Column(String(255), nullable=True)
     is_chairperson = Column(Boolean, default=False, nullable=False)
-    is_secretary = Column(Boolean, default=False) 
-    attendance_status = Column(String(50), nullable=True, default='pending')  # attended, missed, pending, excused
-    
+    is_secretary = Column(Boolean, default=False, nullable=False) 
+    attendance_status = Column(String(50), nullable=True, default='pending')
     apology_comment = Column(Text, nullable=True)  
     
     # Audit fields
@@ -430,30 +500,20 @@ class MeetingParticipant(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    # Relationships
-    meeting = relationship("Meeting", back_populates="participants")
-    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
-
-    @property
-    def created_by_name(self) -> Optional[str]:
-        return self.created_by.username if self.created_by else None
+    # ==================== Relationships ====================
     
-    @property
-    def updated_by_name(self) -> Optional[str]:
-        return self.updated_by.username if self.updated_by else None
-
-
-    meeting_id = Column(CustomUUID  , ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
-    
-    # Relationships
+    # Primary relationship to Meeting - specify foreign_keys
     meeting = relationship(
-        "Meeting",
-        foreign_keys=[meeting_id],  # Specify foreign key
+        "Meeting", 
+        foreign_keys=[meeting_id],
         back_populates="participants",
-        lazy="noload"
+        lazy="selectin"
     )
     
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    
+    # These are back-references from Meeting - they don't need foreign_keys
     chairperson_of = relationship(
         "Meeting",
         foreign_keys="Meeting.chairperson_id",
@@ -470,37 +530,6 @@ class MeetingParticipant(Base):
         uselist=False
     )
 
-class MeetingStatusHistory(Base):
-    """Tracks the lifecycle of a meeting"""
-    __tablename__ = "meeting_status_history"
-    __table_args__ = (
-        Index('ix_msh_meeting_id', 'meeting_id'),
-        Index('ix_msh_status_id', 'status_id'),
-        Index('ix_msh_status_date', 'status_date'),
-        Index('ix_msh_created_by', 'created_by_id'),
-        Index('ix_msh_updated_by', 'updated_by_id'),
-    )
-
-    id = Column(CustomUUID, primary_key=True, default=uuid4)
-    meeting_id = Column(CustomUUID, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False)
-    
-    status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
-    comment = Column(Text, nullable=True)
-    status_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
-    # Audit fields
-    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-
-    # Relationships
-    meeting = relationship("Meeting", back_populates="status_history")
-    status = relationship("Attribute", foreign_keys=[status_id], lazy="selectin")
-    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
-
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -508,6 +537,62 @@ class MeetingStatusHistory(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
+    
+    @property
+    def attendance_status_display(self) -> str:
+        """Get display name for attendance status"""
+        status_map = {
+            'attended': 'Attended',
+            'missed': 'Missed',
+            'pending': 'Pending',
+            'excused': 'Excused'
+        }
+        return status_map.get(self.attendance_status, 'Unknown')
+    
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "meeting_id": str(self.meeting_id),
+            "name": self.name,
+            "email": self.email,
+            "telephone": self.telephone,
+            "title": self.title,
+            "organization": self.organization,
+            "is_chairperson": self.is_chairperson,
+            "is_secretary": self.is_secretary,
+            "attendance_status": self.attendance_status,
+            "attendance_status_display": self.attendance_status_display,
+            "apology_comment": self.apology_comment,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+    
+    def __repr__(self) -> str:
+        return f"<MeetingParticipant id={self.id} name='{self.name}'>"
+
+
+class MeetingStatusHistory(Base):
+    __tablename__ = "meeting_status_history"
+    
+    id = Column(CustomUUID, primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(CustomUUID, ForeignKey("meetings.id"), nullable=False)
+    # ✅ Change this to reference attributes table
+    status_id = Column(CustomUUID, ForeignKey("attributes.id"), nullable=False)  # Was: ForeignKey("meeting_statuses.id")
+    comment = Column(Text, nullable=True)
+    status_date = Column(DateTime, nullable=False, default=datetime.now)
+    created_by_id = Column(CustomUUID, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_by_id = Column(CustomUUID, ForeignKey("users.id"))
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    meeting = relationship("Meeting", foreign_keys=[meeting_id])
+    # ✅ Change this to reference Attribute
+    status = relationship("Attribute", foreign_keys=[status_id])  # Was: relationship("MeetingStatus")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+
 
 class MeetingMinutes(Base):
     """Depends on Meeting and User"""
@@ -517,6 +602,7 @@ class MeetingMinutes(Base):
         Index('ix_mm_timestamp', 'timestamp'),
         Index('ix_mm_created_by', 'created_by_id'),
         Index('ix_mm_updated_by', 'updated_by_id'),
+        Index('ix_mm_is_default', 'is_default'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -536,6 +622,7 @@ class MeetingMinutes(Base):
     updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False) 
     
     # Relationships
     meeting = relationship("Meeting", back_populates="minutes")
@@ -556,8 +643,8 @@ class MeetingMinutes(Base):
     active_actions = relationship(
         "MeetingAction", 
         primaryjoin="and_(MeetingMinutes.id == MeetingAction.minute_id, MeetingAction.is_active == True)",
-        viewonly=True,  # CRITICAL: Makes this relationship read-only
-        overlaps="actions",  # Tells SQLAlchemy this intentionally overlaps with 'actions'
+        viewonly=True,
+        overlaps="actions",
         lazy="selectin",
         order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()"
     )
@@ -574,277 +661,300 @@ class MeetingMinutes(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
     
-
+    @property
+    def action_count(self) -> int:
+        """Get total number of actions"""
+        return len(self.actions) if self.actions else 0
+    
+    @property
+    def completed_action_count(self) -> int:
+        """Get number of completed actions"""
+        if not self.actions:
+            return 0
+        return sum(1 for a in self.actions if a.is_completed)
+    
+    @property
+    def overdue_action_count(self) -> int:
+        """Get number of overdue actions"""
+        if not self.actions:
+            return 0
+        return sum(1 for a in self.actions if a.is_overdue)
+    
+    @property
+    def completion_percentage(self) -> float:
+        """Get completion percentage of actions"""
+        if not self.actions:
+            return 0.0
+        completed = self.completed_action_count
+        total = len(self.actions)
+        return round((completed / total) * 100, 2)
+    
+    def to_dict(self, include_actions: bool = True) -> dict:
+        data = {
+            "id": str(self.id),
+            "meeting_id": str(self.meeting_id),
+            "topic": self.topic,
+            "discussion": self.discussion,
+            "decisions": self.decisions,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "recorded_by_id": str(self.recorded_by_id) if self.recorded_by_id else None,
+            "recorded_by_name": self.recorded_by_name,
+            "created_by_id": str(self.created_by_id) if self.created_by_id else None,
+            "created_by_name": self.created_by_name,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "is_active": self.is_active,
+            "is_default": self.is_default,
+            "action_count": self.action_count,
+            "completed_action_count": self.completed_action_count,
+            "overdue_action_count": self.overdue_action_count,
+            "completion_percentage": self.completion_percentage,
+        }
+        
+        if include_actions:
+            data["actions"] = [a.to_dict() for a in (self.actions or [])]
+        
+        return data
+    
+    def __repr__(self) -> str:
+        return f"<MeetingMinutes id={self.id} topic='{self.topic[:50]}'>"
 
 
 class MeetingAction(Base):
-    """Depends on MeetingMinutes, User, Attribute"""
+    """Meeting Action model - tracks action items from meeting minutes"""
     __tablename__ = "meeting_actions"
     __table_args__ = (
-        Index('ix_ma_minute_id', 'minute_id'),
-        Index('ix_ma_assigned_to', 'assigned_to_id'),
-        Index('ix_ma_assigned_by', 'assigned_by_id'),
-        Index('ix_ma_due_date', 'due_date'),
-        Index('ix_ma_priority', 'priority'),
-        Index('ix_ma_overall_status_id', 'overall_status_id'),
-        Index('ix_ma_created_by', 'created_by_id'),
-        Index('ix_ma_updated_by', 'updated_by_id'),
+        Index('ix_meeting_actions_minute_id', 'minute_id'),
+        Index('ix_meeting_actions_assigned_to', 'assigned_to_id'),
+        Index('ix_meeting_actions_due_date', 'due_date'),
+        Index('ix_meeting_actions_priority', 'priority'),
+        Index('ix_meeting_actions_status', 'overall_status_id'),
+        Index('ix_meeting_actions_overall_status_name', 'overall_status_name'),
+        Index('ix_meeting_actions_created_by', 'created_by_id'),
+        Index('ix_meeting_actions_updated_by', 'updated_by_id'),
+        Index('ix_meeting_actions_is_active', 'is_active'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
-    minute_id = Column(CustomUUID, ForeignKey('meeting_minutes.id', ondelete='CASCADE'), nullable=False)
-    
+    minute_id = Column(CustomUUID, ForeignKey("meeting_minutes.id", ondelete='CASCADE'), nullable=False)
     description = Column(Text, nullable=False)
-    
-    assigned_to_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    assigned_to_name = Column(JSON, nullable=True)  # This is a column for denormalized data
-    assigned_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    assigned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+    assigned_to_id = Column(CustomUUID, ForeignKey("users.id", ondelete='SET NULL'), nullable=True)
+    assigned_to_name = Column(JSON, nullable=True)  # Store assigned to details as JSON
+    assigned_by_id = Column(CustomUUID, ForeignKey("users.id", ondelete='SET NULL'), nullable=True)
+    assigned_at = Column(DateTime(timezone=True), default=datetime.now, nullable=False)
     due_date = Column(DateTime(timezone=True), nullable=True)
-    start_date = Column(DateTime(timezone=True), nullable=True)
+    priority = Column(Integer, default=2, nullable=False)  # 1=High, 2=Medium, 3=Low, 4=Very Low
+    remarks = Column(Text, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    
-    overall_status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
+    overall_status_id = Column(CustomUUID, ForeignKey("action_statuses.id", ondelete='SET NULL'), nullable=True)
+    overall_status_name = Column(String(100), nullable=True)
     overall_progress_percentage = Column(Integer, default=0, nullable=False)
     
-    priority = Column(Integer, default=2, nullable=False)
-    
-    estimated_hours = Column(Float, nullable=True)
-    actual_hours = Column(Float, nullable=True)
-    
-    remarks = Column(Text, nullable=True)
-    
     # Audit fields
-    created_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    created_by_id = Column(CustomUUID, ForeignKey("users.id", ondelete='SET NULL'), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.now, nullable=False)
+    updated_by_id = Column(CustomUUID, ForeignKey("users.id", ondelete='SET NULL'), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=datetime.now, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    # Relationships with eager loading defaults
+    # Relationships
     minutes = relationship("MeetingMinutes", back_populates="actions")
     assigned_to = relationship("User", foreign_keys=[assigned_to_id], lazy="selectin")
     assigned_by = relationship("User", foreign_keys=[assigned_by_id], lazy="selectin")
-    overall_status = relationship("Attribute", foreign_keys=[overall_status_id], lazy="selectin")
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    overall_status = relationship("ActionStatus", foreign_keys=[overall_status_id], lazy="selectin")
+    comments = relationship("ActionComment", back_populates="action", cascade="all, delete-orphan", lazy="selectin")
+    status_history = relationship("ActionStatusHistory", back_populates="action", cascade="all, delete-orphan", lazy="selectin")
     
-    # One-to-many with cascade and eager loading
-    status_history = relationship(
-        "ActionStatusHistory", 
-        back_populates="action", 
-        cascade="all, delete-orphan",
-        lazy="selectin",
-        order_by="ActionStatusHistory.created_at.desc()"
-    )
-    comments = relationship(
-        "ActionComment", 
-        back_populates="action", 
-        cascade="all, delete-orphan",
-        lazy="selectin",
-        order_by="ActionComment.created_at.desc()"
-    )
-
-    # ==================== PROPERTIES FOR DISPLAY ====================
+    # ==================== Validators ====================
     
-    @property
-    def created_by_name(self) -> Optional[str]:
-        """Get creator's username from relationship"""
-        return self.created_by.username if self.created_by else None
+    @validates('priority')
+    def validate_priority(self, key: str, value: int) -> int:
+        """Ensure priority is between 1 and 4"""
+        if value is not None and not (1 <= value <= 4):
+            raise ValueError(f"Priority must be between 1 and 4, got {value}")
+        return value
+    
+    @validates('overall_progress_percentage')
+    def validate_progress(self, key: str, value: int) -> int:
+        """Ensure progress is between 0 and 100"""
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError(f"Progress must be between 0 and 100, got {value}")
+        return value
+    
+    # ==================== Properties ====================
     
     @property
-    def updated_by_name(self) -> Optional[str]:
-        """Get last updater's username from relationship"""
-        return self.updated_by.username if self.updated_by else None
-    
-    @property
-    def assigned_to_display_name(self) -> Optional[str]:
-        """
-        Get assigned-to user's display name.
-        Prefers relationship, falls back to denormalized column.
-        Use this for display purposes.
-        """
+    def assigned_to_display(self) -> str:
+        """Get display name for assigned to"""
         if self.assigned_to:
-            return self.assigned_to.username
-        return self.assigned_to_name  # Use the column value as fallback
-    
-    @property
-    def assigned_by_name(self) -> Optional[str]:
-        """Get assigned-by user's username from relationship"""
-        return self.assigned_by.username if self.assigned_by else None
-    
-    @property
-    def overall_status_name(self) -> Optional[str]:
-        """Get overall status name from relationship"""
-        return self.overall_status.name if self.overall_status else None
-    
-    @property
-    def overall_status_code(self) -> Optional[str]:
-        """Get overall status code from relationship"""
-        return self.overall_status.code if self.overall_status else None
-    
-    @property
-    def overall_status_color(self) -> Optional[str]:
-        """Get overall status color from relationship metadata"""
-        if self.overall_status and self.overall_status.extra_metadata:
-            return self.overall_status.extra_metadata.get('color')
-        return None
+            return self.assigned_to.full_name or self.assigned_to.username or 'Unassigned'
+        if self.assigned_to_name:
+            if isinstance(self.assigned_to_name, dict):
+                return self.assigned_to_name.get('name', 'Unassigned')
+            return str(self.assigned_to_name)
+        return 'Unassigned'
     
     @property
     def is_overdue(self) -> bool:
-        """Check if action is overdue (not completed and due date passed)"""
-        if self.completed_at:
+        """Check if the action is overdue"""
+        if not self.due_date or self.is_completed:
             return False
-        if not self.due_date:
-            return False
-        return self.due_date < datetime.now()
+        now = datetime.now(timezone.utc)
+        if self.due_date.tzinfo is None:
+            due_date = self.due_date.replace(tzinfo=timezone.utc)
+        else:
+            due_date = self.due_date
+        return due_date < now
     
     @property
-    def progress_status(self) -> str:
-        """Get progress status based on percentage"""
-        if self.completed_at:
-            return "completed"
-        if self.overall_progress_percentage >= 100:
-            return "completed"
-        if self.overall_progress_percentage > 0:
-            return "in_progress"
-        return "not_started"
+    def is_completed(self) -> bool:
+        """Check if the action is completed"""
+        return self.completed_at is not None or self.overall_progress_percentage >= 100
     
     @property
     def priority_label(self) -> str:
-        """Get human-readable priority label"""
+        """Get priority label"""
         priority_map = {
-            1: "High",
-            2: "Medium", 
-            3: "Low",
-            4: "Very Low"
+            1: 'High',
+            2: 'Medium',
+            3: 'Low',
+            4: 'Very Low'
         }
-        return priority_map.get(self.priority, "Medium")
+        return priority_map.get(self.priority, 'Medium')
     
     @property
     def priority_color(self) -> str:
-        """Get color for priority badge"""
+        """Get priority color for UI"""
         color_map = {
-            1: "error",
-            2: "warning",
-            3: "info",
-            4: "default"
+            1: 'error',
+            2: 'warning',
+            3: 'info',
+            4: 'default'
         }
-        return color_map.get(self.priority, "default")
+        return color_map.get(self.priority, 'default')
     
     @property
-    def time_estimate_display(self) -> str:
-        """Get formatted time estimate"""
-        if self.estimated_hours:
-            if self.estimated_hours < 1:
-                return f"{int(self.estimated_hours * 60)} minutes"
-            return f"{self.estimated_hours:.1f} hours"
-        return "Not estimated"
+    def status_display(self) -> str:
+        """Get the display name for the status"""
+        if self.overall_status:
+            return self.overall_status.name
+        if self.overall_status_name:
+            return self.overall_status_name
+        return 'Pending'
     
     @property
-    def actual_time_display(self) -> str:
-        """Get formatted actual time"""
-        if self.actual_hours:
-            if self.actual_hours < 1:
-                return f"{int(self.actual_hours * 60)} minutes"
-            return f"{self.actual_hours:.1f} hours"
-        return "Not logged"
-    
-    @property
-    def time_variance(self) -> Optional[float]:
-        """Calculate time variance (actual - estimated)"""
-        if self.estimated_hours and self.actual_hours:
-            return self.actual_hours - self.estimated_hours
+    def status_color(self) -> Optional[str]:
+        """Get status color for UI"""
+        if self.overall_status:
+            return self.overall_status.color
         return None
     
     @property
-    def time_variance_display(self) -> str:
-        """Get formatted time variance"""
-        variance = self.time_variance
-        if variance is None:
-            return "N/A"
-        if variance > 0:
-            return f"+{variance:.1f} hours"
-        elif variance < 0:
-            return f"{variance:.1f} hours"
-        return "On track"
+    def progress_status(self) -> str:
+        """Get progress status label"""
+        if self.is_completed:
+            return 'Completed'
+        if self.is_overdue:
+            return 'Overdue'
+        if self.overall_progress_percentage > 0:
+            return 'In Progress'
+        return 'Not Started'
     
-    # ==================== HELPER METHODS ====================
+    # ==================== Methods ====================
     
-    def update_progress(self, new_percentage: int, status_id: Optional[CustomUUID] = None) -> None:
-        """Update progress percentage and auto-set completion if applicable"""
-        self.overall_progress_percentage = min(max(new_percentage, 0), 100)
+    def update_progress(self, percentage: int, status_id: Optional[UUID] = None, remarks: Optional[str] = None) -> None:
+        """
+        Update progress and optionally status
         
-        if self.overall_progress_percentage >= 100 and not self.completed_at:
-            self.completed_at = datetime.now()
-        elif self.overall_progress_percentage < 100 and self.completed_at:
-            self.completed_at = None
-        
-        if self.overall_progress_percentage > 0 and not self.start_date:
-            self.start_date = datetime.now()
-        
+        Args:
+            percentage: Progress percentage (0-100)
+            status_id: Optional status ID to set
+            remarks: Optional remarks to add
+        """
+        self.overall_progress_percentage = min(max(percentage, 0), 100)
         if status_id:
             self.overall_status_id = status_id
+        if remarks:
+            self.remarks = remarks
+        self.updated_at = datetime.now(timezone.utc)
     
-    def mark_completed(self) -> None:
-        """Mark action as completed"""
+    def complete(self) -> None:
+        """Mark the action as completed"""
+        self.completed_at = datetime.now(timezone.utc)
         self.overall_progress_percentage = 100
-        self.completed_at = datetime.now()
-        if not self.start_date:
-            self.start_date = datetime.now()
+        self.updated_at = datetime.now(timezone.utc)
     
-    def reopen(self) -> None:
-        """Reopen a completed action"""
-        self.completed_at = None
-        self.overall_progress_percentage = 0
+    def assign_to(self, user_id: UUID, assigned_by_id: UUID) -> None:
+        """
+        Assign the action to a user
+        
+        Args:
+            user_id: ID of the user to assign to
+            assigned_by_id: ID of the user performing the assignment
+        """
+        self.assigned_to_id = user_id
+        self.assigned_by_id = assigned_by_id
+        self.assigned_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
     
     def to_dict(self, include_relationships: bool = False) -> dict:
-        """Convert to dictionary for serialization"""
-        result = {
+        """Convert action to dictionary"""
+        data = {
             "id": str(self.id),
-            "minute_id": str(self.minute_id),
+            "minute_id": str(self.minute_id) if self.minute_id else None,
             "description": self.description,
             "assigned_to_id": str(self.assigned_to_id) if self.assigned_to_id else None,
             "assigned_to_name": self.assigned_to_name,
+            "assigned_to_display": self.assigned_to_display,
             "assigned_by_id": str(self.assigned_by_id) if self.assigned_by_id else None,
             "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
             "due_date": self.due_date.isoformat() if self.due_date else None,
-            "start_date": self.start_date.isoformat() if self.start_date else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "overall_status_id": str(self.overall_status_id) if self.overall_status_id else None,
-            "overall_progress_percentage": self.overall_progress_percentage,
             "priority": self.priority,
-            "estimated_hours": self.estimated_hours,
-            "actual_hours": self.actual_hours,
-            "remarks": self.remarks,
-            "created_by_id": str(self.created_by_id) if self.created_by_id else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_by_id": str(self.updated_by_id) if self.updated_by_id else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "is_active": self.is_active,
-            
-            # Computed properties
-            "created_by_name": self.created_by_name,
-            "updated_by_name": self.updated_by_name,
-            "assigned_to_display_name": self.assigned_to_display_name,
-            "assigned_by_name": self.assigned_by_name,
-            "overall_status_name": self.overall_status_name,
-            "is_overdue": self.is_overdue,
-            "progress_status": self.progress_status,
             "priority_label": self.priority_label,
             "priority_color": self.priority_color,
+            "remarks": self.remarks,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "overall_status_id": str(self.overall_status_id) if self.overall_status_id else None,
+            "overall_status_name": self.overall_status_name,
+            "overall_progress_percentage": self.overall_progress_percentage,
+            "is_overdue": self.is_overdue,
+            "is_completed": self.is_completed,
+            "progress_status": self.progress_status,
+            "status_display": self.status_display,
+            "status_color": self.status_color,
+            "is_active": self.is_active,
+            "created_by_id": str(self.created_by_id) if self.created_by_id else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
         
         if include_relationships:
-            result["assigned_to"] = self.assigned_to.username if self.assigned_to else None
-            result["assigned_by"] = self.assigned_by.username if self.assigned_by else None
-            result["created_by"] = self.created_by.username if self.created_by else None
-            result["updated_by"] = self.updated_by.username if self.updated_by else None
+            data.update({
+                "assigned_to": {
+                    "id": str(self.assigned_to.id) if self.assigned_to else None,
+                    "full_name": self.assigned_to.full_name if self.assigned_to else None,
+                    "username": self.assigned_to.username if self.assigned_to else None,
+                    "email": self.assigned_to.email if self.assigned_to else None,
+                } if self.assigned_to else None,
+                "overall_status": {
+                    "id": str(self.overall_status.id) if self.overall_status else None,
+                    "code": self.overall_status.code if self.overall_status else None,
+                    "name": self.overall_status.name if self.overall_status else None,
+                    "short_name": self.overall_status.short_name if self.overall_status else None,
+                    "color": self.overall_status.color if self.overall_status else None,
+                } if self.overall_status else None,
+            })
         
-        return result
+        return data
+    
+    def __repr__(self) -> str:
+        return f"<MeetingAction id={self.id} description='{self.description[:50]}' priority={self.priority}>"
+
+
 class ActionStatusHistory(Base):
-    """Depends on MeetingAction, User, Attribute"""
+    """Depends on MeetingAction, User, ActionStatus"""
     __tablename__ = "action_status_history"
     __table_args__ = (
         Index('ix_ash_action_id', 'action_id'),
@@ -857,7 +967,7 @@ class ActionStatusHistory(Base):
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     action_id = Column(CustomUUID, ForeignKey('meeting_actions.id', ondelete='CASCADE'), nullable=False)
     
-    individual_status_id = Column(CustomUUID, ForeignKey('attributes.id', ondelete='SET NULL'), nullable=True)
+    individual_status_id = Column(CustomUUID, ForeignKey('action_statuses.id', ondelete='SET NULL'), nullable=True)
     progress_percentage = Column(Integer, default=0, nullable=False)
     remarks = Column(Text, nullable=True)
     
@@ -872,7 +982,7 @@ class ActionStatusHistory(Base):
     action = relationship("MeetingAction", back_populates="status_history")
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
-    individual_status = relationship("Attribute", foreign_keys=[individual_status_id], lazy="selectin")
+    individual_status = relationship("ActionStatus", foreign_keys=[individual_status_id], lazy="selectin")
 
     @property
     def created_by_name(self) -> Optional[str]:
@@ -881,6 +991,23 @@ class ActionStatusHistory(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
+    
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "action_id": str(self.action_id),
+            "individual_status_id": str(self.individual_status_id) if self.individual_status_id else None,
+            "status_name": self.individual_status.name if self.individual_status else None,
+            "status_code": self.individual_status.code if self.individual_status else None,
+            "progress_percentage": self.progress_percentage,
+            "remarks": self.remarks,
+            "created_by_name": self.created_by_name,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+    
+    def __repr__(self) -> str:
+        return f"<ActionStatusHistory id={self.id} action_id={self.action_id}>"
+
 
 class ActionComment(Base):
     """Depends on MeetingAction and User"""
@@ -917,6 +1044,22 @@ class ActionComment(Base):
     @property
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
+    
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "action_id": str(self.action_id),
+            "comment": self.comment,
+            "attachment_url": self.attachment_url,
+            "created_by_name": self.created_by_name,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+    
+    def __repr__(self) -> str:
+        return f"<ActionComment id={self.id} comment='{self.comment[:50]}'>"
+
+
 class MeetingDocument(Base):
     """Depends on Meeting, User, Attribute"""
     __tablename__ = "meeting_documents"
@@ -932,6 +1075,7 @@ class MeetingDocument(Base):
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     meeting_id = Column(CustomUUID, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False)
     
+    title = Column(String(500), nullable=True)  # Document title/name
     file_name = Column(String(500), nullable=False)
     file_path = Column(String(1000), nullable=False)
     file_size = Column(Integer, nullable=True)
@@ -952,47 +1096,39 @@ class MeetingDocument(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
-    # Relationships
-    title = Column(String(500), nullable=True)  # Document title/name
-    meeting = relationship("Meeting", back_populates="documents")
-    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id], lazy="selectin")
-    document_type = relationship("Attribute", foreign_keys=[document_type_id], lazy="selectin")
-    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
-
-
     # OCR fields
     ocr_text = Column(Text, nullable=True)
     ocr_processed_at = Column(DateTime(timezone=True), nullable=True)
     ocr_language = Column(String(10), nullable=True)
     
+    # Relationships
+    meeting = relationship("Meeting", back_populates="documents")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id], lazy="selectin")
+    document_type = relationship("Attribute", foreign_keys=[document_type_id], lazy="selectin")
+    created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    
     # ============ User Name Properties ============
     
     @property
     def created_by_name(self) -> Optional[str]:
-        """Get the username of who created this document"""
         return self.created_by.username if self.created_by else None
     
     @property
     def updated_by_name(self) -> Optional[str]:
-        """Get the username of who last updated this document"""
         return self.updated_by.username if self.updated_by else None
     
     @property
     def uploaded_by_name(self) -> Optional[str]:
-        """Get the username of who uploaded this document"""
         return self.uploaded_by.username if self.uploaded_by else None
 
     # ============ Document Type Properties ============
     
     @property
     def document_type_name(self) -> str:
-        """Get the document type name from the related Attribute"""
         if self.document_type:
-            # Try to get name from attribute
             if hasattr(self.document_type, 'name') and self.document_type.name:
                 return self.document_type.name
-            # Try to get from extra_metadata
             if hasattr(self.document_type, 'extra_metadata') and self.document_type.extra_metadata:
                 metadata = self.document_type.extra_metadata
                 if isinstance(metadata, dict) and 'display_name' in metadata:
@@ -1001,16 +1137,12 @@ class MeetingDocument(Base):
     
     @property
     def document_type_code(self) -> Optional[str]:
-        """Get the document type code (e.g., 'AGENDA', 'MINUTES')"""
         if self.document_type:
-            # Try direct code
             if hasattr(self.document_type, 'code') and self.document_type.code:
-                # Remove 'DOC_TYPE_' prefix if present
                 code = self.document_type.code
                 if code.startswith('DOC_TYPE_'):
-                    return code[9:]  # Remove 'DOC_TYPE_' prefix
+                    return code[9:]
                 return code
-            # Try to get from extra_metadata
             if hasattr(self.document_type, 'extra_metadata') and self.document_type.extra_metadata:
                 metadata = self.document_type.extra_metadata
                 if isinstance(metadata, dict) and 'code' in metadata:
@@ -1019,19 +1151,16 @@ class MeetingDocument(Base):
     
     @property
     def document_type_short_name(self) -> Optional[str]:
-        """Get the short name of the document type"""
         if self.document_type and hasattr(self.document_type, 'short_name'):
             return self.document_type.short_name
         return self.document_type_name[:20] if self.document_type_name else None
     
     @property
     def document_type_icon(self) -> Optional[str]:
-        """Get the icon associated with this document type"""
         if self.document_type and hasattr(self.document_type, 'extra_metadata'):
             metadata = self.document_type.extra_metadata
             if isinstance(metadata, dict) and 'icon' in metadata:
                 return metadata['icon']
-        # Return default icon based on mime type
         if self.mime_type:
             if self.mime_type == 'application/pdf':
                 return 'pdf'
@@ -1041,19 +1170,17 @@ class MeetingDocument(Base):
     
     @property
     def document_type_color(self) -> Optional[str]:
-        """Get the color associated with this document type for UI"""
         if self.document_type and hasattr(self.document_type, 'extra_metadata'):
             metadata = self.document_type.extra_metadata
             if isinstance(metadata, dict) and 'color' in metadata:
                 return metadata['color']
-        # Return default colors based on document type code
         if self.document_type_code:
             color_map = {
-                'AGENDA': '#3b82f6',    # Blue
-                'MINUTES': '#10b981',   # Green
-                'PRESENTATION': '#f59e0b',  # Amber
-                'REPORT': '#8b5cf6',    # Purple
-                'ATTACHMENT': '#6b7280', # Gray
+                'AGENDA': '#3b82f6',
+                'MINUTES': '#10b981',
+                'PRESENTATION': '#f59e0b',
+                'REPORT': '#8b5cf6',
+                'ATTACHMENT': '#6b7280',
             }
             return color_map.get(self.document_type_code, '#6b7280')
         return '#6b7280'
@@ -1062,21 +1189,18 @@ class MeetingDocument(Base):
     
     @property
     def file_url(self) -> Optional[str]:
-        """Generate download URL for the file"""
         if self.id:
             return f"/api/v1/action-tracker/documents/document/{self.id}/download"
         return None
     
     @property
     def file_extension(self) -> str:
-        """Get the file extension (e.g., '.pdf', '.docx')"""
         if self.file_name and '.' in self.file_name:
             return self.file_name.rsplit('.', 1)[-1].lower()
         return 'unknown'
     
     @property
     def file_size_formatted(self) -> str:
-        """Get human-readable file size (e.g., '1.5 MB', '256 KB')"""
         if not self.file_size:
             return 'Unknown size'
         
@@ -1089,24 +1213,19 @@ class MeetingDocument(Base):
     
     @property
     def is_image(self) -> bool:
-        """Check if the document is an image"""
         return self.mime_type and self.mime_type.startswith('image/')
     
     @property
     def is_pdf(self) -> bool:
-        """Check if the document is a PDF"""
         return self.mime_type == 'application/pdf' or self.file_extension == 'pdf'
     
     @property
     def is_previewable(self) -> bool:
-        """Check if the document can be previewed in the browser"""
         return self.is_pdf or self.is_image
     
     @property
     def thumbnail_url(self) -> Optional[str]:
-        """Get thumbnail URL for images (if applicable)"""
         if self.is_image and self.id:
-            # You could implement a thumbnail generation endpoint
             return f"/api/v1/action-tracker/documents/document/{self.id}/thumbnail"
         return None
 
@@ -1114,35 +1233,27 @@ class MeetingDocument(Base):
     
     @property
     def display_title(self) -> str:
-        """Get the display title (fallback to filename if title is empty)"""
-        return self.title if self.title else self.file_name.replace(f'.{self.file_extension}', '') if self.file_name else 'Untitled Document'
+        if self.title:
+            return self.title
+        if self.file_name:
+            return self.file_name.replace(f'.{self.file_extension}', '')
+        return 'Untitled Document'
     
     @property
     def version_display(self) -> str:
-        """Get formatted version (e.g., 'v1', 'v2')"""
         return f"v{self.version}"
     
     @property
-    def is_latest_version(self) -> bool:
-        """Check if this is the latest version of the document"""
-        # You would need to implement version checking logic
-        # This could query for other documents with same title/meeting
-        return True  # Placeholder
-    
-    @property
     def uploaded_at_formatted(self) -> str:
-        """Get formatted upload date/time"""
         if self.uploaded_at:
             return self.uploaded_at.strftime("%Y-%m-%d %H:%M:%S")
         return "Unknown"
     
     @property
     def uploaded_at_relative(self) -> str:
-        """Get relative time (e.g., '2 hours ago', '3 days ago')"""
         if not self.uploaded_at:
             return "Unknown"
         
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         diff = now - self.uploaded_at
         
@@ -1165,7 +1276,6 @@ class MeetingDocument(Base):
     # ============ Utility Methods ============
     
     def to_dict(self, include_relationships: bool = False) -> dict:
-        """Convert document to dictionary"""
         data = {
             "id": str(self.id),
             "meeting_id": str(self.meeting_id),
@@ -1203,9 +1313,9 @@ class MeetingDocument(Base):
         return data
     
     def __repr__(self) -> str:
-        """String representation of the document"""
         return f"<MeetingDocument {self.display_title} (meeting: {self.meeting_id})>"
-    
+
+
 # ==================== Helper Methods for Eager Loading ====================
 
 from sqlalchemy import select
@@ -1215,7 +1325,7 @@ class MeetingQuery:
     """Helper class for common meeting queries with eager loading"""
     
     @staticmethod
-    def get_with_all_relations():
+    def get_with_all_relations() -> select:
         """Returns a query with all relationships loaded"""
         return select(Meeting).options(
             selectinload(Meeting.participants),
@@ -1230,14 +1340,14 @@ class MeetingQuery:
         )
     
     @staticmethod
-    def get_with_minutes_and_actions():
+    def get_with_minutes_and_actions() -> select:
         """Returns a query with minutes and actions loaded"""
         return select(Meeting).options(
             selectinload(Meeting.minutes).selectinload(MeetingMinutes.actions)
         )
     
     @staticmethod
-    def get_with_audit_info():
+    def get_with_audit_info() -> select:
         """Returns a query with all audit relationships loaded"""
         return select(Meeting).options(
             selectinload(Meeting.created_by),
@@ -1258,7 +1368,5 @@ class MeetingQuery:
 # Add this to enable ORM mode for all models
 for model in [Meeting, MeetingMinutes, MeetingAction, MeetingParticipant, 
               MeetingDocument, MeetingStatusHistory, ActionStatusHistory, 
-              ActionComment, Participant, ParticipantList]:
+              ActionComment, Participant, ParticipantList, ActionStatus]:
     model.__allow_unmapped__ = True
-
-

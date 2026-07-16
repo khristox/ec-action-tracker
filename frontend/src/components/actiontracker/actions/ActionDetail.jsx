@@ -35,6 +35,8 @@ import {
 } from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
 
+// ==================== CONSTANTS ====================
+
 const PRIORITY = {
   1: { label: 'High', color: 'error', icon: <PriorityHigh /> },
   2: { label: 'Medium', color: 'warning', icon: <Schedule /> },
@@ -42,96 +44,109 @@ const PRIORITY = {
   4: { label: 'Very Low', color: 'default', icon: <Info /> },
 };
 
-// Enhanced status configuration with specific colors and icons
+// Enhanced status configuration with dark mode optimized colors
 const STATUS_CONFIG = {
   pending: { 
     label: 'Pending', 
     color: '#F59E0B',
-    bgColor: '#F59E0B',
+    bgColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: '#F59E0B',
     icon: <HourglassEmpty fontSize="small" />,
     muiColor: 'warning'
   },
   started: { 
     label: 'Started', 
-    color: '#3B82F6',
-    bgColor: '#3B82F6',
+    color: '#60A5FA',
+    bgColor: 'rgba(96, 165, 250, 0.15)',
+    borderColor: '#60A5FA',
     icon: <PlayCircle fontSize="small" />,
     muiColor: 'info'
   },
   in_progress: { 
     label: 'In Progress', 
-    color: '#3B82F6',
-    bgColor: '#3B82F6',
+    color: '#60A5FA',
+    bgColor: 'rgba(96, 165, 250, 0.15)',
+    borderColor: '#60A5FA',
     icon: <Pending fontSize="small" />,
     muiColor: 'info'
   },
   awaiting: { 
     label: 'Awaiting', 
-    color: '#8B5CF6',
-    bgColor: '#8B5CF6',
+    color: '#A78BFA',
+    bgColor: 'rgba(167, 139, 250, 0.15)',
+    borderColor: '#A78BFA',
     icon: <WatchLater fontSize="small" />,
     muiColor: 'secondary'
   },
   awaiting_approval: { 
     label: 'Awaiting Approval', 
-    color: '#8B5CF6',
-    bgColor: '#8B5CF6',
+    color: '#A78BFA',
+    bgColor: 'rgba(167, 139, 250, 0.15)',
+    borderColor: '#A78BFA',
     icon: <Pending fontSize="small" />,
     muiColor: 'secondary'
   },
   in_review: { 
     label: 'In Review', 
-    color: '#A78BFA',
-    bgColor: '#A78BFA',
+    color: '#818CF8',
+    bgColor: 'rgba(129, 140, 248, 0.15)',
+    borderColor: '#818CF8',
     icon: <CheckCircleOutlined fontSize="small" />,
     muiColor: 'secondary'
   },
   on_hold: { 
     label: 'On Hold', 
-    color: '#6B7280',
-    bgColor: '#6B7280',
+    color: '#9CA3AF',
+    bgColor: 'rgba(156, 163, 175, 0.15)',
+    borderColor: '#9CA3AF',
     icon: <PauseCircle fontSize="small" />,
     muiColor: 'default'
   },
   blocked: { 
     label: 'Blocked', 
-    color: '#EF4444',
-    bgColor: '#EF4444',
+    color: '#F87171',
+    bgColor: 'rgba(248, 113, 113, 0.15)',
+    borderColor: '#F87171',
     icon: <CancelOutlined fontSize="small" />,
     muiColor: 'error'
   },
   completed: { 
     label: 'Completed', 
-    color: '#10B981',
-    bgColor: '#10B981',
+    color: '#34D399',
+    bgColor: 'rgba(52, 211, 153, 0.15)',
+    borderColor: '#34D399',
     icon: <CheckCircle fontSize="small" />,
     muiColor: 'success'
   },
   closed: { 
     label: 'Closed', 
-    color: '#059669',
-    bgColor: '#059669',
+    color: '#34D399',
+    bgColor: 'rgba(52, 211, 153, 0.15)',
+    borderColor: '#34D399',
     icon: <TaskAlt fontSize="small" />,
     muiColor: 'success'
   },
   cancelled: { 
     label: 'Cancelled', 
-    color: '#DC2626',
-    bgColor: '#DC2626',
+    color: '#F87171',
+    bgColor: 'rgba(248, 113, 113, 0.15)',
+    borderColor: '#F87171',
     icon: <HighlightOff fontSize="small" />,
     muiColor: 'error'
   },
   overdue: { 
     label: 'Overdue', 
-    color: '#EF4444',
-    bgColor: '#EF4444',
+    color: '#F87171',
+    bgColor: 'rgba(248, 113, 113, 0.15)',
+    borderColor: '#F87171',
     icon: <ErrorIcon fontSize="small" />,
     muiColor: 'error'
   },
   ended: { 
     label: 'Ended', 
-    color: '#6B7280',
-    bgColor: '#6B7280',
+    color: '#9CA3AF',
+    bgColor: 'rgba(156, 163, 175, 0.15)',
+    borderColor: '#9CA3AF',
     icon: <Cancel fontSize="small" />,
     muiColor: 'default'
   }
@@ -139,12 +154,15 @@ const STATUS_CONFIG = {
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
+// ==================== COMPONENT ====================
+
 const ActionDetail = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isDarkMode = theme.palette.mode === 'dark';
 
   // Redux state
   const { currentAction, loading, updatingProgress, error: reduxError } = useSelector((state) => state.actions);
@@ -176,35 +194,33 @@ const ActionDetail = () => {
   const [deletingTask, setDeletingTask] = useState(false);
   const [isActionInProgress, setIsActionInProgress] = useState(false);
 
-  // Validate ID
+  // ==================== EFFECTS ====================
+
   useEffect(() => {
     if (id && !isValidUUID(id)) {
       navigate('/actions/my-tasks', { replace: true });
     }
   }, [id, navigate]);
 
-  // Fetch main action data using Redux
   const fetchAction = useCallback(() => {
     if (id) {
       dispatch(fetchActionById(id));
     }
   }, [id, dispatch]);
 
-  // Fetch action tracker attributes (statuses) if not already loaded
   const fetchAttributes = useCallback(() => {
     dispatch(fetchActionTrackerAttributes());
   }, [dispatch]);
 
   useEffect(() => {
     fetchAction();
-    fetchAttributes(); // Fetch status options if not already cached
+    fetchAttributes();
     return () => {
       dispatch(clearCurrentAction());
       dispatch(clearError());
     };
   }, [fetchAction, fetchAttributes, dispatch]);
 
-  // Fetch supplementary data (comments, history)
   const fetchSupplementaryData = useCallback(async () => {
     if (!id) return;
 
@@ -231,14 +247,12 @@ const ActionDetail = () => {
     }
   }, [id]);
 
-  // Run supplementary fetch when action is loaded
   useEffect(() => {
     if (currentAction) {
       fetchSupplementaryData();
     }
   }, [currentAction, fetchSupplementaryData]);
 
-  // Sync local form values
   useEffect(() => {
     if (currentAction) {
       setProgress(currentAction.overall_progress_percentage || 0);
@@ -249,12 +263,13 @@ const ActionDetail = () => {
     }
   }, [currentAction]);
 
-  // Handle errors from status options fetch
   useEffect(() => {
     if (statusOptionsError) {
       console.error('Failed to load status options:', statusOptionsError);
     }
   }, [statusOptionsError]);
+
+  // ==================== HANDLERS ====================
 
   const handleGoBack = () => {
     window.history.back();
@@ -384,12 +399,13 @@ const ActionDetail = () => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  // ==================== COMPUTED PROPERTIES ====================
+
   const isCompleted = useMemo(() => 
     Boolean(currentAction?.completed_at || currentAction?.overall_progress_percentage === 100), 
     [currentAction]
   );
 
-  // Get status configuration for current action
   const getCurrentStatusConfig = () => {
     if (isCompleted) {
       return STATUS_CONFIG.completed;
@@ -408,36 +424,48 @@ const ActionDetail = () => {
   const currentStatusConfig = getCurrentStatusConfig();
   const activePriority = PRIORITY[currentAction?.priority] || PRIORITY[2];
 
-  // Check if user can delete comment (creator or admin)
   const canDeleteComment = (comment) => {
     return currentUser && (comment.created_by_id === currentUser.id || currentUser.is_admin);
   };
 
-  // Check if user can delete task (admin or creator)
   const canDeleteTask = () => {
     if (!currentUser || !currentAction) return false;
     return currentUser.is_admin || currentAction.created_by_id === currentUser.id;
   };
 
-  // Helper function to get status config for history entries
   const getStatusConfigForHistory = (statusId, statusName) => {
     const option = statusOptions.find(opt => opt.id === statusId);
     const statusValue = option?.value || statusName?.toLowerCase() || 'pending';
     return STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
   };
 
-  // Get status name from option
   const getStatusName = (statusId) => {
     const option = statusOptions.find(opt => opt.id === statusId);
     return option?.label || option?.short_name || 'Unknown';
   };
 
-  // Get status icon component
   const getStatusIcon = (statusConfig) => {
     return statusConfig.icon || <Schedule fontSize="small" />;
   };
 
-  // Early returns
+  // ==================== RENDER HELPERS ====================
+
+  // Dark mode optimized paper styles
+  const paperSx = {
+    p: 3,
+    mb: 3,
+    borderRadius: 3,
+    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#ffffff',
+    border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.06)',
+    backdropFilter: isDarkMode ? 'blur(10px)' : 'none',
+    transition: 'all 0.2s ease-in-out',
+    '&:hover': {
+      borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
+    }
+  };
+
+  // ==================== EARLY RETURNS ====================
+
   if (loading && !currentAction) {
     return (
       <Container sx={{ py: 4 }}>
@@ -453,7 +481,13 @@ const ActionDetail = () => {
   if (!currentAction) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
-        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3 }}>
+        <Paper sx={{ 
+          p: 4, 
+          textAlign: 'center', 
+          borderRadius: 3,
+          bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#ffffff',
+          border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.06)',
+        }}>
           <ErrorIcon sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
           <Typography variant="h5" fontWeight={700}>Task Not Found</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>
@@ -472,16 +506,35 @@ const ActionDetail = () => {
     );
   }
 
+  // ==================== MAIN RENDER ====================
+
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2, md: 4 }, pb: isMobile ? 10 : 4 }}>
-      {/* Header - Back button and Delete button */}
+      {/* Header */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
         <Tooltip title="Go Back">
-          <IconButton onClick={handleGoBack} size={isMobile ? 'medium' : 'large'}>
+          <IconButton 
+            onClick={handleGoBack} 
+            size={isMobile ? 'medium' : 'large'}
+            sx={{ 
+              color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              '&:hover': {
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              }
+            }}
+          >
             <ArrowBack />
           </IconButton>
         </Tooltip>
-        <Typography variant="h6" fontWeight={700} sx={{ flex: 1, textAlign: 'center' }}>
+        <Typography 
+          variant="h6" 
+          fontWeight={700} 
+          sx={{ 
+            flex: 1, 
+            textAlign: 'center',
+            color: isDarkMode ? '#fff' : 'inherit'
+          }}
+        >
           Task Details
         </Typography>
         {canDeleteTask() && !isCompleted && (
@@ -491,6 +544,11 @@ const ActionDetail = () => {
               onClick={() => setShowDeleteTaskDialog(true)}
               size={isMobile ? 'medium' : 'large'}
               disabled={isActionInProgress}
+              sx={{
+                '&:hover': {
+                  bgcolor: isDarkMode ? 'rgba(244, 67, 54, 0.12)' : 'rgba(244, 67, 54, 0.04)',
+                }
+              }}
             >
               <Delete />
             </IconButton>
@@ -500,21 +558,41 @@ const ActionDetail = () => {
 
       {/* Global Error */}
       {(localError || reduxError) && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => { setLocalError(''); dispatch(clearError()); }}>
+        <Alert 
+          severity="error" 
+          sx={{ mb: 3 }}
+          onClose={() => { setLocalError(''); dispatch(clearError()); }}
+        >
           {localError || reduxError}
         </Alert>
       )}
 
       {/* Completed Banner */}
       {isCompleted && (
-        <Alert severity="success" icon={<TaskAlt />} sx={{ mb: 3 }}>
+        <Alert 
+          severity="success" 
+          icon={<TaskAlt />} 
+          sx={{ 
+            mb: 3,
+            bgcolor: isDarkMode ? 'rgba(52, 211, 153, 0.12)' : 'success.light',
+            color: isDarkMode ? '#34D399' : 'success.dark',
+            '& .MuiAlert-icon': {
+              color: isDarkMode ? '#34D399' : 'success.main'
+            }
+          }}
+        >
           This task has been completed on {currentAction.completed_at ? new Date(currentAction.completed_at).toLocaleString() : 'an unknown date'}
         </Alert>
       )}
 
       {/* Header Card */}
-      <Paper sx={{ p: 3, mb: 3, borderRadius: 3 }}>
-        <Typography variant="h5" fontWeight={700} gutterBottom>
+      <Paper sx={paperSx}>
+        <Typography 
+          variant="h5" 
+          fontWeight={700} 
+          gutterBottom
+          sx={{ color: isDarkMode ? '#fff' : 'inherit' }}
+        >
           {currentAction.description || currentAction.title}
         </Typography>
 
@@ -524,6 +602,11 @@ const ActionDetail = () => {
             label={activePriority.label} 
             color={activePriority.color} 
             size="small" 
+            sx={{
+              '& .MuiChip-icon': {
+                color: isDarkMode ? 'inherit' : 'inherit'
+              }
+            }}
           />
           <Chip 
             icon={getStatusIcon(currentStatusConfig)}
@@ -531,9 +614,15 @@ const ActionDetail = () => {
             size="small"
             sx={{ 
               bgcolor: currentStatusConfig.bgColor,
-              color: '#fff',
+              border: `1px solid ${currentStatusConfig.borderColor}`,
+              color: currentStatusConfig.color,
               fontWeight: 500,
-              '& .MuiChip-icon': { color: '#fff' }
+              '& .MuiChip-icon': { 
+                color: currentStatusConfig.color 
+              },
+              '&:hover': {
+                bgcolor: currentStatusConfig.bgColor,
+              }
             }}
           />
           {currentAction.meeting_title && (
@@ -543,17 +632,35 @@ const ActionDetail = () => {
               variant="outlined" 
               size="small" 
               clickable 
-              onClick={() => navigate(`/meetings/${currentAction.minutes?.meeting_id}`)} 
+              onClick={() => navigate(`/meetings/${currentAction.minutes?.meeting_id}`)}
+              sx={{
+                borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)',
+                color: isDarkMode ? 'rgba(255,255,255,0.8)' : 'inherit',
+                '&:hover': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.24)',
+                  bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                }
+              }}
             />
           )}
         </Stack>
       </Paper>
 
       {/* Progress Section */}
-      <Paper sx={{ p: 3, mb: 3, borderRadius: 3 }}>
+      <Paper sx={paperSx}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-          <Typography variant="subtitle1" fontWeight={700}>Progress</Typography>
-          <Typography variant="h6" fontWeight={800} color={isCompleted ? 'success.main' : 'primary.main'}>
+          <Typography 
+            variant="subtitle1" 
+            fontWeight={700}
+            sx={{ color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'inherit' }}
+          >
+            Progress
+          </Typography>
+          <Typography 
+            variant="h6" 
+            fontWeight={800} 
+            color={isCompleted ? 'success.main' : 'primary.main'}
+          >
             {progress}%
           </Typography>
         </Stack>
@@ -561,7 +668,16 @@ const ActionDetail = () => {
         <LinearProgress 
           variant="determinate" 
           value={progress} 
-          sx={{ height: 12, borderRadius: 6, mb: 2 }}
+          sx={{ 
+            height: 12, 
+            borderRadius: 6, 
+            mb: 2,
+            bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+            '& .MuiLinearProgress-bar': {
+              bgcolor: isCompleted ? '#34D399' : '#60A5FA',
+              borderRadius: 6,
+            }
+          }}
         />
 
         {!isCompleted && (
@@ -571,6 +687,14 @@ const ActionDetail = () => {
               variant="outlined" 
               onClick={() => setShowProgressDialog(true)}
               disabled={isActionInProgress}
+              sx={{
+                borderColor: isDarkMode ? 'rgba(96, 165, 250, 0.3)' : 'primary.main',
+                color: isDarkMode ? '#60A5FA' : 'primary.main',
+                '&:hover': {
+                  borderColor: isDarkMode ? '#60A5FA' : 'primary.dark',
+                  bgcolor: isDarkMode ? 'rgba(96, 165, 250, 0.08)' : 'rgba(25, 118, 210, 0.04)',
+                }
+              }}
             >
               Update Progress
             </Button>
@@ -581,6 +705,12 @@ const ActionDetail = () => {
               startIcon={<TaskAlt />} 
               onClick={() => setShowCompleteConfirm(true)}
               disabled={isActionInProgress}
+              sx={{
+                bgcolor: isDarkMode ? '#34D399' : 'success.main',
+                '&:hover': {
+                  bgcolor: isDarkMode ? '#2DD4BF' : 'success.dark',
+                }
+              }}
             >
               Mark as Completed
             </Button>
@@ -589,7 +719,7 @@ const ActionDetail = () => {
       </Paper>
 
       {/* Status History Section */}
-      <Paper sx={{ p: 3, mb: 3, borderRadius: 3 }}>
+      <Paper sx={paperSx}>
         <Stack 
           direction="row" 
           justifyContent="space-between" 
@@ -598,22 +728,43 @@ const ActionDetail = () => {
           onClick={() => toggleSection('history')}
         >
           <Stack direction="row" alignItems="center" spacing={1}>
-            <History />
-            <Typography variant="h6" fontWeight={700}>
+            <History sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : 'inherit' }} />
+            <Typography 
+              variant="h6" 
+              fontWeight={700}
+              sx={{ color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'inherit' }}
+            >
               Status History
             </Typography>
-            <Chip label={history.length} size="small" />
+            <Chip 
+              label={history.length} 
+              size="small"
+              sx={{
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              }}
+            />
           </Stack>
-          <IconButton size="small">
+          <IconButton 
+            size="small"
+            sx={{ color: isDarkMode ? 'rgba(255,255,255,0.5)' : 'inherit' }}
+          >
             {expandedSections.history ? <ExpandLess /> : <ExpandMore />}
           </IconButton>
         </Stack>
         
         <Collapse in={expandedSections.history}>
-          <Divider sx={{ my: 2 }} />
+          <Divider sx={{ 
+            my: 2,
+            borderColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
+          }} />
           
           {history.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+            <Typography 
+              variant="body2" 
+              color="text.secondary" 
+              sx={{ py: 2, textAlign: 'center' }}
+            >
               No status changes recorded yet
             </Typography>
           ) : (
@@ -634,9 +785,12 @@ const ActionDetail = () => {
                               icon={statusConfig.icon}
                               sx={{ 
                                 bgcolor: statusConfig.bgColor,
-                                color: '#fff',
+                                border: `1px solid ${statusConfig.borderColor}`,
+                                color: statusConfig.color,
                                 fontWeight: 500,
-                                '& .MuiChip-icon': { color: '#fff' }
+                                '& .MuiChip-icon': { 
+                                  color: statusConfig.color 
+                                }
                               }}
                             />
                             <Typography variant="caption" color="text.secondary">
@@ -647,7 +801,11 @@ const ActionDetail = () => {
                         secondary={
                           <Box sx={{ mt: 1 }}>
                             {entry.remarks && (
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                              <Typography 
+                                variant="body2" 
+                                color="text.secondary" 
+                                sx={{ mb: 0.5 }}
+                              >
                                 {entry.remarks}
                               </Typography>
                             )}
@@ -675,7 +833,7 @@ const ActionDetail = () => {
       </Paper>
 
       {/* Comments Section */}
-      <Paper sx={{ p: 3, mb: 3, borderRadius: 3 }}>
+      <Paper sx={paperSx}>
         <Stack 
           direction="row" 
           justifyContent="space-between" 
@@ -684,19 +842,36 @@ const ActionDetail = () => {
           onClick={() => toggleSection('comments')}
         >
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Comment />
-            <Typography variant="h6" fontWeight={700}>
+            <Comment sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : 'inherit' }} />
+            <Typography 
+              variant="h6" 
+              fontWeight={700}
+              sx={{ color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'inherit' }}
+            >
               Comments
             </Typography>
-            <Chip label={comments.length} size="small" />
+            <Chip 
+              label={comments.length} 
+              size="small"
+              sx={{
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              }}
+            />
           </Stack>
-          <IconButton size="small">
+          <IconButton 
+            size="small"
+            sx={{ color: isDarkMode ? 'rgba(255,255,255,0.5)' : 'inherit' }}
+          >
             {expandedSections.comments ? <ExpandLess /> : <ExpandMore />}
           </IconButton>
         </Stack>
         
         <Collapse in={expandedSections.comments}>
-          <Divider sx={{ my: 2 }} />
+          <Divider sx={{ 
+            my: 2,
+            borderColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
+          }} />
           
           {/* Add Comment Input */}
           <Stack direction="row" spacing={1} sx={{ mb: 3 }}>
@@ -708,11 +883,34 @@ const ActionDetail = () => {
               onChange={(e) => setNewComment(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleAddComment()}
               disabled={isActionInProgress}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)',
+                  '& fieldset': {
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: isDarkMode ? '#60A5FA' : 'primary.main',
+                  }
+                },
+                '& .MuiInputBase-input': {
+                  color: isDarkMode ? '#fff' : 'inherit',
+                }
+              }}
             />
             <IconButton 
               color="primary" 
               onClick={handleAddComment}
               disabled={!newComment.trim() || isActionInProgress}
+              sx={{
+                bgcolor: isDarkMode ? 'rgba(96, 165, 250, 0.12)' : 'rgba(25, 118, 210, 0.04)',
+                '&:hover': {
+                  bgcolor: isDarkMode ? 'rgba(96, 165, 250, 0.2)' : 'rgba(25, 118, 210, 0.08)',
+                }
+              }}
             >
               <Send />
             </IconButton>
@@ -720,7 +918,11 @@ const ActionDetail = () => {
           
           {/* Comments List */}
           {comments.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+            <Typography 
+              variant="body2" 
+              color="text.secondary" 
+              sx={{ py: 2, textAlign: 'center' }}
+            >
               No comments yet
             </Typography>
           ) : (
@@ -730,17 +932,30 @@ const ActionDetail = () => {
                   <ListItem alignItems="flex-start" sx={{ px: 0 }}>
                     <ListItemText
                       primary={
-                        <Typography variant="body2">
+                        <Typography 
+                          variant="body2"
+                          sx={{ color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'inherit' }}
+                        >
                           {comment.comment}
                         </Typography>
                       }
                       secondary={
                         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
                           <Stack direction="row" spacing={1} alignItems="center">
-                            <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem' }}>
+                            <Avatar sx={{ 
+                              width: 24, 
+                              height: 24, 
+                              fontSize: '0.75rem',
+                              bgcolor: isDarkMode ? 'rgba(96, 165, 250, 0.2)' : 'primary.main',
+                              color: isDarkMode ? '#60A5FA' : '#fff'
+                            }}>
                               {(comment.created_by_name || 'S')[0].toUpperCase()}
                             </Avatar>
-                            <Typography variant="caption" fontWeight={500}>
+                            <Typography 
+                              variant="caption" 
+                              fontWeight={500}
+                              sx={{ color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'text.primary' }}
+                            >
                               {comment.created_by_name || comment.created_by?.full_name || comment.created_by?.username || 'System'}
                             </Typography>
                             <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
@@ -756,6 +971,11 @@ const ActionDetail = () => {
                                 onClick={() => {
                                   setSelectedComment(comment);
                                   setShowDeleteCommentDialog(true);
+                                }}
+                                sx={{
+                                  '&:hover': {
+                                    bgcolor: isDarkMode ? 'rgba(244, 67, 54, 0.12)' : 'rgba(244, 67, 54, 0.04)',
+                                  }
                                 }}
                               >
                                 <Delete fontSize="small" />
@@ -775,12 +995,31 @@ const ActionDetail = () => {
       </Paper>
 
       {/* Progress Dialog */}
-      <Dialog open={showProgressDialog} onClose={() => setShowProgressDialog(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Update Progress</DialogTitle>
+      <Dialog 
+        open={showProgressDialog} 
+        onClose={() => setShowProgressDialog(false)} 
+        fullWidth 
+        maxWidth="sm"
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1a1a2e' : '#fff',
+            borderRadius: 3,
+            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : 'none',
+          }
+        }}
+      >
+        <DialogTitle sx={{ color: isDarkMode ? '#fff' : 'inherit' }}>
+          Update Progress
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Box>
-              <Typography gutterBottom>Progress: {progress}%</Typography>
+              <Typography 
+                gutterBottom
+                sx={{ color: isDarkMode ? 'rgba(255,255,255,0.8)' : 'inherit' }}
+              >
+                Progress: {progress}%
+              </Typography>
               <input
                 type="range"
                 min="0"
@@ -788,17 +1027,38 @@ const ActionDetail = () => {
                 step="5"
                 value={progress}
                 onChange={(e) => setProgress(parseInt(e.target.value))}
-                style={{ width: '100%' }}
+                style={{ 
+                  width: '100%',
+                  accentColor: isDarkMode ? '#60A5FA' : '#1976d2',
+                }}
               />
             </Box>
             
             <FormControl fullWidth>
-              <InputLabel>Status</InputLabel>
+              <InputLabel sx={{ color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit' }}>
+                Status
+              </InputLabel>
               <Select
                 value={selectedStatusId}
                 onChange={(e) => setSelectedStatusId(e.target.value)}
                 label="Status"
                 disabled={loadingStatusOptions}
+                sx={{
+                  bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'transparent',
+                  color: isDarkMode ? '#fff' : 'inherit',
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)',
+                  },
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)',
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: isDarkMode ? '#60A5FA' : 'primary.main',
+                  },
+                  '& .MuiSelect-icon': {
+                    color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+                  }
+                }}
               >
                 {loadingStatusOptions && statusOptions.length === 0 ? (
                   <MenuItem disabled>
@@ -811,9 +1071,20 @@ const ActionDetail = () => {
                   statusOptions.map((opt) => {
                     const statusConfig = STATUS_CONFIG[opt.value] || STATUS_CONFIG.pending;
                     return (
-                      <MenuItem key={opt.id} value={opt.id}>
+                      <MenuItem 
+                        key={opt.id} 
+                        value={opt.id}
+                        sx={{
+                          color: isDarkMode ? '#fff' : 'inherit',
+                          '&:hover': {
+                            bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                          }
+                        }}
+                      >
                         <Stack direction="row" alignItems="center" spacing={1}>
-                          {statusConfig.icon}
+                          <span style={{ color: statusConfig.color }}>
+                            {statusConfig.icon}
+                          </span>
                           <Typography variant="body2">
                             {opt.label || opt.short_name}
                           </Typography>
@@ -833,15 +1104,55 @@ const ActionDetail = () => {
               value={progressRemarks}
               onChange={(e) => setProgressRemarks(e.target.value)}
               placeholder="Add any notes about this progress update..."
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'transparent',
+                  color: isDarkMode ? '#fff' : 'inherit',
+                  '& fieldset': {
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: isDarkMode ? '#60A5FA' : 'primary.main',
+                  }
+                },
+                '& .MuiInputLabel-root': {
+                  color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+                },
+                '& .MuiInputLabel-root.Mui-focused': {
+                  color: isDarkMode ? '#60A5FA' : 'primary.main',
+                }
+              }}
             />
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowProgressDialog(false)}>Cancel</Button>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setShowProgressDialog(false)}
+            sx={{
+              color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              '&:hover': {
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              }
+            }}
+          >
+            Cancel
+          </Button>
           <Button 
             variant="contained" 
             onClick={handleUpdateProgress} 
             disabled={updatingProgress || !selectedStatusId || isActionInProgress || loadingStatusOptions}
+            sx={{
+              bgcolor: isDarkMode ? '#60A5FA' : 'primary.main',
+              '&:hover': {
+                bgcolor: isDarkMode ? '#93BBFC' : 'primary.dark',
+              },
+              '&.Mui-disabled': {
+                bgcolor: isDarkMode ? 'rgba(96, 165, 250, 0.3)' : 'rgba(25, 118, 210, 0.3)',
+              }
+            }}
           >
             Save Progress
           </Button>
@@ -849,21 +1160,58 @@ const ActionDetail = () => {
       </Dialog>
 
       {/* Complete Confirmation Dialog */}
-      <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)}>
-        <DialogTitle>Mark as Completed?</DialogTitle>
+      <Dialog 
+        open={showCompleteConfirm} 
+        onClose={() => setShowCompleteConfirm(false)}
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1a1a2e' : '#fff',
+            borderRadius: 3,
+            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : 'none',
+          }
+        }}
+      >
+        <DialogTitle sx={{ color: isDarkMode ? '#fff' : 'inherit' }}>
+          Mark as Completed?
+        </DialogTitle>
         <DialogContent>
-          <Typography>Are you sure you want to mark this task as completed?</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          <Typography sx={{ color: isDarkMode ? 'rgba(255,255,255,0.8)' : 'inherit' }}>
+            Are you sure you want to mark this task as completed?
+          </Typography>
+          <Typography 
+            variant="body2" 
+            color="text.secondary" 
+            sx={{ mt: 1 }}
+          >
             This action cannot be undone.
           </Typography>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowCompleteConfirm(false)}>Cancel</Button>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setShowCompleteConfirm(false)}
+            sx={{
+              color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              '&:hover': {
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              }
+            }}
+          >
+            Cancel
+          </Button>
           <Button 
             color="success" 
             variant="contained" 
             onClick={handleMarkAsCompleted}
             disabled={isActionInProgress}
+            sx={{
+              bgcolor: isDarkMode ? '#34D399' : 'success.main',
+              '&:hover': {
+                bgcolor: isDarkMode ? '#2DD4BF' : 'success.dark',
+              },
+              '&.Mui-disabled': {
+                bgcolor: isDarkMode ? 'rgba(52, 211, 153, 0.3)' : 'rgba(46, 125, 50, 0.3)',
+              }
+            }}
           >
             Yes, Complete
           </Button>
@@ -871,16 +1219,43 @@ const ActionDetail = () => {
       </Dialog>
 
       {/* Delete Task Confirmation Dialog */}
-      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)}>
-        <DialogTitle>Delete Task</DialogTitle>
+      <Dialog 
+        open={showDeleteTaskDialog} 
+        onClose={() => setShowDeleteTaskDialog(false)}
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1a1a2e' : '#fff',
+            borderRadius: 3,
+            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : 'none',
+          }
+        }}
+      >
+        <DialogTitle sx={{ color: isDarkMode ? '#fff' : 'inherit' }}>
+          Delete Task
+        </DialogTitle>
         <DialogContent>
-          <Typography>Are you sure you want to delete this task?</Typography>
-          <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+          <Typography sx={{ color: isDarkMode ? 'rgba(255,255,255,0.8)' : 'inherit' }}>
+            Are you sure you want to delete this task?
+          </Typography>
+          <Typography 
+            variant="body2" 
+            color="error" 
+            sx={{ mt: 1 }}
+          >
             This action cannot be undone. All comments and history will be permanently deleted.
           </Typography>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowDeleteTaskDialog(false)} disabled={deletingTask || isActionInProgress}>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setShowDeleteTaskDialog(false)} 
+            disabled={deletingTask || isActionInProgress}
+            sx={{
+              color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              '&:hover': {
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              }
+            }}
+          >
             Cancel
           </Button>
           <Button 
@@ -888,6 +1263,15 @@ const ActionDetail = () => {
             variant="contained" 
             onClick={handleDeleteTask}
             disabled={deletingTask || isActionInProgress}
+            sx={{
+              bgcolor: isDarkMode ? '#EF4444' : 'error.main',
+              '&:hover': {
+                bgcolor: isDarkMode ? '#DC2626' : 'error.dark',
+              },
+              '&.Mui-disabled': {
+                bgcolor: isDarkMode ? 'rgba(239, 68, 68, 0.3)' : 'rgba(211, 47, 47, 0.3)',
+              }
+            }}
           >
             {deletingTask ? 'Deleting...' : 'Delete Task'}
           </Button>
@@ -895,16 +1279,43 @@ const ActionDetail = () => {
       </Dialog>
 
       {/* Delete Comment Confirmation Dialog */}
-      <Dialog open={showDeleteCommentDialog} onClose={() => setShowDeleteCommentDialog(false)}>
-        <DialogTitle>Delete Comment</DialogTitle>
+      <Dialog 
+        open={showDeleteCommentDialog} 
+        onClose={() => setShowDeleteCommentDialog(false)}
+        PaperProps={{
+          sx: {
+            bgcolor: isDarkMode ? '#1a1a2e' : '#fff',
+            borderRadius: 3,
+            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : 'none',
+          }
+        }}
+      >
+        <DialogTitle sx={{ color: isDarkMode ? '#fff' : 'inherit' }}>
+          Delete Comment
+        </DialogTitle>
         <DialogContent>
-          <Typography>Are you sure you want to delete this comment?</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          <Typography sx={{ color: isDarkMode ? 'rgba(255,255,255,0.8)' : 'inherit' }}>
+            Are you sure you want to delete this comment?
+          </Typography>
+          <Typography 
+            variant="body2" 
+            color="text.secondary" 
+            sx={{ mt: 1 }}
+          >
             This action cannot be undone.
           </Typography>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowDeleteCommentDialog(false)} disabled={deletingComment}>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => setShowDeleteCommentDialog(false)} 
+            disabled={deletingComment}
+            sx={{
+              color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'inherit',
+              '&:hover': {
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              }
+            }}
+          >
             Cancel
           </Button>
           <Button 
@@ -912,6 +1323,15 @@ const ActionDetail = () => {
             variant="contained" 
             onClick={handleDeleteComment}
             disabled={deletingComment}
+            sx={{
+              bgcolor: isDarkMode ? '#EF4444' : 'error.main',
+              '&:hover': {
+                bgcolor: isDarkMode ? '#DC2626' : 'error.dark',
+              },
+              '&.Mui-disabled': {
+                bgcolor: isDarkMode ? 'rgba(239, 68, 68, 0.3)' : 'rgba(211, 47, 47, 0.3)',
+              }
+            }}
           >
             {deletingComment ? 'Deleting...' : 'Delete'}
           </Button>

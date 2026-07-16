@@ -1,10 +1,12 @@
 // src/components/actiontracker/meetings/components/MeetingFilters.jsx
-import { useState, useEffect } from 'react';
+
+import { useEffect } from 'react';
 import { 
   Stack, TextField, InputAdornment, IconButton, 
   FormControl, InputLabel, Select, MenuItem, Button, 
   ToggleButtonGroup, ToggleButton, Box, Chip, 
-  FormControlLabel, Switch, useMediaQuery, useTheme 
+  FormControlLabel, Switch, useMediaQuery, useTheme,
+  CircularProgress
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -18,7 +20,8 @@ export const MeetingFilters = ({
   setSearchTerm, 
   statusFilter, 
   setStatusFilter, 
-  statusOptions,
+  statusOptions = [], 
+  loading = false, 
   showUpcoming,
   setShowUpcoming,
   showPast,
@@ -46,65 +49,123 @@ export const MeetingFilters = ({
 
   const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
 
+  // Safe helper to find a matching option's label
+  const getStatusLabel = (filterValue) => {
+    const matchedOption = statusOptions?.find(
+      (o) => (o.value || o.short_name || o.id) === filterValue
+    );
+    return matchedOption ? (matchedOption.label || matchedOption.name || matchedOption.short_name) : filterValue;
+  };
+
+  useEffect(() => {
+  }, [statusOptions]);
+
   return (
     <Stack spacing={2}>
       {/* Main filter row */}
-      <Stack direction={isMobileView ? 'column' : 'row'} spacing={2} alignItems="center">
+      <Stack 
+        direction={isMobileView ? 'column' : 'row'} 
+        spacing={2} 
+        sx={{ alignItems: 'center' }} 
+      >
         <TextField
           fullWidth
           size="small"
           placeholder="Search meetings..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: COLORS.secondary }} /></InputAdornment>,
-            endAdornment: searchTerm && (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={() => setSearchTerm('')}>
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ),
+          // Fixed: Switched to React 19 / MUI modern slots to prevent DOM attribute bleeding warnings
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: COLORS.secondary }} />
+                </InputAdornment>
+              ),
+              endAdornment: searchTerm && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearchTerm('')}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }
           }}
         />
         
         {isMobileView ? (
-          <Button fullWidth variant="outlined" startIcon={<FilterListIcon />} onClick={onOpenFilterDrawer}>
+          <Button 
+            fullWidth 
+            variant="outlined" 
+            startIcon={<FilterListIcon />} 
+            onClick={onOpenFilterDrawer}
+          >
             {statusFilter !== 'all' 
-              ? `Status: ${statusOptions?.find(o => o.value === statusFilter)?.label || statusFilter}`
+              ? `Status: ${getStatusLabel(statusFilter)}`
               : 'Filter Meetings'
             }
           </Button>
         ) : (
           <FormControl sx={{ minWidth: 220 }} size="small">
-            <InputLabel>Status</InputLabel>
-            <Select value={statusFilter} onChange={handleStatusChange} label="Status">
+            <InputLabel id="status-filter-label">Status</InputLabel>
+            <Select 
+              labelId="status-filter-label"
+              value={statusFilter} 
+              onChange={handleStatusChange} 
+              label="Status"
+              disabled={loading}
+            >
               <MenuItem value="all">All Statuses</MenuItem>
-              {statusOptions?.map(opt => (
-                <MenuItem key={opt.value} value={opt.value}>
+              {loading ? (
+                <MenuItem disabled>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ 
-                      width: 12, 
-                      height: 12, 
-                      borderRadius: '50%', 
-                      bgcolor: opt.color || COLORS.primary 
-                    }} />
-                    {opt.label}
+                    <CircularProgress size={16} />
+                    Loading...
                   </Box>
                 </MenuItem>
-              ))}
+              ) : (
+                statusOptions?.map(opt => {
+                  const value = opt.value || opt.short_name || opt.id;
+                  const label = opt.label || opt.name || opt.short_name;
+                  const color = opt.color || '#6B7280';
+                  
+                  return (
+                    <MenuItem key={value} value={value}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box sx={{ 
+                          width: 12, 
+                          height: 12, 
+                          borderRadius: '50%', 
+                          bgcolor: color 
+                        }} />
+                        {label}
+                      </Box>
+                    </MenuItem>
+                  );
+                })
+              )}
             </Select>
           </FormControl>
         )}
         
-        <ToggleButtonGroup value={viewMode} exclusive onChange={(e, val) => val && setViewMode(val)} size="small" sx={{ ml: isMobileView ? 0 : 'auto' }}>
+        <ToggleButtonGroup 
+          value={viewMode} 
+          exclusive 
+          onChange={(e, val) => val && setViewMode(val)} 
+          size="small" 
+          sx={{ ml: isMobileView ? 0 : 'auto' }}
+        >
           <ToggleButton value="grid"><GridViewIcon fontSize="small" /></ToggleButton>
           <ToggleButton value="table"><ViewListIcon fontSize="small" /></ToggleButton>
         </ToggleButtonGroup>
       </Stack>
       
       {/* Date filter row */}
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+      <Stack 
+        direction="row" 
+        spacing={2} 
+        sx={{ alignItems: 'center', flexWrap: 'wrap' }} 
+      >
         <FormControlLabel
           control={
             <Switch 
@@ -140,9 +201,15 @@ export const MeetingFilters = ({
       
       {/* Active filters display */}
       {hasActiveFilters && (
-        
-          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-
+        <Stack 
+          direction="row" 
+          sx={{ 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            flexWrap: 'wrap', 
+            gap: 1 
+          }}
+        >
           {searchTerm && (
             <Chip 
               label={`Search: ${searchTerm}`} 
@@ -153,7 +220,7 @@ export const MeetingFilters = ({
           )}
           {statusFilter !== 'all' && (
             <Chip 
-              label={`Status: ${statusOptions?.find(o => o.value === statusFilter)?.label || statusFilter}`}
+              label={`Status: ${getStatusLabel(statusFilter)}`}
               size="small" 
               onDelete={() => setStatusFilter('all')}
               variant="outlined"

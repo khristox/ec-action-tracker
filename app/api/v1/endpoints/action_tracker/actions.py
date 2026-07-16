@@ -1,17 +1,31 @@
+# app/api/v1/endpoints/action_tracker/actions.py
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Any, List, Optional
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from typing import Any, List, Optional, Dict
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from app.api import deps
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
-from app.models.meetings.action_tracker import MeetingAction
+from app.models.meetings.action_tracker import MeetingAction, ActionComment
 from app.models.user import User
 
-from app.schemas.action_tracker import ActionCommentCreate, ActionCommentResponse, ActionProgressUpdate, ActionStatusHistoryResponse, MyTaskResponse
-from app.schemas.meeting_minutes.meeting_minutes import MeetingActionCreate, MeetingActionResponse, MeetingActionUpdate
+from app.schemas.action_tracker import (
+    ActionCommentCreate, 
+    ActionCommentResponse, 
+    ActionProgressUpdate, 
+    ActionStatusHistoryResponse, 
+    MyTaskResponse
+)
+from app.schemas.meeting_minutes.meeting_minutes import (
+    MeetingActionCreate, 
+    MeetingActionResponse, 
+    MeetingActionUpdate
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -49,7 +63,11 @@ async def get_action_or_404(db: AsyncSession, action_id: UUID) -> MeetingAction:
     return action
 
 
-async def check_action_permission(action: MeetingAction, current_user: User, require_ownership: bool = False) -> bool:
+async def check_action_permission(
+    action: MeetingAction, 
+    current_user: User, 
+    require_ownership: bool = False
+) -> bool:
     """Check if user has permission to access/modify action"""
     if require_ownership:
         if action.assigned_to_id and action.assigned_to_id != current_user.id:
@@ -62,7 +80,100 @@ async def check_action_permission(action: MeetingAction, current_user: User, req
     return True
 
 
-# ==================== STATIC ROUTES (no path parameters) ====================
+def parse_due_date(due_date: Optional[str]) -> Optional[datetime]:
+    """Parse due date string to datetime"""
+    if not due_date:
+        return None
+    if isinstance(due_date, datetime):
+        return due_date
+    try:
+        return datetime.fromisoformat(due_date.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        return None
+
+
+def extract_assignment_data(action_data: Dict[str, Any]) -> tuple:
+    """Extract and normalize assignment data from payload"""
+    assigned_to_id = action_data.get('assigned_to_id')
+    assigned_to_name = action_data.get('assigned_to_name')
+    
+    # Handle different formats of assigned_to_name
+    if assigned_to_name is None and action_data.get('assigned_to'):
+        assigned_to = action_data.get('assigned_to')
+        if isinstance(assigned_to, dict):
+            assigned_to_id = assigned_to.get('assigned_to_id') or assigned_to.get('id')
+            assigned_to_name = assigned_to.get('assigned_to_name') or assigned_to.get('name')
+            if isinstance(assigned_to_name, dict):
+                assigned_to_name = assigned_to_name.get('name')
+    
+    # If assigned_to_name is a dict with id but no name, add name
+    if isinstance(assigned_to_name, dict):
+        if 'id' in assigned_to_name and 'name' not in assigned_to_name:
+            assigned_to_name['name'] = assigned_to_name.get('id')
+    elif assigned_to_name is None and assigned_to_id:
+        assigned_to_name = {"id": assigned_to_id, "type": "user"}
+    
+    return assigned_to_id, assigned_to_name
+
+
+async def ensure_minute_exists(
+    db: AsyncSession,
+    minute_id: Optional[UUID],
+    meeting_id: Optional[UUID],
+    description: str,
+    user_id: UUID
+) -> UUID:
+    """
+    Ensure a minute exists for the action.
+    If minute_id is provided, validates it exists.
+    If not, creates or finds a default minute.
+    """
+    if minute_id:
+        minute = await meeting_minutes.get(db, minute_id)
+        if not minute:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Minutes with id {minute_id} not found"
+            )
+        return minute_id
+    
+    # No minute_id provided, get or create a default one
+    if not meeting_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="meeting_id is required when minute_id is not provided"
+        )
+    
+    # Check if meeting exists
+    from app.crud.meetings import meeting_crud
+    meeting = await meeting_crud.get(db, meeting_id)
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Meeting with id {meeting_id} not found"
+        )
+    
+    # Check for existing minutes
+    existing_minutes = await meeting_minutes.get_minutes_by_meeting(
+        db=db,
+        meeting_id=meeting_id,
+        limit=1
+    )
+    
+    if existing_minutes:
+        return existing_minutes[0].id
+    
+    # Create default minute
+    default_minute = await meeting_minutes.create_default_minute(
+        db=db,
+        meeting_id=meeting_id,
+        action_description=description,
+        user_id=user_id
+    )
+    return default_minute.id
+
+
+# ==================== USER TASK ROUTES ====================
 
 @router.get("/my-tasks", response_model=List[MyTaskResponse])
 async def get_my_tasks(
@@ -76,14 +187,13 @@ async def get_my_tasks(
     is_overdue: Optional[bool] = Query(None),
     include_completed: bool = Query(False, description="Include completed tasks"),
 ):
-    """Get my tasks with filtering support"""
-
+    """Get tasks assigned to the current user with filtering support."""
     try:
         actions = await meeting_action.get_actions_assigned_to_user(
             db=db,
             user_id=current_user.id,
-            user_email=current_user.email,  # Add this
-            user_phone=current_user.phone,  # Add this (if available)
+            user_email=current_user.email,
+            user_phone=current_user.phone,
             skip=skip,
             limit=limit,
             search=search,
@@ -102,14 +212,7 @@ async def get_my_tasks(
                 meeting_title = action.minutes.meeting.title or ""
                 meeting_date = action.minutes.meeting.meeting_date
             
-            is_overdue_flag = False
-            if action.due_date and not action.completed_at:
-                now = datetime.now()
-                if action.due_date.tzinfo:
-                    due_date = action.due_date.replace(tzinfo=None)
-                else:
-                    due_date = action.due_date
-                is_overdue_flag = due_date < now
+            is_overdue_flag = calculate_is_overdue(action.due_date, action.completed_at)
 
             result.append(MyTaskResponse(
                 id=action.id,
@@ -142,9 +245,7 @@ async def get_overdue_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ):
-    """
-    Get all overdue actions assigned to the current user.
-    """
+    """Get all overdue actions assigned to the current user."""
     try:
         actions = await meeting_action.get_overdue_actions_for_user(
             db=db,
@@ -186,7 +287,8 @@ async def get_overdue_tasks(
             detail=f"Failed to fetch overdue tasks: {str(e)}"
         )
 
-# ==================== COLLECTION ROUTES ====================
+
+# ==================== ACTION COLLECTION ROUTES ====================
 
 @router.get("/", response_model=List[MeetingActionResponse])
 async def get_actions(
@@ -221,7 +323,7 @@ async def get_actions(
         )
 
 
-# ==================== CREATE ACTION ====================
+# ==================== CREATE ACTION (ROOT ENDPOINT) ====================
 
 @router.post("/", response_model=MeetingActionResponse, status_code=status.HTTP_201_CREATED)
 async def create_action(
@@ -232,39 +334,114 @@ async def create_action(
 ) -> Any:
     """
     Create a new action item.
+    If no minute_id is provided, automatically create a default minute.
     """
     try:
-        # Verify minutes exist if minute_id is provided
-        if action_in.minute_id:
-            minutes_obj = await meeting_minutes.get(db, action_in.minute_id)
-            if not minutes_obj:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Minutes with id {action_in.minute_id} not found"
-                )
+        # Ensure minute exists
+        minute_id = await ensure_minute_exists(
+            db=db,
+            minute_id=action_in.minute_id,
+            meeting_id=action_in.meeting_id,
+            description=action_in.description,
+            user_id=current_user.id
+        )
+        action_in.minute_id = minute_id
         
-        # Create the action using existing meeting_action CRUD
+        # Create the action
         action = await meeting_action.create_action(
             db=db,
             minute_id=action_in.minute_id,
             action_in=action_in,
-            user_id=current_user.id
+            assigned_by_id=current_user.id
         )
         
-        logger.info(f"Action created by user {current_user.id}")
+        logger.info(f"Action created by user {current_user.id}: {action.id}")
         return action
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating action: {str(e)}")
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create action: {str(e)}"
         )
 
 
-# Add this endpoint to your actions.py router
+# ==================== CREATE ACTION FOR MINUTE ====================
+
+@router.post("/actions/for-minute/{minute_id}", response_model=MeetingActionResponse, status_code=status.HTTP_201_CREATED)
+async def create_action_for_minute(
+    minute_id: UUID,
+    action_data: Dict[str, Any],
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Create a new action item for a specific minute.
+    This endpoint is used by the frontend when creating actions from the meeting minutes view.
+    """
+    try:
+        logger.info(f"Creating action for minute {minute_id}")
+        logger.debug(f"Received payload: {action_data}")
+        
+        # Check if minute exists
+        minute = await meeting_minutes.get(db, minute_id)
+        if not minute:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Minute with id {minute_id} not found"
+            )
+        
+        # Extract and validate description
+        description = action_data.get('description', '').strip()
+        if not description:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Description is required"
+            )
+        
+        # Extract assignment data
+        assigned_to_id, assigned_to_name = extract_assignment_data(action_data)
+        
+        # Parse due_date
+        due_date = parse_due_date(action_data.get('due_date'))
+        
+        # Create the action_in object
+        action_in = MeetingActionCreate(
+            description=description,
+            assigned_to_id=assigned_to_id,
+            assigned_to_name=assigned_to_name,
+            due_date=due_date,
+            priority=action_data.get('priority', 2),
+            remarks=action_data.get('remarks', ''),
+            minute_id=minute_id
+        )
+        
+        # Create the action
+        action = await meeting_action.create_action(
+            db=db,
+            minute_id=minute_id,
+            action_in=action_in,
+            assigned_by_id=current_user.id
+        )
+        
+        logger.info(f"Action created successfully: {action.id}")
+        return action
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating action: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create action: {str(e)}"
+        )
+
+
+# ==================== ACTION HISTORY ROUTES ====================
 
 @router.get("/{action_id}/history", response_model=List[ActionStatusHistoryResponse])
 async def get_action_history(
@@ -274,9 +451,7 @@ async def get_action_history(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(50, ge=1, le=200, description="Maximum number of records to return"),
 ):
-    """
-    Get status change history for an action with pagination.
-    """
+    """Get status change history for an action with pagination."""
     try:
         # Check if action exists
         action = await get_action_or_404(db, action_id)
@@ -298,8 +473,9 @@ async def get_action_history(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch history"
         )
-    
-# ==================== DYNAMIC ROUTES (with path parameters) ====================
+
+
+# ==================== SINGLE ACTION ROUTES ====================
 
 @router.get("/{action_id}", response_model=MeetingActionResponse)
 async def get_action(
@@ -427,6 +603,8 @@ async def assign_action(
         )
 
 
+# ==================== ACTION COMMENT ROUTES ====================
+
 @router.post("/{action_id}/comments", response_model=ActionCommentResponse, status_code=status.HTTP_201_CREATED)
 async def add_action_comment(
     action_id: UUID,
@@ -448,24 +626,13 @@ async def add_action_comment(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error adding comment to action {action_id}: {str(e)}")
+        logger.error(f"Error adding comment to action {action_id}: {str(e)}", exc_info=True)
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to add comment: {str(e)}"
         )
 
-
-@router.delete("/actions/{action_id}/comments/{comment_id}")
-async def delete_action_comment(
-    action_id: str, 
-    comment_id: str,
-    current_user: User = Depends(deps.get_current_user),
-):
-    # Your delete logic here
-    # Verify comment belongs to action
-    # Delete from database
-    
-    return {"message": f"Comment {comment_id} deleted from action {action_id}"}
 
 @router.get("/{action_id}/comments", response_model=List[ActionCommentResponse])
 async def get_action_comments(
@@ -480,8 +647,18 @@ async def get_action_comments(
         # Check if action exists
         await get_action_or_404(db, action_id)
         
-        # Get comments
-        comments = await meeting_action.get_comments(db, action_id, skip, limit)
+        # Get comments directly with SQLAlchemy
+        query = select(ActionComment).where(
+            ActionComment.action_id == action_id,
+            ActionComment.is_active == True
+        ).options(
+            selectinload(ActionComment.created_by)
+        ).order_by(
+            ActionComment.created_at.desc()
+        ).offset(skip).limit(limit)
+        
+        result = await db.execute(query)
+        comments = result.scalars().all()
         
         logger.info(f"Retrieved {len(comments)} comments for action {action_id}")
         return comments
@@ -489,12 +666,79 @@ async def get_action_comments(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching comments for action {action_id}: {str(e)}")
+        logger.error(f"Error fetching comments for action {action_id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch comments"
         )
 
+
+@router.delete("/{action_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_action_comment(
+    action_id: UUID,
+    comment_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Delete a comment from an action.
+    Only the comment creator or admin can delete comments.
+    """
+    try:
+        # Check if action exists
+        await get_action_or_404(db, action_id)
+        
+        # Get the comment directly from database
+        query = select(ActionComment).where(
+            ActionComment.id == comment_id,
+            ActionComment.is_active == True
+        )
+        result = await db.execute(query)
+        comment = result.scalar_one_or_none()
+        
+        if not comment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Comment with id {comment_id} not found"
+            )
+        
+        # Verify comment belongs to the action
+        if str(comment.action_id) != str(action_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Comment does not belong to this action"
+            )
+        
+        # Check permission - only comment creator or admin can delete
+        is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
+        if comment.created_by_id != current_user.id and not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the comment creator or admin can delete this comment"
+            )
+        
+        # Soft delete the comment
+        comment.is_active = False
+        comment.updated_by_id = current_user.id
+        comment.updated_at = datetime.now(timezone.utc)
+        
+        await db.commit()
+        
+        logger.info(f"Comment {comment_id} deleted from action {action_id} by user {current_user.id}")
+        return None
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting comment {comment_id} from action {action_id}: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete comment: {str(e)}"
+        )
+
+
+# ==================== DELETE ACTION ====================
 
 @router.delete("/{action_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_action(
@@ -524,4 +768,161 @@ async def delete_action(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete action: {str(e)}"
         )
+
+
+# ==================== TEST ROUTES (Development Only) ====================
+
+@router.get("/test", include_in_schema=False)
+async def test_router():
+    """Test endpoint to verify router is mounted (development only)."""
+    return {
+        "status": "ok",
+        "message": "Actions router is mounted and working!",
+        "routes": [
+            "/test",
+            "/",
+            "/my-tasks",
+            "/overdue",
+            "/actions/for-minute/{minute_id}",
+            "/{action_id}",
+            "/{action_id}/history",
+            "/{action_id}/comments",
+            "/{action_id}/progress",
+            "/{action_id}/assign"
+        ]
+    }
+
+
+@router.patch("/{action_id}/progress", response_model=MeetingActionResponse)
+async def update_action_progress(
+    action_id: UUID,
+    progress_update: ActionProgressUpdate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update action progress percentage with validation.
+    """
+    try:
+        # Check if action exists
+        action_obj = await get_action_or_404(db, action_id)
+        
+        # Validate progress percentage
+        if progress_update.progress_percentage < 0 or progress_update.progress_percentage > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Progress percentage must be between 0 and 100"
+            )
+        
+        # Check permission - only assigned user or admin can update progress
+        is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
+        if action_obj.assigned_to_id and action_obj.assigned_to_id != current_user.id and not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assigned user or admin can update progress"
+            )
+        
+        # Update the progress
+        now = datetime.now(timezone.utc)
+        action_obj.overall_progress_percentage = progress_update.progress_percentage
+        
+        # Update status if provided
+        if progress_update.individual_status_id:
+            action_obj.overall_status_id = progress_update.individual_status_id
+        
+        # Update remarks if provided
+        if progress_update.remarks:
+            action_obj.remarks = progress_update.remarks
+        
+        # If progress is 100%, mark as completed
+        if progress_update.progress_percentage >= 100:
+            action_obj.completed_at = now
+        
+        action_obj.updated_by_id = current_user.id
+        action_obj.updated_at = now
+        
+        await db.commit()
+        await db.refresh(action_obj)
+        
+        logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}% by user {current_user.id}")
+        return action_obj
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating action progress {action_id}: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update progress: {str(e)}"
+        )
     
+
+@router.patch("/{action_id}/progress", response_model=MeetingActionResponse)
+async def update_action_progress(
+    action_id: UUID,
+    progress_update: ActionProgressUpdate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update action progress percentage with validation.
+    Only the assigned user or admin can update progress.
+    """
+    try:
+        # Check if action exists
+        action_obj = await get_action_or_404(db, action_id)
+        
+        # Log for debugging
+        logger.info(f"Action {action_id} - assigned_to_id: {action_obj.assigned_to_id}")
+        logger.info(f"Action {action_id} - assigned_to_name: {action_obj.assigned_to_name}")
+        
+        # Validate progress percentage
+        if progress_update.progress_percentage < 0 or progress_update.progress_percentage > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Progress percentage must be between 0 and 100"
+            )
+        
+        # Check permission - only assigned user or admin can update progress
+        is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
+        if action_obj.assigned_to_id and action_obj.assigned_to_id != current_user.id and not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assigned user or admin can update progress"
+            )
+        
+        # Update the progress directly
+        now = datetime.now(timezone.utc)
+        action_obj.overall_progress_percentage = progress_update.progress_percentage
+        
+        # Update status if provided
+        if progress_update.individual_status_id:
+            action_obj.overall_status_id = progress_update.individual_status_id
+        
+        # Update remarks if provided
+        if progress_update.remarks:
+            action_obj.remarks = progress_update.remarks
+        
+        # If progress is 100%, mark as completed
+        if progress_update.progress_percentage >= 100:
+            action_obj.completed_at = now
+        
+        action_obj.updated_by_id = current_user.id
+        action_obj.updated_at = now
+        
+        await db.commit()
+        await db.refresh(action_obj)
+        
+        logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}% by user {current_user.id}")
+        return action_obj
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating action progress {action_id}: {str(e)}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update progress: {str(e)}"
+        )

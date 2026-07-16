@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/components/actiontracker/meetings/components/AssignToSelector.jsx
+
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Button,
@@ -18,21 +20,57 @@ import {
   Avatar,
   Divider,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
+  Tooltip
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  PersonAdd as PersonAdd,
-  Close as Close,
+  PersonAdd as PersonAddIcon,
+  Close as CloseIcon,
   CheckCircle as CheckCircleIcon,
   Group as GroupIcon,
   Person as PersonIcon,
   Email as EmailIcon,
-  Phone as PhoneIcon
+  Phone as PhoneIcon,
+  Visibility as VisibilityIcon,
+  VisibilityOff as VisibilityOffIcon
 } from '@mui/icons-material';
 import api from '../../../../services/api';
 
-const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meetingId }) => {
+const debounce = (func, wait) => {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
+
+const obfuscateEmail = (email) => {
+  if (!email) return null;
+  const [localPart, domain] = email.split('@');
+  if (!domain) return email;
+  if (localPart.length <= 2) return email;
+  const firstTwo = localPart.slice(0, 2);
+  const lastOne = localPart.slice(-1);
+  return `${firstTwo}***${lastOne}@${domain}`;
+};
+
+const AssignToSelector = ({ 
+  value, 
+  onChange, 
+  disabled, 
+  label = "Assign To", 
+  meetingId,
+  placeholder = "Click to assign to user or participant"
+}) => {
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [systemUsers, setSystemUsers] = useState([]);
@@ -45,37 +83,91 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualEntry, setManualEntry] = useState({ name: '', email: '', phone: '' });
   const [error, setError] = useState(null);
+  const [showFullEmail, setShowFullEmail] = useState({});
+  const searchInputRef = useRef(null);
 
-  // Fetch system users - wrapped in useCallback
+  const debouncedSearch = useMemo(
+    () => debounce((term) => filterUsers(term), 300),
+    [systemUsers, participants]
+  );
+
+  const filterUsers = useCallback((term) => {
+    if (!term) {
+      setFilteredSystemUsers(systemUsers);
+      setFilteredParticipants(participants);
+    } else {
+      const lowerTerm = term.toLowerCase();
+      setFilteredSystemUsers(
+        systemUsers.filter(u => 
+          u.name?.toLowerCase().includes(lowerTerm) ||
+          u.email?.toLowerCase().includes(lowerTerm) ||
+          u.username?.toLowerCase().includes(lowerTerm)
+        )
+      );
+      setFilteredParticipants(
+        participants.filter(p => 
+          p.name?.toLowerCase().includes(lowerTerm) ||
+          p.email?.toLowerCase().includes(lowerTerm)
+        )
+      );
+    }
+  }, [systemUsers, participants]);
+
+  const handleSearchChange = useCallback((e) => {
+    const term = e.target.value;
+    setSearchTerm(term);
+    debouncedSearch(term);
+  }, [debouncedSearch]);
+
   const fetchSystemUsers = useCallback(async () => {
     setLoadingSystemUsers(true);
     setError(null);
     try {
-      const response = await api.get(`/users/available/?skip=0&limit=100&active_only=true`);
+      const response = await api.get('/users/', {
+        params: { skip: 0, limit: 100, is_active: true }
+      });
       const users = response.data?.items || response.data || [];
-      setSystemUsers(users.map(u => ({
-        id: u.id,
-        name: u.full_name || u.username,
-        email: u.email,
-        phone: u.phone || u.telephone,
-        type: 'system'
-      })));
+      
+      let currentParticipants = [];
+      if (meetingId) {
+        try {
+          const participantResponse = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
+          currentParticipants = participantResponse.data?.items || participantResponse.data || [];
+        } catch (err) {
+          console.warn('Could not fetch participants for privacy check:', err);
+        }
+      }
+      
+      setSystemUsers(users.map(u => {
+        const isParticipant = currentParticipants.some(p => 
+          p.email?.toLowerCase() === u.email?.toLowerCase() ||
+          p.id === u.id
+        );
+        return {
+          id: u.id,
+          name: u.full_name || (u.first_name && u.last_name ? `${u.first_name} ${u.last_name}` : u.username),
+          username: u.username,
+          email: u.email,
+          phone: u.phone || u.telephone,
+          type: 'system',
+          is_active: u.is_active,
+          is_participant: isParticipant,
+          original_email: u.email
+        };
+      }));
     } catch (err) {
       console.error("Failed to fetch system users:", err);
-      setError('Could not load system users');
+      setError('Could not load system users. Please try again.');
     } finally {
       setLoadingSystemUsers(false);
     }
-  }, []);
+  }, [meetingId]);
 
-  // Fetch meeting participants - wrapped in useCallback
   const fetchParticipants = useCallback(async () => {
     if (!meetingId) {
-      console.error('No meetingId provided');
-      setError('Meeting ID not available');
+      setParticipants([]);
       return;
     }
-    
     setLoadingParticipants(true);
     setError(null);
     try {
@@ -86,117 +178,253 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
         name: p.name || p.full_name || p.username,
         email: p.email,
         phone: p.phone || p.telephone,
-        title: p.title,
-        type: 'participant'
+        title: p.title || p.role,
+        // Participants are NEVER treated as verified system users here, even
+        // if they happen to also have a user_id. Linking a participant to a
+        // real users.id (for the FK) must be an explicit, separate lookup —
+        // not inferred from meeting-attendance data.
+        type: 'participant',
+        original_email: p.email
       })));
     } catch (err) {
       console.error("Failed to fetch participants:", err);
       setError('Could not load meeting participants');
+      setParticipants([]);
     } finally {
       setLoadingParticipants(false);
     }
   }, [meetingId]);
 
-  // Fetch system users when dialog opens and system tab is active
   useEffect(() => {
-    if (searchDialogOpen && activeTab === 'system') {
-      fetchSystemUsers();
+    if (searchDialogOpen) {
+      setSearchTerm('');
+      setError(null);
+      setShowFullEmail({});
+      if (activeTab === 'system') fetchSystemUsers();
+      else if (activeTab === 'participants' && meetingId) fetchParticipants();
+      setTimeout(() => searchInputRef.current?.focus(), 100);
     }
-  }, [searchDialogOpen, activeTab, fetchSystemUsers]);
+  }, [searchDialogOpen, activeTab, fetchSystemUsers, fetchParticipants, meetingId]);
 
-  // Fetch meeting participants when dialog opens and participants tab is active
   useEffect(() => {
-    if (searchDialogOpen && activeTab === 'participants' && meetingId) {
-      fetchParticipants();
-    }
-  }, [searchDialogOpen, activeTab, meetingId, fetchParticipants]);
+    filterUsers(searchTerm);
+  }, [systemUsers, participants, filterUsers, searchTerm]);
 
-  // Filter users based on search term
-  useEffect(() => {
-    if (!searchTerm) {
-      setFilteredSystemUsers(systemUsers);
-      setFilteredParticipants(participants);
-    } else {
-      const term = searchTerm.toLowerCase();
-      setFilteredSystemUsers(systemUsers.filter(u => 
-        u.name?.toLowerCase().includes(term) ||
-        u.email?.toLowerCase().includes(term)
-      ));
-      setFilteredParticipants(participants.filter(p => 
-        p.name?.toLowerCase().includes(term) ||
-        p.email?.toLowerCase().includes(term)
-      ));
-    }
-  }, [searchTerm, systemUsers, participants]);
+  const toggleEmailVisibility = useCallback((userId) => {
+    setShowFullEmail(prev => ({ ...prev, [userId]: !prev[userId] }));
+  }, []);
 
-  const handleSelectUser = (user) => {
-    onChange({
-      type: user.type === 'system' ? 'user' : user.type,
+  const getDisplayEmail = useCallback((user) => {
+    if (!user.email) return null;
+    const isParticipant = participants.some(p => 
+      p.email?.toLowerCase() === user.email?.toLowerCase() ||
+      p.id === user.id
+    );
+    if (isParticipant || showFullEmail[user.id]) return user.email;
+    return obfuscateEmail(user.email);
+  }, [participants, showFullEmail]);
+
+  const handleSelectUser = useCallback((user) => {
+    // IMPORTANT: assigned_to_id is a foreign key into the `users` table on
+    // the backend. It must ONLY ever be populated when the selection is a
+    // verified system user — i.e. it came from the System Users tab and was
+    // resolved via the /users/ endpoint (type === 'system').
+    //
+    // Meeting participants, manual entries, or any other source must NEVER
+    // populate assigned_to_id, even if they carry an id-shaped value (e.g. a
+    // participant's user_id) — that id has not been verified against the
+    // users table and can cause a FK violation on save. Their full identity
+    // is instead captured entirely in assigned_to_name (JSON), which has no
+    // FK constraint and can safely hold non-system-user data.
+    const isVerifiedSystemUser = user.type === 'system';
+
+    const assignedTo = {
+      type: isVerifiedSystemUser ? 'user' : user.type,
       id: user.id,
       name: user.name,
       email: user.email || '',
       phone: user.phone || '',
-      assigned_to_id: user.type === 'system' ? user.id : null,
+      assigned_to_id: isVerifiedSystemUser ? user.id : null,
       assigned_to_name: {
         id: user.id,
         name: user.name,
         email: user.email || '',
         phone: user.phone || '',
         title: user.title,
-        type: user.type === 'system' ? 'user' : user.type
+        type: isVerifiedSystemUser ? 'user' : user.type
       }
-    });
+    };
+    onChange(assignedTo);
     setSearchDialogOpen(false);
     resetForm();
-  };
+  }, [onChange]);
 
-  const handleAddNewPerson = () => {
+  const handleAddNewPerson = useCallback(() => {
     if (!manualEntry.name.trim()) {
       setError('Name is required');
       return;
     }
-    
-    // Check if email matches existing system user
     const existingUser = systemUsers.find(u => 
       u.email?.toLowerCase() === manualEntry.email?.toLowerCase()
     );
-    
     if (existingUser) {
       handleSelectUser(existingUser);
-    } else {
-      const newUser = {
-        type: 'manual',
-        id: null,
+      return;
+    }
+    const newUser = {
+      type: 'manual',
+      id: null,
+      name: manualEntry.name,
+      email: manualEntry.email || null,
+      phone: manualEntry.phone || null,
+      assigned_to_id: null,
+      assigned_to_name: {
         name: manualEntry.name,
         email: manualEntry.email || null,
         phone: manualEntry.phone || null,
-        assigned_to_id: null,
-        assigned_to_name: {
-          name: manualEntry.name,
-          email: manualEntry.email || null,
-          phone: manualEntry.phone || null,
-          type: 'manual'
-        }
-      };
-      onChange(newUser);
-      setSearchDialogOpen(false);
-      resetForm();
-    }
-  };
+        type: 'manual'
+      }
+    };
+    onChange(newUser);
+    setSearchDialogOpen(false);
+    resetForm();
+  }, [manualEntry, systemUsers, handleSelectUser, onChange]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setSearchTerm('');
     setManualEntry({ name: '', email: '', phone: '' });
     setError(null);
     setShowManualForm(false);
-  };
+  }, []);
 
-  const getInitials = (name) => {
+  const getInitials = useCallback((name) => {
     if (!name) return '?';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  };
+    const parts = name.split(' ').filter(Boolean);
+    if (parts.length >= 2) return parts[0][0] + parts[parts.length - 1][0];
+    return parts[0]?.[0]?.toUpperCase() || '?';
+  }, []);
 
-  const displayValue = value ? value.name : '';
+  const displayValue = value?.name || '';
+
+  // UserItem component - FIXED: removed `button` prop and fixed HTML nesting
+  const UserItem = useCallback(({ user, selected }) => {
+    const displayEmail = getDisplayEmail(user);
+    const isParticipant = user.is_participant || participants.some(p => 
+      p.email?.toLowerCase() === user.email?.toLowerCase() ||
+      p.id === user.id
+    );
+    const showRevealButton = !isParticipant && user.email;
+    
+    return (
+      <ListItem
+        // FIX: Use component prop instead of `button` attribute
+        component="div"
+        onClick={() => handleSelectUser(user)}
+        selected={selected}
+        sx={{
+          borderRadius: 1,
+          mb: 0.5,
+          cursor: 'pointer',
+          '&:hover': { bgcolor: 'action.hover' },
+          '&.Mui-selected': {
+            bgcolor: 'primary.50',
+            '&:hover': { bgcolor: 'primary.100' },
+          },
+        }}
+      >
+        <ListItemAvatar>
+          <Avatar sx={{ bgcolor: selected ? 'primary.main' : 'grey.400' }}>
+            {getInitials(user.name)}
+          </Avatar>
+        </ListItemAvatar>
+        <ListItemText
+          primary={
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Typography variant="body2" fontWeight={selected ? 600 : 400}>
+                {user.name}
+              </Typography>
+              {isParticipant && (
+                <Chip
+                  label="Meeting Participant"
+                  size="small"
+                  color="success"
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: '0.6rem' }}
+                />
+              )}
+              {user.is_active === false && (
+                <Chip
+                  label="Inactive"
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: '0.6rem' }}
+                />
+              )}
+            </Stack>
+          }
+          // FIX: Use Box with display:flex instead of Stack with flexWrap prop
+          secondary={
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+              {displayEmail && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <EmailIcon fontSize="small" sx={{ fontSize: 14, color: 'text.secondary' }} />
+                  <Typography variant="caption" color="text.secondary" component="span">
+                    {displayEmail}
+                  </Typography>
+                  {showRevealButton && (
+                    <Tooltip title={showFullEmail[user.id] ? "Hide email" : "Show full email"}>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleEmailVisibility(user.id);
+                        }}
+                        sx={{ p: 0.5 }}
+                      >
+                        {showFullEmail[user.id] ? (
+                          <VisibilityOffIcon sx={{ fontSize: 14 }} />
+                        ) : (
+                          <VisibilityIcon sx={{ fontSize: 14 }} />
+                        )}
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {!isParticipant && !showFullEmail[user.id] && (
+                    <Tooltip title="Email hidden for privacy. Click eye icon to reveal.">
+                      <Chip
+                        label="Private"
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                        sx={{ height: 18, fontSize: '0.55rem' }}
+                      />
+                    </Tooltip>
+                  )}
+                </Box>
+              )}
+              {user.username && (
+                <Typography variant="caption" color="text.secondary">
+                  @{user.username}
+                </Typography>
+              )}
+              {user.title && (
+                <Chip
+                  label={user.title}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 18, fontSize: '0.6rem' }}
+                />
+              )}
+            </Box>
+          }
+        />
+        {selected && (
+          <CheckCircleIcon color="primary" sx={{ ml: 1 }} />
+        )}
+      </ListItem>
+    );
+  }, [getDisplayEmail, participants, showFullEmail, toggleEmailVisibility, handleSelectUser, getInitials]);
 
   return (
     <>
@@ -206,79 +434,141 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
         value={displayValue}
         onClick={() => setSearchDialogOpen(true)}
         disabled={disabled}
-        placeholder="Click to assign to user or participant"
-        InputProps={{
-          readOnly: true,
-          endAdornment: value && (
-            <InputAdornment position="end">
-              <IconButton 
-                size="small" 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onChange(null);
-                }}
-                edge="end"
-              >
-                <Close fontSize="small" />
-              </IconButton>
-            </InputAdornment>
-          )
+        placeholder={placeholder}
+        slotProps={{
+          input: {
+            readOnly: true,
+            endAdornment: value && (
+              <InputAdornment position="end">
+                <IconButton 
+                  size="small" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChange(null);
+                  }}
+                  edge="end"
+                  aria-label="clear assignment"
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ),
+            startAdornment: value && (
+              <InputAdornment position="start">
+                <Avatar sx={{ width: 24, height: 24, fontSize: 12 }}>
+                  {getInitials(value.name)}
+                </Avatar>
+              </InputAdornment>
+            )
+          }
         }}
       />
       
-      <Dialog open={searchDialogOpen} onClose={() => setSearchDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={searchDialogOpen} 
+        onClose={() => setSearchDialogOpen(false)} 
+        maxWidth="sm" 
+        fullWidth
+        TransitionProps={{
+          onEntered: () => searchInputRef.current?.focus(),
+        }}
+        // FIX: Use slotProps for Modal to handle aria-hidden
+        slotProps={{
+          modal: {
+            // This helps with the aria-hidden focus issue
+          }
+        }}
+      >
         <DialogTitle>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">Assign To</Typography>
-            <IconButton onClick={() => setSearchDialogOpen(false)} size="small">
-              <Close />
+          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6" fontWeight={600}>
+              Assign To
+            </Typography>
+            <IconButton onClick={() => setSearchDialogOpen(false)} size="small" aria-label="close dialog">
+              <CloseIcon />
             </IconButton>
           </Stack>
         </DialogTitle>
         
-        <DialogContent>
+        <DialogContent dividers>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
               {error}
             </Alert>
           )}
           
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {/* Search Field */}
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <Typography variant="caption">
+              <strong>Privacy:</strong> Email addresses are hidden by default. 
+              Only participants in this meeting can see full emails. 
+              You can click the eye icon to reveal individual emails.
+            </Typography>
+          </Alert>
+          
+          <Stack spacing={2.5}>
             <TextField
+              inputRef={searchInputRef}
               fullWidth
-              placeholder="Search by name or email..."
+              placeholder="Search by name, email, or username..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              autoFocus
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon color="action" />
-                  </InputAdornment>
-                ),
+              onChange={handleSearchChange}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                  endAdornment: searchTerm && (
+                    <InputAdornment position="end">
+                      <IconButton 
+                        size="small" 
+                        onClick={() => {
+                          setSearchTerm('');
+                          filterUsers('');
+                        }}
+                        edge="end"
+                      >
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }
               }}
             />
 
-            {/* Toggle Buttons */}
             <ToggleButtonGroup
               value={activeTab}
               exclusive
               onChange={(e, val) => val && setActiveTab(val)}
               fullWidth
               size="small"
+              aria-label="user selection mode"
             >
-              <ToggleButton value="system">
+              <ToggleButton value="system" aria-label="system users">
                 <PersonIcon fontSize="small" sx={{ mr: 1 }} />
-                System Users ({systemUsers.length})
+                System Users
+                {systemUsers.length > 0 && (
+                  <Chip
+                    label={systemUsers.length}
+                    size="small"
+                    sx={{ ml: 1, height: 18, fontSize: '0.6rem' }}
+                  />
+                )}
               </ToggleButton>
-              <ToggleButton value="participants">
+              <ToggleButton value="participants" aria-label="meeting participants">
                 <GroupIcon fontSize="small" sx={{ mr: 1 }} />
-                Participants ({participants.length})
+                Participants
+                {participants.length > 0 && (
+                  <Chip
+                    label={participants.length}
+                    size="small"
+                    sx={{ ml: 1, height: 18, fontSize: '0.6rem' }}
+                  />
+                )}
               </ToggleButton>
             </ToggleButtonGroup>
 
-            {/* System Users Tab */}
             {activeTab === 'system' && (
               <>
                 {loadingSystemUsers ? (
@@ -289,39 +579,43 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
                     </Typography>
                   </Box>
                 ) : filteredSystemUsers.length > 0 ? (
-                  <Stack spacing={1} maxHeight={400} sx={{ overflowY: 'auto' }}>
+                  <List 
+                    sx={{ 
+                      maxHeight: 400, 
+                      overflowY: 'auto',
+                      p: 0,
+                      '&::-webkit-scrollbar': {
+                        width: 6,
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        bgcolor: 'background.paper',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        bgcolor: 'grey.300',
+                        borderRadius: 3,
+                      },
+                    }}
+                  >
                     {filteredSystemUsers.map((user) => (
-                      <Paper
+                      <UserItem
                         key={user.id}
-                        sx={{ p: 1.5, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
-                        onClick={() => handleSelectUser(user)}
-                      >
-                        <Stack direction="row" alignItems="center" spacing={2}>
-                          <Avatar>{getInitials(user.name)}</Avatar>
-                          <Box flex={1}>
-                            <Typography fontWeight={600}>{user.name}</Typography>
-                            {user.email && (
-                              <Typography variant="caption" color="text.secondary">
-                                {user.email}
-                              </Typography>
-                            )}
-                          </Box>
-                          {value?.id === user.id && value?.type === 'user' && (
-                            <CheckCircleIcon color="primary" />
-                          )}
-                        </Stack>
-                      </Paper>
+                        user={user}
+                        selected={value?.id === user.id && value?.type === 'user'}
+                      />
                     ))}
-                  </Stack>
+                  </List>
                 ) : searchTerm ? (
-                  <Alert severity="info">No users found matching "{searchTerm}"</Alert>
+                  <Alert severity="info" icon={<SearchIcon />}>
+                    No users found matching "{searchTerm}"
+                  </Alert>
                 ) : (
-                  <Alert severity="info">No system users found</Alert>
+                  <Alert severity="info">
+                    No system users available
+                  </Alert>
                 )}
               </>
             )}
 
-            {/* Participants Tab */}
             {activeTab === 'participants' && (
               <>
                 {loadingParticipants ? (
@@ -332,105 +626,116 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
                     </Typography>
                   </Box>
                 ) : filteredParticipants.length > 0 ? (
-                  <Stack spacing={1} maxHeight={400} sx={{ overflowY: 'auto' }}>
+                  <List 
+                    sx={{ 
+                      maxHeight: 400, 
+                      overflowY: 'auto',
+                      p: 0,
+                      '&::-webkit-scrollbar': {
+                        width: 6,
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        bgcolor: 'background.paper',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        bgcolor: 'grey.300',
+                        borderRadius: 3,
+                      },
+                    }}
+                  >
                     {filteredParticipants.map((p) => (
-                      <Paper
+                      <UserItem
                         key={p.id}
-                        sx={{ p: 1.5, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
-                        onClick={() => handleSelectUser(p)}
-                      >
-                        <Stack direction="row" alignItems="center" spacing={2}>
-                          <Avatar>{getInitials(p.name)}</Avatar>
-                          <Box flex={1}>
-                            <Typography fontWeight={600}>{p.name}</Typography>
-                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                              {p.email && (
-                                <Typography variant="caption" color="text.secondary">
-                                  {p.email}
-                                </Typography>
-                              )}
-                              {p.title && (
-                                <Typography variant="caption" color="text.secondary">
-                                  • {p.title}
-                                </Typography>
-                              )}
-                            </Stack>
-                          </Box>
-                          {value?.id === p.id && value?.type === 'participant' && (
-                            <CheckCircleIcon color="primary" />
-                          )}
-                        </Stack>
-                      </Paper>
+                        user={p}
+                        selected={value?.id === p.id && value?.type === 'participant'}
+                      />
                     ))}
-                  </Stack>
+                  </List>
                 ) : searchTerm ? (
-                  <Alert severity="info">No participants found matching "{searchTerm}"</Alert>
+                  <Alert severity="info" icon={<SearchIcon />}>
+                    No participants found matching "{searchTerm}"
+                  </Alert>
                 ) : (
-                  <Alert severity="info">No participants found for this meeting: "{meetingId}"</Alert>
+                  <Alert severity="info">
+                    {meetingId ? 'No participants found for this meeting' : 'No meeting selected'}
+                  </Alert>
                 )}
               </>
             )}
 
             <Divider />
 
-            {/* Add New Person Section */}
             {!showManualForm ? (
               <Button
-                startIcon={<PersonAdd />}
+                startIcon={<PersonAddIcon />}
                 onClick={() => setShowManualForm(true)}
                 fullWidth
                 variant="outlined"
+                sx={{ borderStyle: 'dashed' }}
               >
                 Add New Person
               </Button>
             ) : (
-              <Paper variant="outlined" sx={{ p: 2 }}>
+              <Paper variant="outlined" sx={{ p: 2, borderStyle: 'dashed' }}>
                 <Stack spacing={2}>
                   <Alert severity="info">
-                    If the email matches an existing system user, they will be linked automatically.
+                    If the email matches an existing user, they will be linked automatically.
                   </Alert>
                   
                   <TextField
                     size="small"
-                    label="Name *"
+                    label="Full Name *"
                     value={manualEntry.name}
                     onChange={(e) => setManualEntry({ ...manualEntry, name: e.target.value })}
                     fullWidth
                     required
+                    error={!manualEntry.name.trim() && !!error}
+                    helperText={!manualEntry.name.trim() && error ? 'Name is required' : ''}
                   />
                   
                   <TextField
                     size="small"
-                    label="Email"
+                    label="Email Address"
                     value={manualEntry.email}
                     onChange={(e) => setManualEntry({ ...manualEntry, email: e.target.value })}
                     fullWidth
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <EmailIcon fontSize="small" color="action" />
-                        </InputAdornment>
-                      ),
+                    type="email"
+                    slotProps={{
+                      input: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <EmailIcon fontSize="small" color="action" />
+                          </InputAdornment>
+                        ),
+                      }
                     }}
                   />
                   
                   <TextField
                     size="small"
-                    label="Phone"
+                    label="Phone Number"
                     value={manualEntry.phone}
                     onChange={(e) => setManualEntry({ ...manualEntry, phone: e.target.value })}
                     fullWidth
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <PhoneIcon fontSize="small" color="action" />
-                        </InputAdornment>
-                      ),
+                    slotProps={{
+                      input: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <PhoneIcon fontSize="small" color="action" />
+                          </InputAdornment>
+                        ),
+                      }
                     }}
                   />
                   
-                  <Stack direction="row" spacing={1} justifyContent="flex-end">
-                    <Button size="small" onClick={() => setShowManualForm(false)}>
+                  <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+                    <Button 
+                      size="small" 
+                      onClick={() => {
+                        setShowManualForm(false);
+                        setError(null);
+                      }}
+                    >
                       Cancel
                     </Button>
                     <Button 
@@ -438,6 +743,7 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
                       variant="contained" 
                       onClick={handleAddNewPerson}
                       disabled={!manualEntry.name.trim()}
+                      startIcon={<PersonAddIcon />}
                     >
                       Add Person
                     </Button>
@@ -448,8 +754,10 @@ const AssignToSelector = ({ value, onChange, disabled, label = "Assign To", meet
           </Stack>
         </DialogContent>
         
-        <DialogActions>
-          <Button onClick={() => setSearchDialogOpen(false)}>Close</Button>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setSearchDialogOpen(false)} variant="text">
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
     </>

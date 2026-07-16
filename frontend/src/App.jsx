@@ -387,8 +387,6 @@ const ProtectedRoute = ({
   const { isAuthenticated, isAuthChecking, user } = useSelector(selectAuth);
   const location = useLocation();
 
-  console.log('DEBUG user:', user);
-
   // Preload role-based components as soon as we know who the user is
   useEffect(() => {
     if (user?.roles?.length > 0 || user?.is_superuser) {

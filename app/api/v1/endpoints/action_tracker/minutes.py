@@ -4,8 +4,9 @@ Handles CRUD operations for meeting minutes and their associated actions
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
+from venv import logger
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import db
 from app.api import deps
 from app.crud.meetings.action_tracker import CRUDMeeting, CRUDMeetingMinutes, meeting_action
-from app.models.meetings.action_tracker import Meeting, MeetingMinutes
+from app.models.meetings.action_tracker import Meeting, MeetingAction, MeetingMinutes
 # from app.crud.action_tracker import meeting, meeting_action, meeting_minutes
 
 from . import participants, participant_lists, meetings, minutes, actions, documents, dashboard, import_export
@@ -213,45 +214,103 @@ async def delete_minutes(
 # ACTION ENDPOINTS FOR MINUTES
 # ============================================================================
 
-@router.post(
-    "/{minute_id}/actions",
-    response_model=MeetingActionResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create action from minutes",
-    description="Create a new action item associated with specific minutes"
-)
-async def create_action_for_minutes(
+@router.post("/minutes/{minute_id}/actions", response_model=MeetingActionResponse, status_code=status.HTTP_201_CREATED)
+async def create_action_for_minute(
     minute_id: UUID,
-    action_in: MeetingActionCreate,
+    action_data: Dict[str, Any],
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-) -> MeetingActionResponse:
-    """
-    Create an action item from meeting minutes.
-    
-    Args:
-        minute_id: UUID of the minutes
-        action_in: Action data (description, assigned_to, due_date, priority, etc.)
-        db: Database session
-        current_user: Authenticated user
-    
-    Returns:
-        Created action object
-    """
-    # Verify minutes exists
-    minutes_obj = await meeting_minutes.get(db, minute_id)
-    if not minutes_obj:
+):
+    """Create an action for a specific minute"""
+    try:
+        logger.info(f"Creating action for minute {minute_id}")
+        logger.info(f"Received payload: {action_data}")
+        
+        # Check if minute exists
+        minute = await meeting_minutes.get(db, minute_id)
+        if not minute:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Minute with id {minute_id} not found"
+            )
+        
+        # Extract description
+        description = action_data.get('description', '').strip()
+        if not description:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Description is required"
+            )
+        
+        # Handle assigned_to_name - it can be a dict or string
+        assigned_to_name = action_data.get('assigned_to_name')
+        assigned_to_id = action_data.get('assigned_to_id')
+        
+        # If assigned_to_name is a dict, extract the name and id
+        if isinstance(assigned_to_name, dict):
+            # Store the full dict as assigned_to_name
+            # The schema can handle dict, string, or None
+            pass  # Keep as is
+        elif assigned_to_name is None and assigned_to_id:
+            # If only ID is provided, create a minimal dict
+            assigned_to_name = {"id": assigned_to_id, "type": "user"}
+        
+        # Parse due_date
+        due_date = action_data.get('due_date')
+        if due_date and isinstance(due_date, str):
+            try:
+                due_date = datetime.fromisoformat(due_date.replace('Z', '+00:00'))
+            except ValueError:
+                due_date = None
+        
+        # Create the action
+        now = datetime.now()
+        action = MeetingAction(
+            minute_id=minute_id,
+            description=description,
+            assigned_to_id=assigned_to_id,
+            assigned_to_name=assigned_to_name,
+            due_date=due_date,
+            priority=action_data.get('priority', 2),
+            remarks=action_data.get('remarks', ''),
+            created_by_id=current_user.id,
+            created_at=now,
+            is_active=True
+        )
+        
+        db.add(action)
+        await db.commit()
+        await db.refresh(action)
+        
+        logger.info(f"Action created successfully: {action.id}")
+        
+        # Build response manually to ensure correct format
+        return MeetingActionResponse(
+            id=action.id,
+            minute_id=action.minute_id,
+            description=action.description,
+            assigned_to_id=action.assigned_to_id,
+            assigned_to_name=action.assigned_to_name,
+            due_date=action.due_date,
+            priority=action.priority,
+            remarks=action.remarks,
+            created_by_id=action.created_by_id,
+            created_at=action.created_at,
+            is_active=action.is_active,
+            assigned_at=action.created_at,
+            overall_progress_percentage=0
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating action: {str(e)}", exc_info=True)
+        await db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Minutes {minute_id} not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create action: {str(e)}"
         )
     
-    # Create action
-    action = await meeting_action.create_action(
-        db, minute_id, action_in, current_user.id
-    )
-    return action
-
 
 @router.get(
     "/{minute_id}/actions",

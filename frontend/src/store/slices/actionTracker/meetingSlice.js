@@ -456,7 +456,7 @@ export const deleteMeeting = createAsyncThunk(
 
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateMeetingStatus',
-  async ({ id, status, comment }, { rejectWithValue, getState }) => {
+  async ({ id, status, comment }, { rejectWithValue, getState, dispatch }) => {
     try {
       const state = getState();
       const meetingStatusOptions = state.meetings.meetingStatusOptions;
@@ -476,20 +476,31 @@ export const updateMeetingStatus = createAsyncThunk(
       
       console.log('Updating meeting status:', { id, status: statusValue, comment });
       
+      // Make the PATCH request
       const response = await api.patch(
         `/action-tracker/meetings/${id}/status`,
         null,
         { params: { status: statusValue.toLowerCase(), comment: comment || '' } }
       );
       
+      console.log('Status update response:', response.data);
+      
+      // Normalize the response
       const normalizedData = normalizeMeetingStatus(response.data);
-      return normalizedData;
+      
+      // IMPORTANT: Refresh the meeting data after status update
+      // This ensures we have the latest data from the server
+      const refreshedMeeting = await api.get(`/action-tracker/meetings/${id}`);
+      const finalData = normalizeMeetingStatus(refreshedMeeting.data);
+      
+      return finalData;
     } catch (error) {
       console.error('Update meeting status error:', error);
       return rejectWithValue(handleApiError(error));
     }
   }
 );
+
 
 export const addMeetingMinutes = createAsyncThunk(
   'meetings/addMeetingMinutes',

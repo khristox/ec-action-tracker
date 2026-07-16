@@ -1,11 +1,11 @@
 // src/components/layout/MobileBottomNav.jsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   BottomNavigation, BottomNavigationAction, Paper, Badge, Avatar,
   Menu, MenuItem, ListItemIcon, ListItemText, Divider, Fade,
-  Box, Typography, Chip, CircularProgress, alpha, useTheme, Tooltip,
+  Box, Typography, Chip, CircularProgress, alpha, useTheme,
   Skeleton, Alert, Snackbar, Button
 } from '@mui/material';
 import {
@@ -72,11 +72,9 @@ const DEFAULT_MENUS = [
 // ─── Icon Resolver with null safety ────────────────────────────────────────────
 
 const resolveIcon = (icon, iconType = 'mui', iconLibrary = 'fas') => {
-  // Safety checks
   if (!icon) return <DashboardIcon />;
   
   try {
-    // MUI icons
     if (iconType === 'mui') {
       const iconStr = typeof icon === 'string' ? icon : String(icon);
       const key = iconStr.charAt(0).toUpperCase() + iconStr.slice(1);
@@ -84,13 +82,10 @@ const resolveIcon = (icon, iconType = 'mui', iconLibrary = 'fas') => {
       return Icon ? <Icon /> : <DashboardIcon />;
     }
 
-    // FontAwesome icons - handle safely
     if (iconType === 'fontawesome') {
-      // Return a simple fallback to avoid FA issues
       return <DashboardIcon />;
     }
 
-    // Custom image URL
     if (iconType === 'custom' && typeof icon === 'string') {
       return <img src={icon} alt="icon" style={{ width: 24, height: 24 }} onError={(e) => { e.target.style.display = 'none'; }} />;
     }
@@ -163,7 +158,6 @@ const MobileBottomNav = () => {
   const abortControllerRef = useRef(null);
   const isMountedRef = useRef(true);
 
-  // Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -173,9 +167,8 @@ const MobileBottomNav = () => {
     };
   }, []);
 
-  // ── Fetch menus from database ─────────────────────────────────────────────
+// ── Fetch menus from database ─────────────────────────────────────────────
   const fetchMenus = useCallback(async (forceRefresh = false) => {
-    // Check cache first
     if (!forceRefresh) {
       const cached = getCachedMenus();
       if (cached && cached.length > 0) {
@@ -193,7 +186,6 @@ const MobileBottomNav = () => {
         setError(null);
       }
       
-      // Cancel previous request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -203,7 +195,6 @@ const MobileBottomNav = () => {
         signal: abortControllerRef.current.signal
       });
       
-      // Safely extract data
       let data = [];
       if (response.data && typeof response.data === 'object') {
         data = response.data.data || response.data.items || response.data || [];
@@ -211,7 +202,6 @@ const MobileBottomNav = () => {
       
       if (!Array.isArray(data)) data = [];
       
-      // Filter and sort menus
       const filtered = data
         .filter(menu => menu && menu.can_show_mb_bottom === true && menu.is_active === true)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
@@ -225,7 +215,11 @@ const MobileBottomNav = () => {
       }
       return finalMenus;
     } catch (err) {
-      if (err.name === 'AbortError') return null;
+      // ✅ FIX: Safely check both Native Abort and Axios CanceledError
+      if (err.name === 'AbortError' || err.__CANCEL__ || err.constructor?.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+        return null; 
+      }
+      
       console.error('Failed to fetch mobile menus:', err);
       
       if (isMountedRef.current) {
@@ -253,7 +247,6 @@ const MobileBottomNav = () => {
     const counts = { meetings: 0, actions: 0, overdue: 0 };
     
     try {
-      // Fetch upcoming meetings count
       if (menus.some(m => m && m.code === 'meetings')) {
         try {
           const res = await api.get('/action-tracker/meetings/', { 
@@ -264,7 +257,6 @@ const MobileBottomNav = () => {
         } catch { /* ignore */ }
       }
 
-      // Fetch pending actions count
       if (menus.some(m => m && m.code === 'actions')) {
         try {
           const res = await api.get('/action-tracker/actions/my-tasks', { 
@@ -273,7 +265,6 @@ const MobileBottomNav = () => {
           const total = res.data?.total || 0;
           counts.actions = typeof total === 'number' ? total : 0;
           
-          // Fetch overdue count
           const overdueRes = await api.get('/action-tracker/actions/my-tasks', {
             params: { limit: 1, include_completed: false, is_overdue: true }
           });
@@ -405,7 +396,6 @@ const MobileBottomNav = () => {
     );
   }
 
-  // Show error state with retry
   if (error && (!menus || menus.length === 0)) {
     return (
       <Paper sx={{ 
@@ -454,6 +444,7 @@ const MobileBottomNav = () => {
             },
           }}
         >
+          {/* Dynamic Menus */}
           {menus.filter(Boolean).map((menu, index) => {
             const iconEl = resolveIcon(menu.icon, menu.icon_type, menu.icon_library);
             const badgeContent = getBadgeContent(menu.code);
@@ -462,7 +453,8 @@ const MobileBottomNav = () => {
 
             return (
               <BottomNavigationAction
-                key={menu.id || menu.code || index}
+                // Use the index as part of the primary key to guarantee local uniqueness
+                key={`nav-item-${index}-${menu.id || menu.code || 'fallback'}`} 
                 label={menu.title || 'Menu'}
                 icon={
                   badgeContent ? (
@@ -569,7 +561,7 @@ const MobileBottomNav = () => {
 
         {/* Navigation items from menus */}
         {menus.filter(Boolean).map((menu) => (
-          <MenuItem key={menu.id || menu.code} onClick={() => handleMenuAction(getPathFromMenu(menu))}>
+          <MenuItem key={`menu-item-${menu.id || menu.code}`} onClick={() => handleMenuAction(getPathFromMenu(menu))}>
             <ListItemIcon>
               {resolveIcon(menu.icon, menu.icon_type, menu.icon_library)}
             </ListItemIcon>

@@ -5,7 +5,7 @@ from typing import Any, List, Optional
 import uuid
 
 from app.models.meetings.user_department import UserDepartment
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
@@ -20,8 +20,7 @@ from app.schemas.user import DepartmentInfo, UserCreate, UserUpdate, UserRespons
 from app.schemas.role import PermissionBrief, RoleResponse
 from app.schemas.auth import MessageResponse
 
-from app.models.user import user_roles 
-
+from app.models.user import user_roles
 
 router = APIRouter()
 
@@ -38,39 +37,41 @@ async def get_users(
     current_user: User = Depends(deps.get_current_admin),
 ) -> List[UserResponse]:
     """Get all users (admin only)"""
-    from sqlalchemy.orm import selectinload
-    
+    from asyncio.log import logger
+
     filter_active = is_active if is_active is not None else active_only
-    
-    query = select(User)
-    
+
+    query = select(User).options(selectinload(User.roles))
+
     if include_departments:
         query = query.options(
             selectinload(User.user_departments).selectinload(UserDepartment.department)
         )
-    
+
     if filter_active:
         query = query.where(User.is_active == True)
-    
+
     if search and len(search.strip()) >= 2:
         t = f"%{search.strip()}%"
         query = query.where(or_(
-            User.first_name.ilike(t), 
+            User.first_name.ilike(t),
             User.last_name.ilike(t),
-            User.email.ilike(t), 
-            User.username.ilike(t), 
+            User.email.ilike(t),
+            User.username.ilike(t),
             User.phone.ilike(t),
             func.concat(User.first_name, ' ', User.last_name).ilike(t)
         ))
-    
+
     query = query.offset(skip).limit(limit).order_by(User.created_at.desc())
-    
+
     result = await db.execute(query)
     users = result.scalars().all()
     
+    logger.info(f"Admin {current_user.username} fetched {len(users)} users")
+
     return [
         UserResponse(
-            id=u.id,
+            id=str(u.id),  # ✅ Convert UUID to string
             email=u.email,
             username=u.username,
             first_name=u.first_name,
@@ -80,22 +81,24 @@ async def get_users(
             is_active=u.is_active,
             is_verified=u.is_verified,
             is_superuser=u.is_superuser,
+            roles=[r.code for r in u.roles],
             created_at=u.created_at,
             updated_at=u.updated_at,
             departments=[
                 DepartmentInfo(
-                    id=ud.department.id,
+                    id=str(ud.department.id),  # ✅ Convert UUID to string
                     name=ud.department.name,
                     code=ud.department.department_code,
                     role=ud.role,
                     is_primary=ud.is_primary
                 )
-                for ud in u.user_departments 
+                for ud in u.user_departments
                 if ud.department and ud.status == "active"
             ] if include_departments else []
         )
         for u in users
     ]
+
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_by_admin(
@@ -106,7 +109,7 @@ async def create_user_by_admin(
 ) -> Any:
     """Create new user. Admin only."""
     from asyncio.log import logger
-    
+
     # Check if user exists by email
     user_exists = await user_crud.get_by_email(db, email=user_in.email)
     if user_exists:
@@ -114,7 +117,7 @@ async def create_user_by_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists"
         )
-    
+
     # Check if user exists by username
     if user_in.username:
         user_exists = await user_crud.get_by_username(db, username=user_in.username)
@@ -123,7 +126,7 @@ async def create_user_by_admin(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User with this username already exists"
             )
-    
+
     # Create user
     new_user = await user_crud.create_with_roles(
         db,
@@ -135,20 +138,21 @@ async def create_user_by_admin(
         is_verified=user_in.is_verified or False,
         is_superuser=user_in.is_superuser or False
     )
-    
+
     if not new_user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user 2"
+            detail="Failed to create user"
         )
-    
+
     await db.commit()
     await db.refresh(new_user)
-    
+    await db.refresh(new_user, attribute_names=["roles"])
+
     logger.info(f"Admin {current_user.username} created user: {new_user.username}")
-    
+
     return UserResponse(
-        id=new_user.id,
+        id=str(new_user.id),  # ✅ Convert UUID to string
         email=new_user.email,
         username=new_user.username,
         first_name=new_user.first_name or "",
@@ -158,6 +162,7 @@ async def create_user_by_admin(
         is_active=new_user.is_active,
         is_verified=new_user.is_verified,
         is_superuser=new_user.is_superuser,
+        roles=[r.code for r in new_user.roles],
         created_at=new_user.created_at,
         updated_at=new_user.updated_at
     )
@@ -173,7 +178,7 @@ async def update_user_by_admin(
 ) -> Any:
     """Update user. Admin only."""
     from asyncio.log import logger
-    
+
     try:
         user_uuid = uuid.UUID(user_id)
     except ValueError:
@@ -182,184 +187,36 @@ async def update_user_by_admin(
             detail="Invalid user ID format"
         )
 
-    # Get user WITHOUT filtering by active status
-    # Use a direct query instead of user_crud.get if it filters inactive users
     result = await db.execute(
-        select(User).where(User.id == user_uuid)
+        select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
     )
     target_user = result.scalar_one_or_none()
-    
+
     if not target_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User not found with ID: {user_id}"
         )
-    
+
     # Update user fields
     update_data = user_in.model_dump(exclude_unset=True)
     logger.info(f"Updating user {target_user.username} with data: {update_data}")
-    
+
     for field, value in update_data.items():
+        if field == "roles":
+            continue
         if value is not None and hasattr(target_user, field):
             setattr(target_user, field, value)
-    
+
     target_user.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(target_user)
-    
-    logger.info(f"Admin {current_user.username} updated user: {target_user.username} (active: {target_user.is_active})")
-    
+    await db.refresh(target_user, attribute_names=["roles"])
+
+    logger.info(f"Admin {current_user.username} updated user: {target_user.username}")
+
     return UserResponse(
-        id=target_user.id,
-        email=target_user.email,
-        username=target_user.username,
-        first_name=target_user.first_name or "",
-        last_name=target_user.last_name or "",
-        middle_name=getattr(target_user, "middle_name", "") or "",
-        phone=target_user.phone or "",
-        is_active=target_user.is_active,
-        is_verified=target_user.is_verified,
-        is_superuser=target_user.is_superuser,
-        created_at=target_user.created_at,
-        updated_at=target_user.updated_at
-    )
-@router.delete("/users/{user_id}", response_model=MessageResponse)
-async def delete_user_by_admin(
-    *,
-    db: AsyncSession = Depends(deps.get_db),
-    user_id: str,
-    current_user: User = Depends(deps.get_current_admin)
-) -> Any:
-    """Delete user. Admin only."""
-    from asyncio.log import logger
-    
-    try:
-        user_uuid = uuid.UUID(user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
-        )
-    
-    # Prevent self-deletion
-    if user_uuid == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot delete your own account"
-        )
-    
-    # Get user
-    target_user = await user_crud.get(db, id=user_uuid)
-    if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    await db.delete(target_user)
-    await db.commit()
-    
-    logger.info(f"Admin {current_user.username} deleted user: {target_user.username}")
-    
-    return MessageResponse(message="User deleted successfully")
-
-
-@router.post("/users/{user_id}/reset-password", response_model=MessageResponse)
-async def reset_user_password(
-    *,
-    db: AsyncSession = Depends(deps.get_db),
-    user_id: str,
-    password_data: dict,
-    current_user: User = Depends(deps.get_current_admin)
-) -> Any:
-    """Reset user password (admin only)."""
-    from asyncio.log import logger
-    
-    try:
-        user_uuid = uuid.UUID(user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
-        )
-    
-    # Get user
-    target_user = await user_crud.get(db, id=user_uuid)
-    if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    new_password = password_data.get("new_password")
-    if not new_password or len(new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters"
-        )
-    
-    # Update password
-    target_user.hashed_password = get_password_hash(new_password)
-    target_user.password_changed_at = datetime.now(timezone.utc)
-    await db.commit()
-    
-    logger.info(f"Admin {current_user.username} reset password for user: {target_user.username}")
-    
-    return MessageResponse(message="Password reset successfully")
-
-
-@router.put("/users/{user_id}/roles", response_model=UserResponse)
-async def update_user_roles(
-    *,
-    db: AsyncSession = Depends(deps.get_db),
-    user_id: str,
-    role_names: List[str],  # The body is a list directly
-    current_user: User = Depends(deps.get_current_admin)
-) -> Any:
-    """Update user roles. Admin only."""
-    from asyncio.log import logger
-    
-    try:
-        user_uuid = uuid.UUID(user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
-        )
-    
-    # Get user with roles using eager loading
-    result = await db.execute(
-        select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
-    )
-    target_user = result.scalar_one_or_none()
-    
-    if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # Clear existing roles
-    target_user.roles.clear()
-    
-    # Add new roles
-    for role_name in role_names:
-        # Get role by code/name
-        result = await db.execute(
-            select(Role).where(Role.code == role_name)
-        )
-        role_obj = result.scalar_one_or_none()
-        if role_obj:
-            target_user.roles.append(role_obj)
-    
-    target_user.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(target_user)
-    
-    logger.info(f"Admin {current_user.username} updated roles for user: {target_user.username}")
-    
-    return UserResponse(
-        id=target_user.id,
+        id=str(target_user.id),  # ✅ Convert UUID to string
         email=target_user.email,
         username=target_user.username,
         first_name=target_user.first_name or "",
@@ -375,6 +232,157 @@ async def update_user_roles(
     )
 
 
+@router.put("/users/{user_id}/roles", response_model=UserResponse)
+async def update_user_roles(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    user_id: str,
+    role_names: List[str] = Body(..., embed=False),
+    current_user: User = Depends(deps.get_current_admin)
+) -> Any:
+    """Update user roles. Admin only."""
+    from asyncio.log import logger
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+
+    # Get user with roles using eager loading
+    result = await db.execute(
+        select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
+    )
+    target_user = result.scalar_one_or_none()
+
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Clear existing roles
+    target_user.roles.clear()
+
+    # Add new roles
+    for role_name in role_names:
+        result = await db.execute(
+            select(Role).where(Role.code == role_name)
+        )
+        role_obj = result.scalar_one_or_none()
+        if role_obj:
+            target_user.roles.append(role_obj)
+        else:
+            logger.warning(f"⚠️ Role '{role_name}' not found in database")
+
+    target_user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(target_user)
+    await db.refresh(target_user, attribute_names=["roles"])
+
+    logger.info(f"✅ Admin {current_user.username} updated roles for user: {target_user.username}")
+    logger.info(f"📝 New roles: {[role.code for role in target_user.roles]}")
+
+    return UserResponse(
+        id=str(target_user.id),  # ✅ Convert UUID to string
+        email=target_user.email,
+        username=target_user.username,
+        first_name=target_user.first_name or "",
+        last_name=target_user.last_name or "",
+        middle_name=getattr(target_user, "middle_name", "") or "",
+        phone=target_user.phone or "",
+        is_active=target_user.is_active,
+        is_verified=target_user.is_verified,
+        is_superuser=target_user.is_superuser,
+        roles=[role.code for role in target_user.roles],
+        created_at=target_user.created_at,
+        updated_at=target_user.updated_at
+    )
+
+
+@router.delete("/users/{user_id}", response_model=MessageResponse)
+async def delete_user_by_admin(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    user_id: str,
+    current_user: User = Depends(deps.get_current_admin)
+) -> Any:
+    """Delete user. Admin only."""
+    from asyncio.log import logger
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+
+    if user_uuid == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account"
+        )
+
+    target_user = await user_crud.get(db, id=user_uuid)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    await db.delete(target_user)
+    await db.commit()
+
+    logger.info(f"Admin {current_user.username} deleted user: {target_user.username}")
+
+    return MessageResponse(message="User deleted successfully")
+
+
+@router.post("/users/{user_id}/reset-password", response_model=MessageResponse)
+async def reset_user_password(
+    *,
+    db: AsyncSession = Depends(deps.get_db),
+    user_id: str,
+    password_data: dict = Body(...),
+    current_user: User = Depends(deps.get_current_admin)
+) -> Any:
+    """Reset user password (admin only)."""
+    from asyncio.log import logger
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+
+    target_user = await user_crud.get(db, id=user_uuid)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    new_password = password_data.get("new_password")
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters"
+        )
+
+    target_user.hashed_password = get_password_hash(new_password)
+    target_user.password_changed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    logger.info(f"Admin {current_user.username} reset password for user: {target_user.username}")
+
+    return MessageResponse(message="Password reset successfully")
+
+
 @router.get("/reports/user-statistics")
 async def get_user_statistics(
     db: AsyncSession = Depends(deps.get_db),
@@ -382,25 +390,25 @@ async def get_user_statistics(
 ) -> Any:
     """Get user statistics. Admin only."""
     from asyncio.log import logger
-    
+
     # Count users
     result = await db.execute(select(func.count()).select_from(User))
     total_users = result.scalar() or 0
-    
+
     result = await db.execute(select(func.count()).select_from(User).where(User.is_active == True))
     active_users = result.scalar() or 0
-    
+
     result = await db.execute(select(func.count()).select_from(User).where(User.is_verified == True))
     verified_users = result.scalar() or 0
-    
+
     # Count by roles
     result = await db.execute(
         select(func.count()).select_from(User).where(User.roles.any(Role.code == 'admin'))
     )
     admin_users = result.scalar() or 0
-    
+
     logger.info(f"Admin {current_user.username} fetched user statistics")
-    
+
     return {
         "total_users": total_users,
         "active_users": active_users,
@@ -411,38 +419,37 @@ async def get_user_statistics(
     }
 
 
-@router.get("/", response_model=List[RoleResponse])
+@router.get("/roles", response_model=List[RoleResponse])
 async def get_roles(
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-):
+) -> List[RoleResponse]:
     """
     Get all roles with their permissions.
     """
     # Eager load permissions to avoid N+1 queries
     result = await db.execute(
         select(Role)
-        .options(selectinload(Role.permissions))  # Add this line
+        .options(selectinload(Role.permissions))
         .offset(skip)
         .limit(limit)
         .order_by(Role.name)
     )
     roles = result.scalars().all()
-    
+
     # Calculate user count for each role
     response_roles = []
     for role in roles:
-        # Get user count (you might want to optimize this)
         user_count_result = await db.execute(
             select(func.count()).select_from(user_roles).where(user_roles.c.role_id == role.id)
         )
         user_count = user_count_result.scalar() or 0
-        
+
         response_roles.append(
             RoleResponse(
-                id=role.id,
+                id=role.id,  # This might also need str() if RoleResponse expects string
                 name=role.name,
                 code=role.code,
                 description=role.description,
@@ -451,9 +458,9 @@ async def get_roles(
                 created_at=role.created_at,
                 updated_at=role.updated_at,
                 user_count=user_count,
-                permissions=[  # Add permissions
+                permissions=[
                     PermissionBrief(
-                        id=p.id,
+                        id=p.id,  # This might also need str() if PermissionBrief expects string
                         name=p.name,
                         code=p.code,
                         resource=p.resource,
@@ -464,5 +471,5 @@ async def get_roles(
                 ]
             )
         )
-    
+
     return response_roles

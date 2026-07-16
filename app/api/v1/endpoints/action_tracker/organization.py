@@ -354,19 +354,40 @@ async def get_organization_nodes(
 ):
     """Get all organization nodes with optional filtering"""
     query = select(OrganizationNode)
-    
+
     if is_active is not None:
         query = query.where(OrganizationNode.is_active == is_active)
-    
+
     if parent_id is not None:
         query = query.where(OrganizationNode.parent_id == parent_id)
-    
+
     query = query.offset(skip).limit(limit).order_by(OrganizationNode.order, OrganizationNode.name)
-    
+
     result = await db.execute(query)
     nodes = result.scalars().all()
-    
-    return [node.to_dict() for node in nodes]
+
+    return [
+        OrganizationNodeResponse(
+            id=str(node.id),
+            name=node.name,
+            title=node.title,
+            parent_id=str(node.parent_id) if node.parent_id else None,
+            level=node.level,
+            path=node.path,
+            order=node.order,
+            is_active=node.is_active,
+            email=node.email,
+            phone=node.phone,
+            department_code=node.department_code,
+            location=node.location,
+            employee_count=node.employee_count,
+            budget=node.budget,
+            color=node.color,
+            created_at=node.created_at.isoformat() if node.created_at else None,
+            updated_at=node.updated_at.isoformat() if node.updated_at else None
+        )
+        for node in nodes
+    ]
 
 @router.get("/{node_id}", response_model=OrganizationNodeResponse)
 @router_departments.get("/{node_id}", response_model=OrganizationNodeResponse)

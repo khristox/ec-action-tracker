@@ -14,8 +14,6 @@ import {
   Divider,
   Alert,
   CircularProgress,
-  Grid,
-  Avatar,
   Tooltip,
   Tabs,
   Tab,
@@ -38,11 +36,7 @@ import {
   Badge,
   Snackbar,
   alpha,
-  Card,
-  CardContent,
   LinearProgress,
-  Breadcrumbs,
-  Skeleton,
   SpeedDial,
   SpeedDialAction,
   SpeedDialIcon,
@@ -54,10 +48,8 @@ import {
   ArrowBack as ArrowBackIcon,
   Edit as Edit,
   Delete as Delete,
-  LocationOn as LocationIcon,
   People as PeopleIcon,
   Description as DescriptionIcon,
-  CalendarToday as CalendarIcon,
   Refresh as RefreshIcon,
   Assignment as AssignmentIcon,
   CheckCircle as CheckCircleIcon,
@@ -65,25 +57,11 @@ import {
   Schedule as ScheduleIcon,
   Cancel as Cancel,
   MoreVert as MoreVertIcon,
-  VideoCall as VideoCallIcon,
-  Link as LinkIcon,
   Notifications as NotificationsIcon,
   History as HistoryIcon,
   Update as UpdateIcon,
-  AccessTime as AccessTimeIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
   ErrorOutlined as ErrorOutlinedIcon,
   HourglassEmpty as HourglassEmptyIcon,
-  Public as PublicIcon,
-  Flag as FlagIcon,
-  Terrain as TerrainIcon,
-  Business as BusinessIcon,
-  Home as HomeIcon,
-  Apartment as ApartmentIcon,
-  MeetingRoom as MeetingRoomIcon,
-  EventSeat as EventSeatIcon,
-  ChevronRight as ChevronRightIcon,
   FiberManualRecord as FiberManualRecordIcon,
   Share as ShareIcon,
   CopyAll as CopyAllIcon,
@@ -92,6 +70,7 @@ import {
   ViewStream as ViewStreamIcon,
   ViewAgenda as ViewAgendaIcon,
   MarkEmailRead as MarkEmailReadIcon,
+  Info as InfoIcon,
 } from '@mui/icons-material';
 import {
   fetchMeetingById,
@@ -108,6 +87,7 @@ import MeetingMinutes from './MeetingMinutes';
 import MeetingActionsList from './MeetingActionsList';
 import MeetingDocuments from './MeetingDocuments';
 import MeetingHistory from './components/MeetingHistory';
+import MeetingOverviewTab from './components/MeetingOverviewTab';
 import ParticipantsTab from './components/ParticipantsTab';
 import NotificationDialog from './components/NotificationDialog';
 import UpdateMeetingLinkDialog from './components/UpdateMeetingLinkDialog';
@@ -214,22 +194,18 @@ const PERMISSIONS = {
 // ==================== Constants ====================
 const NOT_FOUND_DELAY_MS = 7000;
 const SNACKBAR_AUTO_HIDE_MS = 6000;
-const AGENDA_COLLAPSED_HEIGHT = 160;
-const AGENDA_EXPANDED_MAX_HEIGHT = 2000;
+const TAB_STORAGE_KEY_PREFIX = 'meeting_detail_last_tab_';
 
-// Location level configurations
-const LOCATION_LEVELS = {
-  1:  { name: 'Country',    icon: <PublicIcon fontSize="small" />,      color: '#4CAF50' },
-  2:  { name: 'Region',     icon: <FlagIcon fontSize="small" />,        color: '#2196F3' },
-  3:  { name: 'District',   icon: <TerrainIcon fontSize="small" />,     color: '#9C27B0' },
-  4:  { name: 'County',     icon: <BusinessIcon fontSize="small" />,    color: '#FF9800' },
-  5:  { name: 'Subcounty',  icon: <HomeIcon fontSize="small" />,        color: '#795548' },
-  6:  { name: 'Parish',     icon: <LocationIcon fontSize="small" />,    color: '#607D8B' },
-  7:  { name: 'Village',    icon: <HomeIcon fontSize="small" />,        color: '#8BC34A' },
-  11: { name: 'Office',     icon: <ApartmentIcon fontSize="small" />,   color: '#E91E63' },
-  12: { name: 'Building',   icon: <BusinessIcon fontSize="small" />,    color: '#3F51B5' },
-  13: { name: 'Room',       icon: <MeetingRoomIcon fontSize="small" />, color: '#009688' },
-  14: { name: 'Conference', icon: <EventSeatIcon fontSize="small" />,   color: '#673AB7' },
+// Elegant near-black dark palette (replaces flat Tailwind-slate grays).
+// A single true-black-adjacent surface family with a faint warm undertone,
+// rather than blue-gray slate — reads as considered rather than a default.
+const DARK = {
+  bg: '#0B0B0D',
+  surface: '#161618',
+  surfaceAlt: '#1D1D20',
+  border: 'rgba(255,255,255,0.08)',
+  borderStrong: 'rgba(255,255,255,0.14)',
+  textSecondary: '#A3A3AA',
 };
 
 // Status configurations
@@ -246,13 +222,14 @@ const STATUS_CONFIG = {
 
 // Tab configurations with proper permission codes
 const TABS = [
-  { label: 'Minutes',      icon: <DescriptionIcon />,       value: 0, simple: true, requiresPermission: PERMISSIONS.VIEW_MINUTES },
-  { label: 'Actions',      icon: <AssignmentIcon />,        value: 1, simple: true, requiresPermission: PERMISSIONS.VIEW_OWN_ACTIONS },
-  { label: 'Participants', icon: <PeopleIcon />,            value: 2, simple: true, requiresPermission: PERMISSIONS.VIEW_PARTICIPANTS },
-  { label: 'Documents',    icon: <DescriptionIcon />,       value: 3, simple: false, requiresPermission: null },
-  { label: 'History',      icon: <HistoryIcon />,           value: 4, simple: false, requiresPermission: null },
-  { label: 'Audit',        icon: <HistoryIcon />,           value: 5, simple: false, requiresPermission: PERMISSIONS.VIEW_AUDIT_LOGS },
-  { label: 'Recordings',   icon: <FiberManualRecordIcon />, value: 6, simple: false, requiresPermission: PERMISSIONS.VIEW_RECORDER },
+  { label: 'Overview',     icon: <InfoIcon />,               value: 0, simple: true, requiresPermission: null },
+  { label: 'Minutes',      icon: <DescriptionIcon />,       value: 1, simple: true, requiresPermission: PERMISSIONS.VIEW_MINUTES },
+  { label: 'Actions',      icon: <AssignmentIcon />,        value: 2, simple: true, requiresPermission: PERMISSIONS.VIEW_OWN_ACTIONS },
+  { label: 'Participants', icon: <PeopleIcon />,            value: 3, simple: true, requiresPermission: PERMISSIONS.VIEW_PARTICIPANTS },
+  { label: 'Documents',    icon: <DescriptionIcon />,       value: 4, simple: false, requiresPermission: null },
+  { label: 'History',      icon: <HistoryIcon />,           value: 5, simple: false, requiresPermission: null },
+  { label: 'Audit',        icon: <HistoryIcon />,           value: 6, simple: false, requiresPermission: PERMISSIONS.VIEW_AUDIT_LOGS },
+  { label: 'Recordings',   icon: <FiberManualRecordIcon />, value: 7, simple: false, requiresPermission: PERMISSIONS.VIEW_RECORDER },
 ];
 
 // Speed Dial Actions
@@ -270,24 +247,6 @@ const getSpeedDialActions = (hasUpdatePermission, hasNotificationPermission, has
 };
 
 // ==================== Helper Functions ====================
-const getLevelInfo = (level) => LOCATION_LEVELS[level] || { name: `Level ${level}`, icon: <LocationIcon fontSize="small" />, color: '#7C3AED' };
-
-const formatDate = (dateString) => {
-  if (!dateString) return 'Date not set';
-  try {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    });
-  } catch { return 'Invalid date'; }
-};
-
-const formatTime = (dateString) => {
-  if (!dateString) return 'Time not set';
-  try {
-    return new Date(dateString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  } catch { return 'Invalid time'; }
-};
-
 const normalizeStatus = (status) => {
   if (!status) return null;
   if (status.short_name) return status;
@@ -298,196 +257,6 @@ const normalizeStatus = (status) => {
   if (typeof status === 'string') return { short_name: status.toLowerCase(), name: status, code: status, id: null };
   return status;
 };
-
-const isAgendaEmpty = (agenda) => !agenda || agenda.trim() === '' || agenda === '<p></p>';
-
-// ==================== CTE Location Display Component ====================
-const CTELocationDisplay = memo(({ locationId, locationData }) => {
-  const [locationHierarchy, setLocationHierarchy] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const fetchLocationHierarchy = async () => {
-      if (!locationId && !locationData) { setLocationHierarchy([]); return; }
-      setLoading(true);
-      try {
-        if (locationData && locationData.ancestors) {
-          setLocationHierarchy([...locationData.ancestors, locationData]);
-          setLoading(false);
-          return;
-        }
-        const [locationRes, ancestorsRes] = await Promise.all([
-          api.get(`/locations/${locationId}`),
-          api.get(`/locations/${locationId}/ancestors`),
-        ]);
-        setLocationHierarchy([...(ancestorsRes.data || []), locationRes.data]);
-      } catch (err) {
-        console.error('Error loading location hierarchy:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchLocationHierarchy();
-  }, [locationId, locationData]);
-
-  if (loading) return <Skeleton variant="rounded" width={200} height={32} />;
-  if (locationHierarchy.length === 0) {
-    return <Typography variant="body2" color="text.secondary">{locationData?.name || 'Location not specified'}</Typography>;
-  }
-
-  return (
-    <Stack spacing={1}>
-      <Breadcrumbs separator={<ChevronRightIcon sx={{ fontSize: 14 }} />} sx={{ flexWrap: 'wrap' }}>
-        {locationHierarchy.map((item, index) => {
-          const levelInfo = getLevelInfo(item.level);
-          const isLast = index === locationHierarchy.length - 1;
-          return (
-            <Chip
-              key={item.id}
-              label={item.name}
-              size="small"
-              icon={levelInfo.icon}
-              sx={{
-                bgcolor: alpha(levelInfo.color, 0.1),
-                borderColor: levelInfo.color,
-                color: levelInfo.color,
-                border: '1px solid',
-                fontWeight: isLast ? 700 : 500,
-                ...(isLast && { bgcolor: alpha(levelInfo.color, 0.2) }),
-              }}
-            />
-          );
-        })}
-      </Breadcrumbs>
-    </Stack>
-  );
-});
-CTELocationDisplay.displayName = 'CTELocationDisplay';
-
-// ==================== Rich Text Content Component ====================
-const RichTextContent = memo(({ content }) => {
-  const theme = useTheme();
-  const isDarkMode = theme.palette.mode === 'dark';
-
-  if (isAgendaEmpty(content)) {
-    return (
-      <Typography variant="body2" sx={{ fontStyle: 'italic', color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-        No agenda provided.
-      </Typography>
-    );
-  }
-
-  return (
-    <Box
-      sx={{
-        color: isDarkMode ? '#E5E7EB' : 'inherit',
-        '& p': { marginBottom: '12px', lineHeight: 1.7 },
-        '& p:last-child': { marginBottom: 0 },
-        '& ul, & ol': { paddingLeft: '24px', marginBottom: '12px' },
-        '& li': { marginBottom: '6px' },
-        '& h1, & h2, & h3': { margin: '16px 0 8px 0', fontWeight: 600 },
-        '& blockquote': {
-          borderLeft: '4px solid #7C3AED',
-          paddingLeft: '16px',
-          fontStyle: 'italic',
-          margin: '16px 0',
-        },
-        '& a': { color: '#A78BFA', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
-        '& strong, & b': { fontWeight: 700 },
-        '& img': { maxWidth: '100%', borderRadius: '8px' },
-        '& table': { borderCollapse: 'collapse', width: '100%', marginBottom: '12px' },
-        '& th, & td': { border: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`, padding: '6px 10px' },
-      }}
-      dangerouslySetInnerHTML={{ __html: content }}
-    />
-  );
-});
-RichTextContent.displayName = 'RichTextContent';
-
-// ==================== Agenda Section (Rich Text Display) ====================
-const AgendaSection = memo(({ agenda }) => {
-  const theme = useTheme();
-  const isDarkMode = theme.palette.mode === 'dark';
-  const [expanded, setExpanded] = useState(false);
-  const [needsToggle, setNeedsToggle] = useState(false);
-  const contentRef = React.useRef(null);
-
-  const hasAgenda = !isAgendaEmpty(agenda);
-
-  useEffect(() => {
-    if (!hasAgenda || !contentRef.current) return;
-    setNeedsToggle(contentRef.current.scrollHeight > AGENDA_COLLAPSED_HEIGHT + 8);
-  }, [agenda, hasAgenda]);
-
-  if (!hasAgenda) return null;
-
-  const cardBg = isDarkMode ? '#1F2937' : '#FFFFFF';
-
-  return (
-    <Box sx={{ mt: 4 }}>
-      <Divider sx={{ mb: 3 }} />
-      <Stack direction="row" spacing={2} alignItems="flex-start">
-        <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}>
-          <DescriptionIcon />
-        </Avatar>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>
-            Agenda
-          </Typography>
-
-          <Paper
-            variant="outlined"
-            sx={{
-              position: 'relative',
-              p: 3,
-              bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02),
-              borderRadius: 2,
-              overflow: 'hidden',
-            }}
-          >
-            <Box
-              ref={contentRef}
-              sx={{
-                maxHeight: expanded ? AGENDA_EXPANDED_MAX_HEIGHT : AGENDA_COLLAPSED_HEIGHT,
-                overflow: 'hidden',
-                transition: 'max-height 0.35s ease',
-              }}
-            >
-              <RichTextContent content={agenda} />
-            </Box>
-
-            {!expanded && needsToggle && (
-              <Box
-                aria-hidden
-                sx={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: 56,
-                  background: `linear-gradient(to bottom, ${alpha(cardBg, 0)}, ${cardBg})`,
-                  pointerEvents: 'none',
-                }}
-              />
-            )}
-          </Paper>
-
-          {needsToggle && (
-            <Button
-              size="small"
-              onClick={() => setExpanded((prev) => !prev)}
-              endIcon={expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              sx={{ mt: 1, textTransform: 'none', fontWeight: 600, color: '#7C3AED' }}
-            >
-              {expanded ? 'Show less' : 'Show full agenda'}
-            </Button>
-          )}
-        </Box>
-      </Stack>
-    </Box>
-  );
-});
-AgendaSection.displayName = 'AgendaSection';
 
 // ==================== Tab Panel Component ====================
 const TabPanel = memo(({ children, value, index, ...other }) => (
@@ -531,8 +300,8 @@ const ViewModeToggle = memo(({ viewMode, onChange }) => {
         size="small"
         sx={{
           '& .MuiToggleButtonGroup-grouped': {
-            border: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
-            '&:not(:first-of-type)': { borderLeft: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}` },
+            border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}`,
+            '&:not(:first-of-type)': { borderLeft: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}` },
           },
           '& .MuiToggleButton-root': {
             px: { xs: 1, sm: 1.75 },
@@ -540,7 +309,7 @@ const ViewModeToggle = memo(({ viewMode, onChange }) => {
             textTransform: 'none',
             fontWeight: 600,
             fontSize: '0.75rem',
-            color: isDarkMode ? '#9CA3AF' : 'text.secondary',
+            color: isDarkMode ? DARK.textSecondary : 'text.secondary',
             gap: 0.6,
             '&.Mui-selected': {
               bgcolor: alpha('#7C3AED', 0.12),
@@ -601,13 +370,13 @@ const HeaderBar = memo(({
       position="sticky"
       elevation={isDarkMode ? 0 : 2}
       sx={{
-        bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+        bgcolor: isDarkMode ? DARK.surfaceAlt : '#FFFFFF',
         borderBottom: 1,
-        borderColor: isDarkMode ? '#374151' : '#E5E7EB',
+        borderColor: isDarkMode ? DARK.border : '#E5E7EB',
         zIndex: theme.zIndex.drawer + 1,
       }}
     >
-      <Toolbar sx={{ px: { xs: 1.5, sm: 3 } }}>
+      <Toolbar sx={{ px: { xs: 1.5, sm: 3 }, minHeight: { md: 56 } }}>
         <IconButton onClick={onBack} edge="start" sx={{ mr: 2 }}>
           <ArrowBackIcon />
         </IconButton>
@@ -688,154 +457,36 @@ const HeaderBar = memo(({
 });
 HeaderBar.displayName = 'HeaderBar';
 
-// ==================== Meeting Info Card ====================
-const MeetingInfoCard = memo(({ meeting, isMobile, onUpdateLink, onJoinMeeting, viewMode }) => {
+// ==================== Meeting Title Bar (always visible; slim) ====================
+const MeetingTitleBar = memo(({ meeting, isMobile }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
-
-  const isSimple = viewMode === 'simple';
   const statusConfig = STATUS_CONFIG[meeting?.status?.short_name?.toLowerCase()] || STATUS_CONFIG.pending;
-  const isOnlineMeeting = meeting?.platform && meeting?.platform !== 'physical';
-  const hasMeetingLink = meeting?.meeting_link;
 
   return (
-    <Card
+    <Box
       sx={{
-        mb: 3,
+        mb: 2,
+        px: { xs: 2, sm: 2.5 },
+        py: 1.5,
         borderRadius: 3,
-        overflow: 'hidden',
-        border: `1px solid ${isDarkMode ? alpha('#FFFFFF', 0.1) : '#E5E7EB'}`,
-        bgcolor: isDarkMode ? '#1F2937' : '#FFFFFF',
+        border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}`,
+        bgcolor: isDarkMode ? DARK.surface : '#FFFFFF',
+        display: 'flex',
+        flexDirection: { xs: 'column', sm: 'row' },
+        alignItems: { xs: 'flex-start', sm: 'center' },
+        justifyContent: 'space-between',
+        gap: 1.5,
       }}
     >
-      <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={2}
-          sx={{
-            justifyContent: 'space-between',
-            alignItems: { xs: 'flex-start', sm: 'center' },
-          }}
-        >
-          <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight={800}>
-            {meeting?.title}
-          </Typography>
-          <Chip label={statusConfig.label} color={statusConfig.color} icon={statusConfig.icon} sx={{ fontWeight: 600 }} />
-        </Stack>
-
-        {!isSimple && meeting?.description && (
-          <>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-              {meeting.description}
-            </Typography>
-          </>
-        )}
-
-        <Divider sx={{ my: 2 }} />
-
-        <Grid container spacing={{ xs: 2, sm: 3 }}>
-          <Grid size={{ xs: 12, sm: 6, md: isSimple ? 4 : 3 }}>
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Avatar sx={{ bgcolor: alpha('#7C3AED', 0.1), color: '#7C3AED' }}>
-                <CalendarIcon />
-              </Avatar>
-              <Box>
-                <Typography variant="caption" fontWeight={600} color="text.secondary">DATE & TIME</Typography>
-                <Typography variant="body1" fontWeight={600}>{formatDate(meeting?.meeting_date)}</Typography>
-                {meeting?.start_time && (
-                  <Typography variant="body2" color="text.secondary">
-                    <AccessTimeIcon sx={{ fontSize: 12, mr: 0.5, verticalAlign: 'middle' }} />
-                    {formatTime(meeting.start_time)}
-                    {meeting?.end_time && ` - ${formatTime(meeting.end_time)}`}
-                  </Typography>
-                )}
-              </Box>
-            </Stack>
-          </Grid>
-
-          <Grid size={{ xs: 12, sm: 6, md: isSimple ? 4 : 3 }}>
-            <Stack direction="row" spacing={2} alignItems="flex-start">
-              <Avatar sx={{ bgcolor: alpha('#3B82F6', 0.1), color: '#3B82F6' }}>
-                {isOnlineMeeting ? <VideoCallIcon /> : <LocationIcon />}
-              </Avatar>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" fontWeight={600} color="text.secondary">
-                  {isOnlineMeeting ? 'PLATFORM' : 'LOCATION'}
-                </Typography>
-                {isOnlineMeeting ? (
-                  <>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Typography variant="body1" fontWeight={600}>
-                        {meeting?.platform === 'zoom' ? 'Zoom' : meeting?.platform === 'google_meet' ? 'Google Meet' : meeting?.platform === 'microsoft_teams' ? 'Microsoft Teams' : 'Online Meeting'}
-                      </Typography>
-                      <Tooltip title="Update Meeting Link"><IconButton size="small" onClick={onUpdateLink}><UpdateIcon fontSize="small" /></IconButton></Tooltip>
-                    </Stack>
-                    {hasMeetingLink && (
-                      <Button size="small" startIcon={<LinkIcon />} onClick={onJoinMeeting} sx={{ mt: 0.5, textTransform: 'none' }}>
-                        Join Meeting
-                      </Button>
-                    )}
-                  </>
-                ) : (
-                  <CTELocationDisplay locationId={meeting?.location_id} locationData={meeting?.location} />
-                )}
-              </Box>
-            </Stack>
-          </Grid>
-
-          {!isSimple && meeting?.facilitator && (
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: alpha('#10B981', 0.1), color: '#10B981' }}><PeopleIcon /></Avatar>
-                <Box>
-                  <Typography variant="caption" fontWeight={600} color="text.secondary">SECRETARY</Typography>
-                  <Typography variant="body1" fontWeight={600}>{meeting.facilitator}</Typography>
-                </Box>
-              </Stack>
-            </Grid>
-          )}
-
-          {!isSimple && meeting?.chairperson_name && (
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar sx={{ bgcolor: alpha('#F59E0B', 0.1), color: '#F59E0B' }}><PeopleIcon /></Avatar>
-                <Box>
-                  <Typography variant="caption" fontWeight={600} color="text.secondary">CHAIRPERSON</Typography>
-                  <Typography variant="body1" fontWeight={600}>{meeting.chairperson_name}</Typography>
-                </Box>
-              </Stack>
-            </Grid>
-          )}
-
-          {isSimple && (meeting?.facilitator || meeting?.chairperson_name) && (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <Stack direction="row" spacing={2} alignItems="flex-start">
-                <Avatar sx={{ bgcolor: alpha('#10B981', 0.1), color: '#10B981' }}><PeopleIcon /></Avatar>
-                <Box>
-                  <Typography variant="caption" fontWeight={600} color="text.secondary">KEY PERSONS</Typography>
-                  {meeting?.chairperson_name && <Typography variant="body2" fontWeight={600}>Chair: {meeting.chairperson_name}</Typography>}
-                  {meeting?.facilitator && <Typography variant="body2" color="text.secondary">Secretary: {meeting.facilitator}</Typography>}
-                </Box>
-              </Stack>
-            </Grid>
-          )}
-        </Grid>
-
-        {!isSimple && <AgendaSection agenda={meeting?.agenda} />}
-
-        {isSimple && (
-          <Box sx={{ mt: 2, pt: 2, borderTop: `1px dashed ${isDarkMode ? '#374151' : '#E5E7EB'}` }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-              Switch to <strong>Detailed</strong> view to see agenda, description, chairperson, secretary and more.
-            </Typography>
-          </Box>
-        )}
-      </CardContent>
-    </Card>
+      <Typography variant={isMobile ? 'h6' : 'h5'} fontWeight={800} sx={{ fontSize: { md: '1.25rem' } }}>
+        {meeting?.title}
+      </Typography>
+      <Chip label={statusConfig.label} color={statusConfig.color} icon={statusConfig.icon} sx={{ fontWeight: 600, flexShrink: 0 }} />
+    </Box>
   );
 });
-MeetingInfoCard.displayName = 'MeetingInfoCard';
+MeetingTitleBar.displayName = 'MeetingTitleBar';
 
 // ==================== Main Component ====================
 const MeetingDetail = () => {
@@ -875,7 +526,15 @@ const MeetingDetail = () => {
   const canExportReports = isAdmin || hasExportReportPermission;
   const canViewAudit = isAdmin || hasViewAuditPermission;
 
-  const [tabValue, setTabValue] = useState(0);
+  // ---- Tab persistence: restore the last tab selected for THIS meeting id (if any) ----
+  const [tabValue, setTabValue] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`${TAB_STORAGE_KEY_PREFIX}${id}`);
+      return saved !== null ? parseInt(saved, 10) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [updateLinkDialogOpen, setUpdateLinkDialogOpen] = useState(false);
   const [statusMenuAnchor, setStatusMenuAnchor] = useState(null);
@@ -962,6 +621,7 @@ const MeetingDetail = () => {
 
   const visibleTabs = useMemo(() => {
     return TABS.filter((tab) => {
+      if (isAdmin) return true;
       if (tab.requiresPermission) {
         if (tab.requiresPermission === PERMISSIONS.VIEW_RECORDER) return hasViewRecorderPermission;
         if (tab.requiresPermission === PERMISSIONS.VIEW_AUDIT_LOGS) return canViewAudit;
@@ -969,7 +629,7 @@ const MeetingDetail = () => {
       }
       return true;
     });
-  }, [hasViewRecorderPermission, canViewAudit, userPermissions]);
+  }, [isAdmin, hasViewRecorderPermission, canViewAudit, userPermissions]);
 
   // Tabs actually shown given the current view mode (simple vs detailed).
   const visibleTabsForMode = useMemo(
@@ -990,6 +650,27 @@ const MeetingDetail = () => {
       setTabValue(visibleTabsForMode[0].value);
     }
   }, [visibleTabsForMode, isTabValueVisible]);
+
+  // ---- Tab persistence: whenever the meeting id changes, restore whatever tab
+  // was last selected for that specific meeting (defaults to Overview if none saved) ----
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`${TAB_STORAGE_KEY_PREFIX}${id}`);
+      setTabValue(saved !== null ? parseInt(saved, 10) : 0);
+    } catch {
+      setTabValue(0);
+    }
+  }, [id]);
+
+  // ---- Tab persistence: save the current tab selection for this meeting id ----
+  useEffect(() => {
+    if (!id) return;
+    try {
+      localStorage.setItem(`${TAB_STORAGE_KEY_PREFIX}${id}`, String(tabValue));
+    } catch {
+      // ignore storage errors (e.g. private browsing / quota exceeded)
+    }
+  }, [tabValue, id]);
 
   const getStatusValue = useCallback(() => {
     const status = normalizedMeeting?.status;
@@ -1220,22 +901,46 @@ const MeetingDetail = () => {
     setStatusMenuAnchor(null);
   };
 
-  const handleStatusUpdate = async () => {
-    if (!selectedStatus) return;
-    setStatusUpdating(true);
-    try {
-      await dispatch(updateMeetingStatus({ id, status: selectedStatus, comment: statusComment })).unwrap();
-      setStatusDialogOpen(false);
-      setSelectedStatus('');
-      setStatusComment('');
-      fetchMeeting();
-      setSnackbar({ open: true, message: '✅ Meeting status updated successfully!', severity: 'success' });
-    } catch (err) {
-      setSnackbar({ open: true, message: err.message || 'Failed to update meeting status', severity: 'error' });
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
+const handleStatusUpdate = async () => {
+  if (!selectedStatus) return;
+  setStatusUpdating(true);
+  try {
+    console.log('Sending status update:', { id, status: selectedStatus, comment: statusComment });
+    
+    const result = await dispatch(updateMeetingStatus({ 
+      id, 
+      status: selectedStatus, 
+      comment: statusComment 
+    })).unwrap();
+    
+    console.log('Status update result:', result);
+    
+    // Close dialogs and reset form
+    setStatusDialogOpen(false);
+    setSelectedStatus('');
+    setStatusComment('');
+    
+    // Force refresh the meeting data
+    await fetchMeeting();
+    
+    // Show success message
+    setSnackbar({ 
+      open: true, 
+      message: '✅ Meeting status updated successfully!', 
+      severity: 'success' 
+    });
+  } catch (err) {
+    console.error('Status update error:', err);
+    setSnackbar({ 
+      open: true, 
+      message: err.message || 'Failed to update meeting status', 
+      severity: 'error' 
+    });
+  } finally {
+    setStatusUpdating(false);
+  }
+};
+
 
   const handleDeleteClick = () => {
     if (!canDeleteMeeting) {
@@ -1281,9 +986,9 @@ const MeetingDetail = () => {
 
   if (loading && !currentMeeting && !showNotFound) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Container maxWidth="sm">
-          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
+          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3, bgcolor: isDarkMode ? DARK.surface : '#FFFFFF', border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}` }}>
             <CircularProgress size={60} sx={{ mb: 3, color: '#7C3AED' }} />
             <Typography variant="h6" fontWeight={600} gutterBottom>Loading Meeting Details</Typography>
             <LoadingTimeout timeout={NOT_FOUND_DELAY_MS} />
@@ -1295,14 +1000,14 @@ const MeetingDetail = () => {
 
   if (showNotFound && (!currentMeeting || (!loading && !currentMeeting))) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Container maxWidth="sm">
-          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
+          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3, bgcolor: isDarkMode ? DARK.surface : '#FFFFFF', border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}` }}>
             <Box sx={{ width: 80, height: 80, borderRadius: '50%', bgcolor: alpha('#EF4444', 0.1), display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3 }}>
               <ErrorOutlinedIcon sx={{ fontSize: 48, color: '#EF4444' }} />
             </Box>
             <Typography variant="h5" color="error" gutterBottom fontWeight={700}>Meeting Not Found</Typography>
-            <Typography variant="body2" sx={{ mb: 4, color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+            <Typography variant="body2" sx={{ mb: 4, color: isDarkMode ? DARK.textSecondary : 'text.secondary' }}>
               The meeting you're looking for doesn't exist or has been deleted.
             </Typography>
             <Stack spacing={2}>
@@ -1316,7 +1021,7 @@ const MeetingDetail = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? '#111827' : '#F3F4F6' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6' }}>
       <HeaderBar
         onBack={handleBack}
         onNotify={handleNotifyClick}
@@ -1344,33 +1049,61 @@ const MeetingDetail = () => {
         onEmailHistoryOpen={handleEmailHistoryOpen}
       />
 
-      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 } }}>
+      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 2.5, md: 2.5 } }}>
         {(error || localError) && (
           <Alert severity="error" onClose={handleErrorClose} sx={{ mb: 3 }}>
             {typeof error === 'string' ? error : (localError || 'Failed to load meeting')}
           </Alert>
         )}
 
-        <MeetingInfoCard
-          meeting={normalizedMeeting}
-          isMobile={isMobile}
-          onUpdateLink={() => setUpdateLinkDialogOpen(true)}
-          onJoinMeeting={handleJoinMeeting}
-          viewMode={viewMode}
-        />
+        <MeetingTitleBar meeting={normalizedMeeting} isMobile={isMobile} />
 
         {visibleTabsForMode.length > 0 && (
-          <Paper sx={{ borderRadius: 3, overflow: 'hidden' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', bgcolor: isDarkMode ? '#1F2937' : '#F9FAFB', pr: 1.5 }}>
+          <Paper sx={{ borderRadius: 3, overflow: 'hidden', border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}` }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                bgcolor: isDarkMode ? DARK.surfaceAlt : alpha('#7C3AED', 0.045),
+                borderBottom: `2px solid ${isDarkMode ? DARK.borderStrong : alpha('#7C3AED', 0.12)}`,
+                px: 1,
+                pr: 1.5,
+              }}
+            >
               <Tabs
                 value={effectiveTabValue}
                 onChange={handleTabChange}
                 variant="scrollable"
                 scrollButtons="auto"
-                sx={{ flex: 1, minHeight: 48, '& .MuiTab-root': { py: 1.5, minHeight: 48, fontWeight: 600, fontSize: '0.8rem', '&.Mui-selected': { color: '#7C3AED' } }, '& .MuiTabs-indicator': { backgroundColor: '#7C3AED', height: 3 } }}
+                TabIndicatorProps={{ sx: { display: 'none' } }}
+                sx={{
+                  flex: 1,
+                  minHeight: 58,
+                  py: 1,
+                  '& .MuiTabs-flexContainer': { gap: 0.5 },
+                  '& .MuiTab-root': {
+                    py: 1.25,
+                    px: 2,
+                    minHeight: 42,
+                    borderRadius: 2.5,
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    color: isDarkMode ? DARK.textSecondary : 'text.secondary',
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    '&:hover': {
+                      bgcolor: isDarkMode ? alpha('#FFFFFF', 0.04) : alpha('#7C3AED', 0.05),
+                    },
+                    '&.Mui-selected': {
+                      color: isDarkMode ? '#FFFFFF' : '#FFFFFF',
+                      bgcolor: '#7C3AED',
+                      boxShadow: `0 2px 10px ${alpha('#7C3AED', 0.4)}`,
+                    },
+                  },
+                }}
               >
                 {visibleTabsForMode.map((tab) => (
-                  <Tab key={tab.value} value={tab.value} icon={tab.icon} iconPosition="start" label={tab.label} />
+                  <Tab key={tab.value} value={tab.value} icon={tab.icon} iconPosition="start" label={tab.label} disableRipple />
                 ))}
               </Tabs>
 
@@ -1386,14 +1119,21 @@ const MeetingDetail = () => {
               )}
             </Box>
 
-            <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            <Box sx={{ p: { xs: 2, sm: 2.5, md: 2.5 } }}>
               <TabPanel value={effectiveTabValue} index={0}>
-                <MeetingMinutes meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
+                <MeetingOverviewTab
+                  meeting={normalizedMeeting}
+                  onUpdateLink={() => setUpdateLinkDialogOpen(true)}
+                  onJoinMeeting={handleJoinMeeting}
+                />
               </TabPanel>
               <TabPanel value={effectiveTabValue} index={1}>
-                <MeetingActionsList meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
+                <MeetingMinutes meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
               </TabPanel>
               <TabPanel value={effectiveTabValue} index={2}>
+                <MeetingActionsList meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
+              </TabPanel>
+              <TabPanel value={effectiveTabValue} index={3}>
                 <ParticipantsTab
                   meetingId={id}
                   participants={participants}
@@ -1404,19 +1144,19 @@ const MeetingDetail = () => {
                   currentSecretaryId={normalizedMeeting?.secretary_id}
                 />
               </TabPanel>
-              <TabPanel value={effectiveTabValue} index={3}>
+              <TabPanel value={effectiveTabValue} index={4}>
                 <MeetingDocuments meetingId={id} meetingStatus={normalizedMeeting?.status?.short_name} onRefresh={handleRefresh} />
               </TabPanel>
-              <TabPanel value={effectiveTabValue} index={4}>
+              <TabPanel value={effectiveTabValue} index={5}>
                 <MeetingHistory meetingId={id} />
               </TabPanel>
               {canViewAudit && (
-                <TabPanel value={effectiveTabValue} index={5}>
+                <TabPanel value={effectiveTabValue} index={6}>
                   <MeetingAudit meetingId={id} />
                 </TabPanel>
               )}
               {hasViewRecorderPermission && (
-                <TabPanel value={effectiveTabValue} index={6}>
+                <TabPanel value={effectiveTabValue} index={7}>
                   <MeetingRecorder meetingId={id} />
                 </TabPanel>
               )}

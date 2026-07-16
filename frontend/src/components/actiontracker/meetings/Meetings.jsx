@@ -5,7 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   Box, Typography, Button, Paper, Stack, Fab, Tabs, Tab,
   Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
-  CircularProgress, IconButton, Chip, Divider, TextField, InputAdornment
+  CircularProgress, IconButton, Chip, TextField, InputAdornment
 } from '@mui/material';
 import Add from '@mui/icons-material/Add';
 import FilterListIcon from '@mui/icons-material/FilterList';
@@ -14,9 +14,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import { 
-  selectMeetingStatusOptions, 
-  selectStatusOptions, 
-  fetchMeetingStatusOptions 
+  selectMeetingStatusOptions,
+  fetchActionTrackerAttributes
 } from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
 
@@ -29,8 +28,10 @@ import { NotificationDialog } from './components/NotificationDialog';
 import { RecurringMeetingsList } from './components/RecurringMeetingsList';
 import { TabPanel } from './components/TabPanel';
 import { COLORS } from './styles/colors';
+import AddActionDialog from './components/AddActionDialog';
 
-// Storage keys - grouped for easy management
+
+// ==================== CONSTANTS ====================
 const STORAGE_KEYS = {
   SELECTED_TAB: 'meetings_selected_tab',
   VIEW_MODE: 'meetings_view_mode',
@@ -42,11 +43,11 @@ const STORAGE_KEYS = {
   SCROLL_POSITION: 'meetings_scroll_position'
 };
 
-// Session storage for scroll position (cleared on page close)
 const SESSION_KEYS = {
   SCROLL_POSITION: 'meetings_scroll_position_session'
 };
 
+// ==================== MAIN COMPONENT ====================
 const Meetings = () => {
   const theme = useTheme();
   const navigate = useNavigate();
@@ -56,7 +57,10 @@ const Meetings = () => {
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const scrollContainerRef = useRef(null);
   
-  const statusOptions = useSelector(selectStatusOptions);
+  // ==================== REDUX SELECTORS ====================
+  const statusOptions = useSelector(selectMeetingStatusOptions);
+  
+  // ==================== CUSTOM HOOKS ====================
   const {
     meetings,
     loading,
@@ -68,15 +72,13 @@ const Meetings = () => {
     handleGenerateNextOccurrence
   } = useMeetings();
   
-  // Load saved state from localStorage
+  // ==================== LOCAL STATE ====================
   const [searchTerm, setSearchTerm] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SEARCH_TERM);
-    return saved || '';
+    return localStorage.getItem(STORAGE_KEYS.SEARCH_TERM) || '';
   });
   
   const [statusFilter, setStatusFilter] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.STATUS_FILTER);
-    return saved || 'all';
+    return localStorage.getItem(STORAGE_KEYS.STATUS_FILTER) || 'all';
   });
   
   const [page, setPage] = useState(() => {
@@ -102,7 +104,6 @@ const Meetings = () => {
     const tabParam = urlParams.get('tab');
     if (tabParam === 'recurring') return 1;
     if (tabParam === 'regular') return 0;
-    
     const saved = localStorage.getItem(STORAGE_KEYS.SELECTED_TAB);
     return saved ? parseInt(saved) : 0;
   });
@@ -117,7 +118,46 @@ const Meetings = () => {
     return saved !== null ? saved === 'true' : false;
   });
   
-  // Save state to localStorage with debounce for performance
+
+  const [addActionDialogOpen, setAddActionDialogOpen] = useState(false);
+  const [selectedMeetingForAction, setSelectedMeetingForAction] = useState(null);
+  const [minutes, setMinutes] = useState([]);
+  const [loadingMinutes, setLoadingMinutes] = useState(false);
+  const [actionError, setActionError] = useState(null);
+  const [creatingAction, setCreatingAction] = useState(false);
+
+
+  // ==================== COMPUTED VALUES ====================
+  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
+  const totalPages = Math.ceil((pagination.total || 0) / rowsPerPage);
+  const regularMeetingsCount = pagination.total ?? meetings.length;
+  const recurringMeetingsCount = recurringMeetings.length;
+  
+  const activeFilterCount = [
+    searchTerm ? 1 : 0,
+    statusFilter !== 'all' ? 1 : 0,
+    !showUpcoming ? 1 : 0,
+    showPast ? 1 : 0
+  ].reduce((a, b) => a + b, 0);
+
+  // ==================== HELPER FUNCTIONS ====================
+  const getStatusLabel = (statusId) => {
+    const status = statusOptions.find(s => s.id === statusId);
+    return status ? status.name : 'Unknown';
+  };
+
+  const getStatusColor = (statusId) => {
+    const status = statusOptions.find(s => s.id === statusId);
+    return status?.color || 'default';
+  };
+
+  const getGridColumns = useCallback(() => {
+    if (isMobile) return '1fr';
+    if (isTablet) return 'repeat(2, 1fr)';
+    return 'repeat(auto-fill, minmax(280px, 1fr))';
+  }, [isMobile, isTablet]);
+
+  // ==================== STORAGE HELPERS ====================
   const saveToLocalStorage = useCallback((key, value) => {
     try {
       if (value === undefined || value === null) {
@@ -130,39 +170,154 @@ const Meetings = () => {
     }
   }, []);
   
-  // Save scroll position
   const saveScrollPosition = useCallback(() => {
     const scrollY = window.scrollY;
     sessionStorage.setItem(SESSION_KEYS.SCROLL_POSITION, scrollY.toString());
     localStorage.setItem(STORAGE_KEYS.SCROLL_POSITION, scrollY.toString());
   }, []);
   
-  // Restore scroll position
   const restoreScrollPosition = useCallback(() => {
-    let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION);
-    
-    if (!savedScroll) {
-      savedScroll = localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
-    }
-    
+    let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
+                      localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
     if (savedScroll) {
-      const scrollY = parseInt(savedScroll);
-      setTimeout(() => {
-        window.scrollTo({ top: scrollY, behavior: 'auto' });
-      }, 100);
+      setTimeout(() => window.scrollTo({ top: parseInt(savedScroll), behavior: 'auto' }), 100);
     }
   }, []);
+
+  // ==================== HANDLERS ====================
+  const handleSearchTermChange = (value) => {
+    setSearchTerm(value);
+    setPage(1);
+  };
   
-  // Save preferences to localStorage when they change
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
+  
+  const handleShowUpcomingChange = (value) => {
+    setShowUpcoming(value);
+    setPage(1);
+  };
+  
+  const handleShowPastChange = (value) => {
+    setShowPast(value);
+    setPage(1);
+  };
+  
+  const handlePageChange = (event, newPage) => {
+    setPage(newPage);
+    saveScrollPosition();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+    setPage(1);
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  };
+  
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setShowUpcoming(true);
+    setShowPast(false);
+    setPage(1);
+    ['STATUS_FILTER', 'SHOW_UPCOMING', 'SHOW_PAST', 'SEARCH_TERM'].forEach(key => {
+      localStorage.removeItem(STORAGE_KEYS[key]);
+    });
+  };
+
+  const handleNotifyClick = async (meeting) => {
+    setSelectedMeeting(meeting);
+    setNotificationDialogOpen(true);
+    try {
+      const res = await api.get(`/action-tracker/meetings/${meeting.id}/participants`);
+      setParticipants(res.data?.items || res.data || []);
+    } catch (err) { 
+      setParticipants([]); 
+    }
+  };
+  
+  
+  const handleAddAction = async (meeting) => {
+    setSelectedMeetingForAction(meeting);
+    setAddActionDialogOpen(true);
+    setActionError(null);
+    setLoadingMinutes(true);
+    try {
+      const response = await api.get(`/action-tracker/meetings/${meeting.id}/minutes`);
+      const minutesData = response.data?.items || response.data || [];
+      setMinutes(Array.isArray(minutesData) ? minutesData : []);
+    } catch (err) {
+      setMinutes([]);
+    } finally {
+      setLoadingMinutes(false);
+    }
+  };
+
+  const handleSaveAction = async (payload) => {
+    setCreatingAction(true);
+    setActionError(null);
+    try {
+      const actionPayload = { ...payload, meeting_id: selectedMeetingForAction?.id };
+      const response = await api.post('/action-tracker/actions/', actionPayload);
+      setSnackbar({ open: true, message: 'Action created successfully!', severity: 'success' });
+      setAddActionDialogOpen(false);
+      setSelectedMeetingForAction(null);
+      loadMeetings({ page, limit: rowsPerPage });
+      return response.data;
+    } catch (err) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to create action';
+      setActionError(errorMessage);
+      throw err;
+    } finally {
+      setCreatingAction(false);
+    }
+  };
+
+  const handleMinuteCreated = async () => {
+    if (selectedMeetingForAction) {
+      try {
+        const response = await api.get(`/action-tracker/meetings/${selectedMeetingForAction.id}/minutes`);
+        const minutesData = response.data?.items || response.data || [];
+        setMinutes(Array.isArray(minutesData) ? minutesData : []);
+      } catch (err) {
+        // ignore
+      }
+    }
+  };
+
+  const handleSendNotifications = async (data) => {
+    try {
+      const res = await api.post(`/action-tracker/meetings/${selectedMeeting.id}/notify-participants`, data);
+      setSnackbar({ open: true, message: `✨ Sent to ${res.data.sent} participants!`, severity: 'success' });
+      setNotificationDialogOpen(false);
+    } catch (err) { 
+      setSnackbar({ open: true, message: 'Failed to send notifications', severity: 'error' }); 
+    }
+  };
+  
+  const handleGenerateMeeting = async (meeting) => {
+    const result = await handleGenerateNextOccurrence(meeting);
+    setSnackbar({ open: true, message: result.message, severity: result.success ? 'success' : 'error' });
+    if (result.success) {
+      loadRecurringMeetings();
+      loadMeetings({ page, limit: rowsPerPage });
+    }
+  };
+
+  // ==================== EFFECTS ====================
+  // Load status options on mount
+  useEffect(() => {
+    dispatch(fetchActionTrackerAttributes());
+  }, [dispatch]);
+
+  // Save preferences to localStorage
   useEffect(() => {
     saveToLocalStorage(STORAGE_KEYS.SELECTED_TAB, tabValue);
-    
     const urlParams = new URLSearchParams(location.search);
-    if (tabValue === 0) {
-      urlParams.set('tab', 'regular');
-    } else if (tabValue === 1) {
-      urlParams.set('tab', 'recurring');
-    }
+    urlParams.set('tab', tabValue === 0 ? 'regular' : 'recurring');
     navigate({ search: urlParams.toString() }, { replace: true });
   }, [tabValue, navigate, location.search, saveToLocalStorage]);
   
@@ -182,7 +337,7 @@ const Meetings = () => {
     if (statusFilter !== 'all') {
       saveToLocalStorage(STORAGE_KEYS.STATUS_FILTER, statusFilter);
     } else {
-      saveToLocalStorage(STORAGE_KEYS.STATUS_FILTER, null);
+      localStorage.removeItem(STORAGE_KEYS.STATUS_FILTER);
     }
   }, [statusFilter, saveToLocalStorage]);
   
@@ -193,34 +348,24 @@ const Meetings = () => {
   useEffect(() => {
     saveToLocalStorage(STORAGE_KEYS.CURRENT_PAGE, page);
   }, [page, saveToLocalStorage]);
-  
-  // Save scroll position on scroll
+
+  // Scroll position handlers
   useEffect(() => {
-    const handleScroll = () => {
-      saveScrollPosition();
-    };
-    
+    const handleScroll = () => saveScrollPosition();
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [saveScrollPosition]);
-  
-  // Save scroll position before page unload
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      saveScrollPosition();
+    window.addEventListener('beforeunload', saveScrollPosition);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('beforeunload', saveScrollPosition);
     };
-    
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [saveScrollPosition]);
-  
-  // Load data on mount
+
+  // Load recurring meetings on mount
   useEffect(() => {
-    dispatch(fetchMeetingStatusOptions());
     loadRecurringMeetings();
-  }, [dispatch, loadRecurringMeetings]);
-  
-  // Load meetings when filters/page change — all filtering is server-side
+  }, [loadRecurringMeetings]);
+
+  // Load meetings when filters change
   useEffect(() => {
     const params = {
       page,
@@ -231,148 +376,19 @@ const Meetings = () => {
       show_past: showPast,
     };
     if (searchTerm) params.search = searchTerm;
-    if (statusFilter !== 'all') params.status_id = statusFilter;
+    if (statusFilter !== 'all') params.status = statusFilter; // Use 'status' not 'status_id'
     
     loadMeetings(params);
   }, [page, searchTerm, statusFilter, rowsPerPage, showUpcoming, showPast, loadMeetings]);
-  
-  // Reset to page 1 whenever filters change (but not page itself)
-  const [filtersChanged, setFiltersChanged] = useState(false);
-  useEffect(() => {
-    if (filtersChanged) {
-      setPage(1);
-      setFiltersChanged(false);
-    }
-  }, [filtersChanged]);
-  
-  // Handle filter changes
-  const handleSearchTermChange = (value) => {
-    setSearchTerm(value);
-    setFiltersChanged(true);
-  };
-  
-  const handleStatusFilterChange = (value) => {
-    setStatusFilter(value);
-    setFiltersChanged(true);
-  };
-  
-  const handleShowUpcomingChange = (value) => {
-    setShowUpcoming(value);
-    setFiltersChanged(true);
-  };
-  
-  const handleShowPastChange = (value) => {
-    setShowPast(value);
-    setFiltersChanged(true);
-  };
-  
-  const handlePageChange = (event, newPage) => {
-    setPage(newPage);
-    saveScrollPosition();
-    setTimeout(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 0);
-  };
-  
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
-    setPage(1);
-    setFiltersChanged(false);
-    window.scrollTo({ top: 0, behavior: 'auto' });
-  };
-  
-  const handleNotifyClick = async (meeting) => {
-    setSelectedMeeting(meeting);
-    setNotificationDialogOpen(true);
-    try {
-      const res = await api.get(`/action-tracker/meetings/${meeting.id}/participants`);
-      setParticipants(res.data?.items || res.data || []);
-    } catch (err) { 
-      setParticipants([]); 
-    }
-  };
-  
-  const handleSendNotifications = async (data) => {
-    try {
-      const res = await api.post(`/action-tracker/meetings/${selectedMeeting.id}/notify-participants`, data);
-      setSnackbar({ open: true, message: `✨ Sent to ${res.data.sent} participants!`, severity: 'success' });
-      setNotificationDialogOpen(false);
-    } catch (err) { 
-      setSnackbar({ open: true, message: 'Failed to send notifications', severity: 'error' }); 
-    }
-  };
-  
-  const handleGenerateMeeting = async (meeting) => {
-    const result = await handleGenerateNextOccurrence(meeting);
-    setSnackbar({ open: true, message: result.message, severity: result.success ? 'success' : 'error' });
-    if (result.success) {
-      loadRecurringMeetings();
-      loadMeetings({ page, limit: rowsPerPage });
-    }
-  };
-  
-  const handleClearFilters = () => {
-    setSearchTerm('');
-    setStatusFilter('all');
-    setShowUpcoming(true);
-    setShowPast(false);
-    setFiltersChanged(true);
-    localStorage.removeItem(STORAGE_KEYS.STATUS_FILTER);
-    localStorage.removeItem(STORAGE_KEYS.SHOW_UPCOMING);
-    localStorage.removeItem(STORAGE_KEYS.SHOW_PAST);
-    localStorage.removeItem(STORAGE_KEYS.SEARCH_TERM);
-  };
-  
-  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
-  
-  // Use server-driven total for pagination
-  const totalPages = Math.ceil((pagination.total || 0) / rowsPerPage);
-  
-  // Get accurate counts for tabs
-  const regularMeetingsCount = pagination.total ?? meetings.length;
-  const recurringMeetingsCount = recurringMeetings.length;
-  
-  // Restore scroll position after initial load
+
+  // Restore scroll position after loading
   useEffect(() => {
     if (!loading && meetings.length > 0) {
       restoreScrollPosition();
     }
   }, [loading, meetings.length, restoreScrollPosition]);
 
-  // Helper to get status label
-  const getStatusLabel = (statusId) => {
-    const status = statusOptions.find(s => s.id === statusId);
-    return status ? status.name : 'Unknown';
-  };
-
-  // Helper to get status color
-  const getStatusColor = (statusId) => {
-    const status = statusOptions.find(s => s.id === statusId);
-    return status?.color || 'default';
-  };
-
-  // Count active filters
-  const activeFilterCount = [
-    searchTerm ? 1 : 0,
-    statusFilter !== 'all' ? 1 : 0,
-    !showUpcoming ? 1 : 0,
-    showPast ? 1 : 0
-  ].reduce((a, b) => a + b, 0);
-
-  // ========== FIXED GRID CONFIGURATION ==========
-  // Get grid columns based on screen size - Ensures cards fill the row
-  const getGridColumns = useCallback(() => {
-    if (isMobile) return '1fr';
-    if (isTablet) return 'repeat(2, 1fr)';
-    // Desktop: Use auto-fill with minmax to fill the row properly
-    // 'auto-fill' creates as many columns as possible
-    // 'minmax(280px, 1fr)' ensures each card is at least 280px but grows to fill space
-    return 'repeat(auto-fill, minmax(280px, 1fr))';
-  }, [isMobile, isTablet]);
-
-  // Count how many cards will be in the grid for debugging
-  const cardCount = meetings.length;
-  
+  // ==================== RENDER ====================
   return (
     <Box sx={{ 
       width: '100%', 
@@ -383,13 +399,15 @@ const Meetings = () => {
     }}>
       <Box sx={{ p: isMobile ? 1.5 : 3 }} ref={scrollContainerRef}>
         
-        {/* Header - Simplified for mobile */}
+        {/* ==================== HEADER ==================== */}
         <Stack 
           direction={isMobile ? "column" : "row"} 
-          justifyContent="space-between" 
-          alignItems={isMobile ? "flex-start" : "center"} 
           mb={isMobile ? 2 : 4}
           spacing={isMobile ? 1.5 : 0}
+          sx={{
+            justifyContent: 'space-between',
+            alignItems: isMobile ? 'flex-start' : 'center'
+          }}
         >
           <Box>
             <Typography 
@@ -412,21 +430,13 @@ const Meetings = () => {
             )}
           </Box>
           
-          {/* Desktop - Show both buttons */}
           {!isMobile && (
             <Stack direction="row" spacing={1.5}>
               <Button 
                 variant="contained" 
                 startIcon={<Add />} 
                 onClick={() => navigate('/meetings/create')} 
-                sx={{ 
-                  borderRadius: 2.5, 
-                  px: 3, 
-                  py: 1.2, 
-                  fontWeight: 700, 
-                  textTransform: 'none',
-                  ...(tabValue === 1 && { variant: 'outlined' })
-                }}
+                sx={{ borderRadius: 2.5, px: 3, py: 1.2, fontWeight: 700, textTransform: 'none' }}
               >
                 New Meeting
               </Button>
@@ -434,13 +444,7 @@ const Meetings = () => {
                 variant={tabValue === 1 ? "contained" : "outlined"} 
                 startIcon={<Add />} 
                 onClick={() => navigate('/recurring-meetings/create')} 
-                sx={{ 
-                  borderRadius: 2.5, 
-                  px: 3, 
-                  py: 1.2, 
-                  fontWeight: 700, 
-                  textTransform: 'none'
-                }}
+                sx={{ borderRadius: 2.5, px: 3, py: 1.2, fontWeight: 700, textTransform: 'none' }}
               >
                 New Series
               </Button>
@@ -448,7 +452,7 @@ const Meetings = () => {
           )}
         </Stack>
         
-        {/* Tabs with accurate counts - Remove curve on mobile */}
+        {/* ==================== TABS ==================== */}
         <Paper sx={{ 
           borderRadius: isMobile ? 0 : 3, 
           overflow: 'hidden', 
@@ -515,9 +519,9 @@ const Meetings = () => {
           </Tabs>
         </Paper>
         
-        {/* Regular Meetings Tab */}
+        {/* ==================== REGULAR MEETINGS TAB ==================== */}
         <TabPanel value={tabValue} index={0}>
-          {/* Filters - Mobile Optimized */}
+          {/* Filters */}
           <Paper elevation={0} sx={{ 
             p: isMobile ? 1 : 2.5, 
             mb: isMobile ? 2 : 4, 
@@ -531,8 +535,8 @@ const Meetings = () => {
               boxShadow: 'none'
             })
           }}>
-            {/* Mobile Filter Bar */}
             {isMobile ? (
+              // Mobile Filters
               <>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Box sx={{ flex: 1, position: 'relative' }}>
@@ -608,7 +612,6 @@ const Meetings = () => {
                   </Stack>
                 </Stack>
 
-                {/* Filter Chips */}
                 {hasActiveFilters && (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
                     {searchTerm && (
@@ -657,7 +660,7 @@ const Meetings = () => {
                 )}
               </>
             ) : (
-              // Desktop - Original MeetingFilters component
+              // Desktop Filters
               <MeetingFilters
                 searchTerm={searchTerm}
                 setSearchTerm={handleSearchTermChange}
@@ -677,7 +680,7 @@ const Meetings = () => {
             )}
           </Paper>
           
-          {/* ========== GRID VIEW - FIXED ========== */}
+          {/* ==================== GRID VIEW ==================== */}
           {viewMode === 'grid' && (
             <>
               <Box sx={{ 
@@ -685,9 +688,7 @@ const Meetings = () => {
                 gridTemplateColumns: getGridColumns(),
                 gap: { xs: 2, sm: 2.5, md: 3 },
                 width: '100%',
-                // This ensures all grid items stretch to fill their cells
                 alignItems: 'stretch',
-                // This ensures the grid items are properly sized
                 '& > *': {
                   width: '100%',
                   height: '100%',
@@ -697,16 +698,12 @@ const Meetings = () => {
                 }
               }}>
                 {loading ? (
-                  // Loading skeletons
                   Array.from({ length: isMobile ? 3 : 6 }).map((_, i) => (
                     <Skeleton 
                       key={i} 
                       variant="rounded" 
                       height={isMobile ? 320 : 380} 
-                      sx={{ 
-                        borderRadius: 3,
-                        width: '100%'
-                      }} 
+                      sx={{ borderRadius: 3, width: '100%' }} 
                     />
                   ))
                 ) : meetings.length === 0 ? (
@@ -728,20 +725,20 @@ const Meetings = () => {
                   </Box>
                 ) : (
                   meetings.map((meeting) => (
-                    <MeetingCard 
-                      key={meeting.id}
-                      meeting={meeting} 
-                      statusOptions={statusOptions} 
-                      onView={(id) => navigate(`/meetings/${id}`)} 
-                      onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
-                      onNotify={handleNotifyClick}
-                      onGenerateMeeting={handleGenerateMeeting}
-                    />
+                  <MeetingCard 
+                    key={meeting.id}
+                    meeting={meeting} 
+                    statusOptions={statusOptions} 
+                    onView={(id) => navigate(`/meetings/${id}`)} 
+                    onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
+                    onNotify={handleNotifyClick}
+                    onGenerateMeeting={handleGenerateMeeting}
+                    onAddAction={handleAddAction}
+                  />
                   ))
                 )}
               </Box>
               
-              {/* Pagination */}
               {!loading && totalPages > 1 && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
                   <Pagination
@@ -758,7 +755,7 @@ const Meetings = () => {
             </>
           )}
           
-          {/* Table View */}
+          {/* ==================== TABLE VIEW ==================== */}
           {viewMode === 'table' && (
             <>
               <MeetingTableView 
@@ -768,7 +765,6 @@ const Meetings = () => {
                 onNotify={handleNotifyClick}
               />
               
-              {/* Pagination for table view */}
               {!loading && totalPages > 1 && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
                   <Pagination
@@ -786,7 +782,7 @@ const Meetings = () => {
           )}
         </TabPanel>
         
-        {/* Recurring Meetings Tab */}
+        {/* ==================== RECURRING MEETINGS TAB ==================== */}
         <TabPanel value={tabValue} index={1}>
           {loadingRecurring ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -803,7 +799,7 @@ const Meetings = () => {
         </TabPanel>
       </Box>
       
-      {/* Mobile FAB - Single button with dropdown or toggle */}
+      {/* ==================== MOBILE FAB ==================== */}
       {isMobile && (
         <Stack 
           direction="column" 
@@ -816,7 +812,6 @@ const Meetings = () => {
             alignItems: 'flex-end'
           }}
         >
-          {/* Quick action hint */}
           <Box sx={{ 
             bgcolor: 'background.paper', 
             px: 1.5, 
@@ -829,13 +824,9 @@ const Meetings = () => {
           }}>
             {tabValue === 0 ? 'Create Meeting' : 'Create Series'}
           </Box>
-          
           <Fab 
             color="primary" 
-            sx={{ 
-              boxShadow: 3,
-              '&:active': { transform: 'scale(0.95)' }
-            }} 
+            sx={{ boxShadow: 3, '&:active': { transform: 'scale(0.95)' } }} 
             onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')}
           >
             <Add />
@@ -843,7 +834,7 @@ const Meetings = () => {
         </Stack>
       )}
       
-      {/* Mobile Filter Drawer */}
+      {/* ==================== MOBILE FILTER DRAWER ==================== */}
       <MobileFilterDrawer 
         open={filterDrawerOpen}
         onClose={() => setFilterDrawerOpen(false)}
@@ -860,7 +851,7 @@ const Meetings = () => {
         activeFilterCount={activeFilterCount}
       />
       
-      {/* Notification Dialog */}
+      {/* ==================== NOTIFICATION DIALOG ==================== */}
       <NotificationDialog 
         open={notificationDialogOpen} 
         onClose={() => setNotificationDialogOpen(false)} 
@@ -868,8 +859,28 @@ const Meetings = () => {
         participants={participants} 
         onSend={handleSendNotifications} 
       />
+
+      {/* ==================== ADD ACTION DIALOG ==================== */}
+      {selectedMeetingForAction && (
+        <AddActionDialog
+          open={addActionDialogOpen}
+          onClose={() => {
+            setAddActionDialogOpen(false);
+            setSelectedMeetingForAction(null);
+            setActionError(null);
+          }}
+          onSave={handleSaveAction}
+          meetingId={selectedMeetingForAction?.id}
+          minutes={minutes}
+          selectedMinuteId={minutes.length > 0 ? minutes[0]?.id : null}
+          loading={loadingMinutes}
+          error={actionError}
+          busy={creatingAction}
+          onMinutesCreated={handleMinuteCreated}
+        />
+      )}
       
-      {/* Snackbar */}
+      {/* ==================== SNACKBAR ==================== */}
       <Snackbar 
         open={snackbar.open} 
         autoHideDuration={4000} 

@@ -2,15 +2,13 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { 
   Box, SwipeableDrawer, Stack, Typography, IconButton, 
-  TextField, InputAdornment, Chip, Button, FormControlLabel, Switch,
-  Divider, useMediaQuery, useTheme, alpha, FormControl, InputLabel, Select, MenuItem
+  TextField, InputAdornment, Chip, Button, 
+  Divider, useMediaQuery, useTheme, alpha
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import Close from '@mui/icons-material/Close';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import EventIcon from '@mui/icons-material/Event';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import Cancel from '@mui/icons-material/Cancel';
@@ -47,14 +45,12 @@ export const MobileFilterDrawer = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   
   // Local state for form values
   const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
   const [localStatusFilter, setLocalStatusFilter] = useState(statusFilter);
   const [localShowUpcoming, setLocalShowUpcoming] = useState(showUpcoming);
   const [localShowPast, setLocalShowPast] = useState(showPast);
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   
   // Track if filters have been modified
   const hasChanges = useMemo(() => {
@@ -72,8 +68,6 @@ export const MobileFilterDrawer = ({
       setLocalStatusFilter(statusFilter);
       setLocalShowUpcoming(showUpcoming);
       setLocalShowPast(showPast);
-      // Reset advanced section when drawer opens
-      setIsAdvancedOpen(false);
     }
   }, [open, searchTerm, statusFilter, showUpcoming, showPast]);
 
@@ -154,13 +148,15 @@ export const MobileFilterDrawer = ({
       onClose={onClose} 
       onOpen={() => {}}
       disableSwipeToOpen={false}
-      PaperProps={{
-        sx: {
-          borderTopLeftRadius: isMobile ? 12 : 16,
-          borderTopRightRadius: isMobile ? 12 : 16,
-          maxHeight: isMobile ? '85vh' : '80vh',
-          minHeight: isMobile ? '50vh' : '40vh',
-          p: 0,
+      slotProps={{
+        paper: {
+          sx: {
+            borderTopLeftRadius: isMobile ? 12 : 16,
+            borderTopRightRadius: isMobile ? 12 : 16,
+            maxHeight: isMobile ? '85vh' : '80vh',
+            minHeight: isMobile ? '50vh' : '40vh',
+            p: 0,
+          }
         }
       }}
     >
@@ -183,11 +179,9 @@ export const MobileFilterDrawer = ({
         {/* Header */}
         <Stack 
           direction="row" 
-          justifyContent="space-between" 
-          alignItems="center" 
-          mb={2}
+          sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}
         >
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <FilterAltIcon color="primary" sx={{ fontSize: isMobile ? 20 : 24 }} />
             <Typography variant="h6" fontWeight={700} fontSize={isMobile ? '1.1rem' : '1.25rem'}>
               Filters
@@ -221,26 +215,28 @@ export const MobileFilterDrawer = ({
           value={localSearchTerm}
           onChange={(e) => setLocalSearchTerm(e.target.value)}
           sx={{ mb: 2.5 }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon color="action" sx={{ fontSize: isMobile ? 18 : 20 }} />
-              </InputAdornment>
-            ),
-            endAdornment: localSearchTerm && (
-              <InputAdornment position="end">
-                <IconButton 
-                  size="small" 
-                  onClick={() => setLocalSearchTerm('')}
-                  edge="end"
-                >
-                  <Close fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ),
-            sx: { 
-              borderRadius: 2,
-              '& .MuiOutlinedInput-root': { borderRadius: 2 }
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" sx={{ fontSize: isMobile ? 18 : 20 }} />
+                </InputAdornment>
+              ),
+              endAdornment: localSearchTerm && (
+                <InputAdornment position="end">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => setLocalSearchTerm('')}
+                    edge="end"
+                  >
+                    <Close fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+              sx: { 
+                borderRadius: 2,
+                '& .MuiOutlinedInput-root': { borderRadius: 2 }
+              }
             }
           }}
         />
@@ -253,9 +249,8 @@ export const MobileFilterDrawer = ({
           <Stack 
             direction="row" 
             spacing={0.75} 
-            flexWrap="wrap" 
             useFlexGap
-            sx={{ gap: 0.75 }}
+            sx={{ flexWrap: 'wrap', gap: 0.75 }}
           >
             <Chip 
               label="All" 
@@ -359,7 +354,7 @@ export const MobileFilterDrawer = ({
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Active Filters
             </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ gap: 0.5 }}>
+            <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap', gap: 0.5 }}>
               {searchTerm && (
                 <Chip 
                   label={`🔍 ${searchTerm}`}
@@ -458,8 +453,6 @@ export const MobileFilterDrawer = ({
   );
 };
 
-// Display name for debugging
 MobileFilterDrawer.displayName = 'MobileFilterDrawer';
 
-// Default export
 export default MobileFilterDrawer;

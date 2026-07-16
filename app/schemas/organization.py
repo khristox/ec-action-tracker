@@ -163,10 +163,8 @@ def node_to_response(node) -> OrganizationNodeResponse:
         employee_count=node.employee_count,
         budget=node.budget,
         color=node.color,
-        display_name=getattr(node, 'display_name', node.name),
-        metadata=metadata_dict,  # Use the built metadata dict
-        created_at=node.created_at.isoformat() if hasattr(node, 'created_at') and node.created_at else None,
-        updated_at=node.updated_at.isoformat() if hasattr(node, 'updated_at') and node.updated_at else None
+        created_at=node.created_at.isoformat() if node.created_at else None,
+        updated_at=node.updated_at.isoformat() if node.updated_at else None
     )
 
 

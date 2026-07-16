@@ -25,7 +25,7 @@ class CurrencyCode(str, Enum):
     NGN = "NGN"
     ZAR = "ZAR"
     GHS = "GHS"
-    
+
     @classmethod
     def get_default(cls) -> str:
         return cls.USD.value
@@ -40,7 +40,7 @@ class LanguageCode(str, Enum):
     SW = "sw"
     AR = "ar"
     ZH = "zh"
-    
+
     @classmethod
     def get_default(cls) -> str:
         return cls.EN.value
@@ -57,7 +57,7 @@ class Timezone(str, Enum):
     NEW_YORK = "America/New_York"
     LONDON = "Europe/London"
     DUBAI = "Asia/Dubai"
-    
+
     @classmethod
     def get_default(cls) -> str:
         return cls.UTC.value
@@ -65,17 +65,31 @@ class Timezone(str, Enum):
 
 # ==================== VALIDATION UTILITIES ====================
 
+def uuid_to_str(v: Any) -> Any:
+    """
+    Coerce a UUID (or anything UUID-like) into its string form.
+
+    Used as a `mode='before'` field validator on response schemas that
+    declare id / *_id fields as `str`, so that raw UUID objects coming
+    back from SQLAlchemy models or raw SQL rows don't blow up FastAPI's
+    response serialization (Pydantic v2 does not auto-coerce UUID -> str).
+    """
+    if isinstance(v, UUID):
+        return str(v)
+    return v
+
+
 class ValidationUtils:
     """Utility class for common validations"""
-    
+
     @staticmethod
     def validate_username(username: Optional[str]) -> Optional[str]:
         """Validate and normalize username"""
         if username is None:
             return None
-        
+
         username = username.strip().lower()
-        
+
         if len(username) < 3:
             raise ValueError('Username must be at least 3 characters')
         if len(username) > 100:
@@ -88,39 +102,25 @@ class ValidationUtils:
             raise ValueError('Username cannot start or end with underscore')
         if '__' in username:
             raise ValueError('Username cannot contain consecutive underscores')
-        
+
         return username
-    
+
     @staticmethod
     def validate_phone(phone: Optional[str]) -> Optional[str]:
-        """Validate and format phone number to E.164 format
-        
-        Args:
-            phone: Phone number string, can be None, empty string, or a phone number
-            
-        Returns:
-            Formatted phone number with + prefix, or None if input is None/empty
-            
-        Raises:
-            ValueError: If phone number format is invalid (not None/empty)
-        """
-        # Handle None or empty string
+        """Validate and format phone number to E.164 format"""
         if phone is None or phone.strip() == '':
             return None
-        
-        # Clean the phone number
+
         cleaned = re.sub(r'[\s\-\(\)\.]+', '', phone.strip())
-        
-        # Validate format (must be 8-15 digits, optionally starting with +)
+
         if not re.match(r'^\+?[0-9]{8,15}$', cleaned):
             raise ValueError('Phone number must be 8-15 digits, optionally starting with +')
-        
-        # Ensure it starts with +
+
         if not cleaned.startswith('+'):
             cleaned = '+' + cleaned
-        
+
         return cleaned
-    
+
     @staticmethod
     def validate_name(name: Optional[str], field_name: str, max_length: int = 100, required: bool = False) -> Optional[str]:
         """Validate and format name fields"""
@@ -128,103 +128,103 @@ class ValidationUtils:
             if required:
                 raise ValueError(f'{field_name} is required')
             return None
-        
+
         name = name.strip()
-        
+
         if not name:
             if required:
                 raise ValueError(f'{field_name} cannot be empty')
             return None
-        
+
         if len(name) > max_length:
             raise ValueError(f'{field_name} must not exceed {max_length} characters')
-        
+
         name = ' '.join(word.capitalize() for word in name.split())
         name = re.sub(r'\s+', ' ', name)
-        
+
         return name
-    
+
     @staticmethod
     def validate_date_of_birth(dob: Optional[date]) -> Optional[date]:
         """Validate date of birth (must be at least 18 years ago)"""
         if dob is None:
             return None
-        
+
         today = date.today()
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-        
+
         if age < 18:
             raise ValueError('User must be at least 18 years old')
         if age > 120:
             raise ValueError('Invalid date of birth (age cannot exceed 120 years)')
         if dob > today:
             raise ValueError('Date of birth cannot be in the future')
-        
+
         return dob
-    
+
     @staticmethod
     def validate_currency(currency: Optional[str]) -> Optional[str]:
         """Validate and normalize currency code"""
         if currency is None:
             return None
-        
+
         currency = currency.upper().strip()
-        
+
         if not re.match(r'^[A-Z]{3}$', currency):
             raise ValueError('Currency code must be 3 uppercase letters (ISO 4217)')
-        
+
         if currency not in [c.value for c in CurrencyCode]:
             raise ValueError(f'Unsupported currency code. Supported: {", ".join([c.value for c in CurrencyCode])}')
-        
+
         return currency
-    
+
     @staticmethod
     def validate_language(language: Optional[str]) -> Optional[str]:
         """Validate and normalize language code"""
         if language is None:
             return None
-        
+
         language = language.lower().strip()
-        
+
         if not re.match(r'^[a-z]{2,5}$', language):
             raise ValueError('Language code must be 2-5 lowercase letters (ISO 639)')
-        
+
         if language not in [l.value for l in LanguageCode]:
             raise ValueError(f'Unsupported language code. Supported: {", ".join([l.value for l in LanguageCode])}')
-        
+
         return language
-    
+
     @staticmethod
     def validate_timezone(timezone_str: Optional[str]) -> Optional[str]:
         """Validate timezone"""
         if timezone_str is None:
             return None
-        
+
         import pytz
         timezone_str = timezone_str.strip()
-        
+
         if timezone_str not in pytz.all_timezones:
             raise ValueError(f'Invalid timezone. Use valid IANA timezone (e.g., Africa/Nairobi)')
-        
+
         return timezone_str
-    
+
     @staticmethod
     def validate_profile_picture(profile_picture: Optional[str]) -> Optional[bytes]:
         """Validate and decode profile picture from base64"""
         if profile_picture is None:
             return None
-        
+
         if profile_picture.startswith('data:image/'):
             base64_data = profile_picture.split(',', 1)[-1]
         else:
             base64_data = profile_picture
-        
+
         try:
             image_data = base64.b64decode(base64_data)
-            
+
             if len(image_data) > 5 * 1024 * 1024:
                 raise ValueError('Profile picture must be less than 5MB')
-            
+
             magic_bytes = image_data[:4]
             valid_magic = [
                 b'\xff\xd8\xff',  # JPEG
@@ -232,17 +232,17 @@ class ValidationUtils:
                 b'GIF8',          # GIF
                 b'RIFF',          # WEBP
             ]
-            
+
             if not any(magic_bytes.startswith(magic) for magic in valid_magic):
                 raise ValueError('Invalid image format. Supported: JPEG, PNG, GIF, WEBP')
-            
+
             return image_data
-            
+
         except base64.binascii.Error:
             raise ValueError('Invalid base64 encoding for profile picture')
         except Exception as e:
             raise ValueError(f'Invalid profile picture: {str(e)}')
-    
+
     @staticmethod
     def detect_content_type(image_data: bytes) -> str:
         """Detect content type from image data"""
@@ -276,7 +276,7 @@ class UserBase(BaseModel):
     preferred_currency: Optional[str] = Field(None, min_length=3, max_length=3, description="Preferred currency code (ISO 4217)", example="USD")
     language: str = Field("en", min_length=2, max_length=5, description="Preferred language code", example="en")
     timezone: str = Field("UTC", description="User's timezone", example="Africa/Nairobi")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -296,18 +296,18 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """
     Schema for creating a new user
-    
+
     Includes password validation and role assignment
     """
     password: str = Field(..., min_length=8, max_length=72, description="Password (8-72 characters, must contain uppercase, lowercase, digit)")
     roles: List[str] = Field(default=["user"], description="List of role codes to assign to user", example=["user", "property_manager"])
     confirm_password: Optional[str] = Field(None, description="Password confirmation (required if password is provided)")
-    
+
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_username(v)
-    
+
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -322,30 +322,30 @@ class UserCreate(UserBase):
         if not any(c in '!@#$%^&*()_+-=[]{};:\'",.<>/?`~' for c in v):
             raise ValueError('Password must contain at least one special character')
         return v
-    
+
     @field_validator('phone')
     @classmethod
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_phone(v)
-    
+
     @field_validator('preferred_currency')
     @classmethod
     def validate_currency(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_currency(v)
-    
+
     @field_validator('roles')
     @classmethod
     def validate_roles(cls, v: List[str]) -> List[str]:
         if not v:
             raise ValueError('At least one role is required')
         return list(dict.fromkeys(v))
-    
+
     @model_validator(mode='after')
     def validate_passwords_match(self) -> 'UserCreate':
         if self.confirm_password is not None and self.password != self.confirm_password:
             raise ValueError('Passwords do not match')
         return self
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -366,7 +366,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     """
     Schema for updating an existing user
-    
+
     All fields are optional to allow partial updates.
     Only provided fields will be updated.
     """
@@ -376,95 +376,94 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100, description="Updated first name", example="Jonathan")
     last_name: Optional[str] = Field(None, max_length=100, description="Updated last name", example="Smith")
     middle_name: Optional[str] = Field(None, max_length=100, description="Updated middle name", example="Michael")
-    
+
     # Contact Information
     phone: Optional[str] = Field(None, max_length=20, description="Updated phone number (E.164 format)", example="+254723456789")
     alternate_phone: Optional[str] = Field(None, max_length=20, description="Alternate phone number", example="+254712345678")
-    
+
     # Personal Details
     date_of_birth: Optional[date] = Field(None, description="Date of birth (YYYY-MM-DD)", example="1990-01-01")
-    
+
     # Address Information
     address: Optional[str] = Field(None, max_length=500, description="Street address", example="123 Main Street")
     city: Optional[str] = Field(None, max_length=100, description="City", example="Nairobi")
     state: Optional[str] = Field(None, max_length=100, description="State or province", example="Nairobi County")
     country: Optional[str] = Field(None, max_length=100, description="Country", example="Kenya")
     postal_code: Optional[str] = Field(None, max_length=20, description="Postal/ZIP code", example="00100")
-    
+
     # Professional Information
     occupation: Optional[str] = Field(None, max_length=100, description="Occupation", example="Software Engineer")
     education: Optional[str] = Field(None, max_length=200, description="Educational background", example="Bachelor's in Computer Science")
-    
+
     # Bio
     bio: Optional[str] = Field(None, max_length=500, description="Short biography", example="Passionate about real estate")
-    
+
     # Account Settings
     is_active: Optional[bool] = Field(None, description="Whether user account is active")
     is_verified: Optional[bool] = Field(None, description="Whether email is verified (usually only admin can change)")
     is_superuser: Optional[bool] = Field(None, description="Whether Super User or Not")
-    
 
     preferred_currency: Optional[str] = Field(None, min_length=3, max_length=3, description="Preferred currency code (ISO 4217)", example="KES")
     language: Optional[str] = Field(None, min_length=2, max_length=5, description="Preferred language (ISO 639-1)", example="sw")
     timezone: Optional[str] = Field(None, description="User's timezone (IANA timezone)", example="Africa/Nairobi")
-    
+
     # Attribute References (from attribute groups)
-    gender_attribute_id: Optional[UUID] = Field(None, description="Gender attribute ID from GENDER attribute group", example="fd089bf8-d8c0-46a7-8aba-7817e4a80de5")
-    language_attribute_id: Optional[UUID] = Field(None, description="Language attribute ID from LANGUAGE attribute group", example="9febbfa6-5bc8-4c40-9cee-ccac11bd3a15")
-    currency_attribute_id: Optional[UUID] = Field(None, description="Currency attribute ID from CURRENCY attribute group", example="053821c4-308f-4b91-9835-e3d30ee3f5e8")
-    country_attribute_id: Optional[UUID] = Field(None, description="Country attribute ID from COUNTRY attribute group", example="123e4567-e89b-12d3-a456-426614174000")
-    
+    gender_attribute_id: Optional[str] = Field(None, description="Gender attribute ID (UUID as string)", example="fd089bf8-d8c0-46a7-8aba-7817e4a80de5")
+    language_attribute_id: Optional[str] = Field(None, description="Language attribute ID (UUID as string)", example="9febbfa6-5bc8-4c40-9cee-ccac11bd3a15")
+    currency_attribute_id: Optional[str] = Field(None, description="Currency attribute ID (UUID as string)", example="053821c4-308f-4b91-9835-e3d30ee3f5e8")
+    country_attribute_id: Optional[str] = Field(None, description="Country attribute ID (UUID as string)", example="123e4567-e89b-12d3-a456-426614174000")
+
     # Location Information (from CTE)
-    location_id: Optional[UUID] = Field(None, description="Location ID from CTE location system", example="123e4567-e89b-12d3-a456-426614174000")
-    
+    location_id: Optional[str] = Field(None, description="Location ID (UUID as string)", example="123e4567-e89b-12d3-a456-426614174000")
+
     # Avatar
     avatar_url: Optional[str] = Field(None, max_length=500, description="URL to user's avatar image", example="https://example.com/avatars/user.jpg")
-    
+
     # Profile Picture Support
     profile_picture: Optional[str] = Field(None, description="Base64 encoded profile picture image", example="data:image/jpeg;base64,/9j/4AAQSkZJRg...")
-    
+
     # Internal use only
     _profile_picture_bytes: Optional[bytes] = None
     _profile_picture_content_type: Optional[str] = None
-    
+
     # ==================== VALIDATORS ====================
-    
+
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_username(v)
-    
+
     @field_validator('phone', 'alternate_phone')
     @classmethod
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_phone(v)
-    
+
     @field_validator('first_name', 'last_name', 'middle_name')
     @classmethod
     def validate_name(cls, v: Optional[str], info) -> Optional[str]:
         field_name = info.field_name.replace('_', ' ').title()
         return ValidationUtils.validate_name(v, field_name, max_length=100, required=False)
-    
+
     @field_validator('date_of_birth')
     @classmethod
     def validate_date_of_birth(cls, v: Optional[date]) -> Optional[date]:
         return ValidationUtils.validate_date_of_birth(v)
-    
+
     @field_validator('preferred_currency')
     @classmethod
     def validate_currency(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_currency(v)
-    
+
     @field_validator('language')
     @classmethod
     def validate_language(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_language(v)
-    
+
     @field_validator('timezone')
     @classmethod
     def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
         return ValidationUtils.validate_timezone(v)
-    
+
     @field_validator('avatar_url')
     @classmethod
     def validate_avatar_url(cls, v: Optional[str]) -> Optional[str]:
@@ -474,24 +473,14 @@ class UserUpdate(BaseModel):
             if len(v) > 500:
                 raise ValueError('Avatar URL must not exceed 500 characters')
         return v
-    
+
     @field_validator('profile_picture')
     @classmethod
     def validate_profile_picture(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v.strip() == '':
             return None
         return v
-    
-    @field_validator('gender_attribute_id', 'language_attribute_id', 'currency_attribute_id', 'country_attribute_id', 'location_id')
-    @classmethod
-    def validate_uuid(cls, v: Optional[UUID]) -> Optional[UUID]:
-        if v is not None and not isinstance(v, UUID):
-            try:
-                return UUID(str(v))
-            except ValueError:
-                raise ValueError(f'Invalid UUID format: {v}')
-        return v
-    
+
     @model_validator(mode='after')
     def process_profile_picture(self) -> 'UserUpdate':
         if self.profile_picture:
@@ -502,9 +491,9 @@ class UserUpdate(BaseModel):
             except ValueError as e:
                 raise ValueError(f'Profile picture validation failed: {str(e)}')
         return self
-    
+
     # ==================== UTILITY METHODS ====================
-    
+
     def get_updates_dict(self) -> Dict[str, Any]:
         updates = {}
         for k, v in self.model_dump().items():
@@ -518,22 +507,22 @@ class UserUpdate(BaseModel):
             if v is not None:
                 updates[k] = v
         return updates
-    
+
     def has_updates(self) -> bool:
         return len(self.get_updates_dict()) > 0
-    
+
     def get_updated_fields(self) -> List[str]:
         return list(self.get_updates_dict().keys())
-    
+
     def has_profile_picture_update(self) -> bool:
         return self._profile_picture_bytes is not None
-    
+
     def get_profile_picture_bytes(self) -> Optional[bytes]:
         return self._profile_picture_bytes
-    
+
     def get_profile_picture_content_type(self) -> Optional[str]:
         return self._profile_picture_content_type
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -558,7 +547,7 @@ class ProfilePictureUpload(BaseModel):
     profile_picture: str = Field(..., description="Base64 encoded profile picture image (data URL format)")
     _profile_picture_bytes: Optional[bytes] = None
     _profile_picture_content_type: Optional[str] = None
-    
+
     @field_validator('profile_picture')
     @classmethod
     def validate_profile_picture(cls, v: str) -> str:
@@ -567,7 +556,7 @@ class ProfilePictureUpload(BaseModel):
         if not v.startswith('data:image/'):
             raise ValueError('Invalid image format. Expected data URL')
         return v
-    
+
     @model_validator(mode='after')
     def process_profile_picture(self) -> 'ProfilePictureUpload':
         try:
@@ -575,12 +564,12 @@ class ProfilePictureUpload(BaseModel):
             from PIL import Image
             import io
             import re
-            
+
             header, base64_data = self.profile_picture.split(',', 1)
             image_bytes = base64.b64decode(base64_data)
-            
+
             img = Image.open(io.BytesIO(image_bytes))
-            
+
             if img.mode in ('RGBA', 'LA', 'P'):
                 background = Image.new('RGB', img.size, (255, 255, 255))
                 if img.mode == 'RGBA':
@@ -590,32 +579,32 @@ class ProfilePictureUpload(BaseModel):
                 img = background
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
-            
+
             max_size = 400
             if img.width > max_size or img.height > max_size:
                 img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            
+
             output = io.BytesIO()
             img.save(output, format='WEBP', quality=75, optimize=True)
             compressed_bytes = output.getvalue()
-            
+
             self._profile_picture_bytes = compressed_bytes
             self._profile_picture_content_type = 'image/webp'
-            
+
         except ImportError:
             import base64
             header, base64_data = self.profile_picture.split(',', 1)
             self._profile_picture_bytes = base64.b64decode(base64_data)
             self._profile_picture_content_type = header.split(':')[1].split(';')[0]
-            
+
         except Exception as e:
             raise ValueError(f'Failed to process image: {str(e)}')
-        
+
         return self
-    
+
     def get_profile_picture_bytes(self) -> bytes:
         return self._profile_picture_bytes
-    
+
     def get_profile_picture_content_type(self) -> str:
         return self._profile_picture_content_type
 
@@ -626,7 +615,7 @@ class ProfilePictureResponse(BaseModel):
     content_type: Optional[str] = Field(None, description="MIME type of the image")
     has_picture: bool = Field(False, description="Whether user has a profile picture")
     size_bytes: Optional[int] = Field(None, description="Size of the image in bytes")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -643,20 +632,27 @@ class ProfilePictureResponse(BaseModel):
 
 class DepartmentInfo(BaseModel):
     """Department information for user response"""
-    id: str
-    name: str
-    code: Optional[str] = None
-    role: str
-    is_primary: bool
-    
-    class Config:
-        from_attributes = True
+    id: str = Field(..., description="Department ID (UUID as string)")
+    name: str = Field(..., description="Department name")
+    code: Optional[str] = Field(None, description="Department code")
+    role: str = Field(..., description="User's role in department")
+    is_primary: bool = Field(False, description="Is this the user's primary department")
+    parent_id: Optional[str] = Field(None, description="Parent department ID (UUID as string)")
+
+    @field_validator('id', 'parent_id', mode='before')
+    @classmethod
+    def stringify_uuid(cls, v):
+        return uuid_to_str(v)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class UserResponse(BaseModel):
     """
     Schema for user response (excludes sensitive data like password)
     """
-    id: UUID
-    email: str
+    id: str = Field(..., description="User ID (UUID as string)")
+    email: str = Field(..., description="User email")
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -674,7 +670,7 @@ class UserResponse(BaseModel):
     bio: Optional[str] = None
     preferred_currency: Optional[str] = None
     language: Optional[str] = "en"
-    timezone:  Optional[str] = "UTC"
+    timezone: Optional[str] = "UTC"
     is_active: bool = True
     is_verified: bool = False
     is_superuser: bool = False
@@ -685,30 +681,31 @@ class UserResponse(BaseModel):
     profile_picture_type: Optional[str] = None
     nationality_name: Optional[str] = None
     departments: List[DepartmentInfo] = Field(default_factory=list, description="User's department assignments")
+    roles: List[str] = Field(default_factory=list, description="List of role codes assigned to the user")
 
-    # Attribute references
-    gender_attribute_id: Optional[UUID] = Field(None, description="Gender attribute ID")
-    language_attribute_id: Optional[UUID] = Field(None, description="Language attribute ID")
-    currency_attribute_id: Optional[UUID] = Field(None, description="Currency attribute ID")
-    country_attribute_id: Optional[UUID] = Field(None, description="Country attribute ID")
-    
+    # Attribute references (UUIDs as strings for response)
+    gender_attribute_id: Optional[str] = Field(None, description="Gender attribute ID (UUID as string)")
+    language_attribute_id: Optional[str] = Field(None, description="Language attribute ID (UUID as string)")
+    currency_attribute_id: Optional[str] = Field(None, description="Currency attribute ID (UUID as string)")
+    country_attribute_id: Optional[str] = Field(None, description="Country attribute ID (UUID as string)")
+
     # Location from CTE
-    location_id: Optional[UUID] = Field(None, description="Location ID from CTE")
+    location_id: Optional[str] = Field(None, description="Location ID (UUID as string)")
     location_name: Optional[str] = Field(None, description="Location name")
     location_code: Optional[str] = Field(None, description="Location code")
     location_level: Optional[int] = Field(None, description="Location level")
     location_mode: Optional[str] = Field(None, description="Location mode (address/buildings)")
-    
+
     # Computed properties
     @property
     def full_name(self) -> str:
         parts = [self.first_name, self.middle_name, self.last_name]
         return " ".join([p for p in parts if p]) or self.username or "Unknown"
-    
+
     @property
     def display_name(self) -> str:
         return self.full_name if self.full_name != "Unknown" else (self.username or "User")
-    
+
     @property
     def initials(self) -> str:
         initials = ""
@@ -717,19 +714,28 @@ class UserResponse(BaseModel):
         if self.last_name:
             initials += self.last_name[0].upper()
         return initials or (self.username[0].upper() if self.username else "U")
-    
+
+    @field_validator(
+        'id', 'gender_attribute_id', 'language_attribute_id',
+        'currency_attribute_id', 'country_attribute_id', 'location_id',
+        mode='before'
+    )
+    @classmethod
+    def stringify_uuid_fields(cls, v):
+        return uuid_to_str(v)
+
     @field_validator('profile_picture', mode='before')
     @classmethod
     def convert_profile_picture(cls, v):
         if isinstance(v, bytes):
             return base64.b64encode(v).decode('utf-8')
         return v
-    
+
     @field_validator('email', mode='after')
     @classmethod
     def validate_email(cls, v):
         return v.lower() if v else v
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -740,7 +746,7 @@ class UserListResponse(BaseModel):
     page: int = Field(1, description="Current page number")
     pages: int = Field(1, description="Total number of pages")
     limit: int = Field(50, description="Items per page")
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -774,19 +780,19 @@ class UserWithRoles(UserResponse):
     Schema for user with associated roles
     """
     roles: List['RoleResponse'] = Field(default_factory=list, description="List of roles assigned to user")
-    
+
     @property
     def role_codes(self) -> List[str]:
         return [role.code for role in self.roles]
-    
+
     @property
     def is_admin(self) -> bool:
         return "admin" in self.role_codes
-    
+
     @property
     def is_property_manager(self) -> bool:
         return "property_manager" in self.role_codes
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -805,7 +811,6 @@ class UserWithRoles(UserResponse):
     )
 
 
-
 # ==================== PASSWORD SCHEMAS ====================
 
 class UserPasswordChange(BaseModel):
@@ -815,7 +820,7 @@ class UserPasswordChange(BaseModel):
     current_password: str = Field(..., min_length=1, description="Current password")
     new_password: str = Field(..., min_length=8, max_length=72, description="New password (8-72 characters)")
     confirm_new_password: str = Field(..., description="Confirm new password")
-    
+
     @field_validator('new_password')
     @classmethod
     def validate_new_password(cls, v: str) -> str:
@@ -830,7 +835,7 @@ class UserPasswordChange(BaseModel):
         if not any(c in '!@#$%^&*()_+-=[]{};:\'",.<>/?`~' for c in v):
             raise ValueError('Password must contain at least one special character')
         return v
-    
+
     @model_validator(mode='after')
     def validate_passwords_match(self) -> 'UserPasswordChange':
         if self.new_password != self.confirm_new_password:
@@ -846,7 +851,7 @@ class UserPasswordReset(BaseModel):
     reset_token: str = Field(..., description="Password reset token")
     new_password: str = Field(..., min_length=8, max_length=72, description="New password")
     confirm_new_password: str = Field(..., description="Confirm new password")
-    
+
     @field_validator('new_password')
     @classmethod
     def validate_new_password(cls, v: str) -> str:
@@ -859,7 +864,7 @@ class UserPasswordReset(BaseModel):
         if not any(c.isdigit() for c in v):
             raise ValueError('Password must contain at least one digit')
         return v
-    
+
     @model_validator(mode='after')
     def validate_passwords_match(self) -> 'UserPasswordReset':
         if self.new_password != self.confirm_new_password:
@@ -883,7 +888,7 @@ class UserFilterParams(BaseModel):
     limit: int = Field(100, ge=1, le=1000, description="Maximum number of records to return")
     sort_by: str = Field("created_at", description="Field to sort by", example="created_at,username,email")
     sort_desc: bool = Field(True, description="Sort in descending order")
-    
+
     @field_validator('sort_by')
     @classmethod
     def validate_sort_by(cls, v: str) -> str:
@@ -893,12 +898,13 @@ class UserFilterParams(BaseModel):
         return v
 
 
-# Helper function
+# ==================== HELPER FUNCTIONS ====================
+
 def encode_profile_picture(image_data: Optional[bytes], content_type: Optional[str] = None) -> Optional[str]:
     """Convert binary image data to base64 data URL"""
     if not image_data:
         return None
-    
+
     try:
         if not content_type:
             if image_data[:2] == b'\xff\xd8':
@@ -911,7 +917,7 @@ def encode_profile_picture(image_data: Optional[bytes], content_type: Optional[s
                 content_type = 'image/webp'
             else:
                 content_type = 'image/jpeg'
-        
+
         base64_str = base64.b64encode(image_data).decode('utf-8')
         return f"data:{content_type};base64,{base64_str}"
     except Exception as e:
@@ -919,16 +925,11 @@ def encode_profile_picture(image_data: Optional[bytes], content_type: Optional[s
         return None
 
 
-# Import here to avoid circular imports
-from app.schemas.role import RoleResponse
-UserWithRoles.model_rebuild()
-
-
-
+# ==================== USER-DEPARTMENT SCHEMAS ====================
 
 class UserDepartmentBase(BaseModel):
-    user_id: str = Field(..., description="User UUID")
-    department_id: str = Field(..., description="Department UUID")
+    user_id: str = Field(..., description="User ID (UUID as string)")
+    department_id: str = Field(..., description="Department ID (UUID as string)")
     role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER, description="User's role in department")
     status: UserDepartmentStatus = Field(default=UserDepartmentStatus.ACTIVE, description="Assignment status")
     is_primary: bool = Field(False, description="Is this the user's primary department")
@@ -937,7 +938,12 @@ class UserDepartmentBase(BaseModel):
     title: Optional[str] = Field(None, max_length=200, description="Custom title in department")
     responsibilities: List[str] = Field(default_factory=list, description="List of responsibilities")
     notes: Optional[str] = Field(None, max_length=500, description="Additional notes")
-    created_by: Optional[str] = Field(None, description="User who created this assignment")
+    created_by: Optional[str] = Field(None, description="User who created this assignment (UUID as string)")
+
+    @field_validator('user_id', 'department_id', 'created_by', mode='before')
+    @classmethod
+    def stringify_uuid_fields(cls, v):
+        return uuid_to_str(v)
 
 
 class UserDepartmentCreate(UserDepartmentBase):
@@ -954,7 +960,7 @@ class UserDepartmentUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=200)
     responsibilities: Optional[List[str]] = None
     notes: Optional[str] = Field(None, max_length=500)
-    
+
     @field_validator('end_date', mode='before')
     @classmethod
     def validate_end_date(cls, v, info):
@@ -966,60 +972,75 @@ class UserDepartmentUpdate(BaseModel):
 
 class UserDepartmentResponse(BaseModel):
     """Response model for user-department assignment"""
-    id: str
-    user_id: str
+    id: str = Field(..., description="Assignment ID (UUID as string)")
+    user_id: str = Field(..., description="User ID (UUID as string)")
     user_name: Optional[str] = None
     user_email: Optional[str] = None
-    department_id: str
+    department_id: str = Field(..., description="Department ID (UUID as string)")
     department_name: Optional[str] = None
     department_path: Optional[str] = None
     department_code: Optional[str] = None
     role: str
     status: str
     is_primary: bool
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     title: Optional[str] = None
     responsibilities: List[str] = []
     notes: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     @field_validator('id', 'user_id', 'department_id', mode='before')
     @classmethod
-    def convert_uuid_to_str(cls, v):
-        """Convert UUID objects to strings"""
-        if hasattr(v, 'hex'):  # Check if it's a UUID object
-            return str(v)
-        return v
-    
-    class Config:
-        from_attributes = True
+    def stringify_uuid_fields(cls, v):
+        return uuid_to_str(v)
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BulkAssignUsersRequest(BaseModel):
     """Bulk assign users to a department"""
-    user_ids: List[str] = Field(..., min_length=1, description="List of user UUIDs")
+    user_ids: List[str] = Field(..., min_length=1, description="List of user IDs (UUIDs as strings)")
     role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER)
     is_primary: bool = False
 
 
 class BulkAssignDepartmentsRequest(BaseModel):
     """Bulk assign departments to a user"""
-    department_ids: List[str] = Field(..., min_length=1, description="List of department UUIDs")
+    department_ids: List[str] = Field(..., min_length=1, description="List of department IDs (UUIDs as strings)")
     role: UserDepartmentRole = Field(default=UserDepartmentRole.MEMBER)
     is_primary: bool = False
 
 
-
 class DepartmentResponse(BaseModel):
-    """Response model for user departments endpoint"""
-    success: bool
-    data: List[Dict[str, Any]]
-    total: int
+    """Response model for department"""
+    id: str = Field(..., description="Department ID (UUID as string)")
+    name: str
+    code: Optional[str] = None
+    description: Optional[str] = None
+    parent_id: Optional[str] = Field(None, description="Parent department ID (UUID as string)")
+    is_active: bool = True
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    member_count: int = Field(0, description="Number of members in department")
+
+    @field_validator('id', 'parent_id', mode='before')
+    @classmethod
+    def stringify_uuid_fields(cls, v):
+        return uuid_to_str(v)
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserRegisterResponse(UserResponse):
     """Extended response for registration"""
     verification_email_sent: bool
     warning: Optional[str] = None
+
+
+# ==================== FORWARD REFERENCES ====================
+
+# Import here to avoid circular imports
+from app.schemas.role import RoleResponse
+UserWithRoles.model_rebuild()

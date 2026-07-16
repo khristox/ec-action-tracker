@@ -53,7 +53,7 @@ from app.api import deps
 from app.crud.user import user as user_crud
 from app.models.user import User
 from app.models.refresh_token import RefreshToken
-from app.schemas.user import DepartmentResponse, ProfilePictureResponse, ProfilePictureUpload, UserCreate, UserResponse, UserUpdate, encode_profile_picture
+from app.schemas.user import DepartmentResponse, ProfilePictureResponse, ProfilePictureUpload, UserCreate, UserDepartmentResponse, UserResponse, UserUpdate, encode_profile_picture
 from app.schemas.token import Token, RefreshTokenRequest
 from app.schemas.auth import (
     ForgotPasswordRequest, MessageResponse, PasswordResetRequest, PasswordResetResponse, ResendVerificationRequest, ResetPasswordRequest
@@ -415,23 +415,26 @@ async def get_current_user_info_full(
     current_user: User = Depends(deps.get_current_user)
 ) -> UserResponse:
     """Get current user information"""
-    
-    # 1. Convert SQLAlchemy object to dict while excluding problematic fields
-    user_dict = current_user.__dict__.copy()   # Safe way to get raw attributes
 
-    # Remove SQLAlchemy internal state
+    user_dict = current_user.__dict__.copy()
+
     user_dict.pop('_sa_instance_state', None)
-    user_dict.pop('departments', None)        # Critical: remove the bad relationship
+    user_dict.pop('departments', None)
 
-    # Convert UUIDs and datetime to JSON-friendly formats
     if 'id' in user_dict and isinstance(user_dict['id'], uuid.UUID):
         user_dict['id'] = str(user_dict['id'])
-    
+
     for dt_field in ['created_at', 'updated_at', 'last_login', 'date_of_birth', 'verified_at']:
         if dt_field in user_dict and user_dict[dt_field]:
             user_dict[dt_field] = user_dict[dt_field].isoformat()
 
-    # 2. Handle profile picture
+    # Convert Role ORM objects -> role code strings (roles is now eager-loaded
+    # by deps.get_current_user, so this key holds real Role instances)
+    if 'roles' in user_dict and user_dict['roles']:
+        user_dict['roles'] = [r.code for r in user_dict['roles']]
+    else:
+        user_dict['roles'] = []
+
     if getattr(current_user, 'profile_picture', None):
         try:
             base64_image = base64.b64encode(current_user.profile_picture).decode('utf-8')
@@ -442,9 +445,7 @@ async def get_current_user_info_full(
     else:
         user_dict["profile_picture"] = None
 
-    # 3. Validate with clean dict
     return UserResponse.model_validate(user_dict)
-
 
 @router.get("/me/simple", operation_id="auth_get_current_user_simple")
 async def get_current_user_info_simple(
@@ -580,13 +581,9 @@ async def get_my_profile_picture(
 
 
 
-# Add this to your router file (likely alongside your existing endpoints)
-
-
-
 @router.get(
-    "/me/departments", 
-    response_model=DepartmentResponse,
+    "/me/departments",
+    response_model=List[UserDepartmentResponse],
     operation_id="auth_get_current_user_departments"
 )
 async def get_current_user_departments(
@@ -595,63 +592,49 @@ async def get_current_user_departments(
     role_filter: Optional[str] = FastQuery(None),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
-):
+) -> List[UserDepartmentResponse]:
     """Get all departments assigned to the current user"""
-    try:
-        logger.info(f"Fetching departments for user: {current_user.id}")
-        
-        query = select(
-            UserDepartment,
-            OrganizationNode
-        ).join(
-            OrganizationNode,
-            OrganizationNode.id == UserDepartment.department_id
-        ).where(
-            UserDepartment.user_id == current_user.id
-        )
-        
-        if active_only:
-            query = query.where(OrganizationNode.is_active == True)
-            query = query.where(UserDepartment.status == 'active')
-        
-        if role_filter:
-            query = query.where(UserDepartment.role == role_filter)
-        
-        query = query.limit(limit)
-        
-        result = await db.execute(query)
-        rows = result.all()
-        
-        departments_list = []
-        for user_department, org_node in rows:
-            department_data = {
-                "id": str(user_department.id),
-                "user_id": str(user_department.user_id),
-                "department_id": str(org_node.id),
-                "department_name": str(org_node.name) if org_node.name else "",
-                "department_path":str(org_node.path),
-                "role": str(user_department.role) if user_department.role else "member",
-                "status": str(user_department.status) if user_department.status else "active",
-                "is_primary": bool(user_department.is_primary),
-                "path": str(org_node.path) if org_node.path else "",
-                "code": str(org_node.department_code) if org_node.department_code else "",
-            }
-            departments_list.append(department_data)
-        
-        return DepartmentResponse(
-            success=True,
-            data=departments_list,
-            total=len(departments_list)
-        )
-        
-    except Exception as e:
-        logger.error(f"Error fetching departments: {str(e)}", exc_info=True)
-        return DepartmentResponse(
-            success=False,
-            data=[],
-            total=0
+    logger.info(f"Fetching departments for user: {current_user.id}")
+
+    query = select(
+        UserDepartment,
+        OrganizationNode
+    ).join(
+        OrganizationNode,
+        OrganizationNode.id == UserDepartment.department_id
+    ).where(
+        UserDepartment.user_id == current_user.id
+    )
+
+    if active_only:
+        query = query.where(OrganizationNode.is_active == True)
+        query = query.where(UserDepartment.status == 'active')
+
+    if role_filter:
+        query = query.where(UserDepartment.role == role_filter)
+
+    query = query.limit(limit)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    departments_list = []
+    for user_department, org_node in rows:
+        departments_list.append(
+            UserDepartmentResponse(
+                id=str(user_department.id),
+                user_id=str(user_department.user_id),
+                department_id=str(org_node.id),
+                department_name=str(org_node.name) if org_node.name else "",
+                department_path=str(org_node.path) if org_node.path else "",
+                department_code=str(org_node.department_code) if org_node.department_code else None,
+                role=str(user_department.role) if user_department.role else "member",
+                status=str(user_department.status) if user_department.status else "active",
+                is_primary=bool(user_department.is_primary),
+            )
         )
 
+    return departments_list
 
 @router.post("/test-email", operation_id="auth_test_email")
 async def test_email_configuration(

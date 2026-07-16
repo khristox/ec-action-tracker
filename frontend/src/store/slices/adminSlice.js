@@ -1,14 +1,17 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import apiClient from '../api/apiClient';
 
-// Helper function to extract error messages from validation errors
+// ─── Helper Functions ─────────────────────────────────────────────────────────
+
+/**
+ * Extract error messages from various error formats
+ */
 const extractErrorMessage = (error) => {
   // Handle 422 validation errors
   if (error.response?.status === 422 && error.response?.data?.detail) {
     const detail = error.response.data.detail;
     
     if (Array.isArray(detail)) {
-      // Extract all error messages and group by field
       const fieldErrors = {};
       const generalErrors = [];
       
@@ -71,26 +74,47 @@ const extractErrorMessage = (error) => {
   };
 };
 
-// Helper to ensure auth token exists
+/**
+ * Ensure authentication token exists
+ */
 const ensureToken = (rejectWithValue) => {
   const token = localStorage.getItem('access_token');
   if (!token) {
     return rejectWithValue({
       message: 'No authentication token found. Please login again.',
       fieldErrors: {},
-      status: 401
+      status: 401,
+      requiresLogin: true
     });
   }
   return token;
 };
 
-// Fetch all users (admin only)
+/**
+ * Convert page to skip for pagination
+ */
+const pageToSkip = (page, limit) => (page - 1) * limit;
+
+// ─── Async Thunks ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all users (admin only)
+ */
 export const fetchUsers = createAsyncThunk(
   'admin/fetchUsers',
-  async ({ page = 1, limit = 10, search = '', is_active = null, role = null, is_superuser = null }, { rejectWithValue }) => {
+  async ({ 
+    page = 1, 
+    limit = 10, 
+    search = '', 
+    is_active = null, 
+    role = null, 
+    is_superuser = null 
+  }, { rejectWithValue }) => {
     try {
-      const params = { page, limit };
-      if (search) params.search = search;
+      const skip = pageToSkip(page, limit);
+      const params = { skip, limit };
+      
+      if (search && search.length >= 2) params.search = search;
       if (is_active !== null) params.is_active = is_active;
       if (role) params.role = role;
       if (is_superuser !== null) params.is_superuser = is_superuser;
@@ -104,7 +128,11 @@ export const fetchUsers = createAsyncThunk(
   }
 );
 
-// Update user roles
+/**
+ * Update user roles (admin only)
+ * ✅ WORKING ENDPOINT: PUT /admin/users/{id}/roles
+ * Payload: ["role1", "role2", ...]
+ */
 export const updateUserRoles = createAsyncThunk(
   'admin/updateUserRoles',
   async ({ id, roles }, { rejectWithValue }) => {
@@ -120,17 +148,30 @@ export const updateUserRoles = createAsyncThunk(
         });
       }
 
-      const response = await apiClient.put(`/admin/users/${id}/roles`, roles);
+      // ✅ Using the working endpoint: /admin/users/{id}/roles
+      console.log('🔄 Updating roles for user:', id);
+      console.log('📝 Roles to assign:', roles);
+
+      const response = await apiClient.put(`/admin/users/${id}/roles`, roles, {
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('✅ Roles updated successfully:', response.data);
       return response.data;
     } catch (error) {
-      console.error('Update user roles error:', error.response?.data);
+      console.error('❌ Update user roles error:', error.response?.status, error.response?.data);
       const errorMessage = extractErrorMessage(error);
       return rejectWithValue(errorMessage);
     }
   }
 );
 
-// Create new user (admin only)
+/**
+ * Create new user (admin only)
+ * Endpoint: POST /admin/users
+ */
 export const createUser = createAsyncThunk(
   'admin/createUser',
   async (userData, { rejectWithValue }) => {
@@ -194,7 +235,10 @@ export const createUser = createAsyncThunk(
   }
 );
 
-// Update user (admin only)
+/**
+ * Update user (admin only)
+ * Endpoint: PUT /admin/users/{id}
+ */
 export const updateUser = createAsyncThunk(
   'admin/updateUser',
   async ({ id, ...userData }, { rejectWithValue }) => {
@@ -202,12 +246,15 @@ export const updateUser = createAsyncThunk(
       const tokenCheck = ensureToken(rejectWithValue);
       if (tokenCheck?.message) return tokenCheck;
 
-      // Clean up the data
+      // Clean up the data - only allow specific fields
       const cleanData = {};
-      const allowedFields = ['email', 'username', 'first_name', 'last_name', 'phone', 'is_active', 'is_verified', 'is_superuser'];
+      const allowedFields = [
+        'email', 'username', 'first_name', 'last_name', 
+        'phone', 'is_active', 'is_verified', 'is_superuser'
+      ];
       
       Object.keys(userData).forEach(key => {
-        if (allowedFields.includes(key) && userData[key] !== undefined && userData[key] !== null && userData[key] !== '') {
+        if (allowedFields.includes(key) && userData[key] !== undefined && userData[key] !== null) {
           if (key === 'is_active' || key === 'is_verified' || key === 'is_superuser') {
             cleanData[key] = Boolean(userData[key]);
           } else if (typeof userData[key] === 'string') {
@@ -236,7 +283,10 @@ export const updateUser = createAsyncThunk(
   }
 );
 
-// Delete user (admin only)
+/**
+ * Delete user (admin only)
+ * Endpoint: DELETE /admin/users/{id}
+ */
 export const deleteUser = createAsyncThunk(
   'admin/deleteUser',
   async (id, { rejectWithValue }) => {
@@ -253,7 +303,11 @@ export const deleteUser = createAsyncThunk(
   }
 );
 
-// Reset user password (admin only)
+/**
+ * Reset user password (admin only)
+ * Endpoint: POST /admin/users/{user_id}/reset-password
+ * Payload: { new_password: "..." }
+ */
 export const resetUserPassword = createAsyncThunk(
   'admin/resetUserPassword',
   async ({ user_id, new_password }, { rejectWithValue }) => {
@@ -261,15 +315,17 @@ export const resetUserPassword = createAsyncThunk(
       const tokenCheck = ensureToken(rejectWithValue);
       if (tokenCheck?.message) return tokenCheck;
 
-      if (!new_password || new_password.length < 6) {
+      if (!new_password || new_password.length < 8) {
         return rejectWithValue({
-          message: 'Password must be at least 6 characters long',
-          fieldErrors: { new_password: ['Password must be at least 6 characters'] },
+          message: 'Password must be at least 8 characters long',
+          fieldErrors: { new_password: ['Password must be at least 8 characters'] },
           status: 422
         });
       }
 
-      const response = await apiClient.post(`/admin/users/${user_id}/reset-password`, { new_password });
+      const response = await apiClient.post(`/admin/users/${user_id}/reset-password`, { 
+        new_password 
+      });
       return response.data;
     } catch (error) {
       const errorMessage = extractErrorMessage(error);
@@ -278,7 +334,11 @@ export const resetUserPassword = createAsyncThunk(
   }
 );
 
-// Bulk delete users
+/**
+ * Bulk delete users (admin only)
+ * Endpoint: POST /admin/users/bulk-delete
+ * Payload: { user_ids: [...] }
+ */
 export const bulkDeleteUsers = createAsyncThunk(
   'admin/bulkDeleteUsers',
   async (userIds, { rejectWithValue }) => {
@@ -294,7 +354,9 @@ export const bulkDeleteUsers = createAsyncThunk(
         });
       }
 
-      const response = await apiClient.post('/admin/users/bulk-delete', { user_ids: userIds });
+      const response = await apiClient.post('/admin/users/bulk-delete', { 
+        user_ids: userIds 
+      });
       return response.data;
     } catch (error) {
       const errorMessage = extractErrorMessage(error);
@@ -303,7 +365,11 @@ export const bulkDeleteUsers = createAsyncThunk(
   }
 );
 
-// Bulk update user status
+/**
+ * Bulk update user status (admin only)
+ * Endpoint: POST /admin/users/bulk-status
+ * Payload: { user_ids: [...], is_active: true/false }
+ */
 export const bulkUpdateUserStatus = createAsyncThunk(
   'admin/bulkUpdateUserStatus',
   async ({ userIds, is_active }, { rejectWithValue }) => {
@@ -319,7 +385,10 @@ export const bulkUpdateUserStatus = createAsyncThunk(
         });
       }
 
-      const response = await apiClient.post('/admin/users/bulk-status', { user_ids: userIds, is_active });
+      const response = await apiClient.post('/admin/users/bulk-status', { 
+        user_ids: userIds, 
+        is_active 
+      });
       return response.data;
     } catch (error) {
       const errorMessage = extractErrorMessage(error);
@@ -327,6 +396,8 @@ export const bulkUpdateUserStatus = createAsyncThunk(
     }
   }
 );
+
+// ─── Slice ────────────────────────────────────────────────────────────────────
 
 const initialState = {
   users: [],
@@ -356,23 +427,31 @@ const adminSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      // Fetch Users
+      // ── Fetch Users ──
       .addCase(fetchUsers.pending, (state) => {
         state.isLoading = true;
         state.error = null;
       })
       .addCase(fetchUsers.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.users = action.payload.items || action.payload;
-        state.total = action.payload.total || (action.payload.items?.length || action.payload.length);
+        // Handle both array and paginated responses
+        if (Array.isArray(action.payload)) {
+          state.users = action.payload;
+          state.total = action.payload.length;
+        } else {
+          state.users = action.payload.items || action.payload || [];
+          state.total = action.payload.total || state.users.length;
+        }
         state.error = null;
       })
       .addCase(fetchUsers.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload;
+        state.users = [];
+        state.total = 0;
       })
       
-      // Create User
+      // ── Create User ──
       .addCase(createUser.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -390,7 +469,7 @@ const adminSlice = createSlice({
         state.operationSuccess = false;
       })
       
-      // Update User
+      // ── Update User ──
       .addCase(updateUser.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -408,17 +487,25 @@ const adminSlice = createSlice({
         state.operationSuccess = false;
       })
       
-      // Update User Roles
+      // ── Update User Roles ──
       .addCase(updateUserRoles.pending, (state) => {
         state.isLoading = true;
         state.error = null;
         state.lastOperation = 'updateRoles';
         state.operationSuccess = false;
       })
-      .addCase(updateUserRoles.fulfilled, (state) => {
+      .addCase(updateUserRoles.fulfilled, (state, action) => {
         state.isLoading = false;
         state.operationSuccess = true;
         state.error = null;
+        // Update the user in the list with new roles
+        if (action.payload) {
+          const updatedUser = action.payload;
+          const index = state.users.findIndex(u => u.id === updatedUser.id);
+          if (index !== -1) {
+            state.users[index] = updatedUser;
+          }
+        }
       })
       .addCase(updateUserRoles.rejected, (state, action) => {
         state.isLoading = false;
@@ -426,7 +513,7 @@ const adminSlice = createSlice({
         state.operationSuccess = false;
       })
       
-      // Delete User
+      // ── Delete User ──
       .addCase(deleteUser.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -446,7 +533,7 @@ const adminSlice = createSlice({
         state.operationSuccess = false;
       })
       
-      // Reset Password
+      // ── Reset Password ──
       .addCase(resetUserPassword.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -464,7 +551,7 @@ const adminSlice = createSlice({
         state.operationSuccess = false;
       })
       
-      // Bulk Delete Users
+      // ── Bulk Delete Users ──
       .addCase(bulkDeleteUsers.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -482,7 +569,7 @@ const adminSlice = createSlice({
         state.operationSuccess = false;
       })
       
-      // Bulk Update Status
+      // ── Bulk Update Status ──
       .addCase(bulkUpdateUserStatus.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -501,6 +588,8 @@ const adminSlice = createSlice({
       });
   },
 });
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
 
 export const { clearAdminError, clearLastOperation, resetAdminState } = adminSlice.actions;
 export default adminSlice.reducer;

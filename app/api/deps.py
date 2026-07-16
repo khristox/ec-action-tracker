@@ -3,7 +3,9 @@
 from typing import List, Optional, Union, Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from jose import JWTError, jwt
 import uuid
 
@@ -13,6 +15,7 @@ from app.models.user import User
 from app.models.role import Role
 from app.crud.user import user as user_crud
 from app.schemas.token import TokenPayload
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login", auto_error=False)
 
@@ -39,22 +42,22 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     if not token:
         raise credentials_exception
-    
+
     try:
         secret_key = get_secret_key()
         payload = jwt.decode(
             token, secret_key, algorithms=[settings.ALGORITHM]
         )
-        
+
         # Get user_id from payload (could be in sub or user_id)
         user_id = payload.get("user_id") or payload.get("sub")
-        
+
         if not user_id:
             raise credentials_exception
-        
+
         token_data = TokenPayload(
             sub=user_id,
             user_id=user_id,
@@ -63,26 +66,29 @@ async def get_current_user(
         )
     except JWTError:
         raise credentials_exception
-    
+
     # Try to get user by UUID if it's a valid UUID, otherwise by username
     user = None
     try:
         # Try as UUID first
         user_uuid = uuid.UUID(str(user_id))
-        user = await user_crud.get(db, id=user_uuid)
+        result = await db.execute(
+            select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
+        )
+        user = result.scalar_one_or_none()
     except (ValueError, TypeError):
         # If not a valid UUID, try by username
         user = await user_crud.get_by_username(db, str(user_id))
-    
+
     if user is None:
         raise credentials_exception
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user"
         )
-    
+
     return user
 
 
@@ -96,17 +102,17 @@ async def get_current_user_optional(
     """
     if not token:
         return None
-    
+
     try:
         secret_key = get_secret_key()
         payload = jwt.decode(
             token, secret_key, algorithms=[settings.ALGORITHM]
         )
-        
+
         user_id = payload.get("user_id") or payload.get("sub")
         if not user_id:
             return None
-        
+
         token_data = TokenPayload(
             sub=user_id,
             user_id=user_id,
@@ -115,21 +121,24 @@ async def get_current_user_optional(
         )
     except JWTError:
         return None
-    
+
     # Try to get user by UUID if it's a valid UUID, otherwise by username
     user = None
     try:
         user_uuid = uuid.UUID(str(user_id))
-        user = await user_crud.get(db, id=user_uuid)
+        result = await db.execute(
+            select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
+        )
+        user = result.scalar_one_or_none()
     except (ValueError, TypeError):
         user = await user_crud.get_by_username(db, str(user_id))
-    
+
     if user is None:
         return None
-    
+
     if not user.is_active:
         return None
-    
+
     return user
 
 
@@ -142,17 +151,17 @@ def require_roles(allowed_roles: List[str]):
     ) -> User:
         if current_user.is_superuser:
             return current_user
-        
+
         user_role_codes = [role.code for role in current_user.roles]
-        
+
         if any(role_code in user_role_codes for role_code in allowed_roles):
             return current_user
-        
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Required roles: {', '.join(allowed_roles)}"
         )
-    
+
     return role_checker
 
 
@@ -186,14 +195,14 @@ async def get_current_admin(
     """Get the current admin user (users with admin role or superuser)."""
     if current_user.is_superuser:
         return current_user
-    
+
     has_admin_role = any(role.code == "admin" for role in current_user.roles)
     if not has_admin_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
-    
+
     return current_user
 
 
@@ -207,7 +216,7 @@ async def get_current_lecturer(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Lecturer privileges required"
         )
-    
+
     return current_user
 
 
@@ -221,7 +230,7 @@ async def get_current_student(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Student privileges required"
         )
-    
+
     return current_user
 
 
@@ -231,12 +240,12 @@ async def require_admin(
     """Require admin privileges (superuser or admin role)."""
     if current_user.is_superuser:
         return current_user
-    
+
     has_admin_role = any(role.code == "admin" for role in current_user.roles)
     if not has_admin_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
-    
+
     return current_user

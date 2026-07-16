@@ -1,18 +1,18 @@
 # app/crud/action_tracker/meeting_minutes.py
+
 from datetime import datetime
 from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.meetings.action_tracker import MAX_LIMIT
 from app.models.meetings.action_tracker import MeetingMinutes
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def get_by_meeting_with_filters(
-    self,
     db: AsyncSession,
     meeting_id: UUID,
     skip: int = 0,
@@ -63,11 +63,60 @@ async def get_by_meeting_with_filters(
     result = await db.execute(query)
     minutes = result.scalars().all()
     
-    # Add user-friendly names
-    for minute in minutes:
-        if minute.created_by:
-            minute.created_by_name = minute.created_by.username
-        if minute.recorded_by:
-            minute.recorded_by_name = minute.recorded_by.username
+    # Note: Removed manual property mapping loops to prevent AttributeError.
+    # The read-only properties on your model will resolve automatically during serialization.
     
-    return minutes, total
+    return list(minutes), total
+
+
+async def get_meeting_minutes(
+    db: AsyncSession,
+    meeting_id: UUID,
+    skip: int = 0,
+    limit: int = 100,
+    include_actions: bool = True
+) -> List[MeetingMinutes]:
+    """
+    Get all minutes for a meeting with pagination.
+    This is the function called by the meetings.py endpoint.
+    """
+    query = select(MeetingMinutes).where(
+        MeetingMinutes.meeting_id == meeting_id,
+        MeetingMinutes.is_active == True
+    )
+    
+    if include_actions:
+        query = query.options(
+            selectinload(MeetingMinutes.actions),
+            selectinload(MeetingMinutes.created_by),
+            selectinload(MeetingMinutes.recorded_by)
+        )
+    
+    query = (
+        query.order_by(MeetingMinutes.created_at.desc())
+        .offset(skip)
+        .limit(min(limit, MAX_LIMIT))
+    )
+    
+    result = await db.execute(query)
+    minutes = result.scalars().all()
+    
+    return list(minutes)
+
+
+async def get_minute_by_id(
+    db: AsyncSession,
+    minute_id: UUID
+) -> Optional[MeetingMinutes]:
+    """Get a single minute by ID with relationships loaded"""
+    query = select(MeetingMinutes).where(
+        MeetingMinutes.id == minute_id,
+        MeetingMinutes.is_active == True
+    ).options(
+        selectinload(MeetingMinutes.actions),
+        selectinload(MeetingMinutes.created_by),
+        selectinload(MeetingMinutes.recorded_by)
+    )
+    
+    result = await db.execute(query)
+    return result.scalar_one_or_none()

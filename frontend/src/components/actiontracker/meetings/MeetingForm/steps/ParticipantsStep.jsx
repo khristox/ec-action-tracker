@@ -5,12 +5,39 @@ import {
   FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
-import { PersonAdd as PersonAdd, EditNote as SecretaryIcon } from '@mui/icons-material';
+import { 
+  PersonAdd as PersonAdd, 
+  EditNote as SecretaryIcon,
+  People as PeopleIcon,
+  Person as PersonIcon,
+  ListAlt as ListIcon
+} from '@mui/icons-material';
 import { ExistingUsersSelector } from '../components/ExistingUsersSelector';
 import { ManualParticipantEntry } from '../components/ManualParticipantEntry';
 import { ParticipantListsSelector } from '../components/ParticipantListsSelector';
 import { ParticipantItem } from '../components/ParticipantItem';
-import { PARTICIPANT_TABS } from '../constants';
+
+// Updated tab configuration with short, meaningful names
+const PARTICIPANT_TABS = [
+  { 
+    value: 'existing', 
+    label: 'Users', 
+    icon: <PeopleIcon />, 
+    description: 'Add existing system users'
+  },
+  { 
+    value: 'manual', 
+    label: 'Manual', 
+    icon: <PersonIcon />, 
+    description: 'Add external participants'
+  },
+  { 
+    value: 'lists', 
+    label: 'Groups', 
+    icon: <ListIcon />, 
+    description: 'Add from saved participant lists'
+  }
+];
 
 export const ParticipantsStep = ({
   meetingParticipants,
@@ -30,6 +57,7 @@ export const ParticipantsStep = ({
 
   return (
     <Stack spacing={3}>
+      {/* Main Participants Card */}
       <Card variant="outlined">
         <CardContent>
           <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -37,6 +65,14 @@ export const ParticipantsStep = ({
               value={participantTab}
               onChange={(_, val) => setParticipantTab(val)}
               variant="fullWidth"
+              sx={{
+                '& .MuiTab-root': {
+                  minHeight: 48,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.875rem'
+                }
+              }}
             >
               {PARTICIPANT_TABS.map(tab => (
                 <Tab
@@ -73,29 +109,31 @@ export const ParticipantsStep = ({
         </CardContent>
       </Card>
 
+      {/* Added Participants List */}
       <Card variant="outlined">
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
             <Typography variant="subtitle1" fontWeight="bold">
-              👤 Added Participants ({meetingParticipants.length})
+              👤 Participants ({meetingParticipants.length})
             </Typography>
             <Button
               variant="outlined"
               startIcon={<PersonAdd />}
               onClick={() => setShowAddParticipantDialog(true)}
               disabled={apiLoading}
+              size="small"
             >
               Add More
             </Button>
           </Box>
 
           {meetingParticipants.length === 0 ? (
-            <Alert severity="info" variant="outlined">
-              No participants added yet. Use the options above to add participants.
+            <Alert severity="info" variant="outlined" sx={{ borderRadius: 2 }}>
+              No participants added. Use <strong>Users</strong>, <strong>Manual</strong>, or <strong>Groups</strong> to add.
             </Alert>
           ) : (
             <List sx={{ maxHeight: 400, overflow: 'auto' }}>
-              {meetingParticipants.map(p => (
+              {meetingParticipants.map((p, index) => (
                 <React.Fragment key={p.id}>
                   <ParticipantItem
                     participant={p}
@@ -105,7 +143,7 @@ export const ParticipantsStep = ({
                     isSecretary={p.name === formData.secretary_name}
                     showActions={!apiLoading}
                   />
-                  <Divider component="li" />
+                  {index < meetingParticipants.length - 1 && <Divider component="li" />}
                 </React.Fragment>
               ))}
             </List>
@@ -113,19 +151,23 @@ export const ParticipantsStep = ({
         </CardContent>
       </Card>
 
+      {/* Secretary Selection */}
       <Card variant="outlined" sx={{ borderLeft: 6, borderColor: 'secondary.main' }}>
         <CardContent>
           <Stack direction="row" spacing={1} alignItems="center" mb={2}>
             <SecretaryIcon color="secondary" />
-            <Typography variant="subtitle1" fontWeight="bold">Designate Secretary</Typography>
+            <Typography variant="subtitle1" fontWeight="bold">Secretary</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {meetingParticipants.length === 0 ? '(No participants available)' : ''}
+            </Typography>
           </Stack>
           <FormControl fullWidth>
-            <InputLabel>Select Secretary from Participants</InputLabel>
+            <InputLabel>Select Secretary</InputLabel>
             <Select
               name="secretary_name"
-              value={formData.secretary_name}
+              value={formData.secretary_name || ''}
               onChange={handleChange}
-              label="Select Secretary from Participants"
+              label="Select Secretary"
               disabled={apiLoading || meetingParticipants.length === 0}
             >
               <MenuItem value=""><em>None Selected</em></MenuItem>
@@ -138,8 +180,18 @@ export const ParticipantsStep = ({
       </Card>
 
       {/* Add Participant Dialog */}
-      <Dialog open={showAddParticipantDialog} onClose={() => setShowAddParticipantDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Add Participant</DialogTitle>
+      <Dialog 
+        open={showAddParticipantDialog} 
+        onClose={() => setShowAddParticipantDialog(false)} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <PersonAdd color="primary" />
+            <Typography variant="h6" fontWeight={700}>Add Participant</Typography>
+          </Stack>
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2 }}>
             <Tabs
@@ -197,3 +249,5 @@ export const ParticipantsStep = ({
     </Stack>
   );
 };
+
+export default ParticipantsStep;

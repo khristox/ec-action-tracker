@@ -35,6 +35,7 @@ import {
   Collapse,
   useMediaQuery,
   useTheme,
+  alpha,
 } from '@mui/material';
 import {
   Visibility,
@@ -56,6 +57,19 @@ import {
 } from '@mui/icons-material';
 import { register, clearError, resetRegistrationSuccess, resendVerification } from '../../store/slices/authSlice';
 
+// Elegant near-black dark palette (matches the rest of the app's dark theme:
+// a single true-black-adjacent surface family with a faint warm undertone,
+// rather than flat Tailwind-slate grays).
+const DARK = {
+  bg: '#0B0B0D',
+  surface: '#161618',
+  surfaceAlt: '#1D1D20',
+  surfaceLight: 'rgba(255, 255, 255, 0.04)',
+  border: 'rgba(255, 255, 255, 0.08)',
+  borderStrong: 'rgba(255, 255, 255, 0.14)',
+  textSecondary: '#A3A3AA',
+};
+
 function SlideTransition(props) {
   return <Slide {...props} direction="up" />;
 }
@@ -64,7 +78,8 @@ const SignUpCard = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
-  
+  const isDarkMode = theme.palette.mode === 'dark';
+
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { isRegistering, error, fieldErrors: reduxFieldErrors, registrationSuccess, verificationEmailSent } = useSelector((state) => state.auth);
@@ -99,6 +114,41 @@ const SignUpCard = () => {
   const [nameSplitOrder, setNameSplitOrder] = useState('first-last');
   const [tempFirstName, setTempFirstName] = useState('');
   const [tempLastName, setTempLastName] = useState('');
+
+  // ==================== Dark-mode-aware style helpers ====================
+
+  const textFieldSx = {
+    '& .MuiOutlinedInput-root': {
+      bgcolor: isDarkMode ? DARK.surfaceLight : 'transparent',
+      '& fieldset': {
+        borderColor: isDarkMode ? DARK.border : 'rgba(0,0,0,0.23)',
+      },
+      '&:hover fieldset': {
+        borderColor: isDarkMode ? DARK.borderStrong : 'rgba(0,0,0,0.4)',
+      },
+      '&.Mui-focused fieldset': {
+        borderColor: 'primary.main',
+      },
+    },
+    '& .MuiInputLabel-root': {
+      color: isDarkMode ? DARK.textSecondary : undefined,
+    },
+    '& .MuiInputLabel-root.Mui-focused': {
+      color: 'primary.main',
+    },
+    '& .MuiInputBase-input': {
+      color: isDarkMode ? '#FFFFFF' : undefined,
+    },
+    '& .MuiFormHelperText-root': {
+      color: isDarkMode ? 'rgba(255,255,255,0.5)' : undefined,
+    },
+  };
+
+  const dialogPaperSx = {
+    bgcolor: isDarkMode ? DARK.surface : '#FFFFFF',
+    backgroundImage: 'none',
+    border: isDarkMode ? `1px solid ${DARK.border}` : 'none',
+  };
 
   // Generate username from email
   const generateUsernameFromEmail = useCallback((email) => {
@@ -525,18 +575,28 @@ const SignUpCard = () => {
         maxWidth="sm"
         fullWidth
         fullScreen={isMobile}
+        PaperProps={{ sx: dialogPaperSx }}
       >
-        <DialogTitle>
+        <DialogTitle sx={{ borderBottom: isDarkMode ? `1px solid ${DARK.border}` : 'none' }}>
           <Box display="flex" alignItems="center" gap={1}>
             <MarkEmailReadOutlined color="primary" />
             <Typography variant={isMobile ? 'h6' : 'h5'}>Verify Your Email Address</Typography>
           </Box>
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ pt: 3 }}>
           <Typography variant="body2" sx={{ mb: 2 }}>
             We've sent a verification link to:
           </Typography>
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover', textAlign: 'center', mb: 2 }}>
+          <Paper 
+            variant="outlined" 
+            sx={{ 
+              p: 2, 
+              bgcolor: isDarkMode ? DARK.surfaceLight : 'action.hover', 
+              textAlign: 'center', 
+              mb: 2,
+              border: isDarkMode ? `1px solid ${DARK.border}` : undefined,
+            }}
+          >
             <Typography variant="subtitle1" fontWeight="bold" color="primary" sx={{ wordBreak: 'break-all' }}>
               {registeredEmail || formData.email}
             </Typography>
@@ -546,12 +606,22 @@ const SignUpCard = () => {
             The link will expire in 24 hours.
           </Typography>
           {verificationEmailSent && (
-            <Alert severity="success" sx={{ mt: 2 }}>
+            <Alert 
+              severity="success" 
+              sx={{ 
+                mt: 2,
+                ...(isDarkMode && {
+                  bgcolor: alpha('#10B981', 0.12),
+                  color: '#6EE7B7',
+                  '& .MuiAlert-icon': { color: '#34D399' },
+                }),
+              }}
+            >
               Verification link sent! Please check your inbox and spam folder.
             </Alert>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 3, flexDirection: 'column', gap: 2 }}>
+        <DialogActions sx={{ p: 3, pt: 1, flexDirection: 'column', gap: 2, borderTop: isDarkMode ? `1px solid ${DARK.border}` : 'none' }}>
           <Button 
             variant="contained" 
             fullWidth
@@ -576,7 +646,8 @@ const SignUpCard = () => {
           color: '#fff', 
           zIndex: (theme) => theme.zIndex.drawer + 1,
           flexDirection: 'column',
-          gap: 2
+          gap: 2,
+          bgcolor: isDarkMode ? alpha('#000000', 0.85) : alpha('#000000', 0.6),
         }}
         open={isRegistering || isSubmitting}
       >
@@ -606,14 +677,15 @@ const SignUpCard = () => {
         maxWidth="sm" 
         fullWidth
         fullScreen={isMobile}
+        PaperProps={{ sx: dialogPaperSx }}
       >
-        <DialogTitle>
+        <DialogTitle sx={{ borderBottom: isDarkMode ? `1px solid ${DARK.border}` : 'none' }}>
           <Box display="flex" alignItems="center" gap={1}>
             <BadgeOutlined />
             <Typography variant="h6">Edit Name Details</Typography>
           </Box>
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ pt: 3 }}>
           <Box sx={{ mt: 2 }}>
             <FormControlLabel
               control={
@@ -645,6 +717,7 @@ const SignUpCard = () => {
                   value={tempFirstName}
                   onChange={(e) => setTempFirstName(e.target.value)}
                   margin="normal"
+                  sx={textFieldSx}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -654,6 +727,7 @@ const SignUpCard = () => {
                   value={tempLastName}
                   onChange={(e) => setTempLastName(e.target.value)}
                   margin="normal"
+                  sx={textFieldSx}
                 />
               </Grid>
             </Grid>
@@ -663,7 +737,7 @@ const SignUpCard = () => {
             </Typography>
           </Box>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ borderTop: isDarkMode ? `1px solid ${DARK.border}` : 'none' }}>
           <Button onClick={() => setNameDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleSaveNameChanges} variant="contained" color="primary">
             Save Changes
@@ -680,7 +754,11 @@ const SignUpCard = () => {
           // FIX 2: Add margin auto for centering
           mx: 'auto',
           borderRadius: { xs: 3, sm: 4 },
-          boxShadow: { xs: '0 8px 24px rgba(0,0,0,0.12)', md: '0 12px 40px rgba(0,0,0,0.13)' },
+          bgcolor: isDarkMode ? DARK.surface : '#FFFFFF',
+          border: isDarkMode ? `1px solid ${DARK.border}` : 'none',
+          boxShadow: isDarkMode
+            ? `0 8px 32px 0 ${alpha('#000', 0.7)}, inset 0 0 0 1px ${DARK.border}`
+            : { xs: '0 8px 24px rgba(0,0,0,0.12)', md: '0 12px 40px rgba(0,0,0,0.13)' },
           position: 'relative',
           overflow: 'visible',
           opacity: isFormDisabled ? 0.5 : 1,
@@ -696,10 +774,10 @@ const SignUpCard = () => {
           {/* Header - FIX 4: Responsive icon and text sizes */}
           <Box sx={{ textAlign: 'center', mb: { xs: 2.5, sm: 3 } }}>
             <Group sx={{ fontSize: { xs: 40, sm: 48 }, color: 'primary.main', mb: 1 }} />
-            <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={700} gutterBottom>
+            <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={700} gutterBottom sx={{ color: isDarkMode ? '#FFFFFF' : undefined }}>
               Create Account
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" sx={{ color: isDarkMode ? DARK.textSecondary : 'text.secondary' }}>
               Join us to manage your action items and meetings
             </Typography>
           </Box>
@@ -710,7 +788,14 @@ const SignUpCard = () => {
               <Alert 
                 severity="info" 
                 icon={<HourglassEmpty />}
-                sx={{ mb: 3 }}
+                sx={{
+                  mb: 3,
+                  ...(isDarkMode && {
+                    bgcolor: alpha('#3B82F6', 0.12),
+                    color: '#93C5FD',
+                    '& .MuiAlert-icon': { color: '#60A5FA' },
+                  }),
+                }}
                 onClose={() => {
                   setWaitTimeRemaining(0);
                   setWaitMessage('');
@@ -737,8 +822,21 @@ const SignUpCard = () => {
               overflowX: 'auto',
               // Optional: Make stepper scrollable on very small screens
               '& .MuiStepLabel-label': {
-                fontSize: { xs: '0.75rem', sm: '0.875rem' }
-              }
+                fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                color: isDarkMode ? DARK.textSecondary : undefined,
+                '&.Mui-active': {
+                  color: isDarkMode ? '#FFFFFF' : undefined,
+                  fontWeight: 600,
+                },
+                '&.Mui-completed': {
+                  color: isDarkMode ? '#A78BFA' : undefined,
+                },
+              },
+              '& .MuiStepIcon-root': {
+                color: isDarkMode ? 'rgba(255,255,255,0.15)' : undefined,
+                '&.Mui-active': { color: isDarkMode ? '#7C3AED' : undefined },
+                '&.Mui-completed': { color: isDarkMode ? '#7C3AED' : undefined },
+              },
             }}
           >
             {steps.map((label) => (
@@ -754,7 +852,14 @@ const SignUpCard = () => {
               <Alert 
                 severity="error" 
                 icon={<ErrorOutlined />}
-                sx={{ mb: 3 }}
+                sx={{
+                  mb: 3,
+                  ...(isDarkMode && {
+                    bgcolor: alpha('#EF4444', 0.12),
+                    color: '#FCA5A5',
+                    '& .MuiAlert-icon': { color: '#F87171' },
+                  }),
+                }}
                 onClose={() => dispatch(clearError())}
               >
                 {errorMessage}
@@ -775,7 +880,14 @@ const SignUpCard = () => {
             <Alert 
               severity="success" 
               icon={<CheckCircleOutlined />} 
-              sx={{ mb: 3 }}
+              sx={{
+                mb: 3,
+                ...(isDarkMode && {
+                  bgcolor: alpha('#10B981', 0.12),
+                  color: '#6EE7B7',
+                  '& .MuiAlert-icon': { color: '#34D399' },
+                }),
+              }}
               action={
                 <Button color="inherit" size="small" onClick={() => setVerificationDialogOpen(true)}>
                   Verify Now
@@ -808,6 +920,7 @@ const SignUpCard = () => {
                   error={hasFieldError('email')}
                   helperText={getFieldError('email')}
                   disabled={isFormDisabled}
+                  sx={textFieldSx}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -829,6 +942,7 @@ const SignUpCard = () => {
                   error={hasFieldError('username')}
                   helperText={getFieldError('username') || 'Letters, numbers, and underscores only'}
                   disabled={isFormDisabled}
+                  sx={textFieldSx}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -858,7 +972,7 @@ const SignUpCard = () => {
                 {/* Username Suggestions */}
                 {fieldErrors.username === 'This username is already taken. Please choose another.' && (
                   <Box sx={{ mt: 1, mb: 2 }}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" sx={{ color: isDarkMode ? DARK.textSecondary : 'text.secondary' }}>
                       Suggestions:
                     </Typography>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
@@ -871,7 +985,15 @@ const SignUpCard = () => {
                             setFormData(prev => ({ ...prev, username: suggestion }));
                             setLocalFieldErrors(prev => ({ ...prev, username: '' }));
                           }}
-                          sx={{ cursor: 'pointer' }}
+                          sx={{
+                            cursor: 'pointer',
+                            ...(isDarkMode && {
+                              bgcolor: DARK.surfaceLight,
+                              color: '#E5E7EB',
+                              border: `1px solid ${DARK.border}`,
+                              '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' },
+                            }),
+                          }}
                           disabled={isFormDisabled}
                         />
                       ))}
@@ -891,6 +1013,7 @@ const SignUpCard = () => {
                     error={hasFieldError('full_name')}
                     helperText={getFieldError('full_name')}
                     disabled={isFormDisabled}
+                    sx={textFieldSx}
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
@@ -916,8 +1039,8 @@ const SignUpCard = () => {
                         },
                         zIndex: 1,
                         '&.Mui-disabled': {
-                          backgroundColor: 'grey.400',
-                          color: 'grey.600',
+                          backgroundColor: isDarkMode ? 'rgba(255,255,255,0.12)' : 'grey.400',
+                          color: isDarkMode ? 'rgba(255,255,255,0.3)' : 'grey.600',
                         },
                       }}
                       size="small"
@@ -930,15 +1053,20 @@ const SignUpCard = () => {
                 
                 {/* Display split names */}
                 {(formData.first_name || formData.last_name) && (
-                  <Box sx={{ mt: 2, mb: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                  <Box sx={{ 
+                    mt: 2, mb: 2, p: 2, 
+                    bgcolor: isDarkMode ? DARK.surfaceLight : '#f5f5f5', 
+                    borderRadius: 2,
+                    border: isDarkMode ? `1px solid ${DARK.border}` : 'none',
+                  }}>
+                    <Typography variant="caption" sx={{ color: isDarkMode ? DARK.textSecondary : 'text.secondary' }} gutterBottom display="block">
                       Will be saved as:
                     </Typography>
                     <Box sx={{ display: 'flex', gap: 3, mt: 1, flexWrap: 'wrap' }}>
-                      <Typography variant="body2">
+                      <Typography variant="body2" sx={{ color: isDarkMode ? '#FFFFFF' : undefined }}>
                         <strong>First Name:</strong> {formData.first_name || '—'}
                       </Typography>
-                      <Typography variant="body2">
+                      <Typography variant="body2" sx={{ color: isDarkMode ? '#FFFFFF' : undefined }}>
                         <strong>Last Name:</strong> {formData.last_name || '—'}
                       </Typography>
                     </Box>
@@ -966,6 +1094,7 @@ const SignUpCard = () => {
                   error={hasFieldError('phone')}
                   helperText={getFieldError('phone') || 'e.g., +256712345678'}
                   disabled={isFormDisabled}
+                  sx={textFieldSx}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -992,6 +1121,7 @@ const SignUpCard = () => {
                   error={hasFieldError('password')}
                   helperText={getFieldError('password')}
                   disabled={isFormDisabled}
+                  sx={textFieldSx}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -1030,13 +1160,15 @@ const SignUpCard = () => {
                           sx={{
                             height: 3,
                             flex: 1,
-                            bgcolor: level <= passwordStrength.score ? passwordStrength.color : 'grey.300',
+                            bgcolor: level <= passwordStrength.score
+                              ? passwordStrength.color
+                              : (isDarkMode ? 'rgba(255,255,255,0.12)' : 'grey.300'),
                             borderRadius: 1,
                           }}
                         />
                       ))}
                     </Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: isDarkMode ? DARK.textSecondary : 'text.secondary' }}>
                       Minimum 8 characters with uppercase, lowercase, number, and special character
                     </Typography>
                   </Box>
@@ -1055,6 +1187,7 @@ const SignUpCard = () => {
                   error={hasFieldError('confirmPassword')}
                   helperText={getFieldError('confirmPassword')}
                   disabled={isFormDisabled}
+                  sx={textFieldSx}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -1080,25 +1213,33 @@ const SignUpCard = () => {
             )}
 
             {activeStep === 2 && (
-              <Paper elevation={0} sx={{ p: 3, bgcolor: 'background.default', borderRadius: 2 }}>
-                <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+              <Paper 
+                elevation={0} 
+                sx={{ 
+                  p: 3, 
+                  bgcolor: isDarkMode ? DARK.surfaceLight : 'background.default', 
+                  borderRadius: 2,
+                  border: isDarkMode ? `1px solid ${DARK.border}` : 'none',
+                }}
+              >
+                <Typography variant="subtitle1" fontWeight={600} gutterBottom sx={{ color: isDarkMode ? '#FFFFFF' : undefined }}>
                   Review your information:
                 </Typography>
                 <Box sx={{ mt: 2 }}>
-                  <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                  <Typography variant="body2" sx={{ wordBreak: 'break-all', color: isDarkMode ? '#E5E7EB' : undefined }}>
                     <strong>Email:</strong> {formData.email}
                   </Typography>
-                  <Typography variant="body2" sx={{ mt: 1 }}>
+                  <Typography variant="body2" sx={{ mt: 1, color: isDarkMode ? '#E5E7EB' : undefined }}>
                     <strong>Username:</strong> {formData.username}
                   </Typography>
-                  <Typography variant="body2" sx={{ mt: 1 }}>
+                  <Typography variant="body2" sx={{ mt: 1, color: isDarkMode ? '#E5E7EB' : undefined }}>
                     <strong>First Name:</strong> {formData.first_name}
                   </Typography>
-                  <Typography variant="body2" sx={{ mt: 1 }}>
+                  <Typography variant="body2" sx={{ mt: 1, color: isDarkMode ? '#E5E7EB' : undefined }}>
                     <strong>Last Name:</strong> {formData.last_name}
                   </Typography>
                   {formData.phone && (
-                    <Typography variant="body2" sx={{ mt: 1 }}>
+                    <Typography variant="body2" sx={{ mt: 1, color: isDarkMode ? '#E5E7EB' : undefined }}>
                       <strong>Phone:</strong> {formData.phone}
                     </Typography>
                   )}
@@ -1111,6 +1252,11 @@ const SignUpCard = () => {
                 onClick={handleBack}
                 disabled={activeStep === 0 || isFormDisabled}
                 variant="outlined"
+                sx={isDarkMode ? {
+                  borderColor: DARK.border,
+                  color: DARK.textSecondary,
+                  '&:hover': { borderColor: DARK.borderStrong, bgcolor: DARK.surfaceLight },
+                } : undefined}
               >
                 Back
               </Button>
@@ -1143,8 +1289,8 @@ const SignUpCard = () => {
             </Box>
           </form>
 
-          <Divider sx={{ my: 3 }}>
-            <Typography variant="caption" color="text.secondary">
+          <Divider sx={{ my: 3, borderColor: isDarkMode ? DARK.border : undefined }}>
+            <Typography variant="caption" sx={{ color: isDarkMode ? DARK.textSecondary : 'text.secondary' }}>
               Already have an account?
             </Typography>
           </Divider>

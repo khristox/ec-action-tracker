@@ -151,10 +151,12 @@ const Meetings = () => {
     return status?.color || 'default';
   };
 
+  // Widened cards: was minmax(280px, 1fr) — now minmax(360px, 1fr),
+  // so fewer, wider cards appear per row on desktop.
   const getGridColumns = useCallback(() => {
     if (isMobile) return '1fr';
     if (isTablet) return 'repeat(2, 1fr)';
-    return 'repeat(auto-fill, minmax(280px, 1fr))';
+    return 'repeat(auto-fill, minmax(360px, 1fr))';
   }, [isMobile, isTablet]);
 
   // ==================== STORAGE HELPERS ====================
@@ -440,14 +442,14 @@ const Meetings = () => {
               >
                 New Meeting
               </Button>
-              <Button 
+              {/* <Button 
                 variant={tabValue === 1 ? "contained" : "outlined"} 
                 startIcon={<Add />} 
                 onClick={() => navigate('/recurring-meetings/create')} 
                 sx={{ borderRadius: 2.5, px: 3, py: 1.2, fontWeight: 700, textTransform: 'none' }}
               >
                 New Series
-              </Button>
+              </Button> */}
             </Stack>
           )}
         </Stack>

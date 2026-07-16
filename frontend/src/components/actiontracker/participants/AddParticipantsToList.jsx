@@ -55,17 +55,17 @@ import {
   Info as InfoIcon,
   Warning as WarningIcon,
   Badge as BadgeIcon,
-  Star as StarIcon,
   Work as WorkIcon,
   Notes as NotesIcon,
-  PersonSearch as PersonSearchIcon,
-  AccountCircle as AccountCircleIcon
+  ContactsOutlined as ContactsIcon
 } from '@mui/icons-material';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  fetchAvailableParticipants,
+  fetchParticipants,
+  selectAllParticipants,
+  selectParticipantsPagination,
+  selectListMembers,
   addMembersToList,
-  createParticipant,
   clearError
 } from '../../../store/slices/actionTracker/participantSlice';
 import api from '../../../services/api';
@@ -76,8 +76,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   const isDark = theme.palette.mode === 'dark';
   
   const dispatch = useDispatch();
-  const { availableParticipants, loading } = useSelector((state) => state.participants);
-  
+
   const [activeTab, setActiveTab] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState([]);
@@ -87,11 +86,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   const [error, setError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
   const [fieldFocus, setFieldFocus] = useState({});
-  
-  // State for users from the users/available endpoint
-  const [availableUsers, setAvailableUsers] = useState([]);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
   
   // New participant form
   const [newParticipant, setNewParticipant] = useState({
@@ -103,65 +98,53 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     notes: ''
   });
   const [creating, setCreating] = useState(false);
-  const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
   
   const itemsPerPage = isMobile ? 10 : 20;
-  
-  // Get available participants data from Redux
-  const availableData = availableParticipants[listId] || { items: [], total: 0, pages: 1 };
-  const participants = availableData.items || [];
-  const totalPages = availableData.pages || 1;
 
-  // 🔥 NEW: Fetch users from the users/available endpoint
-  const fetchAvailableUsers = useCallback(async () => {
+  // Existing Participant records (the real Participant table — NOT platform
+  // Users) pulled from the general listing endpoint:
+  //   GET /action-tracker/participants/?page=&limit=&search=
+  // This returns ALL participants (not scoped to a particular list), so we
+  // filter out anyone already a member of this list ourselves, using the
+  // list-members data the parent (ParticipantListsManager) already keeps in
+  // Redux for the currently-viewed list.
+  const allParticipants = useSelector(selectAllParticipants);
+  const participantsPagination = useSelector(selectParticipantsPagination);
+  const currentListMembers = useSelector((state) => selectListMembers(state, listId));
+
+  const memberIds = React.useMemo(() => {
+    const items = currentListMembers?.items || [];
+    return new Set(items.map((m) => m.id));
+  }, [currentListMembers]);
+
+  const availableList = React.useMemo(
+    () => allParticipants.filter((p) => !memberIds.has(p.id)),
+    [allParticipants, memberIds]
+  );
+  const totalAvailable = participantsPagination.total || 0;
+  const totalAvailablePages = participantsPagination.pages || 1;
+
+  const fetchParticipantsForList = useCallback(async () => {
     if (!open || activeTab !== 0) return;
-    
-    setLoadingUsers(true);
+
+    setLoadingParticipants(true);
     try {
-      const response = await api.get('/users/available', {
-        params: {
-          skip: (page - 1) * itemsPerPage,
-          limit: itemsPerPage,
-          search: searchTerm || undefined
-        }
-      });
-      
-      // The response structure might be { items: [], total: 0 } or just an array
-      const data = response.data;
-      const users = data.items || data || [];
-      const total = data.total || users.length;
-      
-      setAvailableUsers(users);
-      setTotalUsers(total);
+      await dispatch(fetchParticipants({
+        page,
+        limit: itemsPerPage,
+        search: searchTerm || undefined
+      })).unwrap();
     } catch (err) {
-      console.error('Failed to fetch available users:', err);
-      setError('Failed to load users. Please try again.');
+      console.error('Failed to fetch participants:', err);
+      setError({ type: 'general', message: 'Failed to load participants. Please try again.' });
     } finally {
-      setLoadingUsers(false);
+      setLoadingParticipants(false);
     }
-  }, [open, activeTab, page, itemsPerPage, searchTerm]);
+  }, [dispatch, open, activeTab, page, itemsPerPage, searchTerm]);
 
-  // Fetch users when the component mounts or filters change
   useEffect(() => {
-    fetchAvailableUsers();
-  }, [fetchAvailableUsers]);
-
-  // Also fetch from the existing Redux action for participants
-  const fetchData = useCallback(() => {
-    if (listId && open && activeTab === 0) {
-      dispatch(fetchAvailableParticipants({
-        listId,
-        params: {
-          skip: (page - 1) * itemsPerPage,
-          limit: itemsPerPage,
-          search: searchTerm || undefined
-        }
-      }));
-    }
-  }, [dispatch, listId, open, activeTab, page, searchTerm, itemsPerPage]);
-  
-  // Use the new fetchAvailableUsers instead of fetchData
-  // Keep fetchData as fallback or for other parts of the component
+    fetchParticipantsForList();
+  }, [fetchParticipantsForList]);
   
   // Handle participant selection
   const handleToggleParticipant = (participant) => {
@@ -177,21 +160,21 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   
   // Handle select all on current page
   const handleSelectAll = () => {
-    if (selectedParticipants.length === availableUsers.length) {
+    if (selectedParticipants.length === availableList.length) {
       setSelectedParticipants([]);
     } else {
-      setSelectedParticipants([...availableUsers]);
+      setSelectedParticipants([...availableList]);
     }
   };
   
-  // Handle submit selected participants
+  // Handle submit selected participants — these are real Participant.id
+  // values from the Participant table, so this works directly.
   const handleSubmitSelected = async () => {
     if (selectedParticipants.length === 0) return;
     
     setSubmitting(true);
     setError(null);
     try {
-      // Add the selected users to the participant list
       await dispatch(addMembersToList({
         listId,
         participantIds: selectedParticipants.map(p => p.id)
@@ -200,8 +183,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
       setSuccessMessage(`Successfully added ${selectedParticipants.length} participant(s) to "${listName}"`);
       setSelectedParticipants([]);
       
-      // Refresh the available users list
-      fetchAvailableUsers();
+      fetchParticipantsForList();
       
       setTimeout(() => {
         if (onSuccess) onSuccess();
@@ -209,7 +191,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
       }, 1500);
     } catch (err) {
       console.error('Failed to add participants:', err);
-      setError(err.message || 'Failed to add participants');
+      setError({ type: 'general', message: err?.message || err || 'Failed to add participants' });
     } finally {
       setSubmitting(false);
     }
@@ -238,27 +220,6 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
-  };
-  
-  // Check if participant exists by email - search ALL users
-  const checkIfParticipantExists = async (email) => {
-    if (!email || skipDuplicateCheck) return null;
-    
-    try {
-      // Search from all registered users
-      const response = await api.get('/users/available', {
-        params: { 
-          search: email,
-          limit: 5
-        },
-        timeout: 5000
-      });
-      const users = response.data?.items || response.data || [];
-      return users.find(p => p.email === email);
-    } catch (err) {
-      console.warn('Error checking existing participant (will proceed with creation):', err.message);
-      return null;
-    }
   };
   
   // Handle create new participant
@@ -300,15 +261,14 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
         notes: ''
       });
       
-      // Refresh the available users list
-      fetchAvailableUsers();
+      fetchParticipantsForList();
       
       setTimeout(() => {
         if (onSuccess) onSuccess();
         onClose();
       }, 1500);
     } catch (err) {
-      console.error('Failed to create participant:', err);
+      console.error('Failed to create participant:', err.response?.data || err.message);
       
       if (err.response?.status === 400 && err.response?.data?.detail) {
         const errorDetail = err.response.data.detail;
@@ -357,7 +317,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
         participantIds: [participant.id]
       })).unwrap();
       setSuccessMessage(`"${participant.name}" added to "${listName}" successfully!`);
-      fetchAvailableUsers();
+      fetchParticipantsForList();
       setTimeout(() => {
         if (onSuccess) onSuccess();
         onClose();
@@ -387,9 +347,6 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     if (error) {
       setError(null);
     }
-    if (field === 'email') {
-      setSkipDuplicateCheck(false);
-    }
   };
   
   const handleFieldFocus = (field) => {
@@ -406,8 +363,23 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     setSelectedParticipants([]);
     setSearchTerm('');
     setValidationErrors({});
-    setSkipDuplicateCheck(false);
     setPage(1);
+  };
+
+  const handleClose = () => {
+    setSelectedParticipants([]);
+    setSearchTerm('');
+    setNewParticipant({
+      name: '',
+      email: '',
+      telephone: '',
+      title: '',
+      organization: '',
+      notes: ''
+    });
+    setValidationErrors({});
+    setError(null);
+    onClose();
   };
   
   // Get gradient colors based on theme
@@ -418,9 +390,6 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
   const successGradient = isDark
     ? `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.12)} 0%, ${alpha(theme.palette.success.dark, 0.04)} 100%)`
     : `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.06)} 0%, ${alpha(theme.palette.success.light, 0.02)} 100%)`;
-
-  // Total pages for users
-  const totalUserPages = Math.ceil(totalUsers / itemsPerPage);
 
   // Floating label animation variants
   const inputVariants = {
@@ -438,7 +407,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
     <>
       <Dialog 
         open={open} 
-        onClose={onClose} 
+        onClose={handleClose} 
         maxWidth="md" 
         fullWidth
         fullScreen={isMobile}
@@ -490,7 +459,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
               </Typography>
             </Box>
             <Tooltip title="Close">
-              <IconButton onClick={onClose} size="small" sx={{ 
+              <IconButton onClick={handleClose} size="small" sx={{ 
                 bgcolor: alpha(theme.palette.grey[500], 0.1),
                 '&:hover': {
                   bgcolor: alpha(theme.palette.grey[500], 0.2),
@@ -526,9 +495,9 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
             }}
           >
             <Tab 
-              icon={<PersonSearchIcon />} 
+              icon={<ContactsIcon />} 
               iconPosition="start" 
-              label="Search Users" 
+              label="Browse Participants" 
             />
             <Tab 
               icon={<PersonAdd />} 
@@ -537,7 +506,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
             />
           </Tabs>
           
-          {/* Tab 1: Search Users from /users/available */}
+          {/* Tab 1: Browse existing Participant records */}
           {activeTab === 0 && (
             <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
               {/* Info Banner */}
@@ -549,10 +518,10 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                 alignItems: 'center',
                 gap: 1
               }}>
-                <PersonSearchIcon sx={{ color: theme.palette.info.main, fontSize: 20 }} />
+                <ContactsIcon sx={{ color: theme.palette.info.main, fontSize: 20 }} />
                 <Typography variant="body2" color="text.secondary">
-                  Search from <strong>all registered users</strong> in the system. 
-                  {listId && ' Only users not already in this list will be shown.'}
+                  Browse from <strong>all saved participants</strong> in the system.
+                  {listId && ' Participants already in this list are hidden from each page shown.'}
                 </Typography>
               </Box>
               
@@ -560,7 +529,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
               <Box sx={{ p: isMobile ? 2 : 2.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
                 <TextField
                   fullWidth
-                  placeholder="Search all registered users by name, email..."
+                  placeholder="Search participants by name, email..."
                   value={searchTerm}
                   onChange={handleSearchChange}
                   size={isMobile ? "small" : "medium"}
@@ -610,7 +579,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                       <Box display="flex" alignItems="center" gap={1}>
                         <CheckCircleIcon sx={{ color: theme.palette.primary.main }} />
                         <Typography variant="body2" fontWeight={600}>
-                          {selectedParticipants.length} user(s) selected
+                          {selectedParticipants.length} participant(s) selected
                         </Typography>
                       </Box>
                       <Box display="flex" gap={1}>
@@ -639,24 +608,24 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
               </AnimatePresence>
               
               {/* Error Alert */}
-              {error && !error.type && (
+              {error && error.type === 'general' && (
                 <Alert 
                   severity="error" 
                   sx={{ m: 2, borderRadius: 2 }} 
                   onClose={() => setError(null)}
                   icon={<WarningIcon />}
                 >
-                  {error.message || error}
+                  {error.message}
                 </Alert>
               )}
               
-              {/* Users List */}
+              {/* Participants List */}
               <Box sx={{ flex: 1, overflow: 'auto', p: isMobile ? 1.5 : 2 }}>
-                {loadingUsers ? (
+                {loadingParticipants ? (
                   <Box display="flex" justifyContent="center" py={5}>
                     <CircularProgress />
                   </Box>
-                ) : availableUsers.length === 0 ? (
+                ) : availableList.length === 0 ? (
                   <Box textAlign="center" py={5}>
                     <Paper sx={{ 
                       p: 4, 
@@ -665,9 +634,9 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                       borderRadius: 3,
                       border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
                     }}>
-                      <AccountCircleIcon sx={{ fontSize: 64, color: theme.palette.text.disabled, mb: 2, opacity: 0.5 }} />
+                      <PeopleIcon sx={{ fontSize: 64, color: theme.palette.text.disabled, mb: 2, opacity: 0.5 }} />
                       <Typography color="text.secondary" gutterBottom variant="h6">
-                        {searchTerm ? 'No registered users match your search' : 'All registered users are already in this list'}
+                        {searchTerm ? 'No participants match your search' : 'No participants available on this page (they may already be in this list)'}
                       </Typography>
                       {searchTerm && (
                         <Button 
@@ -684,7 +653,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                           startIcon={<PersonAdd />}
                           onClick={() => setActiveTab(1)}
                         >
-                          Create New User
+                          Create New Participant
                         </Button>
                       </Box>
                     </Paper>
@@ -693,7 +662,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                   <>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                       <Typography variant="body2" color="text.secondary">
-                        Showing {availableUsers.length} of {totalUsers} registered users
+                        Showing {availableList.length} available on this page ({totalAvailable} total participants)
                       </Typography>
                       <Button 
                         size="small" 
@@ -701,29 +670,29 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                         startIcon={<AddCircleIcon />}
                         sx={{ borderRadius: 2 }}
                       >
-                        {selectedParticipants.length === availableUsers.length ? 'Deselect All' : 'Select All Page'}
+                        {selectedParticipants.length === availableList.length ? 'Deselect All' : 'Select All Page'}
                       </Button>
                     </Box>
                     
                     <List dense={!isMobile} sx={{ bgcolor: 'transparent' }}>
                       <AnimatePresence>
-                        {availableUsers.map((user, index) => (
+                        {availableList.map((participant, index) => (
                           <motion.div
-                            key={user.id}
+                            key={participant.id}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: index * 0.02 }}
                           >
                             <ListItem
                               button
-                              onClick={() => handleToggleParticipant(user)}
+                              onClick={() => handleToggleParticipant(participant)}
                               sx={{
                                 borderRadius: 2,
                                 mb: 1,
-                                bgcolor: selectedParticipants.some(p => p.id === user.id) 
+                                bgcolor: selectedParticipants.some(p => p.id === participant.id) 
                                   ? alpha(theme.palette.primary.main, 0.08)
                                   : 'transparent',
-                                border: `1px solid ${selectedParticipants.some(p => p.id === user.id) 
+                                border: `1px solid ${selectedParticipants.some(p => p.id === participant.id) 
                                   ? alpha(theme.palette.primary.main, 0.3)
                                   : alpha(theme.palette.divider, 0.5)}`,
                                 transition: 'all 0.2s',
@@ -735,37 +704,37 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                               }}
                             >
                               <Checkbox
-                                checked={selectedParticipants.some(p => p.id === user.id)}
-                                onChange={() => handleToggleParticipant(user)}
+                                checked={selectedParticipants.some(p => p.id === participant.id)}
+                                onChange={() => handleToggleParticipant(participant)}
                                 onClick={(e) => e.stopPropagation()}
                                 icon={<CheckCircleIcon sx={{ color: theme.palette.text.disabled }} />}
                                 checkedIcon={<CheckCircleIcon sx={{ color: theme.palette.primary.main }} />}
                               />
                               <ListItemAvatar>
                                 <Avatar sx={{ 
-                                  bgcolor: selectedParticipants.some(p => p.id === user.id)
+                                  bgcolor: selectedParticipants.some(p => p.id === participant.id)
                                     ? theme.palette.primary.main
                                     : theme.palette.grey[isDark ? 700 : 400],
                                   transition: 'all 0.2s',
-                                  background: selectedParticipants.some(p => p.id === user.id) && isDark
+                                  background: selectedParticipants.some(p => p.id === participant.id) && isDark
                                     ? `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`
                                     : 'none'
                                 }}>
-                                  {user.username?.charAt(0)?.toUpperCase() || user.name?.charAt(0)?.toUpperCase() || 'U'}
+                                  {participant.name?.charAt(0)?.toUpperCase() || participant.email?.charAt(0)?.toUpperCase() || '?'}
                                 </Avatar>
                               </ListItemAvatar>
                               <ListItemText
                                 primary={
                                   <Typography variant="body1" fontWeight={500}>
-                                    {user.name || user.username}
+                                    {participant.name || 'Unnamed'}
                                   </Typography>
                                 }
                                 secondary={
                                   <Stack direction="row" spacing={1} flexWrap="wrap" gap={0.5} mt={0.5}>
-                                    {user.email && (
+                                    {participant.email && (
                                       <Chip 
                                         icon={<EmailIcon sx={{ fontSize: 14 }} />}
-                                        label={user.email} 
+                                        label={participant.email} 
                                         size="small" 
                                         variant="outlined" 
                                         sx={{ 
@@ -776,10 +745,10 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                                         }}
                                       />
                                     )}
-                                    {user.phone && (
+                                    {participant.telephone && (
                                       <Chip 
                                         icon={<PhoneIcon sx={{ fontSize: 14 }} />}
-                                        label={user.phone} 
+                                        label={participant.telephone} 
                                         size="small" 
                                         variant="outlined" 
                                         sx={{ 
@@ -790,33 +759,36 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                                         }}
                                       />
                                     )}
-                                    {user.is_superuser && (
+                                    {participant.organization && (
                                       <Chip 
-                                        label="Admin" 
+                                        icon={<BusinessIcon sx={{ fontSize: 14 }} />}
+                                        label={participant.organization} 
                                         size="small" 
-                                        color="warning"
+                                        variant="outlined" 
+                                        sx={{ 
+                                          fontSize: '0.7rem', 
+                                          height: 24,
+                                          borderColor: alpha(theme.palette.primary.main, 0.2),
+                                          bgcolor: alpha(theme.palette.background.paper, 0.5)
+                                        }}
+                                      />
+                                    )}
+                                    {participant.title && (
+                                      <Chip 
+                                        label={participant.title} 
+                                        size="small" 
                                         sx={{ 
                                           height: 20, 
                                           fontSize: '0.6rem',
-                                          fontWeight: 600
+                                          bgcolor: alpha(theme.palette.secondary.main, 0.1),
+                                          color: theme.palette.secondary.main
                                         }}
                                       />
                                     )}
-                                    <Chip 
-                                      label="Available" 
-                                      size="small" 
-                                      color="success"
-                                      sx={{ 
-                                        height: 20, 
-                                        fontSize: '0.6rem',
-                                        bgcolor: alpha(theme.palette.success.main, 0.1),
-                                        color: theme.palette.success.main
-                                      }}
-                                    />
                                   </Stack>
                                 }
                               />
-                              {selectedParticipants.some(p => p.id === user.id) && (
+                              {selectedParticipants.some(p => p.id === participant.id) && (
                                 <motion.div
                                   initial={{ scale: 0 }}
                                   animate={{ scale: 1 }}
@@ -835,7 +807,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
               </Box>
               
               {/* Pagination */}
-              {totalUserPages > 1 && (
+              {totalAvailablePages > 1 && (
                 <Box sx={{ 
                   p: 2, 
                   borderTop: `1px solid ${theme.palette.divider}`, 
@@ -844,7 +816,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                 }}>
                   <Stack alignItems="center">
                     <Pagination
-                      count={totalUserPages}
+                      count={totalAvailablePages}
                       page={page}
                       onChange={(_, val) => setPage(val)}
                       color="primary"
@@ -1230,7 +1202,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
           backdropFilter: isDark ? 'blur(10px)' : 'none'
         }}>
           <Button 
-            onClick={onClose} 
+            onClick={handleClose} 
             fullWidth={isMobile} 
             size="large"
             sx={{ borderRadius: 2 }}
@@ -1262,7 +1234,7 @@ const AddParticipantsToList = ({ open, onClose, onSuccess, listId, listName }) =
                   }
                 }}
               >
-                {submitting ? 'Adding...' : `Add ${selectedParticipants.length} User(s)`}
+                {submitting ? 'Adding...' : `Add ${selectedParticipants.length} Participant(s)`}
               </Button>
             </motion.div>
           )}

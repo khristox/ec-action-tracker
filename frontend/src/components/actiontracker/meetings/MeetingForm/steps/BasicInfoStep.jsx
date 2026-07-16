@@ -23,8 +23,6 @@ import {
   Description as DescriptionIcon,
   Event as EventIcon,
   AccessTime as AccessTimeIcon,
-  Business as BusinessIcon,
-  Lock as LockIcon,
   CheckCircle as CheckCircleIcon,
   Info as InfoIcon,
   Warning as WarningIcon,
@@ -34,8 +32,6 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { format, isValid, parseISO } from 'date-fns';
-import { VisibilitySelector } from '../components/VisibilitySelector';
-import { DepartmentSelector } from '../components/DepartmentSelector';
 
 // ============================================================================
 // Constants
@@ -301,16 +297,6 @@ export const BasicInfoStep = memo(({
   formData,
   setFormData,
   
-  // Visibility
-  visibility,
-  setVisibility,
-  
-  // Department
-  restrictedDepartmentId,
-  restrictedDepartmentName,
-  handleRestrictedDepartmentChange,
-  handleClearRestrictedDepartment,
-  
   // Organization
   organizationId,
   setOrganizationId,
@@ -336,7 +322,6 @@ export const BasicInfoStep = memo(({
 }) => {
   const theme = useTheme();
   const isLight = theme.palette.mode === 'light';
-  const isRestricted = visibility === 'department';
 
   // ==========================================================================
   // Local State
@@ -760,116 +745,6 @@ export const BasicInfoStep = memo(({
                 return null;
               })()
             )}
-          </Stack>
-        </SectionPaper>
-
-        {/* ============================================
-             Access Control Section
-             ============================================ */}
-        <SectionPaper
-          sx={{
-            bgcolor: isRestricted
-              ? (isLight ? alpha(theme.palette.warning.main, 0.04) : alpha(theme.palette.warning.main, 0.08))
-              : undefined,
-            borderColor: isRestricted
-              ? (isLight ? alpha(theme.palette.warning.main, 0.2) : alpha(theme.palette.warning.main, 0.3))
-              : undefined,
-          }}
-        >
-          <Stack spacing={2}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              flexWrap="wrap"
-              gap={1}
-            >
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <BusinessIcon
-                  sx={{
-                    fontSize: 18,
-                    color: isRestricted
-                      ? 'warning.main'
-                      : (isLight ? '#6b6b8a' : '#888888'),
-                  }}
-                />
-                <Typography
-                  variant="subtitle2"
-                  fontWeight={600}
-                  sx={{
-                    color: isRestricted
-                      ? (isLight ? 'warning.dark' : 'warning.light')
-                      : (isLight ? '#1a1a2e' : '#ffffff'),
-                  }}
-                >
-                  Department Access Control
-                </Typography>
-              </Stack>
-              {isRestricted && (
-                <Chip
-                  label="Restricted"
-                  size="small"
-                  color="warning"
-                  icon={<LockIcon sx={{ fontSize: 12 }} />}
-                  onDelete={handleClearRestrictedDepartment}
-                  sx={{ height: 22 }}
-                />
-              )}
-            </Stack>
-
-            <VisibilitySelector
-              value={visibility}
-              onChange={setVisibility}
-              disabled={apiLoading || isSubmitting}
-              isLight={isLight}
-            />
-
-            {isRestricted && (
-              <Fade in timeout={300}>
-                <Box>
-                  <DepartmentSelector
-                    value={restrictedDepartmentId}
-                    onChange={handleRestrictedDepartmentChange}
-                    disabled={apiLoading || isSubmitting}
-                    isLight={isLight}
-                  />
-                </Box>
-              </Fade>
-            )}
-
-            <Stack
-              direction="row"
-              spacing={1}
-              alignItems="flex-start"
-              sx={{
-                p: 1.5,
-                borderRadius: 1,
-                bgcolor: isRestricted
-                  ? (isLight ? alpha(theme.palette.warning.main, 0.04) : alpha(theme.palette.warning.main, 0.08))
-                  : (isLight ? alpha(theme.palette.info.main, 0.04) : alpha(theme.palette.info.main, 0.08)),
-                border: '1px solid',
-                borderColor: isRestricted
-                  ? (isLight ? alpha(theme.palette.warning.main, 0.1) : alpha(theme.palette.warning.main, 0.15))
-                  : (isLight ? alpha(theme.palette.info.main, 0.1) : alpha(theme.palette.info.main, 0.15)),
-              }}
-            >
-              <InfoIcon
-                sx={{
-                  fontSize: 16,
-                  color: isRestricted ? 'warning.main' : 'info.main',
-                  mt: 0.25,
-                }}
-              />
-              <Typography
-                variant="caption"
-                sx={{ color: isLight ? '#4a4a6a' : '#aaaaaa' }}
-              >
-                {isRestricted
-                  ? '🔒 This meeting will be visible only to members of the selected department.'
-                  : '🌐 This meeting will be open to all departments. Select "Restricted to Department" to limit access.'
-                }
-              </Typography>
-            </Stack>
           </Stack>
         </SectionPaper>
 

@@ -173,13 +173,13 @@ const ParticipantsList = ({ meetingId }) => {
             {total} active participants synchronized
           </Typography>
         </Box>
-        <Fab 
+       {/*  <Fab 
           color="primary" variant="extended" 
           onClick={() => setDialogOpen(true)}
           sx={{ px: 4, borderRadius: 4, fontWeight: 800, textTransform: 'none' }}
         >
           <Add sx={{ mr: 1 }} /> Add New
-        </Fab>
+        </Fab> */}
       </Stack>
 
       {/* Modern Search Field */}

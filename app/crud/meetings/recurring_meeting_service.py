@@ -1,15 +1,14 @@
 # app/crud/recurring_meeting_service.py
 import logging
-from venv import logger
-
-from sqlalchemy import desc, select, update, delete
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import HTTPException, status
 import uuid
 import json
+
+from sqlalchemy import desc, select, update, delete
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.meetings.action_tracker import Meeting
 from app.models.address.location import Location
@@ -18,6 +17,48 @@ from app.models.meetings.recurring_meeting import RecurringMeeting, RecurringMee
 from app.schemas.recurring_meeting_schema import RecurringMeetingCreate, RecurringMeetingUpdate, PreviewOccurrencesRequest
 
 logger = logging.getLogger(__name__)
+
+# ==================== DATETIME UTILITY FUNCTIONS ====================
+
+def ensure_naive_datetime(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Ensure datetime is timezone-naive (UTC).
+    This fixes the "can't subtract offset-naive and offset-aware datetimes" error.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        # Convert to UTC and remove timezone info
+        return dt.astimezone().replace(tzinfo=None)
+    return dt
+
+def get_utc_now() -> datetime:
+    """Get current UTC datetime as naive"""
+    return datetime.utcnow()
+
+def ensure_naive_datetimes_in_dict(data: dict) -> dict:
+    """Recursively convert all datetime objects in a dict to naive"""
+    if not data:
+        return data
+    
+    result = {}
+    for key, value in data.items():
+        if isinstance(value, datetime):
+            result[key] = ensure_naive_datetime(value)
+        elif isinstance(value, dict):
+            result[key] = ensure_naive_datetimes_in_dict(value)
+        elif isinstance(value, list):
+            result[key] = [
+                ensure_naive_datetimes_in_dict(item) if isinstance(item, dict)
+                else ensure_naive_datetime(item) if isinstance(item, datetime)
+                else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+# ==================== JSON UTILITY FUNCTIONS ====================
 
 def convert_uuids_to_strings(obj: dict) -> dict:
     """Convert UUID objects to strings in a dictionary for JSON serialization"""
@@ -51,6 +92,8 @@ def ensure_json_serializable(data: Any) -> Any:
     elif isinstance(data, datetime):
         return data.isoformat()
     return data
+
+# ==================== SERVICE CLASS ====================
 
 class RecurringMeetingService:
     
@@ -187,8 +230,12 @@ class RecurringMeetingService:
             # Calculate duration if not provided
             duration_minutes = meeting_data.duration_minutes
             if not duration_minutes and meeting_data.start_time and meeting_data.end_time:
-                delta = meeting_data.end_time - meeting_data.start_time
-                duration_minutes = int(delta.total_seconds() / 60)
+                # Ensure both datetimes are naive for calculation
+                start_time = ensure_naive_datetime(meeting_data.start_time)
+                end_time = ensure_naive_datetime(meeting_data.end_time)
+                if start_time and end_time:
+                    delta = end_time - start_time
+                    duration_minutes = int(delta.total_seconds() / 60)
             
             # Convert UUIDs to strings for JSON fields (ensure JSON serializable)
             recurrence_days_str = None
@@ -199,7 +246,13 @@ class RecurringMeetingService:
             if meeting_data.default_participant_ids:
                 default_participants_str = [str(pid) for pid in meeting_data.default_participant_ids]
             
-            # Create recurring meeting record
+            # === FIX: Ensure all datetimes are naive ===
+            now = get_utc_now()
+            start_time = ensure_naive_datetime(meeting_data.start_time)
+            end_time = ensure_naive_datetime(meeting_data.end_time)
+            recurrence_end_date = ensure_naive_datetime(meeting_data.recurrence_end_date)
+            
+            # Create recurring meeting record with naive datetimes
             db_meeting = RecurringMeeting(
                 id=uuid.uuid4(),
                 title=meeting_data.title,
@@ -210,12 +263,12 @@ class RecurringMeetingService:
                 recurrence_day_of_month=meeting_data.recurrence_day_of_month,
                 recurrence_week_of_month_id=meeting_data.recurrence_week_of_month_id,
                 recurrence_day_of_week_id=meeting_data.recurrence_day_of_week_id,
-                recurrence_end_date=meeting_data.recurrence_end_date,
+                recurrence_end_date=recurrence_end_date,
                 recurrence_max_occurrences=meeting_data.recurrence_max_occurrences,
                 recurrence_end_after_occurrences=meeting_data.recurrence_end_after_occurrences,
                 meeting_template_id=meeting_data.meeting_template_id,
-                start_time=meeting_data.start_time,
-                end_time=meeting_data.end_time,
+                start_time=start_time,
+                end_time=end_time,
                 duration_minutes=duration_minutes,
                 location_id=meeting_data.location_id,
                 location_text=meeting_data.location_text,
@@ -229,15 +282,15 @@ class RecurringMeetingService:
                 additional_info=meeting_data.additional_info,
                 status_id=meeting_data.status_id,
                 created_by_id=user_id,
-                created_at=datetime.now(),
-                updated_at=datetime.now()
+                created_at=now,
+                updated_at=now
             )
             
             self.db.add(db_meeting)
             await self.db.commit()
             await self.db.refresh(db_meeting)
             
-            # Generate first occurrence
+            # Generate first occurrence with naive datetimes
             await self._generate_first_occurrence(db_meeting)
             
             # Refresh again after generating first occurrence
@@ -262,15 +315,17 @@ class RecurringMeetingService:
             # Get a valid meeting status from attributes table
             status_id = await self._get_default_meeting_status()
             
-            # Ensure we have valid datetime objects
+            # === FIX: Ensure we have naive datetime objects ===
+            now = get_utc_now()
+            
             if not recurring.start_time:
                 logger.warning(f"Recurring meeting {recurring.id} has no start_time, using current time")
-                start_time = datetime.now()
+                start_time = now
             else:
-                start_time = recurring.start_time
+                start_time = ensure_naive_datetime(recurring.start_time) or now
             
             # Calculate end time if not provided
-            end_time = recurring.end_time
+            end_time = ensure_naive_datetime(recurring.end_time)
             if not end_time:
                 end_time = start_time + timedelta(hours=1)
                 logger.info(f"Auto-calculated end_time for first occurrence: {end_time}")
@@ -280,7 +335,7 @@ class RecurringMeetingService:
                 end_time = start_time + timedelta(hours=1)
                 logger.warning(f"Fixed invalid end_time, set to: {end_time}")
             
-            """ Create the first meeting occurrence """
+            # Create the first meeting occurrence with naive datetimes
             first_meeting = Meeting(
                 id=uuid.uuid4(),
                 title=recurring.title,
@@ -302,15 +357,15 @@ class RecurringMeetingService:
                 recurring_meeting_id=recurring.id,
                 occurrence_number=1,
                 created_by_id=recurring.created_by_id,
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+                created_at=now,
+                updated_at=now,
                 is_active=True,
                 is_deleted=False
             )
             self.db.add(first_meeting)
             await self.db.flush()
             
-            # Create occurrence record
+            # Create occurrence record with naive datetime
             occurrence = RecurringMeetingOccurrence(
                 id=uuid.uuid4(),
                 recurring_meeting_id=recurring.id,
@@ -318,23 +373,25 @@ class RecurringMeetingService:
                 occurrence_number=1,
                 scheduled_date=start_time,
                 status="scheduled",
-                created_at=datetime.now(),
-                updated_at=datetime.now()
+                created_at=now,
+                updated_at=now
             )
             self.db.add(occurrence)
             
-            # Update recurring meeting
+            # Update recurring meeting with naive datetimes
             recurring.occurrences_count = 1
             recurring.total_occurrences_generated = 1
-            recurring.last_occurrence_date = start_time
+            recurring.last_occurrence_date = ensure_naive_datetime(start_time)
             
             # Calculate next occurrence if possible
             try:
                 next_date = await self._calculate_next_occurrence_date(recurring, start_time)
                 if next_date:
-                    recurring.next_occurrence_date = next_date
+                    recurring.next_occurrence_date = ensure_naive_datetime(next_date)
             except Exception as e:
                 logger.warning(f"Could not calculate next occurrence date: {e}")
+            
+            recurring.updated_at = now
             
             await self.db.commit()
             logger.info(f"Generated first occurrence {first_meeting.id} for recurring meeting {recurring.id}")
@@ -379,6 +436,11 @@ class RecurringMeetingService:
         if not recurring.recurrence_type_id:
             return None
         
+        # Ensure last_date is naive
+        last_date = ensure_naive_datetime(last_date)
+        if not last_date:
+            return None
+        
         # Get recurrence type
         result = await self.db.execute(
             select(Attribute).where(Attribute.id == recurring.recurrence_type_id)
@@ -401,11 +463,11 @@ class RecurringMeetingService:
         
         # Calculate next date based on type
         if recurrence_type == "daily":
-            return last_date + timedelta(days=interval)
+            return ensure_naive_datetime(last_date + timedelta(days=interval))
         elif recurrence_type == "weekly":
-            return last_date + timedelta(weeks=interval)
+            return ensure_naive_datetime(last_date + timedelta(weeks=interval))
         elif recurrence_type == "biweekly":
-            return last_date + timedelta(weeks=interval * 2)
+            return ensure_naive_datetime(last_date + timedelta(weeks=interval * 2))
         elif recurrence_type == "monthly":
             # Add month(s)
             month = last_date.month + interval
@@ -414,14 +476,22 @@ class RecurringMeetingService:
                 month -= 12
                 year += 1
             try:
-                return last_date.replace(year=year, month=month)
+                result = last_date.replace(year=year, month=month)
+                return ensure_naive_datetime(result)
             except ValueError:
                 # Handle invalid day (e.g., Jan 31 -> Feb 28)
-                return last_date.replace(year=year, month=month, day=28)
+                result = last_date.replace(year=year, month=month, day=28)
+                return ensure_naive_datetime(result)
         elif recurrence_type == "quarterly":
-            return last_date + timedelta(days=90 * interval)
+            return ensure_naive_datetime(last_date + timedelta(days=90 * interval))
         elif recurrence_type == "yearly":
-            return last_date.replace(year=last_date.year + interval)
+            try:
+                result = last_date.replace(year=last_date.year + interval)
+                return ensure_naive_datetime(result)
+            except ValueError:
+                # Handle Feb 29 on non-leap year
+                result = last_date.replace(year=last_date.year + interval, day=28)
+                return ensure_naive_datetime(result)
         
         return None
     
@@ -509,6 +579,12 @@ class RecurringMeetingService:
             if 'default_participant_ids' in update_dict and update_dict['default_participant_ids']:
                 update_dict['default_participant_ids'] = [str(pid) for pid in update_dict['default_participant_ids']]
             
+            # === FIX: Ensure datetime fields are naive ===
+            datetime_fields = ['start_time', 'end_time', 'recurrence_end_date']
+            for field in datetime_fields:
+                if field in update_dict and update_dict[field]:
+                    update_dict[field] = ensure_naive_datetime(update_dict[field])
+            
             # Validate location if being updated
             if 'location_id' in update_dict and update_dict['location_id']:
                 await self._validate_location(update_dict['location_id'])
@@ -517,7 +593,7 @@ class RecurringMeetingService:
             for field, value in update_dict.items():
                 setattr(db_meeting, field, value)
             
-            db_meeting.updated_at = datetime.now()
+            db_meeting.updated_at = get_utc_now()
             
             await self.db.commit()
             await self.db.refresh(db_meeting)
@@ -547,20 +623,21 @@ class RecurringMeetingService:
                 logger.warning(f"Recurring meeting {meeting_id} not found for deletion")
                 return False
             
+            now = get_utc_now()
             db_meeting.is_deleted = True
-            db_meeting.deleted_at = datetime.now()
-            db_meeting.updated_at = datetime.now()
+            db_meeting.deleted_at = now
+            db_meeting.updated_at = now
             
             if delete_occurrences:
                 # Cancel all occurrences
                 for occurrence in db_meeting.occurrences:
                     occurrence.status = "cancelled"
-                    occurrence.updated_at = datetime.now()
+                    occurrence.updated_at = now
                     
                     if occurrence.meeting:
                         occurrence.meeting.is_deleted = True
-                        occurrence.meeting.deleted_at = datetime.now()
-                        occurrence.meeting.updated_at = datetime.now()
+                        occurrence.meeting.deleted_at = now
+                        occurrence.meeting.updated_at = now
             
             await self.db.commit()
             logger.info(f"Deleted recurring meeting {meeting_id} (delete_occurrences={delete_occurrences})")
@@ -585,7 +662,11 @@ class RecurringMeetingService:
     async def preview_occurrences(self, request: PreviewOccurrencesRequest) -> List[datetime]:
         """Preview occurrence dates"""
         dates = []
-        current = request.start_date
+        
+        # === FIX: Ensure start_date is naive ===
+        current = ensure_naive_datetime(request.start_date)
+        if not current:
+            current = get_utc_now()
         
         # Get recurrence type value
         result = await self.db.execute(
@@ -609,11 +690,11 @@ class RecurringMeetingService:
         for i in range(max_preview):
             if i > 0:  # Don't add the start date as an occurrence
                 if recurrence_type == "daily":
-                    current = current + timedelta(days=request.recurrence_interval)
+                    current = ensure_naive_datetime(current + timedelta(days=request.recurrence_interval))
                 elif recurrence_type == "weekly":
-                    current = current + timedelta(weeks=request.recurrence_interval)
+                    current = ensure_naive_datetime(current + timedelta(weeks=request.recurrence_interval))
                 elif recurrence_type == "biweekly":
-                    current = current + timedelta(weeks=request.recurrence_interval * 2)
+                    current = ensure_naive_datetime(current + timedelta(weeks=request.recurrence_interval * 2))
                 elif recurrence_type == "monthly":
                     month = current.month + request.recurrence_interval
                     year = current.year
@@ -621,15 +702,19 @@ class RecurringMeetingService:
                         month -= 12
                         year += 1
                     try:
-                        current = current.replace(year=year, month=month)
+                        current = ensure_naive_datetime(current.replace(year=year, month=month))
                     except ValueError:
-                        current = current.replace(year=year, month=month, day=28)
+                        current = ensure_naive_datetime(current.replace(year=year, month=month, day=28))
                 elif recurrence_type == "quarterly":
-                    current = current + timedelta(days=90 * request.recurrence_interval)
+                    current = ensure_naive_datetime(current + timedelta(days=90 * request.recurrence_interval))
                 elif recurrence_type == "yearly":
-                    current = current.replace(year=current.year + request.recurrence_interval)
+                    try:
+                        current = ensure_naive_datetime(current.replace(year=current.year + request.recurrence_interval))
+                    except ValueError:
+                        current = ensure_naive_datetime(current.replace(year=current.year + request.recurrence_interval, day=28))
             
-            dates.append(current)
+            if current:
+                dates.append(current)
         
         return dates[:request.max_occurrences]
     
@@ -701,23 +786,28 @@ class RecurringMeetingService:
             # Get default status for meetings
             status_id = await self._get_default_meeting_status()
             
-            # Determine the meeting date and time
+            now = get_utc_now()
+            
+            # === FIX: Ensure datetimes are naive ===
             if target_date:
-                meeting_datetime = target_date
+                meeting_datetime = ensure_naive_datetime(target_date)
             elif recurring.next_occurrence_date:
-                meeting_datetime = recurring.next_occurrence_date
+                meeting_datetime = ensure_naive_datetime(recurring.next_occurrence_date)
             elif recurring.start_time:
-                meeting_datetime = recurring.start_time
+                meeting_datetime = ensure_naive_datetime(recurring.start_time)
             else:
-                # Default to today at current time
-                meeting_datetime = datetime.now()
+                # Default to current time
+                meeting_datetime = now
+            
+            if not meeting_datetime:
+                meeting_datetime = now
             
             # Extract date and time components
             meeting_date = meeting_datetime.date()
             start_time = meeting_datetime
             
             # Calculate end time
-            end_time = recurring.end_time
+            end_time = ensure_naive_datetime(recurring.end_time)
             if not end_time:
                 end_time = start_time + timedelta(hours=1)
             
@@ -728,10 +818,9 @@ class RecurringMeetingService:
             # Convert JSON fields to ensure they're JSON serializable
             default_participants = recurring.default_participant_ids
             if default_participants and isinstance(default_participants, list):
-                # Ensure they're strings for JSON storage
                 default_participants = [str(pid) for pid in default_participants if pid]
             
-            # Create the meeting occurrence
+            # Create the meeting occurrence with naive datetimes
             meeting = Meeting(
                 id=uuid.uuid4(),
                 title=recurring.title,
@@ -754,8 +843,8 @@ class RecurringMeetingService:
                 recurring_meeting_id=recurring.id,
                 occurrence_number=(recurring.total_occurrences_generated or 0) + 1,
                 created_by_id=recurring.created_by_id,
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+                created_at=now,
+                updated_at=now,
                 is_active=True,
                 is_deleted=False
             )
@@ -763,11 +852,11 @@ class RecurringMeetingService:
             self.db.add(meeting)
             await self.db.flush()
             
-            # Update recurring meeting counts
+            # Update recurring meeting counts with naive datetimes
             recurring.total_occurrences_generated = (recurring.total_occurrences_generated or 0) + 1
             recurring.occurrences_count = (recurring.occurrences_count or 0) + 1
-            recurring.last_occurrence_date = meeting_datetime
-            recurring.updated_at = datetime.now()
+            recurring.last_occurrence_date = ensure_naive_datetime(meeting_datetime)
+            recurring.updated_at = now
             
             await self.db.commit()
             await self.db.refresh(meeting)
@@ -779,6 +868,8 @@ class RecurringMeetingService:
             await self.db.rollback()
             logger.error(f"Error generating on-demand occurrence: {e}", exc_info=True)
             return None
+
+# ==================== DEPENDENCY ====================
 
 # Singleton instance
 recurring_meeting_service = None

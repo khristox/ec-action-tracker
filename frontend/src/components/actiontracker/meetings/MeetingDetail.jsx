@@ -71,6 +71,7 @@ import {
   ViewAgenda as ViewAgendaIcon,
   MarkEmailRead as MarkEmailReadIcon,
   Info as InfoIcon,
+  Restore as RestoreIcon,
 } from '@mui/icons-material';
 import {
   fetchMeetingById,
@@ -195,6 +196,8 @@ const PERMISSIONS = {
 const NOT_FOUND_DELAY_MS = 7000;
 const SNACKBAR_AUTO_HIDE_MS = 6000;
 const TAB_STORAGE_KEY_PREFIX = 'meeting_detail_last_tab_';
+const TAB_ORDER_STORAGE_KEY_PREFIX = 'meeting_detail_tab_order_';
+const PINNED_TAB_VALUE = 0; // Overview - always first, not draggable
 
 // Elegant near-black dark palette (replaces flat Tailwind-slate grays).
 // A single true-black-adjacent surface family with a faint warm undertone,
@@ -535,6 +538,26 @@ const MeetingDetail = () => {
       return 0;
     }
   });
+
+  // ---- Tab order persistence: restore custom drag-and-drop tab order for THIS meeting id ----
+  const [tabOrder, setTabOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`${TAB_ORDER_STORAGE_KEY_PREFIX}${id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore malformed storage
+    }
+    return TABS.map((t) => t.value);
+  });
+
+  // Drag-and-drop state for tab reordering
+  const [draggedTabValue, setDraggedTabValue] = useState(null);
+  const [dragOverTabValue, setDragOverTabValue] = useState(null);
+  const [isDraggingTab, setIsDraggingTab] = useState(false);
+
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [updateLinkDialogOpen, setUpdateLinkDialogOpen] = useState(false);
   const [statusMenuAnchor, setStatusMenuAnchor] = useState(null);
@@ -637,6 +660,22 @@ const MeetingDetail = () => {
     [visibleTabs, viewMode]
   );
 
+  // ---- Apply the user's custom drag-and-drop order on top of the
+  // permission/view-mode-filtered tab list. Any tab not yet present in
+  // tabOrder (e.g. newly granted permission) is appended at the end. ----
+  const orderedVisibleTabsForMode = useMemo(() => {
+    const byValue = new Map(visibleTabsForMode.map((t) => [t.value, t]));
+    const ordered = [];
+    tabOrder.forEach((v) => {
+      if (byValue.has(v)) {
+        ordered.push(byValue.get(v));
+        byValue.delete(v);
+      }
+    });
+    byValue.forEach((t) => ordered.push(t));
+    return ordered;
+  }, [visibleTabsForMode, tabOrder]);
+
   // ---- FIX: always render Tabs/TabPanels with a value that's actually visible ----
   const isTabValueVisible = visibleTabsForMode.some((t) => t.value === tabValue);
   const effectiveTabValue = isTabValueVisible
@@ -671,6 +710,34 @@ const MeetingDetail = () => {
       // ignore storage errors (e.g. private browsing / quota exceeded)
     }
   }, [tabValue, id]);
+
+  // ---- Tab order persistence: whenever the meeting id changes, restore whatever
+  // custom order was last saved for that specific meeting (defaults to natural order) ----
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`${TAB_ORDER_STORAGE_KEY_PREFIX}${id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setTabOrder(parsed);
+          return;
+        }
+      }
+    } catch {
+      // ignore malformed storage
+    }
+    setTabOrder(TABS.map((t) => t.value));
+  }, [id]);
+
+  // ---- Tab order persistence: save the current custom order for this meeting id ----
+  useEffect(() => {
+    if (!id) return;
+    try {
+      localStorage.setItem(`${TAB_ORDER_STORAGE_KEY_PREFIX}${id}`, JSON.stringify(tabOrder));
+    } catch {
+      // ignore storage errors (e.g. private browsing / quota exceeded)
+    }
+  }, [tabOrder, id]);
 
   const getStatusValue = useCallback(() => {
     const status = normalizedMeeting?.status;
@@ -984,6 +1051,71 @@ const handleStatusUpdate = async () => {
     setTabValue(newValue);
   }, []);
 
+  // ==================== Tab Drag-and-Drop Handlers ====================
+  const handleTabDragStart = useCallback((event, tabValueDragged) => {
+    if (tabValueDragged === PINNED_TAB_VALUE) {
+      event.preventDefault();
+      return;
+    }
+    setDraggedTabValue(tabValueDragged);
+    setIsDraggingTab(true);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(tabValueDragged));
+  }, []);
+
+  const handleTabDragOver = useCallback((event, tabValueOver) => {
+    event.preventDefault();
+    if (tabValueOver === PINNED_TAB_VALUE || draggedTabValue === null) return;
+    event.dataTransfer.dropEffect = 'move';
+    if (dragOverTabValue !== tabValueOver) {
+      setDragOverTabValue(tabValueOver);
+    }
+  }, [draggedTabValue, dragOverTabValue]);
+
+  const handleTabDrop = useCallback((event, tabValueDropped) => {
+    event.preventDefault();
+    if (
+      tabValueDropped === PINNED_TAB_VALUE ||
+      draggedTabValue === null ||
+      draggedTabValue === tabValueDropped
+    ) {
+      setDraggedTabValue(null);
+      setDragOverTabValue(null);
+      setIsDraggingTab(false);
+      return;
+    }
+
+    setTabOrder((prevOrder) => {
+      const order = [...prevOrder];
+      const fromIndex = order.indexOf(draggedTabValue);
+      const toIndex = order.indexOf(tabValueDropped);
+      if (fromIndex === -1 || toIndex === -1) return prevOrder;
+      order.splice(fromIndex, 1);
+      order.splice(toIndex, 0, draggedTabValue);
+      return order;
+    });
+
+    setDraggedTabValue(null);
+    setDragOverTabValue(null);
+    setIsDraggingTab(false);
+  }, [draggedTabValue]);
+
+  const handleTabDragEnd = useCallback(() => {
+    setDraggedTabValue(null);
+    setDragOverTabValue(null);
+    setIsDraggingTab(false);
+  }, []);
+
+  const handleResetTabOrder = useCallback(() => {
+    setTabOrder(TABS.map((t) => t.value));
+  }, []);
+
+  const isTabOrderCustomized = useMemo(() => {
+    const defaultOrder = TABS.map((t) => t.value);
+    if (tabOrder.length !== defaultOrder.length) return true;
+    return tabOrder.some((v, i) => v !== defaultOrder[i]);
+  }, [tabOrder]);
+
   if (loading && !currentMeeting && !showNotFound) {
     return (
       <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1090,7 +1222,7 @@ const handleStatusUpdate = async () => {
                     fontWeight: 700,
                     fontSize: '0.85rem',
                     color: isDarkMode ? DARK.textSecondary : 'text.secondary',
-                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    transition: 'background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease',
                     '&:hover': {
                       bgcolor: isDarkMode ? alpha('#FFFFFF', 0.04) : alpha('#7C3AED', 0.05),
                     },
@@ -1102,10 +1234,52 @@ const handleStatusUpdate = async () => {
                   },
                 }}
               >
-                {visibleTabsForMode.map((tab) => (
-                  <Tab key={tab.value} value={tab.value} icon={tab.icon} iconPosition="start" label={tab.label} disableRipple />
-                ))}
+                {orderedVisibleTabsForMode.map((tab) => {
+                  const isDraggable = tab.value !== PINNED_TAB_VALUE;
+                  const isBeingDragged = isDraggingTab && draggedTabValue === tab.value;
+                  const isDropTarget = isDraggingTab && dragOverTabValue === tab.value && isDraggable;
+
+                  return (
+                    <Tab
+                      key={tab.value}
+                      value={tab.value}
+                      icon={tab.icon}
+                      iconPosition="start"
+                      label={tab.label}
+                      disableRipple
+                      draggable={isDraggable}
+                      onDragStart={(e) => handleTabDragStart(e, tab.value)}
+                      onDragOver={(e) => handleTabDragOver(e, tab.value)}
+                      onDrop={(e) => handleTabDrop(e, tab.value)}
+                      onDragEnd={handleTabDragEnd}
+                      sx={{
+                        cursor: isDraggable ? 'grab' : 'default',
+                        opacity: isBeingDragged ? 0.35 : 1,
+                        ...(isDropTarget && {
+                          boxShadow: `inset 3px 0 0 0 ${isDarkMode ? '#FFFFFF' : '#7C3AED'}`,
+                        }),
+                      }}
+                    />
+                  );
+                })}
               </Tabs>
+
+              {isTabOrderCustomized && (
+                <Tooltip title="Reset tab order" arrow>
+                  <IconButton
+                    size="small"
+                    onClick={handleResetTabOrder}
+                    sx={{
+                      ml: 0.5,
+                      flexShrink: 0,
+                      opacity: 0.6,
+                      '&:hover': { opacity: 1, bgcolor: isDarkMode ? alpha('#FFFFFF', 0.06) : alpha('#7C3AED', 0.08) },
+                    }}
+                  >
+                    <RestoreIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
 
               {viewMode === 'simple' && (
                 <Tooltip title={`Also available: ${visibleTabs.filter((t) => !t.simple).map((t) => t.label).join(', ')} — switch to Detailed`} arrow>

@@ -145,7 +145,7 @@ async def ensure_minute_exists(
         )
     
     # Check if meeting exists
-    from app.crud.meetings import meeting_crud
+    from app.crud.meetings.action_tracker import meeting_crud
     meeting = await meeting_crud.get(db, meeting_id)
     if not meeting:
         raise HTTPException(

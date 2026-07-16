@@ -1,6 +1,6 @@
 // src/components/actiontracker/meetings/components/AddActionDialog.jsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, LinearProgress, Alert,
@@ -35,6 +35,21 @@ const getPlainTextPreview = (html, maxLength = 100) => {
   return plainText.substring(0, maxLength) + '...';
 };
 
+// FIX: Safe date formatter — date-fns `format()` throws RangeError on
+// null/undefined/invalid dates, which crashes the render tree with no
+// error boundary in place (this was the cause of the page "freezing").
+// Every call site that formats minute.created_at now goes through this.
+const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown date') => {
+  if (!dateVal) return fallback;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return fallback;
+  try {
+    return format(d, pattern);
+  } catch {
+    return fallback;
+  }
+};
+
 const AddActionDialog = ({ 
   open, 
   onClose, 
@@ -63,6 +78,13 @@ const AddActionDialog = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const hasMinutes = minutes.length > 0;
+
+  // FIX: `addMinutes(new Date(), 5)` was being recomputed on every single
+  // render (new Date identity each time), which churns the DateTimePicker's
+  // validation on every keystroke/error-state change. Memoize it so it's
+  // stable for the life of the dialog being open, and refreshes each time
+  // the dialog is reopened.
+  const minDueDate = useMemo(() => addMinutes(new Date(), 5), [open]);
 
   useEffect(() => {
     if (open) {
@@ -136,7 +158,6 @@ const AddActionDialog = ({
     }
   }, [editingAction, open, selectedMinuteId, hasMinutes]);
 
-  // FIX: Moved handleSave to the correct position (it was inside the component incorrectly)
   const handleSave = async () => {
     if (!formData.description.trim()) {
       setLocalError("Description is required");
@@ -205,8 +226,6 @@ const AddActionDialog = ({
       payload.assigned_to_name = null;
     }
 
-    console.log('📤 AddActionDialog payload:', JSON.stringify(payload, null, 2));
-
     try {
       const result = await onSave(payload);
       
@@ -218,8 +237,10 @@ const AddActionDialog = ({
       
       onClose();
     } catch (err) {
-      setLocalError(err.message || "Failed to create action");
+      setLocalError(err?.message || "Failed to create action");
     } finally {
+      // This always runs, even if onSave() rejects, so the dialog can
+      // never get stuck showing a spinner/progress bar forever.
       setIsSubmitting(false);
     }
   };
@@ -264,7 +285,6 @@ const AddActionDialog = ({
         fullWidth 
         maxWidth="sm"
         fullScreen={isMobile}
-        // FIX: Use slotProps for Paper
         slotProps={{
           paper: {
             sx: {
@@ -340,7 +360,6 @@ const AddActionDialog = ({
                         const minute = minutes.find(m => m.id === selected);
                         if (!minute) return "Select a minute";
                         return (
-                          // FIX: moved alignItems to sx
                           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                             <DescriptionIcon fontSize="small" color="primary" />
                             <Box>
@@ -349,7 +368,7 @@ const AddActionDialog = ({
                               </Typography>
                               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                 <Typography variant="caption" color="text.secondary">
-                                  {format(new Date(minute.created_at), 'MMM d, yyyy')}
+                                  {safeFormatDate(minute.created_at)}
                                 </Typography>
                                 <Chip 
                                   label={getActionCountDisplay(minute)} 
@@ -378,7 +397,6 @@ const AddActionDialog = ({
                         return (
                           <MenuItem key={minute.id} value={minute.id}>
                             <Stack spacing={1} sx={{ width: '100%', py: 0.5 }}>
-                              {/* FIX: moved alignItems to sx */}
                               <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                                 <DescriptionIcon fontSize="small" color="primary" />
                                 <Typography variant="subtitle2" fontWeight={600}>
@@ -386,13 +404,11 @@ const AddActionDialog = ({
                                 </Typography>
                               </Stack>
                               
-                              {/* FIX: moved alignItems to sx */}
                               <Stack direction="row" spacing={2} sx={{ alignItems: 'center', ml: 4 }}>
-                                {/* FIX: moved alignItems to sx */}
                                 <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                                   <AccessTimeIcon fontSize="small" color="action" sx={{ fontSize: 14 }} />
                                   <Typography variant="caption" color="text.secondary">
-                                    {format(new Date(minute.created_at), 'MMM d, yyyy')}
+                                    {safeFormatDate(minute.created_at)}
                                   </Typography>
                                 </Stack>
                                 
@@ -451,7 +467,6 @@ const AddActionDialog = ({
                 borderRadius: 2,
                 border: '1px solid #e0e0e0'
               }}>
-                {/* FIX: moved alignItems to sx */}
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.5 }}>
                   <DescriptionIcon fontSize="small" color="primary" />
                   <Typography variant="subtitle2" fontWeight={600}>
@@ -464,10 +479,9 @@ const AddActionDialog = ({
                     {selectedMinute.topic || selectedMinute.title || 'Untitled Minute'}
                   </Typography>
                   
-                  {/* FIX: moved alignItems to sx */}
                   <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
                     <Typography variant="caption" color="text.secondary">
-                      Created: {format(new Date(selectedMinute.created_at), 'MMM d, yyyy')}
+                      Created: {safeFormatDate(selectedMinute.created_at)}
                     </Typography>
                     <Chip 
                       label={`${selectedMinute.actions?.length || 0} actions`} 
@@ -528,7 +542,8 @@ const AddActionDialog = ({
               value={formData.due_date}
               onChange={(newValue) => setFormData({ ...formData, due_date: newValue })}
               disablePast 
-              minDateTime={addMinutes(new Date(), 5)}
+              minDateTime={minDueDate}
+              closeOnSelect
               disabled={isLoading}
               slotProps={{
                 textField: {
@@ -547,28 +562,24 @@ const AddActionDialog = ({
                 label="Priority"
               >
                 <MenuItem value={1}>
-                  {/* FIX: moved alignItems to sx */}
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <span>🔴</span>
                     <span>High - Urgent</span>
                   </Stack>
                 </MenuItem>
                 <MenuItem value={2}>
-                  {/* FIX: moved alignItems to sx */}
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <span>🟠</span>
                     <span>Medium - Normal</span>
                   </Stack>
                 </MenuItem>
                 <MenuItem value={3}>
-                  {/* FIX: moved alignItems to sx */}
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <span>🟢</span>
                     <span>Low - Flexible</span>
                   </Stack>
                 </MenuItem>
                 <MenuItem value={4}>
-                  {/* FIX: moved alignItems to sx */}
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <span>⚪</span>
                     <span>Very Low - Info Only</span>

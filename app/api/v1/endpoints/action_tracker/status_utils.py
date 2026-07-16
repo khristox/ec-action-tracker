@@ -97,13 +97,3 @@ async def get_valid_status_short_names(db: AsyncSession):
         )
     )
     return [r[0] for r in result.all() if r[0]]
-
-async def get_status_id_by_short_name(db: AsyncSession, short_name: str) -> Optional[UUID]:
-    """Get status ID by short name"""
-    status = await get_status_by_short_name(db, short_name)
-    if status and status.get("id"):
-        try:
-            return UUID(status["id"])
-        except ValueError:
-            pass
-    return None

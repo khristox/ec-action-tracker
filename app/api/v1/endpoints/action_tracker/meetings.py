@@ -1273,7 +1273,7 @@ async def update_meeting(
     """Full update meeting with audit fields and participant management"""
     update_data = meeting_in.model_dump(exclude_unset=True)
     updated_meeting = await update_meeting_common(db, meeting_id, update_data, current_user, "PUT")
-    return utils_build_meeting_response(updated_meeting, db)
+    return await utils_build_meeting_response(updated_meeting, db)
 
 
 @router.patch("/{meeting_id}", response_model=MeetingResponse)
@@ -1323,7 +1323,9 @@ async def update_meeting_status(
             )
         
         logger.info(f"Status info found: {status_info}")
-        new_status_id = UUID(status_info["id"])
+       
+        new_status_id = status_info.id
+
         logger.info(f"New status_id: {new_status_id}")
         
         # UPDATE THE MEETING STATUS

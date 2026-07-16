@@ -41,6 +41,29 @@ import {
 } from '@mui/icons-material';
 import { createParticipant, clearError } from '../../../store/slices/actionTracker/participantSlice';
 
+// Phone number formatting function
+const formatPhoneNumber = (value) => {
+  // Remove all non-digit characters
+  const cleaned = value.replace(/\D/g, '');
+  
+  // If empty, return empty
+  if (!cleaned) return '';
+  
+  // For Uganda format: 256712345678
+  if (cleaned.startsWith('256') && cleaned.length >= 10) {
+    let formatted = '+';
+    if (cleaned.length <= 3) return `+${cleaned}`;
+    if (cleaned.length <= 6) return `+${cleaned.slice(0, 3)} ${cleaned.slice(3)}`;
+    if (cleaned.length <= 9) return `+${cleaned.slice(0, 3)} ${cleaned.slice(3, 6)} ${cleaned.slice(6)}`;
+    return `+${cleaned.slice(0, 3)} ${cleaned.slice(3, 6)} ${cleaned.slice(6, 9)} ${cleaned.slice(9, 12)}`;
+  }
+  
+  // For local format: 0712345678
+  if (cleaned.length <= 4) return cleaned;
+  if (cleaned.length <= 7) return `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`;
+  return `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7, 10)}`;
+};
+
 const CreateParticipant = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -49,13 +72,14 @@ const CreateParticipant = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { loading, error } = useSelector((state) => state.participants);
   
+  // Updated form fields to match backend expectations
   const [form, setForm] = useState({
     name: '',
     email: '',
-    telephone: '',
-    title: '',
-    organization: '',
-    notes: ''
+    phone: '',           // Changed from 'telephone'
+    role: '',            // Changed from 'title'
+    organization: '',    // Keep this or change to 'company'
+    notes: ''            // Keep this or change to 'remarks'
   });
   
   const [touched, setTouched] = useState({});
@@ -74,9 +98,10 @@ const CreateParticipant = () => {
           return 'Enter a valid email address';
         }
         return '';
-      case 'telephone':
-        if (value && !/^[\d\s+()-]{8,}$/.test(value)) {
-          return 'Enter a valid phone number (min 8 digits)';
+      case 'phone':
+        if (value) {
+          const cleaned = value.replace(/\D/g, '');
+          if (cleaned.length < 8) return 'Enter a valid phone number (min 8 digits)';
         }
         return '';
       default:
@@ -94,12 +119,25 @@ const CreateParticipant = () => {
   };
 
   const handleChange = (field) => (e) => {
-    setForm(prev => ({ ...prev, [field]: e.target.value }));
+    let value = e.target.value;
+    
+    // Format phone number on change
+    if (field === 'phone') {
+      value = formatPhoneNumber(value);
+    }
+    
+    setForm(prev => ({ ...prev, [field]: value }));
     setTouched(prev => ({ ...prev, [field]: true }));
   };
 
   const handleBlur = (field) => () => {
     setTouched(prev => ({ ...prev, [field]: true }));
+  };
+
+  // Clean phone number before sending to API (remove formatting)
+  const cleanPhoneNumber = (phone) => {
+    if (!phone) return '';
+    return phone.replace(/\D/g, '');
   };
 
   const handleSubmit = async () => {
@@ -110,8 +148,30 @@ const CreateParticipant = () => {
     }
     
     setSaving(true);
+    
+    // Prepare payload with correct field names for backend
+    const payload = {
+      name: form.name.trim(),
+      email: form.email.trim() || undefined,
+      phone: cleanPhoneNumber(form.phone) || undefined,  // Send cleaned phone
+      role: form.role.trim() || undefined,
+      organization: form.organization.trim() || undefined,
+      notes: form.notes.trim() || undefined
+      // Add any other required fields your backend expects
+      // e.g., meeting_id if required
+    };
+
+    // Remove undefined fields (optional fields)
+    Object.keys(payload).forEach(key => {
+      if (payload[key] === undefined) {
+        delete payload[key];
+      }
+    });
+
+    console.log('Sending payload to backend:', payload);
+
     try {
-      const result = await dispatch(createParticipant(form)).unwrap();
+      const result = await dispatch(createParticipant(payload)).unwrap();
       
       setSuccessMessage(`Participant "${result.name}" created successfully!`);
       
@@ -120,6 +180,10 @@ const CreateParticipant = () => {
       }, 1500);
     } catch (err) {
       console.error('Failed to create participant:', err);
+      // Log detailed error
+      if (err?.response?.data) {
+        console.error('Validation errors:', err.response.data);
+      }
     } finally {
       setSaving(false);
     }
@@ -225,7 +289,7 @@ const CreateParticipant = () => {
         </Box>
       </Box>
 
-      {/* Error Alert */}
+      {/* Error Alert with Details */}
       {error && (
         <Alert 
           severity="error" 
@@ -240,7 +304,14 @@ const CreateParticipant = () => {
           }} 
           onClose={() => dispatch(clearError())}
         >
-          {error}
+          <Typography variant="subtitle2" fontWeight="bold">Error Details:</Typography>
+          {typeof error === 'object' ? (
+            <Box component="pre" sx={{ mt: 1, fontSize: '0.875rem', whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(error, null, 2)}
+            </Box>
+          ) : (
+            error
+          )}
         </Alert>
       )}
 
@@ -360,12 +431,12 @@ const CreateParticipant = () => {
                 fullWidth
                 label="Phone Number"
                 type="tel"
-                value={form.telephone}
-                onChange={handleChange('telephone')}
-                onBlur={handleBlur('telephone')}
-                error={!!getFieldError('telephone')}
-                helperText={getFieldError('telephone') || "Optional - for SMS updates"}
-                placeholder="+256712345678"
+                value={form.phone}
+                onChange={handleChange('phone')}
+                onBlur={handleBlur('phone')}
+                error={!!getFieldError('phone')}
+                helperText={getFieldError('phone') || "Optional - formatted automatically"}
+                placeholder="0712345678 or 256712345678"
                 size={isMobile ? "medium" : "small"}
                 sx={{
                   '& .MuiOutlinedInput-root': {
@@ -387,21 +458,21 @@ const CreateParticipant = () => {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PhoneIcon color={getFieldError('telephone') ? "error" : "action"} />
+                      <PhoneIcon color={getFieldError('phone') ? "error" : "action"} />
                     </InputAdornment>
                   ),
                 }}
               />
             </Grid>
 
-            {/* Title and Organization - Row */}
+            {/* Role and Organization - Row */}
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
-                label="Title / Role"
-                value={form.title}
-                onChange={handleChange('title')}
-                placeholder="e.g., Project Manager, Director"
+                label="Role / Title"
+                value={form.role}
+                onChange={handleChange('role')}
+                placeholder="e.g., Project Manager, Director, Commissioner"
                 size={isMobile ? "medium" : "small"}
                 sx={{
                   '& .MuiOutlinedInput-root': {
@@ -430,10 +501,10 @@ const CreateParticipant = () => {
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
-                label="Organization"
+                label="Organization / Company"
                 value={form.organization}
                 onChange={handleChange('organization')}
-                placeholder="e.g., Electoral Commission, Ministry"
+                placeholder="e.g., Electoral Commission, Ministry of Finance"
                 size={isMobile ? "medium" : "small"}
                 sx={{
                   '& .MuiOutlinedInput-root': {
@@ -455,7 +526,7 @@ const CreateParticipant = () => {
                     </InputAdornment>
                   ),
                 }}
-                helperText="Optional - Company or organization name"
+                helperText="Optional - Organization name"
               />
             </Grid>
 

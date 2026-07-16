@@ -315,8 +315,7 @@ const MeetingsList = () => {
 
   // ============ ADD ACTION HANDLERS ============
   const handleAddAction = async (meeting) => {
-    alert('handleAddAction called'); // TEMP DEBUG
-    console.log('Opening add action dialog for meeting:', meeting);
+    
     setSelectedMeetingForAction(meeting);
     setAddActionDialogOpen(true);
     setActionError(null);

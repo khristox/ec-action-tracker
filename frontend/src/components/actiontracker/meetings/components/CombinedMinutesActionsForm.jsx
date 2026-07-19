@@ -17,7 +17,8 @@ import {
 import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { addMinutes } from 'date-fns';
-import AssignToSelector from './AssignToSelector';
+import PersonsImplementingEditor from './PersonsImplementingEditor';
+import { parsePersonsFromAction, buildPersonsPayload } from './personsImplementing';
 
 const CombinedMinutesActionsForm = ({ 
   open, 
@@ -36,12 +37,23 @@ const CombinedMinutesActionsForm = ({
       content: editingMinutes?.content || '',
       summary: editingMinutes?.summary || ''
     },
-    actions: editingMinutes?.actions || []
+    // Each locally-held action carries `persons_implementing` as editable
+    // rows (not yet the API shape). Existing actions loaded from the API
+    // may only have the legacy assigned_to_name/assigned_to fields, so
+    // they're normalized through parsePersonsFromAction on load.
+    actions: (editingMinutes?.actions || []).map((a) => ({
+      id: a.id,
+      description: a.description || '',
+      persons_implementing: parsePersonsFromAction(a),
+      due_date: a.due_date ? new Date(a.due_date) : null,
+      priority: a.priority || 2,
+      remarks: a.remarks || ''
+    }))
   });
 
   const [newAction, setNewAction] = useState({
     description: '',
-    assigned_to: null,
+    persons_implementing: [],
     due_date: null,
     priority: 2,
     remarks: ''
@@ -86,7 +98,7 @@ const CombinedMinutesActionsForm = ({
     // Reset action form
     setNewAction({
       description: '',
-      assigned_to: null,
+      persons_implementing: [],
       due_date: null,
       priority: 2,
       remarks: ''
@@ -98,7 +110,7 @@ const CombinedMinutesActionsForm = ({
     const action = formData.actions[index];
     setNewAction({
       description: action.description || '',
-      assigned_to: action.assigned_to || null,
+      persons_implementing: action.persons_implementing || [],
       due_date: action.due_date || null,
       priority: action.priority || 2,
       remarks: action.remarks || ''
@@ -117,7 +129,7 @@ const CombinedMinutesActionsForm = ({
   const handleCancelAction = () => {
     setNewAction({
       description: '',
-      assigned_to: null,
+      persons_implementing: [],
       due_date: null,
       priority: 2,
       remarks: ''
@@ -149,9 +161,11 @@ const CombinedMinutesActionsForm = ({
         summary: formData.minutes.summary
       },
       actions: formData.actions.map(action => ({
+        id: action.id,
         description: action.description,
-        assigned_to_name: action.assigned_to?.assigned_to_name || null,
-        assigned_to_id: action.assigned_to?.assigned_to_id || null,
+        // persons_implementing + legacy assigned_to_id/assigned_to_name,
+        // same shape AddActionDialog/EditActionDialog send.
+        ...buildPersonsPayload(action.persons_implementing),
         priority: action.priority,
         due_date: action.due_date ? action.due_date.toISOString() : null,
         remarks: action.remarks || ''
@@ -290,13 +304,14 @@ const CombinedMinutesActionsForm = ({
                             size="small"
                             color={action.priority === 1 ? 'error' : action.priority === 2 ? 'warning' : 'default'}
                           />
-                          {action.assigned_to && (
-                            <Chip 
-                              label={`Assigned: ${action.assigned_to.name || action.assigned_to.assigned_to_name?.name || 'User'}`}
+                          {(action.persons_implementing || []).map((p, i) => (
+                            <Chip
+                              key={p.row_id || i}
+                              label={`Assigned: ${p.name || 'Unnamed'}`}
                               size="small"
                               variant="outlined"
                             />
-                          )}
+                          ))}
                           {action.due_date && (
                             <Chip 
                               label={`Due: ${new Date(action.due_date).toLocaleDateString()}`}
@@ -349,11 +364,10 @@ const CombinedMinutesActionsForm = ({
                     required
                   />
 
-                  <AssignToSelector
-                    value={newAction.assigned_to}
-                    onChange={(userObj) => setNewAction(prev => ({ ...prev, assigned_to: userObj }))}
+                  <PersonsImplementingEditor
+                    value={newAction.persons_implementing}
+                    onChange={(persons) => setNewAction(prev => ({ ...prev, persons_implementing: persons }))}
                     disabled={loading}
-                    label="Assign To"
                     meetingId={meetingId}
                   />
 

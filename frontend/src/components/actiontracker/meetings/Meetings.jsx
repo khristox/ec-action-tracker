@@ -1,4 +1,5 @@
 // src/components/actiontracker/meetings/Meetings.jsx
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -18,8 +19,8 @@ import {
   fetchActionTrackerAttributes
 } from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
+import { meetingsAPI } from '../../../services/meetingsAPI';
 
-import { useMeetings } from './hooks/useMeetings';
 import { MeetingCard } from './components/MeetingCard';
 import { MeetingFilters } from './components/MeetingFilters';
 import { MeetingTableView } from './components/MeetingTableView';
@@ -29,7 +30,6 @@ import { RecurringMeetingsList } from './components/RecurringMeetingsList';
 import { TabPanel } from './components/TabPanel';
 import { COLORS } from './styles/colors';
 import AddActionDialog from './components/AddActionDialog';
-
 
 // ==================== CONSTANTS ====================
 const STORAGE_KEYS = {
@@ -60,19 +60,13 @@ const Meetings = () => {
   // ==================== REDUX SELECTORS ====================
   const statusOptions = useSelector(selectMeetingStatusOptions);
   
-  // ==================== CUSTOM HOOKS ====================
-  const {
-    meetings,
-    loading,
-    pagination,
-    recurringMeetings,
-    loadingRecurring,
-    loadMeetings,
-    loadRecurringMeetings,
-    handleGenerateNextOccurrence
-  } = useMeetings();
-  
   // ==================== LOCAL STATE ====================
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 10 });
+  const [recurringMeetings, setRecurringMeetings] = useState([]);
+  const [loadingRecurring, setLoadingRecurring] = useState(false);
+  
   const [searchTerm, setSearchTerm] = useState(() => {
     return localStorage.getItem(STORAGE_KEYS.SEARCH_TERM) || '';
   });
@@ -118,14 +112,12 @@ const Meetings = () => {
     return saved !== null ? saved === 'true' : false;
   });
   
-
   const [addActionDialogOpen, setAddActionDialogOpen] = useState(false);
   const [selectedMeetingForAction, setSelectedMeetingForAction] = useState(null);
   const [minutes, setMinutes] = useState([]);
   const [loadingMinutes, setLoadingMinutes] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [creatingAction, setCreatingAction] = useState(false);
-
 
   // ==================== COMPUTED VALUES ====================
   const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
@@ -151,8 +143,6 @@ const Meetings = () => {
     return status?.color || 'default';
   };
 
-  // Widened cards: was minmax(280px, 1fr) — now minmax(360px, 1fr),
-  // so fewer, wider cards appear per row on desktop.
   const getGridColumns = useCallback(() => {
     if (isMobile) return '1fr';
     if (isTablet) return 'repeat(2, 1fr)';
@@ -183,6 +173,86 @@ const Meetings = () => {
                       localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
     if (savedScroll) {
       setTimeout(() => window.scrollTo({ top: parseInt(savedScroll), behavior: 'auto' }), 100);
+    }
+  }, []);
+
+  // ==================== DATA FETCHING ====================
+  const loadMeetings = useCallback(async (params = {}) => {
+    try {
+      setLoading(true);
+      
+      const queryParams = {
+        page: params.page || page,
+        limit: params.limit || rowsPerPage,
+        sort_by: 'meeting_date',
+        sort_order: 'desc',
+        show_upcoming: params.show_upcoming !== undefined ? params.show_upcoming : showUpcoming,
+        show_past: params.show_past !== undefined ? params.show_past : showPast,
+      };
+      
+      if (params.search !== undefined) queryParams.search = params.search;
+      else if (searchTerm) queryParams.search = searchTerm;
+      
+      if (params.status !== undefined) queryParams.status = params.status;
+      else if (statusFilter !== 'all') queryParams.status = statusFilter;
+      
+      // ✅ Use deduplicated API call
+      const response = await meetingsAPI.getAll(queryParams);
+      
+      setMeetings(response.data.items || []);
+      setPagination({
+        total: response.data.total || 0,
+        page: response.data.page || 1,
+        limit: response.data.limit || rowsPerPage,
+      });
+    } catch (err) {
+      console.error('Error loading meetings:', err);
+      setSnackbar({ 
+        open: true, 
+        message: err.message || 'Failed to load meetings', 
+        severity: 'error' 
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [page, rowsPerPage, showUpcoming, showPast, searchTerm, statusFilter]);
+
+const loadRecurringMeetings = useCallback(async () => {
+  try {
+    setLoadingRecurring(true);
+    
+    // ✅ Use the correct API method
+    const response = await meetingsAPI.getRecurring({
+      limit: 50,
+      sort_by: 'meeting_date',
+      sort_order: 'desc'
+    });
+    
+    setRecurringMeetings(response.data.items || []);
+  } catch (err) {
+    console.error('Error loading recurring meetings:', err);
+    setSnackbar({ 
+      open: true, 
+      message: 'Failed to load recurring meetings', 
+      severity: 'error' 
+    });
+  } finally {
+    setLoadingRecurring(false);
+  }
+}, []);
+
+  const handleGenerateNextOccurrence = useCallback(async (meeting) => {
+    try {
+      const response = await api.post(`/action-tracker/recurring-meetings/${meeting.id}/generate-next`);
+      return {
+        success: true,
+        message: response.data.message || 'Next occurrence generated successfully'
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: err.response?.data?.detail || err.message || 'Failed to generate next occurrence'
+      };
     }
   }, []);
 
@@ -225,9 +295,8 @@ const Meetings = () => {
     setShowUpcoming(true);
     setShowPast(false);
     setPage(1);
-    ['STATUS_FILTER', 'SHOW_UPCOMING', 'SHOW_PAST', 'SEARCH_TERM'].forEach(key => {
-      localStorage.removeItem(STORAGE_KEYS[key]);
-    });
+    // Clear cache when filters are cleared
+    meetingsAPI.clearCache();
   };
 
   const handleNotifyClick = async (meeting) => {
@@ -240,7 +309,6 @@ const Meetings = () => {
       setParticipants([]); 
     }
   };
-  
   
   const handleAddAction = async (meeting) => {
     setSelectedMeetingForAction(meeting);
@@ -267,6 +335,8 @@ const Meetings = () => {
       setSnackbar({ open: true, message: 'Action created successfully!', severity: 'success' });
       setAddActionDialogOpen(false);
       setSelectedMeetingForAction(null);
+      // Clear cache and reload
+      meetingsAPI.clearCache();
       loadMeetings({ page, limit: rowsPerPage });
       return response.data;
     } catch (err) {
@@ -310,12 +380,10 @@ const Meetings = () => {
   };
 
   // ==================== EFFECTS ====================
-  // Load status options on mount
   useEffect(() => {
     dispatch(fetchActionTrackerAttributes());
   }, [dispatch]);
 
-  // Save preferences to localStorage
   useEffect(() => {
     saveToLocalStorage(STORAGE_KEYS.SELECTED_TAB, tabValue);
     const urlParams = new URLSearchParams(location.search);
@@ -351,7 +419,6 @@ const Meetings = () => {
     saveToLocalStorage(STORAGE_KEYS.CURRENT_PAGE, page);
   }, [page, saveToLocalStorage]);
 
-  // Scroll position handlers
   useEffect(() => {
     const handleScroll = () => saveScrollPosition();
     window.addEventListener('scroll', handleScroll);
@@ -362,28 +429,19 @@ const Meetings = () => {
     };
   }, [saveScrollPosition]);
 
-  // Load recurring meetings on mount
   useEffect(() => {
     loadRecurringMeetings();
   }, [loadRecurringMeetings]);
 
-  // Load meetings when filters change
+  // ✅ Load meetings when filters change - with debounce protection
   useEffect(() => {
-    const params = {
-      page,
-      limit: rowsPerPage,
-      sortBy: 'meeting_date',
-      sortOrder: 'desc',
-      show_upcoming: showUpcoming,
-      show_past: showPast,
-    };
-    if (searchTerm) params.search = searchTerm;
-    if (statusFilter !== 'all') params.status = statusFilter; // Use 'status' not 'status_id'
+    const timeoutId = setTimeout(() => {
+      loadMeetings({ page, limit: rowsPerPage });
+    }, 300); // Debounce to prevent rapid successive calls
     
-    loadMeetings(params);
+    return () => clearTimeout(timeoutId);
   }, [page, searchTerm, statusFilter, rowsPerPage, showUpcoming, showPast, loadMeetings]);
 
-  // Restore scroll position after loading
   useEffect(() => {
     if (!loading && meetings.length > 0) {
       restoreScrollPosition();
@@ -442,14 +500,6 @@ const Meetings = () => {
               >
                 New Meeting
               </Button>
-              {/* <Button 
-                variant={tabValue === 1 ? "contained" : "outlined"} 
-                startIcon={<Add />} 
-                onClick={() => navigate('/recurring-meetings/create')} 
-                sx={{ borderRadius: 2.5, px: 3, py: 1.2, fontWeight: 700, textTransform: 'none' }}
-              >
-                New Series
-              </Button> */}
             </Stack>
           )}
         </Stack>
@@ -523,7 +573,7 @@ const Meetings = () => {
         
         {/* ==================== REGULAR MEETINGS TAB ==================== */}
         <TabPanel value={tabValue} index={0}>
-          {/* Filters */}
+          {/* Filters - same as before */}
           <Paper elevation={0} sx={{ 
             p: isMobile ? 1 : 2.5, 
             mb: isMobile ? 2 : 4, 
@@ -727,16 +777,16 @@ const Meetings = () => {
                   </Box>
                 ) : (
                   meetings.map((meeting) => (
-                  <MeetingCard 
-                    key={meeting.id}
-                    meeting={meeting} 
-                    statusOptions={statusOptions} 
-                    onView={(id) => navigate(`/meetings/${id}`)} 
-                    onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
-                    onNotify={handleNotifyClick}
-                    onGenerateMeeting={handleGenerateMeeting}
-                    onAddAction={handleAddAction}
-                  />
+                    <MeetingCard 
+                      key={meeting.id}
+                      meeting={meeting} 
+                      statusOptions={statusOptions} 
+                      onView={(id) => navigate(`/meetings/${id}`)} 
+                      onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
+                      onNotify={handleNotifyClick}
+                      onGenerateMeeting={handleGenerateMeeting}
+                      onAddAction={handleAddAction}
+                    />
                   ))
                 )}
               </Box>

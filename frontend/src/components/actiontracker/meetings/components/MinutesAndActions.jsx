@@ -22,7 +22,8 @@ import { addMinutes } from 'date-fns';
 import api from '../../../../services/api';
 import MinutesList from './MinutesList';
 import CombinedMinutesActionsForm from './CombinedMinutesActionsForm';
-import AssignToSelector from './AssignToSelector';
+import PersonsImplementingEditor from './PersonsImplementingEditor';
+import { parsePersonsFromAction, buildPersonsPayload } from './personsImplementing';
 
 const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, onUpdate }) => {
   const isStarted = meetingStatus?.toLowerCase().endsWith('started');
@@ -41,7 +42,7 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
   const [selectedMinuteId, setSelectedMinuteId] = useState(null);
   const [actionFormData, setActionFormData] = useState({
     description: '',
-    assigned_to: null,
+    persons_implementing: [],
     due_date: null,
     priority: 2,
     remarks: ''
@@ -135,10 +136,7 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
     setEditingAction(action);
     setActionFormData({
       description: action.description || '',
-      assigned_to: action.assigned_to_name ? {
-        assigned_to_id: action.assigned_to_id,
-        assigned_to_name: action.assigned_to_name
-      } : null,
+      persons_implementing: parsePersonsFromAction(action),
       due_date: action.due_date ? new Date(action.due_date) : null,
       priority: action.priority || 2,
       remarks: action.remarks || ''
@@ -153,7 +151,7 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
     setEditingAction(null);
     setActionFormData({
       description: '',
-      assigned_to: null,
+      persons_implementing: [],
       due_date: null,
       priority: 2,
       remarks: ''
@@ -180,8 +178,9 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
     try {
       const payload = {
         description: actionFormData.description.trim(),
-        assigned_to_name: actionFormData.assigned_to?.assigned_to_name || null,
-        assigned_to_id: actionFormData.assigned_to?.assigned_to_id || null,
+        // persons_implementing + legacy assigned_to_id/assigned_to_name,
+        // same shape every other action form sends.
+        ...buildPersonsPayload(actionFormData.persons_implementing),
         priority: actionFormData.priority,
         due_date: actionFormData.due_date ? actionFormData.due_date.toISOString() : null,
         remarks: actionFormData.remarks || ''
@@ -222,24 +221,24 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
         });
         
         for (const action of data.actions) {
+          // action already has persons_implementing + assigned_to_id +
+          // assigned_to_name built by CombinedMinutesActionsForm via
+          // buildPersonsPayload() - just pass it straight through instead
+          // of re-deriving from the old single `assigned_to` shape.
+          const actionPayload = {
+            description: action.description,
+            persons_implementing: action.persons_implementing,
+            assigned_to_id: action.assigned_to_id,
+            assigned_to_name: action.assigned_to_name,
+            priority: action.priority,
+            due_date: action.due_date,
+            remarks: action.remarks || ''
+          };
+
           if (action.id && !action.isNew) {
-            await api.put(`/action-tracker/actions/${action.id}`, {
-              description: action.description,
-              assigned_to_name: action.assigned_to?.assigned_to_name || null,
-              assigned_to_id: action.assigned_to?.assigned_to_id || null,
-              priority: action.priority,
-              due_date: action.due_date ? new Date(action.due_date).toISOString() : null,
-              remarks: action.remarks || ''
-            });
+            await api.put(`/action-tracker/actions/${action.id}`, actionPayload);
           } else if (action.description) {
-            await api.post(`/action-tracker/actions/minutes/${editingMinutes.id}/actions`, {
-              description: action.description,
-              assigned_to_name: action.assigned_to?.assigned_to_name || null,
-              assigned_to_id: action.assigned_to?.assigned_to_id || null,
-              priority: action.priority,
-              due_date: action.due_date ? new Date(action.due_date).toISOString() : null,
-              remarks: action.remarks || ''
-            });
+            await api.post(`/action-tracker/actions/minutes/${editingMinutes.id}/actions`, actionPayload);
           }
         }
         setSuccessMsg('Minutes and actions updated successfully');
@@ -255,10 +254,11 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
           const actionPromises = data.actions.map(action =>
             api.post(`/action-tracker/actions/minutes/${newMinutesId}/actions`, {
               description: action.description,
-              assigned_to_name: action.assigned_to?.assigned_to_name || null,
-              assigned_to_id: action.assigned_to?.assigned_to_id || null,
+              persons_implementing: action.persons_implementing,
+              assigned_to_id: action.assigned_to_id,
+              assigned_to_name: action.assigned_to_name,
               priority: action.priority,
-              due_date: action.due_date ? new Date(action.due_date).toISOString() : null,
+              due_date: action.due_date,
               remarks: action.remarks || ''
             })
           );
@@ -446,11 +446,10 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
                 placeholder="Describe the action item..."
               />
               
-              <AssignToSelector
-                value={actionFormData.assigned_to}
-                onChange={(userObj) => setActionFormData(prev => ({ ...prev, assigned_to: userObj }))}
+              <PersonsImplementingEditor
+                value={actionFormData.persons_implementing}
+                onChange={(persons) => setActionFormData(prev => ({ ...prev, persons_implementing: persons }))}
                 disabled={savingAction}
-                label="Assign To"
                 meetingId={meetingId}
               />
               

@@ -690,6 +690,10 @@ const meetingSlice = createSlice({
       state.meetings = { ...DEFAULT_PAGINATION };
       state.ui.error = null;
     },
+    clearMeetingMinutes: (state) => {
+      state.currentMinutes = { items: [], total: 0 };
+      state.ui.minutesError = null;
+    },
     setMeetingPage: (state, action) => {
       state.meetings.page = action.payload;
     },
@@ -1149,6 +1153,7 @@ export const {
   removeMinutesLocally,
   updateMinutesLocally,
   clearMinutesError,
+  clearMeetingMinutes,
   setCurrentMeeting,
 } = meetingSlice.actions;
 

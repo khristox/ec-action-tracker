@@ -1,86 +1,142 @@
 // src/services/api.js
+
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 30000, // ✅ 30 second timeout
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor to add auth token
+// ✅ Track pending requests to prevent duplicates
+const pendingRequests = new Map();
+
+// Request interceptor with deduplication and timeout
 api.interceptors.request.use(
   (config) => {
-    // Try both possible token keys (your auth slice uses 'access_token')
+    // Skip for public endpoints
+    const publicEndpoints = ['/auth/login', '/auth/signup', '/auth/refresh', '/auth/forgot-password'];
+    const isPublic = publicEndpoints.some(endpoint => config.url?.includes(endpoint));
+    
+    if (isPublic) {
+      return config;
+    }
+
     const token = localStorage.getItem('access_token') || localStorage.getItem('token');
     
-    console.log('API Request:', {
-      url: config.url,
-      method: config.method,
-      hasToken: !!token
-    });
-    
+    // ✅ Only log in development to reduce noise
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Request:', {
+        url: config.url,
+        method: config.method,
+        hasToken: !!token,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => Promise.reject(error)
-);
-
-// Response interceptor
-api.interceptors.response.use(
-  (response) => response,
   (error) => {
-    console.error('API Error:', {
-      status: error.response?.status,
-      url: error.config?.url,
-      message: error.response?.data?.detail
-    });
-    
-    // Only redirect if it's a 401 and we're not already on login page
-    if (error.response?.status === 401) {
-      const currentPath = window.location.pathname;
-      if (currentPath !== '/login' && currentPath !== '/signup') {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
-      }
-    }
+    console.error('Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
 
+// Response interceptor with token refresh and timeout handling
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // ✅ Prevent infinite retry loops
+    if (originalRequest._retry) {
+      return Promise.reject(error);
+    }
 
-// src/services/api.js - Ensure UUIDs are handled as strings
+    // ✅ Check if it's a timeout error
+    const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+    
+    // ✅ Log error with detail (only in development)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('API Error:', {
+        status: error.response?.status,
+        url: error.config?.url,
+        message: error.response?.data?.detail || error.message,
+        timeout: isTimeout,
+        method: error.config?.method,
+      });
+    }
 
+    // ✅ Handle 401 Unauthorized with token refresh
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      try {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+          const response = await axios.post(
+            `${API_BASE_URL}/auth/refresh`,
+            { refresh_token: refreshToken },
+            { timeout: 10000 }
+          );
+          
+          const newToken = response.data.access_token;
+          if (newToken) {
+            localStorage.setItem('access_token', newToken);
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return api(originalRequest);
+          }
+        }
+      } catch (refreshError) {
+        // ✅ Refresh failed - clear tokens and redirect
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('user');
+        
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/login' && currentPath !== '/signup') {
+          window.location.href = '/login';
+        }
+        return Promise.reject(refreshError);
+      }
+    }
+
+    // ✅ Handle timeout specifically - return a user-friendly error
+    if (isTimeout) {
+      return Promise.reject({
+        ...error,
+        message: 'The server is taking too long to respond. Please try again.',
+        isTimeout: true,
+      });
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// ✅ Export organizationAPI as before
 export const organizationAPI = {
-  // Get all nodes
   getAll: async () => {
     const response = await api.get('/organization/nodes');
     return response.data;
   },
-  
-  // Get tree structure
   getTree: async () => {
     const response = await api.get('/organization/tree');
     return response.data;
   },
-  
-  // Get single node
   get: async (id) => {
-    // id is string UUID, don't convert
     const response = await api.get(`/organization/nodes/${id}`);
     return response.data;
   },
-  
-  // Create node
   create: async (data) => {
-    // Make sure parent_id is null or string, not number
     const cleanData = {
       ...data,
       parent_id: data.parent_id === '' || data.parent_id === undefined ? null : data.parent_id,
@@ -91,8 +147,6 @@ export const organizationAPI = {
     const response = await api.post('/organization/nodes', cleanData);
     return response.data;
   },
-  
-  // Update node
   update: async (id, data) => {
     const cleanData = {
       ...data,
@@ -101,14 +155,10 @@ export const organizationAPI = {
     const response = await api.put(`/organization/nodes/${id}`, cleanData);
     return response.data;
   },
-  
-  // Delete node
   delete: async (id) => {
     const response = await api.delete(`/organization/nodes/${id}`);
     return response.data;
   },
-  
-  // Move node
   move: async (id, newParentId) => {
     const response = await api.patch(`/organization/nodes/${id}/move`, {
       new_parent_id: newParentId === '' || newParentId === undefined ? null : newParentId
@@ -116,6 +166,5 @@ export const organizationAPI = {
     return response.data;
   }
 };
-
 
 export default api;

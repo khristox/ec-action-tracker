@@ -66,14 +66,9 @@ import UpdateProgress from '../actions/UpdateProgress';
 
 // ==================== HELPER FUNCTIONS ====================
 
-/**
- * Extract error message from various error formats
- * Handles Pydantic validation errors, FastAPI errors, and generic errors
- */
 const extractErrorMessage = (error) => {
   if (error.response?.data) {
     const data = error.response.data;
-
     if (Array.isArray(data)) {
       return data.map(e => {
         if (e.msg) return e.msg;
@@ -81,35 +76,20 @@ const extractErrorMessage = (error) => {
         return JSON.stringify(e);
       }).join(', ');
     }
-
     if (data.detail) {
       if (Array.isArray(data.detail)) {
         return data.detail.map(e => e.msg || e.message || e).join(', ');
       }
       return data.detail;
     }
-
-    if (data.message) {
-      return data.message;
-    }
-
-    if (typeof data === 'string') {
-      return data;
-    }
-
+    if (data.message) return data.message;
+    if (typeof data === 'string') return data;
     return JSON.stringify(data);
   }
-
-  if (error.message) {
-    return error.message;
-  }
-
+  if (error.message) return error.message;
   return 'An unexpected error occurred';
 };
 
-/**
- * Check if meeting allows editing actions based on its status
- */
 const canEditActions = (meetingStatus) => {
   if (!meetingStatus) return false;
   const statusLower = String(meetingStatus).toLowerCase();
@@ -117,9 +97,6 @@ const canEditActions = (meetingStatus) => {
   return allowedStatuses.some(status => statusLower.includes(status));
 };
 
-/**
- * Format date string to readable format
- */
 const formatDate = (dateString) => {
   if (!dateString) return 'No due date';
   try {
@@ -144,6 +121,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const statusOptionsError = useSelector(selectActionTrackerError);
   const { updatingProgress } = useSelector((state) => state.actions || {});
 
+  // ==================== REFS FOR PREVENTING INFINITE LOOPS ====================
+  const isMountedRef = useRef(true);
+  const initialFetchDoneRef = useRef(false);
+  const previousMinutesStringRef = useRef('');
+
   // ==================== LOCAL STATE ====================
   const [actions, setActions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -157,16 +139,15 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const [successMessage, setSuccessMessage] = useState('');
   const [creatingDefaultMinute, setCreatingDefaultMinute] = useState(false);
 
-  // Ref into UpdateProgress's imperative API (submitForm / isLoading),
-  // so this dialog's own button row can drive the child form directly
-  // instead of relying on document.querySelector('form').
   const progressFormRef = useRef(null);
 
   // ==================== COMPUTED VALUES ====================
   const canEdit = canEditActions(meetingStatus);
   const isUpdating = localUpdating || updatingProgress;
-  const statusMessage = getStatusMessage(meetingStatus);
   const hasNoMinutes = minutesList.length === 0 && !loading;
+
+  // ✅ FIXED: Call the function to get the status message
+  const statusMessage = getStatusMessage(meetingStatus);
 
   // ==================== HELPER FUNCTIONS ====================
 
@@ -190,11 +171,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     return isDarkMode ? '#6B7280' : 'grey.500';
   };
 
-  /**
-   * Get status configuration for an action.
-   * NOTE: status.short_name from processActionStatusOptions is always
-   * lowercased, so the comparison here must be lowercase too.
-   */
   const getStatusConfig = (action) => {
     const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
     const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
@@ -252,41 +228,26 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== API CALLS ====================
 
+  // ✅ FIXED: fetchMinutes is stable and only depends on meetingId
   const fetchMinutes = useCallback(() => {
-    if (meetingId) {
+    if (meetingId && isMountedRef.current) {
       return dispatch(fetchMeetingMinutes(meetingId));
     }
     return Promise.resolve();
   }, [dispatch, meetingId]);
 
+  // ✅ FIXED: fetchAttributes is stable
   const fetchAttributes = useCallback(() => {
-    dispatch(fetchActionTrackerAttributes());
+    if (isMountedRef.current) {
+      dispatch(fetchActionTrackerAttributes());
+    }
   }, [dispatch]);
 
-  const ensureDefaultMinute = useCallback(async () => {
-    if (minutesList && minutesList.length > 0) {
-      return minutesList[0].id;
-    }
-
-    setCreatingDefaultMinute(true);
-    try {
-      const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
-        title: 'General',
-        content: '',
-      });
-      const newMinuteId = response.data?.id;
-      if (!newMinuteId) {
-        throw new Error('Minute was created but no id was returned');
-      }
-      await fetchMinutes();
-      return newMinuteId;
-    } finally {
-      setCreatingDefaultMinute(false);
-    }
-  }, [meetingId, minutesList, fetchMinutes]);
-
+  // ==================== EXTRACT ACTIONS - FIXED ====================
+  // ✅ FIXED: Only runs when minutesList actually changes
   const extractActionsFromMinutes = useCallback(() => {
-    setLoading(true);
+    if (!isMountedRef.current) return;
+
     try {
       const actionsData = [];
       (minutesList || []).forEach(minute => {
@@ -294,35 +255,68 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           actionsData.push(...minute.actions);
         }
       });
-      setActions(actionsData);
+      
+      // ✅ FIXED: Compare stringified versions to detect actual changes
+      const currentString = JSON.stringify(actionsData);
+      
+      if (currentString !== previousMinutesStringRef.current) {
+        previousMinutesStringRef.current = currentString;
+        if (isMountedRef.current) {
+          setActions(actionsData);
+          setError(null);
+        }
+      }
     } catch (err) {
       console.error('Error extracting actions:', err);
-      setError('Failed to load actions');
+      if (isMountedRef.current) {
+        setError('Failed to load actions');
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [minutesList]);
 
   // ==================== EFFECTS ====================
 
+  // ✅ FIXED: Initial fetch - only runs once when meetingId changes
   useEffect(() => {
-    if (meetingId) {
+    isMountedRef.current = true;
+    initialFetchDoneRef.current = false;
+    previousMinutesStringRef.current = '';
+
+    if (meetingId && !initialFetchDoneRef.current) {
+      initialFetchDoneRef.current = true;
       fetchMinutes();
       fetchAttributes();
     }
-  }, [fetchMinutes, fetchAttributes, meetingId]);
 
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [meetingId, fetchMinutes, fetchAttributes]);
+
+  // ✅ FIXED: Extract actions when minutesList updates
   useEffect(() => {
-    extractActionsFromMinutes();
+    if (minutesList && isMountedRef.current) {
+      extractActionsFromMinutes();
+    }
   }, [minutesList, extractActionsFromMinutes]);
 
+  // ✅ FIXED: Success message cleanup
   useEffect(() => {
     if (successMessage) {
-      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      const timer = setTimeout(() => {
+        if (isMountedRef.current) {
+          setSuccessMessage('');
+        }
+      }, 3000);
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
 
+  // ✅ FIXED: Status options error logging
   useEffect(() => {
     if (statusOptionsError) {
       console.error('Failed to load status options:', statusOptionsError);
@@ -331,62 +325,102 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== EVENT HANDLERS ====================
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
+    if (!isMountedRef.current) return;
+    initialFetchDoneRef.current = false;
+    previousMinutesStringRef.current = '';
     fetchMinutes();
     if (onRefresh) onRefresh();
-  };
+  }, [fetchMinutes, onRefresh]);
 
-  const handleViewAction = (actionId) => {
+  const handleViewAction = useCallback((actionId) => {
     navigate(`/actions/${actionId}`);
-  };
+  }, [navigate]);
 
-  const handleEditAction = (action) => {
+  const handleEditAction = useCallback((action) => {
+    if (!isMountedRef.current) return;
     setSelectedAction(action);
     setShowEditDialog(true);
-  };
+  }, []);
 
-  const handleAssignAction = (action) => {
+  const handleAssignAction = useCallback((action) => {
+    if (!isMountedRef.current) return;
     const meetingIdFromAction = action.minutes?.meeting_id || action.meeting_id;
     setSelectedAction({
       ...action,
       _meetingId: meetingIdFromAction
     });
     setShowAssignDialog(true);
-  };
+  }, []);
 
-  const handleEditSave = () => {
+  const handleEditSave = useCallback(() => {
+    if (!isMountedRef.current) return;
+    initialFetchDoneRef.current = false;
+    previousMinutesStringRef.current = '';
     fetchMinutes();
     setSuccessMessage('Action updated successfully!');
-  };
+  }, [fetchMinutes]);
 
-  const handleAssignSave = () => {
+  const handleAssignSave = useCallback(() => {
+    if (!isMountedRef.current) return;
+    initialFetchDoneRef.current = false;
+    previousMinutesStringRef.current = '';
     fetchMinutes();
     setSuccessMessage('Action assigned successfully!');
-  };
+  }, [fetchMinutes]);
 
-  const handleActionCreated = () => {
+  const handleActionCreated = useCallback(() => {
+    if (!isMountedRef.current) return;
+    initialFetchDoneRef.current = false;
+    previousMinutesStringRef.current = '';
     fetchMinutes();
     if (onRefresh) onRefresh();
     setSuccessMessage('Action created successfully!');
-  };
+  }, [fetchMinutes, onRefresh]);
 
-  const handleOpenProgressDialog = (action) => {
+  const handleOpenProgressDialog = useCallback((action) => {
+    if (!isMountedRef.current) return;
     setSelectedAction(action);
     setShowProgressDialog(true);
-  };
+  }, []);
 
-  const handleProgressUpdateComplete = () => {
+  const handleProgressUpdateComplete = useCallback(() => {
+    if (!isMountedRef.current) return;
+    initialFetchDoneRef.current = false;
+    previousMinutesStringRef.current = '';
     fetchMinutes();
     if (onRefresh) onRefresh();
     setSuccessMessage('Progress updated successfully!');
     setShowProgressDialog(false);
-  };
+  }, [fetchMinutes, onRefresh]);
 
-  const handleActionCreate = async (payload) => {
+  const handleActionCreate = useCallback(async (payload) => {
+    if (!isMountedRef.current) return;
+    
     try {
-      const minuteId = payload.minute_id || await ensureDefaultMinute();
+      // Get or create a minute
+      let minuteId = payload.minute_id;
+      if (!minuteId && minutesList && minutesList.length > 0) {
+        minuteId = minutesList[0]?.id;
+      }
+      
+      if (!minuteId) {
+        // Create a default minute
+        setCreatingDefaultMinute(true);
+        const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
+          title: 'General',
+          content: '',
+        });
+        minuteId = response.data?.id;
+        if (!minuteId) {
+          throw new Error('Failed to create default minute');
+        }
+        // Refresh minutes after creating
+        await fetchMinutes();
+        setCreatingDefaultMinute(false);
+      }
 
-      const response = await api.post(
+      const actionResponse = await api.post(
         '/action-tracker/actions/',
         {
           minute_id: minuteId,
@@ -401,14 +435,16 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       );
 
       handleActionCreated();
-      return response.data;
+      return actionResponse.data;
     } catch (err) {
       console.error('Error creating action:', err);
       const errorMessage = extractErrorMessage(err);
-      setError(errorMessage);
+      if (isMountedRef.current) {
+        setError(errorMessage);
+      }
       throw err;
     }
-  };
+  }, [meetingId, minutesList, fetchMinutes, handleActionCreated]);
 
   // ==================== RENDER ====================
 
@@ -697,7 +733,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           </TableContainer>
         )}
 
-        {/* ==================== ADD ACTION DIALOG ==================== */}
+        {/* ==================== DIALOGS ==================== */}
         <AddActionDialog
           open={showAddActionDialog}
           onClose={() => setShowAddActionDialog(false)}
@@ -710,11 +746,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           error={error}
         />
 
-        {/* ==================== PROGRESS UPDATE DIALOG ====================
-             Single button row lives here (DialogActions). UpdateProgress
-             renders no buttons of its own while embedded; this dialog's
-             "Update Progress" button drives submission via
-             progressFormRef.current.submitForm(). */}
         <Dialog
           open={showProgressDialog}
           onClose={() => setShowProgressDialog(false)}
@@ -829,7 +860,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           </DialogActions>
         </Dialog>
 
-        {/* ==================== EDIT ACTION DIALOG ==================== */}
         <EditActionDialog
           open={showEditDialog}
           action={selectedAction}
@@ -840,7 +870,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           onSave={handleEditSave}
         />
 
-        {/* ==================== ASSIGN USER DIALOG ==================== */}
         <AssignUserDialog
           open={showAssignDialog}
           action={selectedAction}

@@ -3,10 +3,10 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import {
   Grid, Typography, Box, CircularProgress, Alert, Button, Stack, Paper,
   useMediaQuery, useTheme, TextField, InputAdornment,
-  ToggleButton, ToggleButtonGroup, Chip, IconButton, Menu, MenuItem,
+  ToggleButton, ToggleButtonGroup, Chip, IconButton, MenuItem,
   FormControl, InputLabel, Select, Pagination, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
-  alpha, Drawer, AppBar, Toolbar, Divider, SwipeableDrawer,
+  alpha, Divider, SwipeableDrawer,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -14,13 +14,14 @@ import {
   Clear as ClearIcon,
   ViewModule as ViewModuleIcon,
   ViewList as ViewListIcon,
-  FilterList as FilterListIcon,
   CalendarToday as CalendarIcon,
   CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
   Repeat as RepeatIcon,
   TuneRounded as TuneIcon,
   Close as Close,
+  ArrowUpward as ArrowUpwardIcon,
+  ArrowDownward as ArrowDownwardIcon,
 } from '@mui/icons-material';
 import { RecurringMeetingCard } from './RecurringMeetingCard';
 
@@ -43,40 +44,59 @@ const getStatusIcon = (status) => {
   }
 };
 
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All statuses', color: 'default' },
+  { value: 'active', label: 'Active', color: 'success' },
+  { value: 'inactive', label: 'Paused', color: 'warning' },
+  { value: 'completed', label: 'Completed', color: 'info' },
+];
+
+const SORT_OPTIONS = [
+  { value: 'next_date', label: 'Next date' },
+  { value: 'title', label: 'Title' },
+  { value: 'created', label: 'Date created' },
+  { value: 'total', label: 'Total generated' },
+];
+
 // ─── Mobile Filters Drawer ────────────────────────────────────────────────────
-const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, onApply }) => {
+const MobileFiltersDrawer = ({ 
+  open, 
+  onClose, 
+  statusFilter, 
+  setStatusFilter, 
+  sortBy, 
+  setSortBy, 
+  sortOrder, 
+  setSortOrder, 
+  onApply 
+}) => {
   const theme = useTheme();
   const [localStatus, setLocalStatus] = useState(statusFilter);
   const [localSortBy, setLocalSortBy] = useState(sortBy);
   const [localSortOrder, setLocalSortOrder] = useState(sortOrder);
 
-  const handleApply = () => {
+  const handleApply = useCallback(() => {
     setStatusFilter(localStatus);
     setSortBy(localSortBy);
     setSortOrder(localSortOrder);
     onApply?.();
     onClose();
-  };
+  }, [localStatus, localSortBy, localSortOrder, setStatusFilter, setSortBy, setSortOrder, onApply, onClose]);
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     setLocalStatus('all');
     setLocalSortBy('next_date');
     setLocalSortOrder('asc');
-  };
+  }, []);
 
-  const statusOptions = [
-    { value: 'all', label: 'All statuses', color: 'default' },
-    { value: 'active', label: 'Active', color: 'success' },
-    { value: 'inactive', label: 'Paused', color: 'warning' },
-    { value: 'completed', label: 'Completed', color: 'info' },
-  ];
-
-  const sortOptions = [
-    { value: 'next_date', label: 'Next date' },
-    { value: 'title', label: 'Title' },
-    { value: 'created', label: 'Date created' },
-    { value: 'total', label: 'Total generated' },
-  ];
+  const handleSortOptionClick = useCallback((value) => {
+    if (localSortBy === value) {
+      setLocalSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setLocalSortBy(value);
+      setLocalSortOrder('asc');
+    }
+  }, [localSortBy]);
 
   return (
     <SwipeableDrawer
@@ -85,11 +105,14 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
       onClose={onClose}
       onOpen={() => {}}
       disableSwipeToOpen
-      PaperProps={{
-        sx: {
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
-          pb: 'env(safe-area-inset-bottom)',
+      slotProps={{
+        paper: {
+          sx: {
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            pb: 'env(safe-area-inset-bottom)',
+            maxHeight: '85vh',
+          }
         }
       }}
     >
@@ -99,13 +122,26 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
       </Box>
 
       {/* Header */}
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
+      <Stack 
+        direction="row" 
+        spacing={1}
+        sx={{ 
+          px: 2.5, 
+          py: 1.5,
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}
+      >
         <Typography variant="h6" fontWeight={700}>Filters & Sort</Typography>
         <Stack direction="row" spacing={1}>
-          <Button size="small" onClick={handleReset} sx={{ textTransform: 'none', color: 'text.secondary' }}>
+          <Button 
+            size="small" 
+            onClick={handleReset} 
+            sx={{ textTransform: 'none', color: 'text.secondary' }}
+          >
             Reset
           </Button>
-          <IconButton size="small" onClick={onClose}>
+          <IconButton size="small" onClick={onClose} aria-label="Close filters">
             <Close fontSize="small" />
           </IconButton>
         </Stack>
@@ -115,11 +151,20 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
 
       <Box sx={{ px: 2.5, py: 2.5, overflowY: 'auto' }}>
         {/* Status filter */}
-        <Typography variant="overline" color="text.disabled" sx={{ letterSpacing: 1.5, fontSize: '0.65rem', display: 'block', mb: 1.5 }}>
+        <Typography 
+          variant="overline" 
+          color="text.disabled" 
+          sx={{ letterSpacing: 1.5, fontSize: '0.65rem', display: 'block', mb: 1.5 }}
+        >
           Status
         </Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ gap: 1, mb: 3 }}>
-          {statusOptions.map(opt => (
+        <Stack 
+          direction="row" 
+          spacing={1} 
+          useFlexGap 
+          sx={{ flexWrap: 'wrap', gap: 1, mb: 3 }}
+        >
+          {STATUS_OPTIONS.map(opt => (
             <Chip
               key={opt.value}
               label={opt.label}
@@ -127,47 +172,72 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
               color={localStatus === opt.value ? opt.color || 'primary' : 'default'}
               variant={localStatus === opt.value ? 'filled' : 'outlined'}
               onClick={() => setLocalStatus(opt.value)}
-              sx={{ borderRadius: 2, fontWeight: localStatus === opt.value ? 700 : 400 }}
+              sx={{ 
+                borderRadius: 2, 
+                fontWeight: localStatus === opt.value ? 700 : 400,
+                '&:hover': {
+                  transform: 'translateY(-1px)',
+                  transition: 'transform 0.15s ease',
+                }
+              }}
             />
           ))}
         </Stack>
 
         {/* Sort by */}
-        <Typography variant="overline" color="text.disabled" sx={{ letterSpacing: 1.5, fontSize: '0.65rem', display: 'block', mb: 1.5 }}>
+        <Typography 
+          variant="overline" 
+          color="text.disabled" 
+          sx={{ letterSpacing: 1.5, fontSize: '0.65rem', display: 'block', mb: 1.5 }}
+        >
           Sort by
         </Typography>
         <Stack direction="column" spacing={1} sx={{ mb: 3 }}>
-          {sortOptions.map(opt => (
-            <Paper
-              key={opt.value}
-              elevation={0}
-              onClick={() => {
-                if (localSortBy === opt.value) {
-                  setLocalSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-                } else {
-                  setLocalSortBy(opt.value);
-                  setLocalSortOrder('asc');
-                }
-              }}
-              sx={{
-                p: 1.5, borderRadius: 2, cursor: 'pointer',
-                border: '1px solid',
-                borderColor: localSortBy === opt.value ? 'primary.main' : 'divider',
-                bgcolor: localSortBy === opt.value ? alpha('#1976d2', 0.06) : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                transition: 'all 0.15s',
-              }}
-            >
-              <Typography variant="body2" fontWeight={localSortBy === opt.value ? 600 : 400}>
-                {opt.label}
-              </Typography>
-              {localSortBy === opt.value && (
-                <Typography variant="caption" color="primary.main" fontWeight={600}>
-                  {localSortOrder === 'asc' ? '↑ Ascending' : '↓ Descending'}
+          {SORT_OPTIONS.map(opt => {
+            const isActive = localSortBy === opt.value;
+            return (
+              <Paper
+                key={opt.value}
+                elevation={0}
+                onClick={() => handleSortOptionClick(opt.value)}
+                sx={{
+                  p: 1.5, 
+                  borderRadius: 2, 
+                  cursor: 'pointer',
+                  border: '1px solid',
+                  borderColor: isActive ? 'primary.main' : 'divider',
+                  bgcolor: isActive ? alpha(theme.palette.primary.main, 0.06) : 'transparent',
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between',
+                  transition: 'all 0.2s ease',
+                  '&:hover': {
+                    borderColor: isActive ? 'primary.main' : 'text.secondary',
+                    bgcolor: isActive ? alpha(theme.palette.primary.main, 0.08) : alpha(theme.palette.action.hover, 0.04),
+                  }
+                }}
+              >
+                <Typography variant="body2" fontWeight={isActive ? 600 : 400}>
+                  {opt.label}
                 </Typography>
-              )}
-            </Paper>
-          ))}
+                {isActive && (
+                  <Stack 
+                    direction="row" 
+                    spacing={0.5} 
+                    sx={{ alignItems: 'center' }}
+                  >
+                    <Typography variant="caption" color="primary.main" fontWeight={600}>
+                      {localSortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                    </Typography>
+                    {localSortOrder === 'asc' ? 
+                      <ArrowUpwardIcon fontSize="small" color="primary" /> : 
+                      <ArrowDownwardIcon fontSize="small" color="primary" />
+                    }
+                  </Stack>
+                )}
+              </Paper>
+            );
+          })}
         </Stack>
       </Box>
 
@@ -178,7 +248,16 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
           fullWidth
           size="large"
           onClick={handleApply}
-          sx={{ borderRadius: 3, textTransform: 'none', fontWeight: 700, py: 1.5 }}
+          sx={{ 
+            borderRadius: 3, 
+            textTransform: 'none', 
+            fontWeight: 700, 
+            py: 1.5,
+            '&:hover': {
+              transform: 'translateY(-2px)',
+              transition: 'transform 0.2s ease',
+            }
+          }}
         >
           Apply filters
         </Button>
@@ -190,9 +269,13 @@ const MobileFiltersDrawer = ({ open, onClose, statusFilter, setStatusFilter, sor
 // ─── Stat Pill ────────────────────────────────────────────────────────────────
 const StatPill = ({ label, value, color }) => (
   <Box sx={{
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    px: 1.5, py: 0.75,
-    flex: 1, minWidth: 0,
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center',
+    px: 1.5, 
+    py: 0.75,
+    flex: 1, 
+    minWidth: 0,
   }}>
     <Typography variant="h6" fontWeight={800} color={color} sx={{ lineHeight: 1.1 }}>
       {value}
@@ -201,6 +284,36 @@ const StatPill = ({ label, value, color }) => (
       {label}
     </Typography>
   </Box>
+);
+
+// ─── Search Bar Component ─────────────────────────────────────────────────────
+const SearchBar = ({ value, onChange, onClear }) => (
+  <TextField
+    placeholder="Search meetings…"
+    value={value}
+    onChange={onChange}
+    size="small"
+    sx={{
+      flex: 1,
+      '& .MuiOutlinedInput-root': { borderRadius: 2.5 },
+    }}
+    slotProps={{
+      input: {
+        startAdornment: (
+          <InputAdornment position="start">
+            <SearchIcon fontSize="small" color="action" />
+          </InputAdornment>
+        ),
+        endAdornment: value && (
+          <InputAdornment position="end">
+            <IconButton size="small" onClick={onClear} edge="end" aria-label="Clear search">
+              <ClearIcon fontSize="small" />
+            </IconButton>
+          </InputAdornment>
+        ),
+      }
+    }}
+  />
 );
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -222,7 +335,6 @@ export const RecurringMeetingsList = ({
   const isTablet = useMediaQuery('(max-width:960px)');
 
   const containerRef = useRef(null);
-  // Internal page state — used when parent doesn't manage currentPage
   const [internalPage, setInternalPage] = useState(1);
   const activePage = onPageChange ? currentPage : internalPage;
 
@@ -232,7 +344,6 @@ export const RecurringMeetingsList = ({
   const [sortBy, setSortBy] = useState('next_date');
   const [sortOrder, setSortOrder] = useState('asc');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [desktopAnchorEl, setDesktopAnchorEl] = useState(null);
 
   const meetingsArray = Array.isArray(meetings) ? meetings : [];
 
@@ -241,7 +352,7 @@ export const RecurringMeetingsList = ({
     let filtered = [...meetingsArray];
 
     if (searchTerm) {
-      const q = searchTerm.toLowerCase();
+      const q = searchTerm.toLowerCase().trim();
       filtered = filtered.filter(m =>
         m.title?.toLowerCase().includes(q) ||
         m.description?.toLowerCase().includes(q) ||
@@ -257,9 +368,18 @@ export const RecurringMeetingsList = ({
     filtered.sort((a, b) => {
       let vA, vB;
       switch (sortBy) {
-        case 'title': vA = a.title || ''; vB = b.title || ''; break;
-        case 'created': vA = new Date(a.created_at || 0); vB = new Date(b.created_at || 0); break;
-        case 'total': vA = a.total_occurrences_generated || 0; vB = b.total_occurrences_generated || 0; break;
+        case 'title': 
+          vA = (a.title || '').toLowerCase(); 
+          vB = (b.title || '').toLowerCase(); 
+          break;
+        case 'created': 
+          vA = new Date(a.created_at || 0); 
+          vB = new Date(b.created_at || 0); 
+          break;
+        case 'total': 
+          vA = a.total_occurrences_generated || 0; 
+          vB = b.total_occurrences_generated || 0; 
+          break;
         default:
           vA = a.next_occurrence_date ? new Date(a.next_occurrence_date) : new Date(8640000000000000);
           vB = b.next_occurrence_date ? new Date(b.next_occurrence_date) : new Date(8640000000000000);
@@ -286,30 +406,28 @@ export const RecurringMeetingsList = ({
     inactive: meetingsArray.filter(m => m.status === 'inactive').length,
   }), [meetingsArray]);
 
-  // Count active filters for badge
   const activeFilterCount = (statusFilter !== 'all' ? 1 : 0) + (sortBy !== 'next_date' ? 1 : 0);
 
-  const handleSearchChange = (e) => {
+  const handleSearchChange = useCallback((e) => {
     setSearchTerm(e.target.value);
     if (onPageChange) onPageChange(1);
     else setInternalPage(1);
-  };
+  }, [onPageChange]);
 
-  const clearSearch = () => {
+  const clearSearch = useCallback(() => {
     setSearchTerm('');
     if (onPageChange) onPageChange(1);
     else setInternalPage(1);
-  };
+  }, [onPageChange]);
 
-  const handlePageChange = (_, page) => {
+  const handlePageChange = useCallback((_, page) => {
     if (onPageChange) onPageChange(page);
     else setInternalPage(page);
-    // Scroll the nearest scrollable ancestor, fallback to document
+    
     try {
       if (containerRef.current) {
         containerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      // Also try scrolling any scrollable parent
       let el = containerRef.current?.parentElement;
       while (el) {
         const { overflowY } = window.getComputedStyle(el);
@@ -320,15 +438,39 @@ export const RecurringMeetingsList = ({
         el = el.parentElement;
       }
     } catch (e) {
-      // fallback — do nothing
+      // fallback
     }
-  };
+  }, [onPageChange]);
 
-  const renderTableRow = (meeting) => {
+  const handleViewModeChange = useCallback((_, newMode) => {
+    if (newMode) setViewMode(newMode);
+  }, []);
+
+  const handleStatusFilterChange = useCallback((e) => {
+    setStatusFilter(e.target.value);
+    if (onPageChange) onPageChange(1);
+    else setInternalPage(1);
+  }, [onPageChange]);
+
+  const handleSortChange = useCallback((field) => {
+    if (sortBy === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+  }, [sortBy]);
+
+  const renderTableRow = useCallback((meeting) => {
     const nextDate = meeting.next_occurrence_date
       ? new Date(meeting.next_occurrence_date).toLocaleDateString() : 'Ended';
     return (
-      <TableRow key={meeting.id} hover sx={{ cursor: 'pointer' }} onClick={() => onView(meeting.id)}>
+      <TableRow 
+        key={meeting.id} 
+        hover 
+        sx={{ cursor: 'pointer', '&:last-child td, &:last-child th': { border: 0 } }} 
+        onClick={() => onView(meeting.id)}
+      >
         <TableCell>
           <Stack spacing={0.5}>
             <Typography variant="body2" fontWeight={600}>{meeting.title}</Typography>
@@ -340,7 +482,12 @@ export const RecurringMeetingsList = ({
           </Stack>
         </TableCell>
         <TableCell>
-          <Chip label={meeting.recurrence_type || 'Weekly'} size="small" variant="outlined" icon={<RepeatIcon fontSize="small" />} />
+          <Chip 
+            label={meeting.recurrence_type || 'Weekly'} 
+            size="small" 
+            variant="outlined" 
+            icon={<RepeatIcon fontSize="small" />} 
+          />
         </TableCell>
         <TableCell>
           <Typography variant="body2">{nextDate}</Typography>
@@ -351,60 +498,125 @@ export const RecurringMeetingsList = ({
           )}
         </TableCell>
         <TableCell>
-          <Chip label={meeting.status || 'Active'} size="small" color={getStatusColor(meeting.status)} icon={getStatusIcon(meeting.status)} />
+          <Chip 
+            label={meeting.status || 'Active'} 
+            size="small" 
+            color={getStatusColor(meeting.status)} 
+            icon={getStatusIcon(meeting.status)} 
+          />
         </TableCell>
         <TableCell align="center">
           <Typography variant="body2" fontWeight={600}>{meeting.total_occurrences_generated || 0}</Typography>
         </TableCell>
         <TableCell align="right">
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
-            <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); onGenerate(meeting.id); }}>Generate</Button>
-            <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); onEdit(meeting.id); }}>Edit</Button>
+          <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+            <Button 
+              size="small" 
+              variant="outlined" 
+              onClick={(e) => { e.stopPropagation(); onGenerate(meeting.id); }}
+              sx={{ textTransform: 'none' }}
+            >
+              Generate
+            </Button>
+            <Button 
+              size="small" 
+              variant="contained" 
+              onClick={(e) => { e.stopPropagation(); onEdit(meeting.id); }}
+              sx={{ textTransform: 'none' }}
+            >
+              Edit
+            </Button>
           </Stack>
         </TableCell>
       </TableRow>
     );
-  };
+  }, [onView, onGenerate, onEdit]);
 
-  const renderListItem = (meeting) => {
+  const renderListItem = useCallback((meeting) => {
     const nextDate = meeting.next_occurrence_date
       ? new Date(meeting.next_occurrence_date).toLocaleDateString() : 'Ended';
     return (
-      <Paper key={meeting.id} sx={{
-        p: 2, mb: 1.5, borderRadius: 2.5,
-        border: '1px solid', borderColor: 'divider',
-        transition: 'all 0.2s',
-        '&:hover': { boxShadow: theme.shadows[3], transform: 'translateY(-1px)' }
-      }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
-          <Box sx={{ flex: 1 }}>
-            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ mb: 0.75 }}>
+      <Paper 
+        key={meeting.id} 
+        sx={{
+          p: 2, 
+          mb: 1.5, 
+          borderRadius: 2.5,
+          border: '1px solid', 
+          borderColor: 'divider',
+          transition: 'all 0.2s ease',
+          '&:hover': { 
+            boxShadow: theme.shadows[3], 
+            transform: 'translateY(-2px)',
+            borderColor: 'primary.light',
+          }
+        }}
+      >
+        <Stack 
+          direction="row" 
+          spacing={2} 
+          flexWrap="wrap"
+          sx={{ 
+            alignItems: 'flex-start',
+            justifyContent: 'space-between' 
+          }}
+        >
+          <Box sx={{ flex: 1, minWidth: '200px' }}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 0.75, alignItems: 'center' }}>
               <Typography variant="subtitle2" fontWeight={700}>{meeting.title}</Typography>
-              <Chip label={meeting.status || 'Active'} size="small" color={getStatusColor(meeting.status)} />
-              <Chip label={meeting.recurrence_type || 'Weekly'} size="small" variant="outlined" />
+              <Chip 
+                label={meeting.status || 'Active'} 
+                size="small" 
+                color={getStatusColor(meeting.status)} 
+              />
+              <Chip 
+                label={meeting.recurrence_type || 'Weekly'} 
+                size="small" 
+                variant="outlined" 
+              />
             </Stack>
             {meeting.description && (
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{meeting.description}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {meeting.description}
+              </Typography>
             )}
             <Stack direction="row" spacing={2} flexWrap="wrap">
-              <Stack direction="row" spacing={0.5} alignItems="center">
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                 <CalendarIcon sx={{ fontSize: 14 }} color="action" />
-                <Typography variant="caption" color="text.secondary">Next: <strong>{nextDate}</strong></Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Next: <strong>{nextDate}</strong>
+                </Typography>
               </Stack>
-              <Stack direction="row" spacing={0.5} alignItems="center">
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                 <RepeatIcon sx={{ fontSize: 14 }} color="action" />
-                <Typography variant="caption" color="text.secondary">Generated: <strong>{meeting.total_occurrences_generated || 0}</strong></Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Generated: <strong>{meeting.total_occurrences_generated || 0}</strong>
+                </Typography>
               </Stack>
             </Stack>
           </Box>
           <Stack direction="row" spacing={1}>
-            <Button size="small" variant="outlined" onClick={() => onGenerate(meeting.id)}>Generate</Button>
-            <Button size="small" variant="contained" onClick={() => onEdit(meeting.id)}>Edit</Button>
+            <Button 
+              size="small" 
+              variant="outlined" 
+              onClick={() => onGenerate(meeting.id)}
+              sx={{ textTransform: 'none' }}
+            >
+              Generate
+            </Button>
+            <Button 
+              size="small" 
+              variant="contained" 
+              onClick={() => onEdit(meeting.id)}
+              sx={{ textTransform: 'none' }}
+            >
+              Edit
+            </Button>
           </Stack>
         </Stack>
       </Paper>
     );
-  };
+  }, [theme, onGenerate, onEdit]);
 
   if (loading) {
     return (
@@ -417,9 +629,15 @@ export const RecurringMeetingsList = ({
   if (error) {
     return (
       <Box sx={{ py: 4, px: isMobile ? 2 : 0 }}>
-        <Alert severity="error" action={onRefresh && (
-          <Button color="inherit" size="small" onClick={onRefresh} startIcon={<RefreshIcon />}>Retry</Button>
-        )} sx={{ borderRadius: 2 }}>
+        <Alert 
+          severity="error" 
+          action={onRefresh && (
+            <Button color="inherit" size="small" onClick={onRefresh} startIcon={<RefreshIcon />}>
+              Retry
+            </Button>
+          )} 
+          sx={{ borderRadius: 2 }}
+        >
           {error}
         </Alert>
       </Box>
@@ -427,14 +645,15 @@ export const RecurringMeetingsList = ({
   }
 
   return (
-    <Box ref={containerRef} sx={{
-      // On mobile: fill the viewport cleanly
-      px: { xs: 0, sm: 2, md: 3 },
-      pb: { xs: 2, sm: 3 },
-      maxWidth: { sm: '100%', md: 1400 },
-      mx: 'auto',
-    }}>
-
+    <Box 
+      ref={containerRef} 
+      sx={{
+        px: { xs: 0, sm: 2, md: 3 },
+        pb: { xs: 2, sm: 3 },
+        maxWidth: { sm: '100%', md: 1400 },
+        mx: 'auto',
+      }}
+    >
       {/* ── Stats bar ── */}
       <Box sx={{
         mx: { xs: 1.5, sm: 0 },
@@ -442,7 +661,8 @@ export const RecurringMeetingsList = ({
         p: { xs: 1.25, sm: 2 },
         bgcolor: 'background.paper',
         borderRadius: 3,
-        border: '1px solid', borderColor: 'divider',
+        border: '1px solid', 
+        borderColor: 'divider',
         display: 'flex',
         alignItems: 'stretch',
         overflow: 'hidden',
@@ -464,45 +684,47 @@ export const RecurringMeetingsList = ({
 
       {/* ── Search & Filter bar ── */}
       <Box sx={{ px: { xs: 1.5, sm: 0 }, mb: { xs: 1.5, sm: 2.5 } }}>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack 
+          direction="row" 
+          spacing={1} 
+          useFlexGap
+          sx={{ 
+            flexWrap: 'wrap', 
+            gap: 1, 
+            alignItems: 'center' 
+          }}
+        >
           {/* Search */}
-          <TextField
-            placeholder="Search meetings…"
+          <SearchBar
             value={searchTerm}
             onChange={handleSearchChange}
-            size="small"
-            sx={{
-              flex: 1,
-              '& .MuiOutlinedInput-root': { borderRadius: 2.5 },
-            }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" color="action" />
-                </InputAdornment>
-              ),
-              endAdornment: searchTerm && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={clearSearch} edge="end">
-                    <ClearIcon fontSize="small" />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
+            onClear={clearSearch}
           />
 
           {/* View toggle — hidden on mobile */}
           {!isMobile && (
-            <ToggleButtonGroup value={viewMode} exclusive onChange={(_, v) => v && setViewMode(v)} size="small">
-              <ToggleButton value="grid"><ViewModuleIcon fontSize="small" /></ToggleButton>
-              <ToggleButton value="list"><ViewListIcon fontSize="small" /></ToggleButton>
-              <ToggleButton value="table"><ViewListIcon fontSize="small" /></ToggleButton>
+            <ToggleButtonGroup 
+              value={viewMode} 
+              exclusive 
+              onChange={handleViewModeChange} 
+              size="small"
+              sx={{ flexShrink: 0 }}
+            >
+              <ToggleButton value="grid" aria-label="Grid view">
+                <ViewModuleIcon fontSize="small" />
+              </ToggleButton>
+              <ToggleButton value="list" aria-label="List view">
+                <ViewListIcon fontSize="small" />
+              </ToggleButton>
+              <ToggleButton value="table" aria-label="Table view">
+                <ViewListIcon fontSize="small" sx={{ transform: 'rotate(90deg)' }} />
+              </ToggleButton>
             </ToggleButtonGroup>
           )}
 
           {/* Mobile: filter drawer trigger with badge */}
           {isMobile ? (
-            <Box sx={{ position: 'relative' }}>
+            <Box sx={{ position: 'relative', flexShrink: 0 }}>
               <IconButton
                 onClick={() => setFiltersOpen(true)}
                 sx={{
@@ -511,17 +733,30 @@ export const RecurringMeetingsList = ({
                   borderColor: activeFilterCount > 0 ? 'primary.main' : 'divider',
                   bgcolor: activeFilterCount > 0 ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
                   p: 1,
+                  '&:hover': {
+                    bgcolor: activeFilterCount > 0 ? alpha(theme.palette.primary.main, 0.12) : 'action.hover',
+                  }
                 }}
+                aria-label="Open filters"
               >
                 <TuneIcon fontSize="small" color={activeFilterCount > 0 ? 'primary' : 'action'} />
               </IconButton>
               {activeFilterCount > 0 && (
                 <Box sx={{
-                  position: 'absolute', top: -4, right: -4,
-                  width: 16, height: 16, borderRadius: '50%',
-                  bgcolor: 'primary.main', color: 'white',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '0.6rem', fontWeight: 700,
+                  position: 'absolute', 
+                  top: -4, 
+                  right: -4,
+                  width: 18, 
+                  height: 18, 
+                  borderRadius: '50%',
+                  bgcolor: 'primary.main', 
+                  color: 'white',
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  fontSize: '0.6rem', 
+                  fontWeight: 700,
+                  boxShadow: theme.shadows[2],
                 }}>
                   {activeFilterCount}
                 </Box>
@@ -529,18 +764,19 @@ export const RecurringMeetingsList = ({
             </Box>
           ) : (
             /* Desktop: status filter inline */
-            <FormControl size="small" sx={{ minWidth: 130 }}>
+            <FormControl size="small" sx={{ minWidth: 130, flexShrink: 0 }}>
               <InputLabel>Status</InputLabel>
               <Select
                 value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); if (onPageChange) onPageChange(1); }}
+                onChange={handleStatusFilterChange}
                 label="Status"
                 sx={{ borderRadius: 2 }}
               >
-                <MenuItem value="all">All statuses</MenuItem>
-                <MenuItem value="active">Active</MenuItem>
-                <MenuItem value="inactive">Paused</MenuItem>
-                <MenuItem value="completed">Completed</MenuItem>
+                {STATUS_OPTIONS.map(opt => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
           )}
@@ -548,7 +784,13 @@ export const RecurringMeetingsList = ({
 
         {/* Active filter chips (mobile) */}
         {isMobile && (statusFilter !== 'all' || searchTerm) && (
-          <Stack direction="row" spacing={1} sx={{ mt: 1.25 }} flexWrap="wrap" useFlexGap>
+          <Stack 
+            direction="row" 
+            spacing={1} 
+            useFlexGap
+            flexWrap="wrap"
+            sx={{ mt: 1.25 }} 
+          >
             {statusFilter !== 'all' && (
               <Chip
                 label={statusFilter}
@@ -573,9 +815,13 @@ export const RecurringMeetingsList = ({
 
       {/* ── Results summary ── */}
       {meetingsArray.length > 0 && filteredAndSortedMeetings.length > 0 && (
-        <Typography variant="caption" color="text.disabled" sx={{ px: { xs: 1.5, sm: 0 }, mb: 1.5, display: 'block' }}>
-          {paginatedMeetings.length} of {totalFilteredCount} meetings
-          {statusFilter !== 'all' && ` · ${statusFilter}`}
+        <Typography 
+          variant="caption" 
+          color="text.disabled" 
+          sx={{ px: { xs: 1.5, sm: 0 }, mb: 1.5, display: 'block' }}
+        >
+          Showing {paginatedMeetings.length} of {totalFilteredCount} meetings
+          {statusFilter !== 'all' && ` · Filtered by: ${statusFilter}`}
         </Typography>
       )}
 
@@ -589,8 +835,12 @@ export const RecurringMeetingsList = ({
           <Typography variant="body2" color="text.secondary" mb={2}>
             Try adjusting your search or filters
           </Typography>
-          <Button onClick={() => { clearSearch(); setStatusFilter('all'); }} variant="outlined" sx={{ borderRadius: 2 }}>
-            Clear filters
+          <Button 
+            onClick={() => { clearSearch(); setStatusFilter('all'); }} 
+            variant="outlined" 
+            sx={{ borderRadius: 2, textTransform: 'none' }}
+          >
+            Clear all filters
           </Button>
         </Box>
       )}
@@ -644,7 +894,19 @@ export const RecurringMeetingsList = ({
 
       {/* ── Table View (desktop only) ── */}
       {viewMode === 'table' && filteredAndSortedMeetings.length > 0 && !isMobile && (
-        <TableContainer component={Paper} sx={{ borderRadius: 3, overflowX: 'auto', border: '1px solid', borderColor: 'divider' }} elevation={0}>
+        <TableContainer 
+          component={Paper} 
+          sx={{ 
+            borderRadius: 3, 
+            overflowX: 'auto', 
+            border: '1px solid', 
+            borderColor: 'divider',
+            '& .MuiTable-root': {
+              minWidth: 750,
+            }
+          }} 
+          elevation={0}
+        >
           <Table>
             <TableHead>
               <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
@@ -656,15 +918,16 @@ export const RecurringMeetingsList = ({
                   { field: 'total', label: 'Generated', align: 'center' },
                   { field: null, label: 'Actions', align: 'right' },
                 ].map(col => (
-                  <TableCell key={col.label} align={col.align} sx={{ fontWeight: 700, py: 1.5 }}>
+                  <TableCell 
+                    key={col.label} 
+                    align={col.align} 
+                    sx={{ fontWeight: 700, py: 1.5 }}
+                  >
                     {col.field ? (
                       <TableSortLabel
                         active={sortBy === col.field}
                         direction={sortBy === col.field ? sortOrder : 'asc'}
-                        onClick={() => {
-                          if (sortBy === col.field) setSortOrder(p => p === 'asc' ? 'desc' : 'asc');
-                          else { setSortBy(col.field); setSortOrder('asc'); }
-                        }}
+                        onClick={() => handleSortChange(col.field)}
                       >
                         {col.label}
                       </TableSortLabel>
@@ -682,7 +945,7 @@ export const RecurringMeetingsList = ({
 
       {/* ── Pagination ── */}
       {totalPages > 1 && filteredAndSortedMeetings.length > 0 && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3, px: { xs: 1.5, sm: 0 } }}>
+        <Box sx={{ display: 'flex', mt: 3, px: { xs: 1.5, sm: 0 }, justifyContent: 'center' }}>
           <Pagination
             count={totalPages}
             page={activePage}
@@ -691,14 +954,21 @@ export const RecurringMeetingsList = ({
             size={isMobile ? 'small' : 'medium'}
             showFirstButton
             showLastButton
+            siblingCount={isMobile ? 0 : 1}
           />
         </Box>
       )}
 
       {/* ── Refresh ── */}
       {meetingsArray.length > 0 && filteredAndSortedMeetings.length > 0 && onRefresh && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-          <Button variant="text" onClick={onRefresh} startIcon={<RefreshIcon />} size="small" sx={{ color: 'text.secondary' }}>
+        <Box sx={{ display: 'flex', mt: 2, justifyContent: 'center' }}>
+          <Button 
+            variant="text" 
+            onClick={onRefresh} 
+            startIcon={<RefreshIcon />} 
+            size="small" 
+            sx={{ color: 'text.secondary', textTransform: 'none' }}
+          >
             Refresh
           </Button>
         </Box>

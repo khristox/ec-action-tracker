@@ -35,6 +35,8 @@ import {
 import { useDispatch } from 'react-redux';
 import { updateAction } from '../../../../store/slices/actionTracker/actionSlice';
 import { format, isValid, parseISO } from 'date-fns';
+import PersonsImplementingEditor from './PersonsImplementingEditor';
+import { parsePersonsFromAction, buildPersonsPayload } from './components/personsImplementing';
 
 // Validation helper
 const validateForm = (data) => {
@@ -72,16 +74,22 @@ const validateForm = (data) => {
   return errors;
 };
 
-const EditActionDialog = ({ open, action, onClose, onSave }) => {
+// meetingId isn't always available to whatever screen opens this dialog,
+// so it falls back to action.meeting_id when not passed explicitly. The
+// AssignToSelector used inside PersonsImplementingEditor needs *some*
+// meeting context to scope its participant search correctly.
+const EditActionDialog = ({ open, action, onClose, onSave, meetingId }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
   const dispatch = useDispatch();
+  const resolvedMeetingId = meetingId || action?.meeting_id || null;
   
   const [formData, setFormData] = useState({
     description: '',
     remarks: '',
     due_date: '',
-    priority: 2
+    priority: 2,
+    persons_implementing: []
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -124,7 +132,8 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
         description: action.description || '',
         remarks: action.remarks || '',
         due_date: dueDate,
-        priority: action.priority || 2
+        priority: action.priority || 2,
+        persons_implementing: parsePersonsFromAction(action)
       });
     }
   }, [action, open]);
@@ -190,7 +199,12 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
         description: formData.description.trim(),
         remarks: formData.remarks?.trim() || '',
         due_date: formData.due_date || null,
-        priority: parseInt(formData.priority)
+        priority: parseInt(formData.priority),
+        // Same shape AddActionDialog sends: the new persons_implementing
+        // array plus the legacy assigned_to_id/assigned_to_name fields
+        // derived from the first person, for backend/reporting code that
+        // only knows about a single assignee.
+        ...buildPersonsPayload(formData.persons_implementing)
       };
 
       console.log('📤 Updating action with payload:', payload);
@@ -525,6 +539,13 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
             helperText={touched.remarks && validationErrors.remarks}
             disabled={loading}
             sx={inputSx}
+          />
+
+          <PersonsImplementingEditor
+            value={formData.persons_implementing}
+            onChange={(persons) => setFormData((prev) => ({ ...prev, persons_implementing: persons }))}
+            disabled={loading}
+            meetingId={resolvedMeetingId}
           />
 
           <Grid container spacing={2}>

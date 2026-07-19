@@ -1,30 +1,10 @@
 // App.jsx - Improved version
-// Key changes:
-//   1. AuthReloader removed — it caused a timing race that prevented menu fetches
-//   2. Route config cleaned up — adminRoutes deduplicated from protectedRoutes
-//   3. preloadRoleBasedComponents called once, not twice
-//   4. Access control is menu-driven only: a page renders iff its menuCode is
-//      in the user's allowed menu list. The old role-based gate on adminRoutes
-//      has been removed so behavior is consistent with the rest of the app.
-//   5. Added the missing '/forbidden' route so denied access shows the
-//      Forbidden page instead of falling through to the 404 catch-all.
-//   6. Minor cleanup throughout
-//   7. NEW: settings/users (User Management) is now gated on user.is_superuser
-//      instead of a role-code array. The backend doesn't put "admin"/
-//      "super_admin" into user.roles — superuser status is carried on the
-//      boolean `is_superuser` field from /auth/me — so the old
-//      `roles: ['admin', 'super_admin']` check always failed and sent
-//      superusers to /forbidden. ProtectedRoute now accepts a
-//      `requireSuperuser` prop that checks that flag directly.
-
 import React, {
   useEffect,
   useState,
   useRef,
   Suspense,
-  lazy,
-  useCallback,
-  useMemo
+  lazy
 } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -33,40 +13,30 @@ import {
   Box, CircularProgress, Typography, Fade, keyframes,
   Button, LinearProgress
 } from '@mui/material';
-
 // Slices & Selectors
 import { checkAuth, selectAuth } from './store/slices/authSlice';
-
 // Context & Theme
 import { ThemeContextProvider } from './context/ThemeProvider';
-
 // Components
 import Layout from './components/common/Layout';
 import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
 import EditRecurringMeeting from './components/actiontracker/meetings/EditRecurringMeeting';
-
 import { AdminStructures } from './components/admin/adminStructures';
-
-import { fetchUserMenus } from './store/slices/menuSlice'; // if not already imported
 import { selectAllowedMenuCodes, selectMenuLoading } from './store/slices/menuSlice';
 
 // ==================== Error Boundary ====================
-
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
     this.state = { hasError: false, error: null, errorInfo: null };
   }
-
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
-
   componentDidCatch(error, errorInfo) {
     console.error('Component Error:', error?.message || error);
     this.setState({ errorInfo });
   }
-
   render() {
     if (this.state.hasError) {
       return (
@@ -91,18 +61,12 @@ class ErrorBoundary extends React.Component {
 }
 
 // ==================== Static Import Map ====================
-
 const COMPONENT_IMPORTS = {
-  // Auth Pages
   'SignInSide':             () => import('./pages/SignInSide'),
   'SignUp':                 () => import('./pages/SignUp'),
   'ForgotPassword':         () => import('./components/auth/ForgotPassword'),
   'ResetPassword':          () => import('./components/auth/ResetPassword'),
-
-  // Dashboard
   'Dashboard':              () => import('./components/actiontracker/dashboard/Dashboard'),
-
-  // Meetings
   'Meetings':               () => import('./components/actiontracker/meetings/Meetings'),
   'CreateMeeting':          () => import('./components/actiontracker/meetings/CreateMeeting'),
   'MeetingDetail':          () => import('./components/actiontracker/meetings/MeetingDetail'),
@@ -110,12 +74,7 @@ const COMPONENT_IMPORTS = {
   'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm/MeetingForm'),
   'MeetingRecorder':        () => import('./components/actiontracker/meetings/MeetingRecorder'),
   'MeetingEmailNotifications': () => import('./components/actiontracker/meetings/components/meetings/MeetingEmailNotifications'),
-
-
   'RecurringMeetingDetail': () => import('./components/actiontracker/meetings/RecurringMeetingDetail'),
-
-
-  // Actions
   'ActionsList':            () => import('./components/actiontracker/actions/ActionsList'),
   'MyTasks':                () => import('./components/actiontracker/actions/MyTasks'),
   'AllActions':             () => import('./components/actiontracker/actions/AllActions'),
@@ -123,55 +82,38 @@ const COMPONENT_IMPORTS = {
   'OverdueActions':         () => import('./components/actiontracker/actions/OverdueActions'),
   'AssignAction':           () => import('./components/actiontracker/actions/AssignAction'),
   'UpdateProgress':         () => import('./components/actiontracker/actions/UpdateProgress'),
-
-  // Participants
   'ParticipantsLists':      () => import('./components/actiontracker/participants/ParticipantsLists'),
   'ParticipantListsManager':() => import('./components/actiontracker/participants/ParticipantListsManager'),
   'CreateParticipant':      () => import('./components/actiontracker/participants/CreateParticipant'),
   'ParticipantDetail':      () => import('./components/actiontracker/participants/ParticipantDetail'),
   'BulkImportPage':         () => import('./components/actiontracker/participants/BulkImportPage'),
-
-  // Documents & Reports
   'DocumentsList':          () => import('./components/actiontracker/documents/DocumentsList'),
   'ReportsList':            () => import('./components/actiontracker/reports/ReportsList'),
-
-  // Calendar & Settings
   'CalendarView':           () => import('./components/actiontracker/calendar/CalendarView'),
   'Settings':               () => import('./components/actiontracker/settings/Settings'),
   'Locations':              () => import('./components/address/LocationManager'),
-
-  // Profile
   'Profile':                () => import('./components/profile/ProfileSettings'),
   'ProfileSettings':        () => import('./components/profile/ProfileSettings'),
   'SecuritySettings':       () => import('./components/profile/SecuritySettings'),
   'NotificationSettings':   () => import('./components/profile/NotificationSettings'),
   'PreferenceSettings':     () => import('./components/profile/PreferenceSettings'),
-
-  // Admin
   'UserManagement':         () => import('./components/admin/UserManagement'),
   'RoleManagement':         () => import('./components/admin/RoleManagement'),
   'RoleMenuAssignment':     () => import('./components/admin/RoleMenuAssignment'),
   'AuditLogs':              () => import('./components/admin/AuditLogs'),
-
-  // Error Pages
   'NotFound':               () => import('./pages/NotFound'),
   'Forbidden':              () => import('./pages/Forbidden'),
 };
 
-// ==================== Lazy Loading ====================
-
+// ==================== Lazy Loading Helpers ====================
 const componentCache = new Map();
-
 const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
   if (componentCache.has(componentName)) {
     return componentCache.get(componentName);
   }
-
   const importFn = COMPONENT_IMPORTS[componentName];
   if (!importFn) throw new Error(`Component "${componentName}" not found in import map`);
-
   let lastError;
-
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const module = await importFn();
@@ -180,12 +122,10 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
     } catch (error) {
       lastError = error;
       console.error(`[Failed] Attempt ${attempt + 1} for ${componentName}:`, error);
-
       const isChunkError =
         error?.message?.includes('chunk') ||
         error?.message?.includes('loading') ||
         error?.code === 'CHUNK_LOAD_ERROR';
-
       if (isChunkError && attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
         continue;
@@ -193,31 +133,36 @@ const loadComponent = async (componentName, retries = 2, retryDelay = 1000) => {
       break;
     }
   }
-
   throw new Error(`Failed to load ${componentName} after ${retries + 1} attempts: ${lastError?.message}`);
 };
 
 const createLazyComponent = (componentName, options = {}) => {
   const { retries = 2, retryDelay = 1000 } = options;
-
   if (!COMPONENT_IMPORTS[componentName]) {
     console.error(`Component "${componentName}" not found in import map`);
     return () => <div>Component "{componentName}" not found</div>;
   }
-
   return lazy(() => loadComponent(componentName, retries, retryDelay));
 };
 
 const RecurringMeetingDetail = createLazyComponent('RecurringMeetingDetail');
 
-
+// Fix: Wrap the critical preloader pool in a structural race limit so asset delays don't block initialization.
 const preloadCriticalComponents = async () => {
   const critical = ['Dashboard', 'MyTasks', 'ActionsList'];
-  await Promise.allSettled(
-    critical.map(name => loadComponent(name, 1, 500).catch(err =>
-      console.warn(`[Preload] Failed: ${name}`, err)
-    ))
-  );
+  try {
+    await withTimeout(
+      Promise.allSettled(
+        critical.map(name => loadComponent(name, 1, 500).catch(err =>
+          console.warn(`[Preload Critical Non-Fatal Exception]: ${name}`, err)
+        ))
+      ),
+      5000,
+      'preloadCriticalComponents()'
+    );
+  } catch (timeoutErr) {
+    console.warn('[Preload Timeout Warning] Preloading took too long; continuing application mount safely.', timeoutErr);
+  }
 };
 
 const preloadRoleBasedComponents = async (userRoles, isSuperuser) => {
@@ -226,50 +171,34 @@ const preloadRoleBasedComponents = async (userRoles, isSuperuser) => {
     user:    ['Profile', 'ProfileSettings'],
     manager: ['ReportsList', 'CalendarView'],
   };
-
   const roleCodes = (userRoles || []).map(role => typeof role === 'object' ? role.code : role);
   const toPreload = roleCodes.flatMap(code => roleComponents[code] || []);
-
-  // Superusers don't necessarily carry an 'admin' role code (roles can be
-  // empty while is_superuser is true), so make sure admin-area components
-  // still get preloaded for them.
   if (isSuperuser) {
     toPreload.push(...roleComponents.admin);
   }
-
   const uniqueToPreload = [...new Set(toPreload)];
-
   if (uniqueToPreload.length > 0) {
     await Promise.allSettled(
       uniqueToPreload.map(name => loadComponent(name, 1, 500).catch(err =>
-        console.warn(`[Preload] Failed: ${name}`, err)
+        console.warn(`[Preload Role Non-Fatal Exception]: ${name}`, err)
       ))
     );
   }
 };
 
-// ==================== Lazy Components ====================
-
-// Auth
+// ==================== Lazy Component Initializations ====================
 const SignInSide       = createLazyComponent('SignInSide');
 const SignUp           = createLazyComponent('SignUp');
 const ForgotPassword   = createLazyComponent('ForgotPassword');
 const ResetPassword    = createLazyComponent('ResetPassword');
-
-// Dashboard
 const Dashboard        = createLazyComponent('Dashboard');
-
-// Meetings
 const Meetings         = createLazyComponent('Meetings');
 const MeetingForm      = createLazyComponent('MeetingForm');
 const CreateMeeting    = createLazyComponent('CreateMeeting');
 const MeetingDetail    = createLazyComponent('MeetingDetail');
 const EditMeeting      = createLazyComponent('EditMeeting');
 const MeetingRecorder  = createLazyComponent('MeetingRecorder');
-const MeetingEmailNotifications = createLazyComponent('MeetingEmailNotifications'); // ← add this
-
-
-// Actions
+const MeetingEmailNotifications = createLazyComponent('MeetingEmailNotifications');
 const ActionsList      = createLazyComponent('ActionsList');
 const MyTasks          = createLazyComponent('MyTasks');
 const AllActions       = createLazyComponent('AllActions');
@@ -277,54 +206,37 @@ const ActionDetail     = createLazyComponent('ActionDetail');
 const OverdueActions   = createLazyComponent('OverdueActions');
 const AssignAction     = createLazyComponent('AssignAction');
 const UpdateProgress   = createLazyComponent('UpdateProgress');
-
-// Participants
 const ParticipantsLists       = createLazyComponent('ParticipantsLists');
 const ParticipantListsManager = createLazyComponent('ParticipantListsManager');
 const CreateParticipant       = createLazyComponent('CreateParticipant');
 const ParticipantDetail       = createLazyComponent('ParticipantDetail');
 const BulkImportPage          = createLazyComponent('BulkImportPage');
-
-// Documents & Reports
 const DocumentsList    = createLazyComponent('DocumentsList');
 const ReportsList      = createLazyComponent('ReportsList');
-
-// Calendar & Settings
 const CalendarView     = createLazyComponent('CalendarView');
 const Settings         = createLazyComponent('Settings');
 const Locations        = createLazyComponent('Locations');
-
-// Profile
 const Profile                = createLazyComponent('Profile');
 const ProfileSettings        = createLazyComponent('ProfileSettings');
 const SecuritySettings       = createLazyComponent('SecuritySettings');
 const NotificationSettings   = createLazyComponent('NotificationSettings');
 const PreferenceSettings     = createLazyComponent('PreferenceSettings');
-
-// Admin
 const UserManagement    = createLazyComponent('UserManagement');
 const RoleManagement    = createLazyComponent('RoleManagement');
 const RoleMenuAssignment= createLazyComponent('RoleMenuAssignment');
 const AuditLogs         = createLazyComponent('AuditLogs');
-//const AdminStructures     = createLazyComponent('AdminStructures');
-
-// Error Pages
 const NotFound  = createLazyComponent('NotFound');
 const Forbidden = createLazyComponent('Forbidden');
 
-// ==================== Animations ====================
-
+// ==================== Animations & Loading Screen ====================
 const pulse = keyframes`
   0%, 100% { transform: scale(1); opacity: 1; }
   50%       { transform: scale(1.05); opacity: 0.8; }
 `;
-
 const fadeInOut = keyframes`
   0%, 100% { opacity: 0.6; }
   50%       { opacity: 1; }
 `;
-
-// ==================== Loading Screen ====================
 
 const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, progress = null }) => (
   <Fade in timeout={500}>
@@ -359,35 +271,17 @@ const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, 
   </Fade>
 );
 
-// ==================== Recording Route Wrapper ====================
-// Provides MeetingRecorderContext ONLY for the recording route so the
-// browser microphone prompt is never triggered on other pages.
-
 const RecordingRouteWrapper = ({ children }) => (
   <MeetingRecorderProvider>
     {children}
   </MeetingRecorderProvider>
 );
 
-// ==================== Protected Route ====================
-// NOTE: requiredRoles / requiredPermissions are still supported here for
-// any route that genuinely needs a hard role gate, and requireSuperuser is
-// for routes gated on the user.is_superuser boolean (e.g. User Management).
-// Access to individual pages/menus is otherwise controlled by
-// MenuProtectedRoute below. See adminRoutes further down — it intentionally
-// no longer uses requiredRoles, so a user's access is driven solely by
-// their assigned menu list.
-
-const ProtectedRoute = ({
-  children,
-  requiredRoles = [],
-  requiredPermissions = [],
-  requireSuperuser = false,
-}) => {
+// ==================== Route Guards ====================
+const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = [], requireSuperuser = false }) => {
   const { isAuthenticated, isAuthChecking, user } = useSelector(selectAuth);
   const location = useLocation();
 
-  // Preload role-based components as soon as we know who the user is
   useEffect(() => {
     if (user?.roles?.length > 0 || user?.is_superuser) {
       preloadRoleBasedComponents(user.roles, user.is_superuser);
@@ -397,93 +291,52 @@ const ProtectedRoute = ({
   if (isAuthChecking) {
     return <LoadingScreen message="Verifying access..." fullScreen={false} />;
   }
-
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
-
-  // Hard gate on is_superuser. This is a boolean flag from /auth/me, not a
-  // role code — the backend does not populate user.roles with 'admin' or
-  // 'super_admin' for superusers, so this MUST be checked separately from
-  // requiredRoles below rather than folded into it.
   if (requireSuperuser && !user?.is_superuser) {
     return <Navigate to="/forbidden" replace />;
   }
-
   if (requiredRoles.length > 0) {
     const userRoleCodes = (user?.roles || []).map(r => typeof r === 'object' ? r.code : r);
     const hasRole = requiredRoles.some(r => userRoleCodes.includes(r)) || user?.is_superuser;
     if (!hasRole) return <Navigate to="/forbidden" replace />;
   }
-
   if (requiredPermissions.length > 0) {
     const userPermissions = user?.permissions || [];
     const hasPermission = requiredPermissions.some(p => userPermissions.includes(p)) || user?.is_superuser;
     if (!hasPermission) return <Navigate to="/forbidden" replace />;
   }
-
   return children;
 };
-
 
 const MenuProtectedRoute = ({ children, menuCode }) => {
   const { user } = useSelector(selectAuth);
   const allowedMenuCodes = useSelector(selectAllowedMenuCodes);
   const menusLoading = useSelector(selectMenuLoading);
 
-  // Not gated — nothing to check
-  if (!menuCode) return children;
-
-  // Superusers see everything regardless of their assigned menu list.
-  // Menu assignment and is_superuser are two independent systems on the
-  // backend — a superuser account can easily lack a given menuCode in
-  // their allowed-menu list without that meaning they should be blocked.
-  if (user?.is_superuser) return children;
-
-  // Menus haven't loaded yet — don't flash a false 403 while the fetch is in flight
+  if (!menuCode || user?.is_superuser) return children;
   if (menusLoading) {
     return <LoadingScreen message="Checking access..." fullScreen={false} />;
   }
-
-  if (!allowedMenuCodes.has(menuCode)) {
+  if (!allowedMenuCodes || typeof allowedMenuCodes.has !== 'function' || !allowedMenuCodes.has(menuCode)) {
     return <Navigate to="/forbidden" replace />;
   }
-
   return children;
 };
 
-
-// ==================== Public Route ====================
-
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, isAuthChecking } = useSelector(selectAuth);
-  
   const location = useLocation();
   const from = location.state?.from?.pathname || '/dashboard';
 
   if (isAuthChecking) {
     return <LoadingScreen message="Checking session..." fullScreen={false} />;
   }
-
   return isAuthenticated ? <Navigate to={from} replace /> : children;
 };
 
-// ==================== Route Config ====================
-// Admin routes that also appear in protectedRoutes have been removed from
-// adminRoutes to avoid duplicate route registration.
-//
-// Access model: a page is gated purely by `menuCode` by default. If the
-// user's allowed-menu list (fetched from the backend) contains that code,
-// they can see the page — regardless of role. Pages with no `menuCode` are
-// ungated. A route can opt into an additional hard gate on top of the menu
-// check by adding either:
-//   - `superuserOnly: true`   → requires user.is_superuser
-//   - `roles: [...]`          → requires one of these role codes (or superuser)
-// Currently only settings/users uses a hard gate (superuserOnly), since
-// User Management should only be reachable by superusers regardless of
-// whatever menus happen to be assigned. adminRoutes remain menu-only with
-// no extra gate (see rendering in AppContent below).
-
+// ==================== Route Configuration Maps ====================
 const routeConfig = {
   publicRoutes: [
     { path: '/login',                   element: <SignInSide />,     wrapper: PublicRoute },
@@ -491,93 +344,75 @@ const routeConfig = {
     { path: '/forgot-password',         element: <ForgotPassword />, wrapper: PublicRoute },
     { path: '/reset-password/:token',   element: <ResetPassword />,  wrapper: PublicRoute },
   ],
-
   errorRoutes: [
     { path: '/403',        element: <Forbidden /> },
     { path: '/forbidden',  element: <Forbidden /> },
     { path: '/404',        element: <NotFound /> },
   ],
-
-  // ONLY the recording page gets MeetingRecorderProvider (microphone prompt)
   recordingRoutes: [
     { path: 'meetings/:id/record', element: <MeetingRecorder /> },
   ],
-
-  // Regular meeting routes — no microphone access
- regularMeetingRoutes: [
+  regularMeetingRoutes: [
     { path: 'meetings',                   element: <Meetings /> },
     { path: 'meetings/create',            element: <MeetingForm /> },
     { path: 'meetings/:id',               element: <MeetingDetail /> },
     { path: 'meetings/:id/edit',          element: <MeetingForm /> },
     { path: 'meetings/:id/notifications', element: <MeetingEmailNotifications /> },
   ],
-
-    // ADD RECURRING MEETING ROUTES HERE
   recurringMeetingRoutes: [
-    { path: 'recurring-meetings',               element: <Meetings /> },  // Use same Meetings component
-    { path: 'recurring-meetings/create',        element: <MeetingForm /> }, // Use same form with recurring flag
-    { path: 'recurring-meetings/:id',           element: <RecurringMeetingDetail /> }, // Use same detail with recurring flag
-    { path: 'recurring-meetings/:id/edit',      element: <EditRecurringMeeting /> }, // Use same form with recurring flag
+    { path: 'recurring-meetings',               element: <Meetings /> },
+    { path: 'recurring-meetings/create',        element: <MeetingForm /> },
+    { path: 'recurring-meetings/:id',           element: <RecurringMeetingDetail /> },
+    { path: 'recurring-meetings/:id/edit',      element: <EditRecurringMeeting /> },
   ],
-
-  // Standard protected routes
   protectedRoutes: [
-  { path: 'dashboard',                          element: <Dashboard /> }, // ungated
-  { path: 'actions',                            element: <ActionsList />,   menuCode: 'actions' },
-  { path: 'actions/all',                        element: <AllActions />,    menuCode: 'actions' },
-  { path: 'actions/my-tasks',                   element: <MyTasks />,       menuCode: 'actions' },
-  { path: 'actions/:id',                        element: <ActionDetail />,  menuCode: 'actions' },
-  { path: 'actions/overdue',                    element: <OverdueActions />,menuCode: 'actions' },
-  { path: 'actions/assign',                     element: <AssignAction />,  menuCode: 'actions' },
-  { path: 'actions/assign/minute/:minuteId',    element: <AssignAction />,  menuCode: 'actions' },
-  { path: 'actions/edit/:id',                   element: <AssignAction />,  menuCode: 'actions' },
-  { path: 'actions/:id/assign',                 element: <AssignAction />,  menuCode: 'actions' },
-  { path: 'actions/progress',                   element: <UpdateProgress />,menuCode: 'actions' },
-  { path: 'actions/:id/progress',               element: <UpdateProgress />,menuCode: 'actions' },
-  { path: 'participants',                       element: <ParticipantsLists />,       menuCode: 'participants' },
-  { path: 'participants/create',                element: <CreateParticipant />,       menuCode: 'participants' },
-  { path: 'participants/:id',                   element: <ParticipantDetail />,       menuCode: 'participants' },
-  { path: 'participants/:id/edit',              element: <CreateParticipant />,       menuCode: 'participants' },
-  { path: 'participants/import',                element: <BulkImportPage />,          menuCode: 'participants' },
-  { path: 'participant-lists',                  element: <ParticipantListsManager />, menuCode: 'participants' },
-  { path: 'participant-lists/:id',              element: <ParticipantListsManager />, menuCode: 'participants' },
-  { path: 'participants/lists',                 element: <ParticipantListsManager />, menuCode: 'participants' },
-  { path: 'documents',                          element: <DocumentsList />, menuCode: 'documents' },
-  { path: 'documents/:category',                element: <DocumentsList />, menuCode: 'documents' },
-  { path: 'reports',                            element: <ReportsList />,   menuCode: 'reports' },
-  { path: 'reports/:type',                      element: <ReportsList />,   menuCode: 'reports' },
-  { path: 'calendar',                           element: <CalendarView />,  menuCode: 'calendar' },
-  { path: 'profile',                            element: <Profile /> }, // ungated
-  { path: 'profile/:tab',                       element: <Profile /> }, // ungated
-  { path: 'settings',                           element: <Settings /> }, // ungated
-  { path: 'settings/profile',                   element: <ProfileSettings /> }, // ungated
-  { path: 'settings/locations',                 element: <Locations />,      menuCode: 'locations' },
-  { path: 'settings/security',                  element: <SecuritySettings /> }, // ungated
-  { path: 'settings/notifications',             element: <NotificationSettings /> }, // ungated
-  { path: 'settings/preferences',               element: <PreferenceSettings /> }, // ungated
-  { path: 'settings/status',                    element: <Settings /> },
-  { path: 'settings/document-types',            element: <Settings /> },
-  // User Management is now gated on is_superuser instead of a role-code
-  // array — the backend doesn't put 'admin'/'super_admin' into user.roles,
-  // so the old `roles` check always failed for real superusers.
-  { path: 'settings/users',                     element: <UserManagement />,       menuCode: 'admin_users', superuserOnly: true },
-  { path: 'settings/roles',                     element: <RoleManagement />,       menuCode: 'admin_roles' },
-  { path: 'settings/audit',                     element: <AuditLogs />,            menuCode: 'admin_audit' },
-  { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment />,   menuCode: 'admin_role_menu' },
-  { path: 'settings/admin-structures/departments', element: <AdminStructures />,   menuCode: 'admin_structures' },
+    { path: 'dashboard',                          element: <Dashboard /> }, 
+    { path: 'actions',                            element: <ActionsList />,   menuCode: 'actions' },
+    { path: 'actions/all',                        element: <AllActions />,    menuCode: 'actions' },
+    { path: 'actions/my-tasks',                   element: <MyTasks />,       menuCode: 'actions' },
+    { path: 'actions/:id',                        element: <ActionDetail />,  menuCode: 'actions' },
+    { path: 'actions/overdue',                    element: <OverdueActions />,menuCode: 'actions' },
+    { path: 'actions/assign',                     element: <AssignAction />,  menuCode: 'actions' },
+    { path: 'actions/assign/minute/:minuteId',    element: <AssignAction />,  menuCode: 'actions' },
+    { path: 'actions/edit/:id',                   element: <AssignAction />,  menuCode: 'actions' },
+    { path: 'actions/:id/assign',                 element: <AssignAction />,  menuCode: 'actions' },
+    { path: 'actions/progress',                   element: <UpdateProgress />,menuCode: 'actions' },
+    { path: 'actions/:id/progress',               element: <UpdateProgress />,menuCode: 'actions' },
+    { path: 'participants',                       element: <ParticipantsLists />,       menuCode: 'participants' },
+    { path: 'participants/create',                element: <CreateParticipant />,       menuCode: 'participants' },
+    { path: 'participants/:id',                   element: <ParticipantDetail />,       menuCode: 'participants' },
+    { path: 'participants/:id/edit',              element: <CreateParticipant />,       menuCode: 'participants' },
+    { path: 'participants/import',                element: <BulkImportPage />,          menuCode: 'participants' },
+    { path: 'participant-lists',                  element: <ParticipantListsManager />, menuCode: 'participants' },
+    { path: 'participant-lists/:id',              element: <ParticipantListsManager />, menuCode: 'participants' },
+    { path: 'participants/lists',                 element: <ParticipantListsManager />, menuCode: 'participants' },
+    { path: 'documents',                          element: <DocumentsList />, menuCode: 'documents' },
+    { path: 'documents/:category',                element: <DocumentsList />, menuCode: 'documents' },
+    { path: 'reports',                            element: <ReportsList />,   menuCode: 'reports' },
+    { path: 'reports/:type',                      element: <ReportsList />,   menuCode: 'reports' },
+    { path: 'calendar',                           element: <CalendarView />,  menuCode: 'calendar' },
+    { path: 'profile',                            element: <Profile /> }, 
+    { path: 'profile/:tab',                       element: <Profile /> }, 
+    { path: 'settings',                           element: <Settings /> }, 
+    { path: 'settings/profile',                   element: <ProfileSettings /> }, 
+    { path: 'settings/locations',                 element: <Locations />,      menuCode: 'locations' },
+    { path: 'settings/security',                  element: <SecuritySettings /> }, 
+    { path: 'settings/notifications',             element: <NotificationSettings /> }, 
+    { path: 'settings/preferences',               element: <PreferenceSettings /> }, 
+    { path: 'settings/status',                    element: <Settings /> },
+    { path: 'settings/document-types',            element: <Settings /> },
+    { path: 'settings/users',                     element: <UserManagement />,       menuCode: 'admin_users', superuserOnly: true },
+    { path: 'settings/roles',                     element: <RoleManagement />,       menuCode: 'admin_roles' },
+    { path: 'settings/audit',                     element: <AuditLogs />,            menuCode: 'admin_audit' },
+    { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment />,   menuCode: 'admin_role_menu' },
+    { path: 'settings/admin-structures/departments', element: <AdminStructures />,   menuCode: 'admin_structures' },
   ],
-
-  // Menu-gated only — no separate role check. A user sees these iff the
-  // corresponding menuCode is in their allowed-menu list.
   adminRoutes: [
     { path: 'admin/users',  element: <UserManagement />, menuCode: 'admin_users' },
     { path: 'admin/roles',  element: <RoleManagement />, menuCode: 'admin_roles' },
     { path: 'admin/audit',  element: <AuditLogs />,      menuCode: 'admin_audit' },
   ],
-
 };
-
-// ==================== Suspense wrapper helper ====================
 
 const Lazy = ({ message = 'Loading page...', children }) => (
   <Suspense fallback={<LoadingScreen message={message} fullScreen={false} />}>
@@ -585,47 +420,129 @@ const Lazy = ({ message = 'Loading page...', children }) => (
   </Suspense>
 );
 
-// ==================== AppContent ====================
+const INIT_TIMEOUT_MS = 20000;
+const withTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
 
+// Yields a tick so a setState right before this can actually paint before
+// the next setState overwrites it. Without this, two setState calls that
+// fire back-to-back with no `await` between them get batched into a single
+// render and the intermediate value is never shown to the user.
+const nextFrame = () => new Promise(resolve => setTimeout(resolve, 0));
+
+// ==================== AppContent Component ====================
 const AppContent = () => {
   const dispatch = useDispatch();
-  const { isAuthenticated, user } = useSelector(selectAuth);
+  const { isAuthenticated, isAuthChecking, user } = useSelector(selectAuth);
   const [initialized, setInitialized] = useState(false);
   const [initError, setInitError] = useState(null);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  // Hoisted to top level (was previously declared inside a conditional
+  // branch further down, which violates the Rules of Hooks: hooks must run
+  // in the same order on every render, and calling useState/useEffect only
+  // when `isAuthChecking && !authCheckCompleted.current` is true meant the
+  // hook list could shift between renders, corrupting React's internal
+  // state/prop bookkeeping for this and any descendant component.
+  const [forceProceed, setForceProceed] = useState(false);
   const initCalled = useRef(false);
+  const authCheckCompleted = useRef(false);
 
   useEffect(() => {
+    // NOTE: deliberately no local `isMounted` flag here. In React 18
+    // StrictMode (dev only), effects run twice: mount -> cleanup -> mount.
+    // `initCalled` (a ref, shared across both invocations) already
+    // guarantees `initialize()` only truly runs once, so a per-closure
+    // `isMounted` boolean flipped by the first invocation's cleanup would
+    // do nothing except sabotage that one real run: every `if (isMounted)`
+    // check after the first `await` would silently evaluate to false,
+    // including the `finally` block's `setInitialized(true)` - which is
+    // exactly what was freezing the loading screen at 30% forever. This
+    // component is the app root and effectively never unmounts outside of
+    // StrictMode's synthetic remount or a full page teardown, so skipping
+    // the mounted-guard here is safe.
     const initialize = async () => {
+      // Prevent multiple initialization attempts
       if (initCalled.current) return;
       initCalled.current = true;
 
       setLoadingProgress(30);
+      await nextFrame();
 
       try {
         setLoadingProgress(60);
-        await dispatch(checkAuth()).unwrap();
-        setLoadingProgress(80);
 
-        await preloadCriticalComponents();
+        // Only call checkAuth if not already authenticated
+        if (!isAuthenticated && !authCheckCompleted.current) {
+          try {
+            await withTimeout(
+              dispatch(checkAuth()).unwrap(),
+              INIT_TIMEOUT_MS,
+              'checkAuth()'
+            );
+            authCheckCompleted.current = true;
+          } catch (authErr) {
+            // Log but don't block - auth failures should redirect to login.
+            // authErr is the rejectWithValue payload from checkAuth (e.g.
+            // { reason: 'no_token' }), not a real Error, so there's no
+            // `.message` in the common case - that's expected.
+            console.warn('Auth check failed (non-fatal):', authErr?.reason || authErr?.message || authErr);
+            authCheckCompleted.current = true;
+          }
+        } else {
+          authCheckCompleted.current = true;
+        }
+
+        setLoadingProgress(80);
+        // Preload critical components in the background
+        preloadCriticalComponents().catch(err =>
+          console.warn('Preload warning:', err)
+        );
+        // Give the 80% state a chance to paint before jumping to 100%.
+        await nextFrame();
         setLoadingProgress(100);
       } catch (err) {
-        console.error('Initialization error:', err?.message || err);
-        if (err?.status === 0 || err?.code === 'ERR_NETWORK') {
-          setInitError('Unable to connect to the server. Please check your connection.');
+        const isTimeout = err?.code === 'ECONNABORTED' || /timed out/i.test(err?.message || '');
+
+        if (err?.status === 0 || err?.code === 'ERR_NETWORK' || isTimeout) {
+          console.error('Fatal initialization network failure:', err);
+          setInitError('Unable to connect to the server. Please check your connection and try again.');
         } else if (err?.status === 500) {
+          console.error('Fatal initialization server exception:', err);
           setInitError('Server error. Please try again later.');
+        } else {
+          console.warn('Caught initialization exception:', err?.message || err);
+          // Non-fatal errors - proceed with app loading
+          setLoadingProgress(100);
         }
-        // Non-network errors (e.g. 401 unauthenticated) are not fatal —
-        // the app still loads and the user will be redirected to /login.
       } finally {
         setInitialized(true);
+        // Ensure auth check is marked complete
+        authCheckCompleted.current = true;
       }
     };
 
     initialize();
-  }, [dispatch]);
+  }, [dispatch, isAuthenticated]);
 
+  // Force-proceed timer for a stuck auth check. Runs unconditionally (per
+  // Rules of Hooks) but only arms its timeout when actually needed.
+  useEffect(() => {
+    if (!(isAuthChecking && !authCheckCompleted.current)) return;
+
+    const timer = setTimeout(() => {
+      setForceProceed(true);
+      authCheckCompleted.current = true;
+    }, 5000); // Force proceed after 5 seconds
+
+    return () => clearTimeout(timer);
+  }, [isAuthChecking]);
+
+  // If there's a fatal initialization error, show the error screen
   if (initError) {
     return (
       <Box sx={{
@@ -643,25 +560,27 @@ const AppContent = () => {
     );
   }
 
+  // Only show loading screen if not initialized AND auth is still checking
+  // OR if auth check is taking too long (timeout fallback)
   if (!initialized) {
+    // If auth check is stuck for more than 10 seconds, force proceed
+    // This is handled by the timeout in the init function
     return <LoadingScreen message="Starting Application..." progress={loadingProgress} />;
+  }
+
+  // If auth check is stuck, force proceed after a reasonable time
+  // The loading screen will show briefly but then the app will render
+  if (isAuthChecking && !authCheckCompleted.current && !forceProceed) {
+    return <LoadingScreen message="Verifying access..." progress={null} />;
   }
 
   return (
     <ErrorBoundary>
       <Suspense fallback={<LoadingScreen message="Loading application..." />}>
         <Routes>
-          {/* Public Routes */}
           {routeConfig.publicRoutes.map(({ path, element, wrapper: Wrapper }) => (
             <Route key={path} path={path} element={<Wrapper>{element}</Wrapper>} />
           ))}
-
-          {/* Protected App Routes */}
-          {/* NOTE: AuthReloader has been removed. The Sidebar manages its own
-              menu fetch lifecycle via two separate useEffect hooks that watch
-              isLoggedIn and user.id independently. Adding AuthReloader here
-              caused a timing race where the Sidebar would mount before Redux
-              had propagated isLoggedIn=true, causing the fetch to be skipped. */}
           <Route
             path="/"
             element={
@@ -671,27 +590,12 @@ const AppContent = () => {
             }
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
-
-            {/* Regular Meeting Routes — no MeetingRecorderProvider */}
             {routeConfig.regularMeetingRoutes.map(({ path, element }) => (
-              <Route
-                key={path}
-                path={path}
-                element={<Lazy message="Loading meeting page...">{element}</Lazy>}
-              />
+              <Route key={path} path={path} element={<Lazy message="Loading meeting page...">{element}</Lazy>} />
             ))}
-
-
-            {/* ADD RECURRING MEETING ROUTES HERE */}
             {routeConfig.recurringMeetingRoutes.map(({ path, element }) => (
-              <Route
-                key={path}
-                path={path}
-                element={<Lazy message="Loading recurring meeting page...">{element}</Lazy>}
-              />
+              <Route key={path} path={path} element={<Lazy message="Loading recurring meeting page...">{element}</Lazy>} />
             ))}
-
-            {/* Recording Route ONLY — MeetingRecorderProvider here triggers mic prompt */}
             {routeConfig.recordingRoutes.map(({ path, element }) => (
               <Route
                 key={path}
@@ -703,66 +607,44 @@ const AppContent = () => {
                 }
               />
             ))}
-
-
-      {/* Standard Protected Routes — menu-gated by default. A route can opt
-          into an additional hard gate on top of the menu check via either
-          `superuserOnly` (checks user.is_superuser) or `roles` (checks role
-          codes). Currently only settings/users uses superuserOnly.
-          Everything else stays menu-only. */}
-      {routeConfig.protectedRoutes.map(({ path, element, menuCode, roles, superuserOnly }) => {
-        const gated = (
-          <MenuProtectedRoute menuCode={menuCode}>
-            <Lazy>{element}</Lazy>
-          </MenuProtectedRoute>
-        );
-
-        const needsHardGate = superuserOnly || (roles && roles.length > 0);
-
-        return (
-          <Route
-            key={path}
-            path={path}
-            element={
-              needsHardGate
-                ? (
-                  <ProtectedRoute requiredRoles={roles || []} requireSuperuser={!!superuserOnly}>
-                    {gated}
-                  </ProtectedRoute>
-                )
-                : gated
-            }
-          />
-        );
-      })}
-
-      {/* Admin Routes — menu-gated only, same access model as everything else.
-          No separate role check: visibility is driven entirely by whether
-          the user's assigned menus include this route's menuCode. */}
-      {routeConfig.adminRoutes.map(({ path, element, menuCode }) => (
-        <Route
-          key={path}
-          path={path}
-          element={
-            <MenuProtectedRoute menuCode={menuCode}>
-              <Lazy>{element}</Lazy>
-            </MenuProtectedRoute>
-          }
-        />
-      ))}
-
+            {routeConfig.protectedRoutes.map(({ path, element, menuCode, roles, superuserOnly }) => {
+              const gated = (
+                <MenuProtectedRoute menuCode={menuCode}>
+                  <Lazy>{element}</Lazy>
+                </MenuProtectedRoute>
+              );
+              const needsHardGate = superuserOnly || (roles && roles.length > 0);
+              return (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    needsHardGate
+                      ? (
+                        <ProtectedRoute requiredRoles={roles || []} requireSuperuser={!!superuserOnly}>
+                          {gated}
+                        </ProtectedRoute>
+                      )
+                      : gated
+                  }
+                />
+              );
+            })}
+            {routeConfig.adminRoutes.map(({ path, element, menuCode }) => (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  <MenuProtectedRoute menuCode={menuCode}>
+                    <Lazy>{element}</Lazy>
+                  </MenuProtectedRoute>
+                }
+              />
+            ))}
           </Route>
-
-          {/* Error Routes */}
           {routeConfig.errorRoutes.map(({ path, element }) => (
-            <Route
-              key={path}
-              path={path}
-              element={<Lazy message="Loading...">{element}</Lazy>}
-            />
+            <Route key={path} path={path} element={<Lazy message="Loading...">{element}</Lazy>} />
           ))}
-
-          {/* Catch-all */}
           <Route path="*" element={<Navigate to="/404" replace />} />
         </Routes>
       </Suspense>
@@ -770,11 +652,9 @@ const AppContent = () => {
   );
 };
 
-// ==================== Main App ====================
-
+// ==================== Main App Entry Component ====================
 export default function App() {
   const baseUrl = import.meta.env.BASE_URL;
-
   return (
     <ThemeContextProvider>
       <SnackbarProvider

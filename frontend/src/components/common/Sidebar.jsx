@@ -243,20 +243,16 @@ const Sidebar = ({ isMobile, mobileOpen, onClose, isCollapsed, setIsCollapsed })
   // Effect 2: Fetch menus on login
   useEffect(() => {
     if (!isLoggedIn || !user?.id) return;
-
     const isFirstLoad = !previousUserId.current;
     const userChanged = previousUserId.current !== null && previousUserId.current !== user.id;
-    const menusEmpty = !menus || menus.length === 0;
-
-    if (isFirstLoad || userChanged || menusEmpty) {
+    if (isFirstLoad || userChanged) {
       dispatch(resetMenuState());
       dispatch(fetchUserMenus());
       setOpenSubmenus({});
       setSearchQuery('');
     }
-
     previousUserId.current = user.id;
-  }, [isLoggedIn, user?.id, menus, dispatch]);
+  }, [isLoggedIn, user?.id, dispatch]); // menus removed from deps entirely
 
   // Auto-expand current path
   useEffect(() => {

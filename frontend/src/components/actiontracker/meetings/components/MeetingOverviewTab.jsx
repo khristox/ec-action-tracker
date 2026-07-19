@@ -61,7 +61,7 @@ const AGENDA_EXPANDED_MAX_HEIGHT = 2000;
 
 // ==================== Location level configurations ====================
 const LOCATION_LEVELS = {
-  1:  { name: 'Country',    icon: <PublicIcon fontSize="small" />,      color: '#4CAF50' },
+  1:  { name: 'Country',    icon: <PublicIcon fontSize="small" />,    color: '#4CAF50' },
   2:  { name: 'Region',     icon: <FlagIcon fontSize="small" />,        color: '#2196F3' },
   3:  { name: 'District',   icon: <TerrainIcon fontSize="small" />,     color: '#9C27B0' },
   4:  { name: 'County',     icon: <BusinessIcon fontSize="small" />,    color: '#FF9800' },
@@ -198,7 +198,7 @@ const RichTextContent = memo(({ content }) => {
 });
 RichTextContent.displayName = 'RichTextContent';
 
-// ==================== Agenda Section (compact, inline — lives inside the Location block) ====================
+// ==================== Agenda Section ====================
 const AgendaSection = memo(({ agenda }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -219,7 +219,8 @@ const AgendaSection = memo(({ agenda }) => {
 
   return (
     <Box sx={{ mt: 1.5, pt: 1.5, borderTop: `1px dashed ${isDarkMode ? DARK.border : '#E5E7EB'}` }}>
-      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.75 }}>
+      {/* FIX: Move layout properties into generic sx pool blocks */}
+      <Stack direction="row" spacing={0.75} sx={{ mb: 0.75, alignItems: 'center' }}>
         <DescriptionIcon sx={{ fontSize: 14, color: isDarkMode ? DARK.textSecondary : 'text.secondary' }} />
         <Typography
           variant="caption"
@@ -297,7 +298,8 @@ const MeetingOverviewTab = memo(({ meeting, onUpdateLink, onJoinMeeting }) => {
 
       <Grid container spacing={{ xs: 2, sm: 2.5 }}>
         <Grid size={{ xs: 12, md: 5 }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          {/* FIX: Move alignment logic safely into sx object mapping */}
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Avatar sx={{ width: 36, height: 36, bgcolor: alpha('#7C3AED', 0.1), color: '#7C3AED' }}>
               <CalendarIcon sx={{ fontSize: 19 }} />
             </Avatar>
@@ -315,10 +317,9 @@ const MeetingOverviewTab = memo(({ meeting, onUpdateLink, onJoinMeeting }) => {
           </Stack>
         </Grid>
 
-        {/* Location/Platform — the Agenda lives inside this box, collapsed by
-            default, so "where and what" sit together as one unit. */}
         <Grid size={{ xs: 12, md: 7 }}>
-          <Stack direction="row" spacing={1.5} alignItems="flex-start">
+          {/* FIX: Move layout alignment context safely to standard style maps */}
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
             <Avatar sx={{ width: 36, height: 36, bgcolor: alpha('#3B82F6', 0.1), color: '#3B82F6' }}>
               {isOnlineMeeting ? <VideoCallIcon sx={{ fontSize: 19 }} /> : <LocationIcon sx={{ fontSize: 19 }} />}
             </Avatar>
@@ -328,11 +329,16 @@ const MeetingOverviewTab = memo(({ meeting, onUpdateLink, onJoinMeeting }) => {
               </Typography>
               {isOnlineMeeting ? (
                 <>
-                  <Stack direction="row" alignItems="center" spacing={1}>
+                  {/* FIX: Sanitized alignments layout blocks mapping */}
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <Typography variant="body1" fontWeight={600}>
                       {meeting?.platform === 'zoom' ? 'Zoom' : meeting?.platform === 'google_meet' ? 'Google Meet' : meeting?.platform === 'microsoft_teams' ? 'Microsoft Teams' : 'Online Meeting'}
                     </Typography>
-                    <Tooltip title="Update Meeting Link"><IconButton size="small" onClick={onUpdateLink}><UpdateIcon fontSize="small" /></IconButton></Tooltip>
+                    <Tooltip title="Update Meeting Link">
+                      <IconButton size="small" onClick={onUpdateLink}>
+                        <UpdateIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </Stack>
                   {hasMeetingLink && (
                     <Button size="small" startIcon={<LinkIcon />} onClick={onJoinMeeting} sx={{ mt: 0.5, textTransform: 'none' }}>
@@ -353,9 +359,10 @@ const MeetingOverviewTab = memo(({ meeting, onUpdateLink, onJoinMeeting }) => {
       {hasKeyPersons && (
         <>
           <Divider sx={{ mt: 2, mb: 1.5 }} />
+          {/* FIX: Shift row wrapping configurations safely to standard styles container */}
           <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap', rowGap: 1.25 }}>
             {meeting?.chairperson_name && (
-              <Stack direction="row" spacing={1.25} alignItems="center">
+              <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
                 <Avatar sx={{ width: 30, height: 30, bgcolor: alpha('#F59E0B', 0.12), color: '#F59E0B' }}>
                   <PeopleIcon sx={{ fontSize: 16 }} />
                 </Avatar>
@@ -366,7 +373,7 @@ const MeetingOverviewTab = memo(({ meeting, onUpdateLink, onJoinMeeting }) => {
               </Stack>
             )}
             {meeting?.facilitator && (
-              <Stack direction="row" spacing={1.25} alignItems="center">
+              <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
                 <Avatar sx={{ width: 30, height: 30, bgcolor: alpha('#10B981', 0.12), color: '#10B981' }}>
                   <PeopleIcon sx={{ fontSize: 16 }} />
                 </Avatar>

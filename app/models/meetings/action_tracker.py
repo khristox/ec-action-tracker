@@ -2,20 +2,16 @@
 Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
-
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import uuid
-
 from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from app.db.base import Base
 from app.db.types import UUID as CustomUUID
 from uuid import UUID, uuid4
-
 # ==================== Association Tables ====================
-
 participant_list_members = Table(
     'participant_list_members',
     Base.metadata,
@@ -27,9 +23,7 @@ participant_list_members = Table(
     Index('ix_plm_participant_id', 'participant_id'),
     Index('ix_plm_added_by', 'added_by_id')
 )
-
 # ==================== Main Models ====================
-
 class Participant(Base):
     """Independent - no foreign keys to other action tracker tables"""
     __tablename__ = "participants"
@@ -59,7 +53,6 @@ class Participant(Base):
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     participant_lists = relationship("ParticipantList", secondary=participant_list_members, back_populates="participants")
-
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -84,8 +77,6 @@ class Participant(Base):
     
     def __repr__(self) -> str:
         return f"<Participant id={self.id} name='{self.name}'>"
-
-
 class ParticipantList(Base):
     """Depends on Participant and User"""
     __tablename__ = "participant_lists"
@@ -111,7 +102,6 @@ class ParticipantList(Base):
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     participants = relationship("Participant", secondary=participant_list_members, back_populates="participant_lists", lazy="selectin")
-
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -134,9 +124,6 @@ class ParticipantList(Base):
     
     def __repr__(self) -> str:
         return f"<ParticipantList id={self.id} name='{self.name}'>"
-
-
-
 class ActionStatus(Base):
     """Action status lookup table"""
     __tablename__ = "action_statuses"
@@ -188,8 +175,6 @@ class ActionStatus(Base):
     
     def __repr__(self) -> str:
         return f"<ActionStatus id={self.id} code='{self.code}' name='{self.name}'>"
-
-
 class Meeting(Base):
     """Meeting model with relationships to Location, User, and Attribute"""
     __tablename__ = "meetings"
@@ -225,7 +210,6 @@ class Meeting(Base):
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=True)
     duration_minutes = Column(Integer, nullable=True)  # Calculated field
-
     # Meeting platform fields
     platform = Column(String(100), nullable=True)
     meeting_link = Column(String(500), nullable=True)
@@ -280,7 +264,6 @@ class Meeting(Base):
     
     # Status - using MeetingStatus model
     status = relationship("Attribute", foreign_keys=[status_id], lazy="selectin")
-
     
     # Participants
     participants = relationship(
@@ -467,8 +450,6 @@ class Meeting(Base):
     
     def __repr__(self) -> str:
         return f"<Meeting id={self.id} title='{self.title[:50]}' date={self.meeting_date}>"
-
-
 class MeetingParticipant(Base):
     """Depends on Meeting"""
     __tablename__ = "meeting_participants"
@@ -529,7 +510,6 @@ class MeetingParticipant(Base):
         lazy="noload",
         uselist=False
     )
-
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -569,8 +549,6 @@ class MeetingParticipant(Base):
     
     def __repr__(self) -> str:
         return f"<MeetingParticipant id={self.id} name='{self.name}'>"
-
-
 class MeetingStatusHistory(Base):
     __tablename__ = "meeting_status_history"
     
@@ -592,8 +570,6 @@ class MeetingStatusHistory(Base):
     status = relationship("Attribute", foreign_keys=[status_id])  # Was: relationship("MeetingStatus")
     created_by = relationship("User", foreign_keys=[created_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
-
-
 class MeetingMinutes(Base):
     """Depends on Meeting and User"""
     __tablename__ = "meeting_minutes"
@@ -638,7 +614,6 @@ class MeetingMinutes(Base):
         lazy="selectin",
         order_by="MeetingAction.due_date.asc(), MeetingAction.priority.asc()"
     )
-
     # Active actions only (read-only) - filtered view
     active_actions = relationship(
         "MeetingAction", 
@@ -718,8 +693,6 @@ class MeetingMinutes(Base):
     
     def __repr__(self) -> str:
         return f"<MeetingMinutes id={self.id} topic='{self.topic[:50]}'>"
-
-
 class MeetingAction(Base):
     """Meeting Action model - tracks action items from meeting minutes"""
     __tablename__ = "meeting_actions"
@@ -733,6 +706,7 @@ class MeetingAction(Base):
         Index('ix_meeting_actions_created_by', 'created_by_id'),
         Index('ix_meeting_actions_updated_by', 'updated_by_id'),
         Index('ix_meeting_actions_is_active', 'is_active'),
+        Index('ix_meeting_actions_assign_to_meeting', 'assign_to_meeting_id'),
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -745,6 +719,18 @@ class MeetingAction(Base):
     due_date = Column(DateTime(timezone=True), nullable=True)
     priority = Column(Integer, default=2, nullable=False)  # 1=High, 2=Medium, 3=Low, 4=Very Low
     remarks = Column(Text, nullable=True)
+
+    # ---- New fields to match the updated Actions Tracker Form ----
+    title = Column(String(500), nullable=True)
+    issue_challenge = Column(Text, nullable=True)
+    is_key_action = Column(Boolean, default=False, nullable=False)
+    type_of_action = Column(String(100), nullable=True)
+    date_initiated = Column(DateTime(timezone=True), nullable=True)
+    tags = Column(JSON, nullable=True)  # list[str], e.g. ["urgent", "budget"]
+    assign_to_meeting_id = Column(
+        CustomUUID, ForeignKey("meetings.id", ondelete='SET NULL'), nullable=True
+    )
+
     completed_at = Column(DateTime(timezone=True), nullable=True)
     overall_status_id = Column(CustomUUID, ForeignKey("action_statuses.id", ondelete='SET NULL'), nullable=True)
     overall_status_name = Column(String(100), nullable=True)
@@ -766,6 +752,16 @@ class MeetingAction(Base):
     overall_status = relationship("ActionStatus", foreign_keys=[overall_status_id], lazy="selectin")
     comments = relationship("ActionComment", back_populates="action", cascade="all, delete-orphan", lazy="selectin")
     status_history = relationship("ActionStatusHistory", back_populates="action", cascade="all, delete-orphan", lazy="selectin")
+    assign_to_meeting = relationship(
+        "Meeting", foreign_keys=[assign_to_meeting_id], lazy="selectin"
+    )
+    implementers = relationship(
+        "ActionImplementer",
+        back_populates="action",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ActionImplementer.sort_order",
+    )
     
     # ==================== Validators ====================
     
@@ -915,6 +911,14 @@ class MeetingAction(Base):
             "priority_label": self.priority_label,
             "priority_color": self.priority_color,
             "remarks": self.remarks,
+            "title": self.title,
+            "issue_challenge": self.issue_challenge,
+            "is_key_action": self.is_key_action,
+            "type_of_action": self.type_of_action,
+            "date_initiated": self.date_initiated.isoformat() if self.date_initiated else None,
+            "tags": self.tags or [],
+            "assign_to_meeting_id": str(self.assign_to_meeting_id) if self.assign_to_meeting_id else None,
+            "persons_implementing": [i.to_dict() for i in (self.implementers or [])],
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "overall_status_id": str(self.overall_status_id) if self.overall_status_id else None,
             "overall_status_name": self.overall_status_name,
@@ -951,8 +955,6 @@ class MeetingAction(Base):
     
     def __repr__(self) -> str:
         return f"<MeetingAction id={self.id} description='{self.description[:50]}' priority={self.priority}>"
-
-
 class ActionStatusHistory(Base):
     """Depends on MeetingAction, User, ActionStatus"""
     __tablename__ = "action_status_history"
@@ -983,7 +985,6 @@ class ActionStatusHistory(Base):
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     individual_status = relationship("ActionStatus", foreign_keys=[individual_status_id], lazy="selectin")
-
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -1007,8 +1008,6 @@ class ActionStatusHistory(Base):
     
     def __repr__(self) -> str:
         return f"<ActionStatusHistory id={self.id} action_id={self.action_id}>"
-
-
 class ActionComment(Base):
     """Depends on MeetingAction and User"""
     __tablename__ = "action_comments"
@@ -1036,7 +1035,6 @@ class ActionComment(Base):
     action = relationship("MeetingAction", back_populates="comments")
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
-
     @property
     def created_by_name(self) -> Optional[str]:
         return self.created_by.username if self.created_by else None
@@ -1058,8 +1056,55 @@ class ActionComment(Base):
     
     def __repr__(self) -> str:
         return f"<ActionComment id={self.id} comment='{self.comment[:50]}'>"
+class ActionImplementer(Base):
+    """
+    A person implementing a MeetingAction. Mirrors MeetingParticipant's
+    shape (name/email/telephone as free-text, with an optional link to a
+    real User) since an implementer may or may not be a system user —
+    the frontend's "Person(s) Implementing" table allows picking a known
+    user OR typing a name/phone/email manually.
 
+    The full list is replaced wholesale on every action update (see CRUD),
+    so this table intentionally stays lightweight — no soft-delete flag,
+    no full audit trail, just enough to render the table and re-derive it
+    on save.
+    """
+    __tablename__ = "action_implementers"
+    __table_args__ = (
+        Index('ix_action_implementers_action_id', 'action_id'),
+        Index('ix_action_implementers_user_id', 'user_id'),
+    )
 
+    id = Column(CustomUUID, primary_key=True, default=uuid4)
+    action_id = Column(
+        CustomUUID, ForeignKey('meeting_actions.id', ondelete='CASCADE'), nullable=False
+    )
+
+    # Optional link to a real user (populated when picked via AssignToSelector)
+    user_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    action = relationship("MeetingAction", back_populates="implementers")
+    user = relationship("User", foreign_keys=[user_id], lazy="selectin")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "user_id": str(self.user_id) if self.user_id else None,
+            "name": self.name,
+            "email": self.email,
+            "phone": self.phone,
+        }
+
+    def __repr__(self) -> str:
+        return f"<ActionImplementer id={self.id} name='{self.name}' action_id={self.action_id}>"
 class MeetingDocument(Base):
     """Depends on Meeting, User, Attribute"""
     __tablename__ = "meeting_documents"
@@ -1121,7 +1166,6 @@ class MeetingDocument(Base):
     @property
     def uploaded_by_name(self) -> Optional[str]:
         return self.uploaded_by.username if self.uploaded_by else None
-
     # ============ Document Type Properties ============
     
     @property
@@ -1184,7 +1228,6 @@ class MeetingDocument(Base):
             }
             return color_map.get(self.document_type_code, '#6b7280')
         return '#6b7280'
-
     # ============ File Properties ============
     
     @property
@@ -1228,7 +1271,6 @@ class MeetingDocument(Base):
         if self.is_image and self.id:
             return f"/api/v1/action-tracker/documents/document/{self.id}/thumbnail"
         return None
-
     # ============ Document Information ============
     
     @property
@@ -1272,7 +1314,6 @@ class MeetingDocument(Base):
             minutes = diff.seconds // 60
             return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
         return "Just now"
-
     # ============ Utility Methods ============
     
     def to_dict(self, include_relationships: bool = False) -> dict:
@@ -1314,13 +1355,9 @@ class MeetingDocument(Base):
     
     def __repr__(self) -> str:
         return f"<MeetingDocument {self.display_title} (meeting: {self.meeting_id})>"
-
-
 # ==================== Helper Methods for Eager Loading ====================
-
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-
 class MeetingQuery:
     """Helper class for common meeting queries with eager loading"""
     
@@ -1361,12 +1398,10 @@ class MeetingQuery:
             selectinload(Meeting.documents).selectinload(MeetingDocument.created_by),
             selectinload(Meeting.documents).selectinload(MeetingDocument.updated_by),
         )
-
-
 # ==================== Model Configuration for Pydantic ====================
-
 # Add this to enable ORM mode for all models
 for model in [Meeting, MeetingMinutes, MeetingAction, MeetingParticipant, 
               MeetingDocument, MeetingStatusHistory, ActionStatusHistory, 
-              ActionComment, Participant, ParticipantList, ActionStatus]:
+              ActionComment, Participant, ParticipantList, ActionStatus,
+              ActionImplementer]:
     model.__allow_unmapped__ = True

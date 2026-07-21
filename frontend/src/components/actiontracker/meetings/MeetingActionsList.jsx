@@ -1,6 +1,6 @@
 // src/components/actiontracker/meetings/MeetingActionsList.jsx
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -37,8 +37,6 @@ import {
   ListItemAvatar,
   ListItemText,
   Badge,
-  Menu,
-  MenuItem,
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -57,11 +55,9 @@ import {
   Lock as LockIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  People as PeopleIcon,
   Label as LabelIcon,
   Flag as FlagIcon,
   Lightbulb as LightbulbIcon,
-  MoreVert as MoreVertIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import {
@@ -136,7 +132,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const isDarkMode = theme.palette.mode === 'dark';
 
   // ==================== REDUX SELECTORS ====================
-  // ✅ Use the minutes data from Redux (shared with MeetingMinutes)
   const minutesList = useSelector(selectMeetingMinutes);
   const statusOptions = useSelector(selectActionStatusOptions);
   const loadingStatusOptions = useSelector(selectActionTrackerLoading);
@@ -145,8 +140,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== REFS ====================
   const isMountedRef = useRef(true);
+  const fetchTimeoutRef = useRef(null);
+  const isFetchingRef = useRef(false);
   const previousMinutesStringRef = useRef('');
-  const attributesFetchedRef = useRef(false);
 
   // ==================== LOCAL STATE ====================
   const [actions, setActions] = useState([]);
@@ -161,15 +157,14 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const [localUpdating, setLocalUpdating] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [expandedActions, setExpandedActions] = useState({});
-  const [anchorElMap, setAnchorElMap] = useState({});
 
   const progressFormRef = useRef(null);
 
   // ==================== COMPUTED VALUES ====================
-  const canEdit = canEditActions(meetingStatus);
+  const canEdit = useMemo(() => canEditActions(meetingStatus), [meetingStatus]);
   const isUpdating = localUpdating || updatingProgress;
   const hasNoMinutes = minutesList.length === 0 && !loading;
-  const statusMessage = getStatusMessage(meetingStatus);
+  const statusMessage = useMemo(() => getStatusMessage(meetingStatus), [meetingStatus]);
 
   // ==================== HELPER FUNCTIONS ====================
 
@@ -185,15 +180,15 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     return null;
   }
 
-  const getProgressColor = (value) => {
+  const getProgressColor = useCallback((value) => {
     if (value >= 100) return isDarkMode ? '#34D399' : 'success.main';
     if (value >= 75) return isDarkMode ? '#A78BFA' : 'secondary.main';
     if (value >= 50) return isDarkMode ? '#FBBF24' : 'warning.main';
     if (value >= 25) return isDarkMode ? '#60A5FA' : 'primary.main';
     return isDarkMode ? '#6B7280' : 'grey.500';
-  };
+  }, [isDarkMode]);
 
-  const getStatusConfig = (action) => {
+  const getStatusConfig = useCallback((action) => {
     const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
     const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
 
@@ -230,16 +225,13 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       icon: <ScheduleIcon fontSize="small" />,
       chipSx: isDarkMode ? { bgcolor: alpha('#F59E0B', 0.2), color: '#FBBF24' } : {}
     };
-  };
+  }, [statusOptions, isDarkMode]);
 
-  const getAssignedToName = (action) => {
-    // Check persons_implementing first (new field)
+  const getAssignedToName = useCallback((action) => {
     if (action.persons_implementing && action.persons_implementing.length > 0) {
       const firstPerson = action.persons_implementing[0];
       return firstPerson.name || 'Unassigned';
     }
-    
-    // Fallback to legacy fields
     if (action.assigned_to?.full_name) {
       return action.assigned_to.full_name;
     }
@@ -253,13 +245,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       return action.assigned_to_name.name || action.assigned_to_name.email || 'Unassigned';
     }
     return 'Unassigned';
-  };
+  }, []);
 
-  const getImplementers = (action) => {
+  const getImplementers = useCallback((action) => {
     if (action.persons_implementing && action.persons_implementing.length > 0) {
       return action.persons_implementing;
     }
-    // Fallback to legacy single assignee
     if (action.assigned_to || action.assigned_to_name) {
       return [{
         name: getAssignedToName(action),
@@ -269,9 +260,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       }];
     }
     return [];
-  };
+  }, [getAssignedToName]);
 
-  const getPriorityLabel = (priority) => {
+  const getPriorityLabel = useCallback((priority) => {
     const map = {
       1: { label: 'High', color: '#EF4444' },
       2: { label: 'Medium', color: '#F59E0B' },
@@ -279,11 +270,30 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       4: { label: 'Very Low', color: '#9CA3AF' },
     };
     return map[priority] || map[2];
-  };
+  }, []);
 
-  // ==================== EXTRACT ACTIONS FROM MINUTES ====================
-  const extractActionsFromMinutes = useCallback(() => {
+  // ==================== API CALLS ====================
+
+  const fetchMinutes = useCallback(() => {
+    if (!meetingId || !isMountedRef.current || isFetchingRef.current) {
+      return Promise.resolve();
+    }
+    
+    isFetchingRef.current = true;
+    return dispatch(fetchMeetingMinutes(meetingId))
+      .finally(() => {
+        isFetchingRef.current = false;
+      });
+  }, [dispatch, meetingId]);
+
+  const fetchAttributes = useCallback(() => {
     if (!isMountedRef.current) return;
+    dispatch(fetchActionTrackerAttributes());
+  }, [dispatch]);
+
+  // ==================== EXTRACT ACTIONS ====================
+  const extractActionsFromMinutes = useCallback(() => {
+    if (!isMountedRef.current || !minutesList) return;
 
     try {
       const actionsData = [];
@@ -316,30 +326,61 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== EFFECTS ====================
 
-  // ✅ Effect 1: Fetch attributes only (once), NOT minutes
-  // The minutes are already fetched by MeetingMinutes.jsx
+  // Initial fetch - only once on mount or when meetingId changes
   useEffect(() => {
+    if (!meetingId) return;
+    
+    let isActive = true;
     isMountedRef.current = true;
+    previousMinutesStringRef.current = '';
 
-    // Only fetch attributes if not already fetched
-    if (!attributesFetchedRef.current) {
-      attributesFetchedRef.current = true;
-      dispatch(fetchActionTrackerAttributes());
+    const fetchData = async () => {
+      if (!isActive) return;
+      setLoading(true);
+      try {
+        await fetchMinutes();
+        await fetchAttributes();
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        if (isActive && isMountedRef.current) {
+          setError('Failed to load meeting data');
+        }
+      } finally {
+        if (isActive && isMountedRef.current) {
+          setLoading(false);
+        }
+      }
+    };
+
+    // Debounce fetch to prevent multiple calls
+    if (fetchTimeoutRef.current) {
+      clearTimeout(fetchTimeoutRef.current);
     }
+    
+    fetchTimeoutRef.current = setTimeout(() => {
+      if (isActive) {
+        fetchData();
+      }
+    }, 100);
 
     return () => {
+      isActive = false;
       isMountedRef.current = false;
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+        fetchTimeoutRef.current = null;
+      }
     };
-  }, [dispatch]);
+  }, [meetingId, fetchMinutes, fetchAttributes]);
 
-  // ✅ Effect 2: Extract actions when minutesList changes (shared from Redux)
+  // Extract actions when minutes change
   useEffect(() => {
     if (minutesList && isMountedRef.current) {
       extractActionsFromMinutes();
     }
   }, [minutesList, extractActionsFromMinutes]);
 
-  // ✅ Effect 3: Handle success messages
+  // Success message timeout
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
@@ -351,7 +392,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   }, [successMessage]);
 
-  // ✅ Effect 4: Log status options errors
+  // Log errors
   useEffect(() => {
     if (statusOptionsError) {
       console.error('Failed to load status options:', statusOptionsError);
@@ -361,16 +402,18 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   // ==================== EVENT HANDLERS ====================
 
   const handleRefresh = useCallback(() => {
-    if (!isMountedRef.current) return;
+    if (!isMountedRef.current || isFetchingRef.current) return;
     
-    // ✅ Refresh minutes data (will be shared with MeetingMinutes)
-    dispatch(fetchMeetingMinutes(meetingId));
-    
-    // Also refresh attributes
-    dispatch(fetchActionTrackerAttributes());
-    
+    setLoading(true);
+    previousMinutesStringRef.current = '';
+    fetchMinutes()
+      .finally(() => {
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
+      });
     if (onRefresh) onRefresh();
-  }, [dispatch, meetingId, onRefresh]);
+  }, [fetchMinutes, onRefresh]);
 
   const handleViewAction = useCallback((actionId) => {
     navigate(`/actions/${actionId}`);
@@ -392,27 +435,27 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     setShowAssignDialog(true);
   }, []);
 
-  const handleEditSave = useCallback(() => {
+  const handleRefreshAfterAction = useCallback(() => {
     if (!isMountedRef.current) return;
-    // ✅ Refresh minutes data
-    dispatch(fetchMeetingMinutes(meetingId));
+    previousMinutesStringRef.current = '';
+    fetchMinutes();
+  }, [fetchMinutes]);
+
+  const handleEditSave = useCallback(() => {
+    handleRefreshAfterAction();
     setSuccessMessage('Action updated successfully!');
-  }, [dispatch, meetingId]);
+  }, [handleRefreshAfterAction]);
 
   const handleAssignSave = useCallback(() => {
-    if (!isMountedRef.current) return;
-    // ✅ Refresh minutes data
-    dispatch(fetchMeetingMinutes(meetingId));
+    handleRefreshAfterAction();
     setSuccessMessage('Action assigned successfully!');
-  }, [dispatch, meetingId]);
+  }, [handleRefreshAfterAction]);
 
   const handleActionCreated = useCallback(() => {
-    if (!isMountedRef.current) return;
-    // ✅ Refresh minutes data
-    dispatch(fetchMeetingMinutes(meetingId));
+    handleRefreshAfterAction();
     if (onRefresh) onRefresh();
     setSuccessMessage('Action created successfully!');
-  }, [dispatch, meetingId, onRefresh]);
+  }, [handleRefreshAfterAction, onRefresh]);
 
   const handleOpenProgressDialog = useCallback((action) => {
     if (!isMountedRef.current) return;
@@ -422,25 +465,27 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleProgressUpdateComplete = useCallback(() => {
     if (!isMountedRef.current) return;
-    // ✅ Refresh minutes data
-    dispatch(fetchMeetingMinutes(meetingId));
+    handleRefreshAfterAction();
     if (onRefresh) onRefresh();
     setSuccessMessage('Progress updated successfully!');
     setShowProgressDialog(false);
-  }, [dispatch, meetingId, onRefresh]);
+  }, [handleRefreshAfterAction, onRefresh]);
 
   const handleActionCreate = useCallback(async (payload) => {
-    if (!isMountedRef.current) return;
+    if (!isMountedRef.current || !meetingId) return;
     
+    if (isFetchingRef.current) {
+      console.log('Already fetching, skipping...');
+      return;
+    }
+
     try {
-      // Get or create a minute
       let minuteId = payload.minute_id;
       if (!minuteId && minutesList && minutesList.length > 0) {
         minuteId = minutesList[0]?.id;
       }
       
       if (!minuteId) {
-        // Create a default minute
         const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
           title: 'General',
           content: '',
@@ -449,8 +494,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
         if (!minuteId) {
           throw new Error('Failed to create default minute');
         }
-        // ✅ Refresh minutes after creating
-        dispatch(fetchMeetingMinutes(meetingId));
+        await fetchMinutes();
       }
 
       const actionResponse = await api.post(
@@ -485,26 +529,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       }
       throw err;
     }
-  }, [meetingId, minutesList, dispatch, handleActionCreated]);
+  }, [meetingId, minutesList, fetchMinutes, handleActionCreated]);
 
   const toggleExpand = useCallback((actionId) => {
     setExpandedActions(prev => ({
       ...prev,
       [actionId]: !prev[actionId]
-    }));
-  }, []);
-
-  const handleMenuOpen = useCallback((event, actionId) => {
-    setAnchorElMap(prev => ({
-      ...prev,
-      [actionId]: event.currentTarget
-    }));
-  }, []);
-
-  const handleMenuClose = useCallback((actionId) => {
-    setAnchorElMap(prev => ({
-      ...prev,
-      [actionId]: null
     }));
   }, []);
 
@@ -525,11 +555,18 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     <Fade in timeout={500}>
       <Box>
         {/* ==================== HEADER ==================== */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Stack 
+          direction="row"
+          sx={{ 
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            mb: 3 
+          }}
+        >
           <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
             Action Items ({actions.length})
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Stack direction="row" spacing={1}>
             <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to add actions") : "Add new action item"}>
               <span>
                 <Button
@@ -551,7 +588,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               <IconButton
                 onClick={handleRefresh}
                 size="small"
-                disabled={loading}
+                disabled={loading || isFetchingRef.current}
                 sx={{
                   color: isDarkMode ? '#D1D5DB' : 'inherit',
                   '&:hover': { backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.04) }
@@ -560,8 +597,8 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
-          </Box>
-        </Box>
+          </Stack>
+        </Stack>
 
         {/* ==================== STATUS MESSAGES ==================== */}
         {statusMessage && (
@@ -678,7 +715,14 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               {action.description}
                             </Typography>
                             {/* Show additional info badges */}
-                            <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
+                            <Stack 
+                              direction="row" 
+                              spacing={1}
+                              sx={{ 
+                                alignItems: 'center',
+                                flexWrap: 'wrap' 
+                              }}
+                            >
                               {action.title && (
                                 <Chip
                                   label={action.title}
@@ -723,11 +767,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                                   />
                                 </Tooltip>
                               )}
-                            </Box>
+                            </Stack>
                           </Stack>
                         </TableCell>
                         <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
                             {implementers.length > 0 ? (
                               <Badge
                                 badgeContent={implementers.length > 1 ? implementers.length : null}
@@ -775,15 +819,15 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                                 </Typography>
                               )}
                             </Box>
-                          </Box>
+                          </Stack>
                         </TableCell>
                         <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
                             <ScheduleIcon fontSize="small" sx={{ color: isOverdue ? (isDarkMode ? '#F87171' : 'error') : (isDarkMode ? '#6B7280' : 'action') }} />
                             <Typography variant="body2" sx={{ color: isOverdue ? (isDarkMode ? '#F87171' : 'error') : (isDarkMode ? '#D1D5DB' : 'text.primary') }}>
                               {formatDate(action.due_date)}
                             </Typography>
-                          </Box>
+                          </Stack>
                         </TableCell>
                         <TableCell>
                           <Chip
@@ -825,7 +869,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           </Stack>
                         </TableCell>
                         <TableCell align="center">
-                          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
+                          <Stack 
+                            direction="row" 
+                            spacing={0.5}
+                            sx={{ justifyContent: 'center' }}
+                          >
                             <Tooltip title={canEdit ? "Update Progress" : "Meeting must be started to update progress"}>
                               <span>
                                 <IconButton
@@ -880,7 +928,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                                 {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                               </IconButton>
                             </Tooltip>
-                          </Box>
+                          </Stack>
                         </TableCell>
                       </TableRow>
 
@@ -891,29 +939,33 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <Box sx={{ p: 2, bgcolor: isDarkMode ? alpha('#FFFFFF', 0.02) : alpha('#000000', 0.02) }}>
                               <Stack spacing={2}>
                                 {/* New Fields Display */}
-                                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                                <Stack 
+                                  direction="row" 
+                                  spacing={2}
+                                  sx={{ flexWrap: 'wrap' }}
+                                >
                                   {action.title && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Stack direction="row" spacing={1} alignItems="center">
                                       <LabelIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
                                       <Typography variant="caption" fontWeight={600}>Title:</Typography>
                                       <Typography variant="caption">{action.title}</Typography>
-                                    </Box>
+                                    </Stack>
                                   )}
                                   {action.type_of_action && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Stack direction="row" spacing={1} alignItems="center">
                                       <FlagIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
                                       <Typography variant="caption" fontWeight={600}>Type:</Typography>
                                       <Typography variant="caption">{action.type_of_action}</Typography>
-                                    </Box>
+                                    </Stack>
                                   )}
                                   {action.date_initiated && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Stack direction="row" spacing={1} alignItems="center">
                                       <ScheduleIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
                                       <Typography variant="caption" fontWeight={600}>Initiated:</Typography>
                                       <Typography variant="caption">{formatDate(action.date_initiated)}</Typography>
-                                    </Box>
+                                    </Stack>
                                   )}
-                                </Box>
+                                </Stack>
 
                                 {/* Issue/Challenge */}
                                 {action.issue_challenge && (
@@ -956,10 +1008,10 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                                           <ListItemText
                                             primary={person.name}
                                             secondary={
-                                              <Box component="span" sx={{ display: 'flex', gap: 1 }}>
+                                              <Stack direction="row" spacing={1} component="span">
                                                 {person.email && <Typography variant="caption">{person.email}</Typography>}
                                                 {person.phone && <Typography variant="caption">{person.phone}</Typography>}
-                                              </Box>
+                                              </Stack>
                                             }
                                             primaryTypographyProps={{ variant: 'caption', fontWeight: 500 }}
                                             secondaryTypographyProps={{ variant: 'caption', component: 'span' }}
@@ -976,7 +1028,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                                     <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
                                       Tags:
                                     </Typography>
-                                    <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                                    <Stack 
+                                      direction="row" 
+                                      spacing={0.5}
+                                      sx={{ mt: 0.5, flexWrap: 'wrap' }}
+                                    >
                                       {action.tags.map((tag, idx) => (
                                         <Chip
                                           key={idx}
@@ -986,7 +1042,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                                           sx={{ height: 20, fontSize: '0.6rem' }}
                                         />
                                       ))}
-                                    </Box>
+                                    </Stack>
                                   </Box>
                                 )}
                               </Stack>

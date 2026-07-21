@@ -1,4 +1,5 @@
 // src/components/meetings/MeetingDetail.jsx
+
 import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -46,7 +47,6 @@ import MeetingAudit from './MeetingAudit';
 import MeetingRecorder from './MeetingRecorder';
 import api from '../../../services/api';
 import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
-import { deduplicatedGet } from '../../../utils/requestUtils';
 
 // ==================== Permission Constants ====================
 const PERMISSIONS = {
@@ -378,44 +378,64 @@ const MeetingDetail = () => {
   const fetchMeeting = useCallback(() => { if (id) dispatch(fetchMeetingById(id)); }, [id, dispatch]);
   const fetchParticipants = useCallback(() => { if (id) dispatch(fetchMeetingParticipants(id)); }, [id, dispatch]);
   
-const fetchEmailNotifications = useCallback(async (signal) => {
+  // ✅ FIX: Simplified fetchEmailNotifications
+  const fetchEmailNotifications = useCallback(async (signal) => {
     if (!id) return;
     try {
-      const response = await deduplicatedGet(
-        '/notifications',
-        { meeting_id: id, channel: 'email', limit: 50 },
-        { key: `email_notifications_${id}`, signal }
-      );
-      if (!response.canceled) {
+      const response = await api.get('/notifications', {
+        params: { meeting_id: id, channel: 'email', limit: 50 },
+        signal
+      });
+      if (!signal?.aborted) {
         setEmailNotifications(response.data?.items || []);
       }
     } catch (err) {
-      // Completely swallow cancellation errors so they never hit the console log
+      // Silently ignore cancellation errors
       if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && err.message !== 'canceled') {
         console.error('Failed to fetch email notifications:', err);
       }
     }
   }, [id]);
 
+  // ✅ FIX: handleRefresh without fetchEmailNotifications
   const handleRefresh = useCallback(() => {
     setShowNotFound(false);
     setLoadingTimeout(false);
     setInitialLoadComplete(false);
     fetchMeeting();
     fetchParticipants();
-    fetchEmailNotifications();
-  }, [fetchMeeting, fetchParticipants, fetchEmailNotifications]);
+    // Don't call fetchEmailNotifications here to avoid duplicates
+  }, [fetchMeeting, fetchParticipants]);
 
-  // Completely fixed mount effect with stable abort and dispatch isolation
+  // ✅ FIX: Mount effect with proper error handling
   useEffect(() => {
     if (!id) return;
 
     const emailController = new AbortController();
 
-    dispatch(fetchMeetingById(id));
-    dispatch(fetchMeetingParticipants(id));
-    fetchEmailNotifications(emailController.signal);
-    dispatch(fetchActionTrackerAttributes());
+    // Load all data
+    const loadData = async () => {
+      try {
+        // Fetch meeting data
+        await dispatch(fetchMeetingById(id)).unwrap();
+        
+        // Fetch participants
+        await dispatch(fetchMeetingParticipants(id)).unwrap();
+        
+        // Fetch email notifications (non-critical)
+        await fetchEmailNotifications(emailController.signal);
+        
+        // Fetch attributes (non-critical, can run in background)
+        dispatch(fetchActionTrackerAttributes());
+      } catch (err) {
+        // Only log errors that aren't cancellations
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && err.message !== 'canceled') {
+          console.error('Error loading meeting data:', err);
+        }
+      }
+    };
+
+    loadData();
 
     return () => {
       emailController.abort();
@@ -423,7 +443,7 @@ const fetchEmailNotifications = useCallback(async (signal) => {
       dispatch(clearNotificationError());
       dispatch(clearLastNotificationResult());
     };
-  }, [id, dispatch, fetchEmailNotifications]);
+  }, [id, dispatch, fetchMeetingById, fetchMeetingParticipants, fetchEmailNotifications]);
 
   // Loading Delay Sync
   useEffect(() => {

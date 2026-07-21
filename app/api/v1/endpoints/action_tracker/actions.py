@@ -11,7 +11,7 @@ import logging
 
 from app.api import deps
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
-from app.models.meetings.action_tracker import MeetingAction, ActionComment
+from app.models.meetings.action_tracker import ActionImplementer, MeetingAction, ActionComment
 from app.models.user import User
 
 from app.schemas.action_tracker import (
@@ -925,4 +925,177 @@ async def update_action_progress(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update progress: {str(e)}"
+        )
+    
+
+# ==================== IMPLEMENTERS ENDPOINTS ====================
+
+@router.get("/{action_id}/implementers", response_model=List[dict])
+async def get_action_implementers(
+    action_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Get all implementers for an action.
+    """
+    try:
+        # Check if action exists
+        await get_action_or_404(db, action_id)
+        
+        # Get implementers
+        result = await db.execute(
+            select(ActionImplementer)
+            .where(
+                ActionImplementer.action_id == action_id,
+                # Assuming there's an is_active field, if not, remove this condition
+                # ActionImplementer.is_active == True
+            )
+            .order_by(ActionImplementer.sort_order)
+        )
+        implementers = result.scalars().all()
+        
+        # Convert to dict
+        return [
+            {
+                "id": str(imp.id),
+                "action_id": str(imp.action_id),
+                "user_id": str(imp.user_id) if imp.user_id else None,
+                "name": imp.name,
+                "email": imp.email,
+                "phone": imp.phone,
+                "sort_order": imp.sort_order
+            }
+            for imp in implementers
+        ]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching implementers for action {action_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch implementers"
+        )
+
+
+@router.post("/{action_id}/implementers", response_model=List[dict])
+async def add_action_implementers(
+    action_id: UUID,
+    implementers_data: List[Dict[str, Any]],
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Add or update implementers for an action.
+    This will replace all existing implementers with the new list.
+    """
+    try:
+        # Check if action exists
+        await get_action_or_404(db, action_id)
+        
+        # Delete existing implementers
+        await db.execute(
+            delete(ActionImplementer).where(ActionImplementer.action_id == action_id)
+        )
+        
+        # Create new implementers
+        new_implementers = []
+        for idx, person_data in enumerate(implementers_data):
+            implementer = ActionImplementer(
+                id=uuid.uuid4(),
+                action_id=action_id,
+                user_id=person_data.get('assigned_to_id') or person_data.get('user_id'),
+                name=person_data.get('name', 'Unassigned'),
+                email=person_data.get('email'),
+                phone=person_data.get('phone') or person_data.get('telephone'),
+                sort_order=idx
+            )
+            db.add(implementer)
+            new_implementers.append(implementer)
+        
+        await db.commit()
+        
+        # Refresh and return
+        return [
+            {
+                "id": str(imp.id),
+                "action_id": str(imp.action_id),
+                "user_id": str(imp.user_id) if imp.user_id else None,
+                "name": imp.name,
+                "email": imp.email,
+                "phone": imp.phone,
+                "sort_order": imp.sort_order
+            }
+            for imp in new_implementers
+        ]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error adding implementers for action {action_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to add implementers"
+        )
+
+
+@router.put("/{action_id}/implementers", response_model=List[dict])
+async def update_action_implementers(
+    action_id: UUID,
+    implementers_data: List[Dict[str, Any]],
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update implementers for an action (alias for POST).
+    """
+    return await add_action_implementers(action_id, implementers_data, db, current_user)
+
+
+@router.delete("/{action_id}/implementers/{implementer_id}")
+async def delete_action_implementer(
+    action_id: UUID,
+    implementer_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Delete a specific implementer from an action.
+    """
+    try:
+        # Check if action exists
+        await get_action_or_404(db, action_id)
+        
+        # Find and delete the implementer
+        result = await db.execute(
+            delete(ActionImplementer).where(
+                ActionImplementer.id == implementer_id,
+                ActionImplementer.action_id == action_id
+            )
+        )
+        
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Implementer not found"
+            )
+        
+        await db.commit()
+        
+        return {
+            "message": "Implementer deleted successfully",
+            "implementer_id": str(implementer_id),
+            "action_id": str(action_id)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting implementer {implementer_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete implementer"
         )

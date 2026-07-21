@@ -552,15 +552,16 @@ async def upload_recording(
     recording_format: Optional[str] = Form(None, alias="format"),
     recording_mode: Optional[str] = Form("video", alias="mode"),
     time_limit: Optional[int] = Form(0),
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
+    current_user: User = Depends(deps.get_current_user),  # still needs a session, but only briefly
 ):
     """Upload a recording for a specific meeting (non-chunked)"""
 
-    # Validate meeting
-    meeting = await validate_meeting(db, meeting_id)
+    # ---- short session: just validate the meeting exists ----
+    async with AsyncSessionLocal() as db:
+        meeting = await validate_meeting(db, meeting_id)
+        meeting_id_val = meeting.id  # capture what we need; don't keep `meeting` bound to this session
 
-    # Validate file size
+    # ---- no DB session held from here through the upload ----
     content = await file.read()
     file_size = len(content)
 
@@ -571,7 +572,6 @@ async def upload_recording(
                    f"Consider using chunked upload for large files."
         )
 
-    # Validate file type
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -579,58 +579,43 @@ async def upload_recording(
             detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    # Create unique filename
     unique_filename = get_secure_filename(file.filename)
-
-    # Determine recording type
-    if recording_mode == "video":
-        recording_type = RecordingType.VIDEO
-    elif recording_mode == "audio":
-        recording_type = RecordingType.AUDIO
-    else:
-        recording_type = RecordingType.VIDEO
-
+    recording_type = RecordingType.AUDIO if recording_mode == "audio" else RecordingType.VIDEO
     content_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "video/webm"
 
-    # Upload to MinIO (not local disk)
     object_key = await RecordingService.save_to_storage(
-        content, str(meeting.id), unique_filename, content_type
+        content, str(meeting_id_val), unique_filename, content_type
     )
 
-    # Create database record
+    # ---- short session: just the insert ----
     recording_id = str(uuid.uuid4())
-    recording = MeetingRecording(
-        id=recording_id,
-        meeting_id=meeting.id,
-        title=title or file.filename.rsplit('.', 1)[0],
-        description=description,
-        category=category,
-        recording_type=recording_type,
-        file_name=unique_filename,
-        file_path=object_key,
-        file_size=file_size,
-        mime_type=content_type,
-        duration=duration,
-        quality=quality,
-        format=recording_format,
-        time_limit=time_limit if time_limit > 0 else None,
-        status=RecordingStatus.COMPLETED,
-        created_by_id=str(current_user.id),
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        is_active=True
-    )
+    async with AsyncSessionLocal() as db:
+        recording = MeetingRecording(
+            id=recording_id,
+            meeting_id=meeting_id_val,
+            title=title or file.filename.rsplit('.', 1)[0],
+            description=description,
+            category=category,
+            recording_type=recording_type,
+            file_name=unique_filename,
+            file_path=object_key,
+            file_size=file_size,
+            mime_type=content_type,
+            duration=duration,
+            quality=quality,
+            format=recording_format,
+            time_limit=time_limit if time_limit > 0 else None,
+            status=RecordingStatus.COMPLETED,
+            created_by_id=str(current_user.id),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True
+        )
+        db.add(recording)
+        await db.commit()
+        await db.refresh(recording)
 
-    db.add(recording)
-    await db.commit()
-    await db.refresh(recording)
-
-    # Background task for processing
-    background_tasks.add_task(
-        process_recording_async,
-        recording.id,
-        str(meeting.id)
-    )
+    background_tasks.add_task(process_recording_async, recording.id, str(meeting_id_val))
 
     return {
         "success": True,
@@ -648,7 +633,6 @@ async def upload_recording(
         "created_at": recording.created_at.isoformat(),
         "message": "Recording uploaded successfully"
     }
-
 
 @router.get("/{meeting_id}/recordings")
 async def get_meeting_recordings(

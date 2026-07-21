@@ -75,11 +75,12 @@ class ReminderScheduler:
 
     async def _check_and_send_reminders(self):
         """Check all meetings and send reminders if needed."""
-        async with AsyncSessionLocal() as db:
-            now = self._get_current_time()
-            today = now.date()
+        now = self._get_current_time()
+        today = now.date()
 
-            try:
+        # ---- 1. Short-lived session: just fetch candidate meetings ----
+        try:
+            async with AsyncSessionLocal() as db:
                 result = await db.execute(
                     select(Meeting)
                     .options(selectinload(Meeting.participants))
@@ -89,102 +90,124 @@ class ReminderScheduler:
                     )
                 )
                 meetings = result.scalars().all()
+        except Exception as e:
+            logger.error(f"Error fetching meetings: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return
+        # session released here — nothing below holds this connection
 
-                sent_count = 0
-                failed_count = 0
+        sent_count = 0
+        failed_count = 0
 
-                for meeting in meetings:
-                    if not meeting.start_time:
-                        continue
+        for meeting in meetings:
+            if not meeting.start_time:
+                continue
 
-                    try:
-                        if isinstance(meeting.start_time, datetime):
-                            meeting_datetime = meeting.start_time
-                        else:
-                            meeting_datetime = datetime.combine(meeting.meeting_date, meeting.start_time)
+            try:
+                if isinstance(meeting.start_time, datetime):
+                    meeting_datetime = meeting.start_time
+                else:
+                    meeting_datetime = datetime.combine(meeting.meeting_date, meeting.start_time)
 
-                        # Timezone handling
-                        if meeting_datetime.tzinfo is None and now.tzinfo is not None:
-                            meeting_datetime = meeting_datetime.replace(tzinfo=now.tzinfo)
-                        elif meeting_datetime.tzinfo is not None and now.tzinfo is None:
-                            now = now.replace(tzinfo=meeting_datetime.tzinfo)
+                # Timezone handling
+                if meeting_datetime.tzinfo is None and now.tzinfo is not None:
+                    meeting_datetime = meeting_datetime.replace(tzinfo=now.tzinfo)
+                elif meeting_datetime.tzinfo is not None and now.tzinfo is None:
+                    now = now.replace(tzinfo=meeting_datetime.tzinfo)
 
-                        time_diff = meeting_datetime - now
-                        minutes_until = time_diff.total_seconds() / 60
-
-                    except Exception as e:
-                        logger.error(f"Error calculating time for meeting {meeting.id}: {e}")
-                        continue
-
-                    if 15 <= minutes_until <= 25:
-                        logger.info(f"⏰ Meeting '{meeting.title}' starts in {int(minutes_until)} minutes")
-
-                        if await self._reminders_already_sent(db, meeting.id):
-                            logger.debug(f"Reminders already sent for meeting {meeting.id}")
-                            continue
-
-                        for participant in meeting.participants:
-                            if participant.email and getattr(participant, 'is_active', True):
-                                success = await self._send_reminder_to_participant(
-                                    db=db,
-                                    meeting=meeting,
-                                    participant=participant,
-                                    minutes_until=int(minutes_until)
-                                )
-                                if success:
-                                    sent_count += 1
-                                else:
-                                    failed_count += 1
-
-                        if sent_count > 0:
-                            meeting.reminder_sent_at = now
-                            meeting.reminder_sent_count = (getattr(meeting, 'reminder_sent_count', 0) or 0) + 1
-                            await db.commit()
-
-                if sent_count > 0 or failed_count > 0:
-                    logger.info(f"📊 Reminders processed: {sent_count} sent, {failed_count} failed")
+                time_diff = meeting_datetime - now
+                minutes_until = time_diff.total_seconds() / 60
 
             except Exception as e:
-                logger.error(f"Error checking meetings: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                await db.rollback()
+                logger.error(f"Error calculating time for meeting {meeting.id}: {e}")
+                continue
+
+            if not (15 <= minutes_until <= 25):
+                continue
+
+            logger.info(f"⏰ Meeting '{meeting.title}' starts in {int(minutes_until)} minutes")
+
+            # ---- 2. Short-lived session: "already sent" check ----
+            try:
+                async with AsyncSessionLocal() as db:
+                    already_sent = await self._reminders_already_sent(db, meeting.id)
+            except Exception as e:
+                logger.error(f"Error checking existing reminders for meeting {meeting.id}: {e}")
+                continue
+
+            if already_sent:
+                logger.debug(f"Reminders already sent for meeting {meeting.id}")
+                continue
+
+            meeting_sent_any = False
+
+            for participant in meeting.participants:
+                if participant.email and getattr(participant, 'is_active', True):
+                    success = await self._send_reminder_to_participant(
+                        meeting=meeting,
+                        participant=participant,
+                        minutes_until=int(minutes_until)
+                    )
+                    if success:
+                        sent_count += 1
+                        meeting_sent_any = True
+                    else:
+                        failed_count += 1
+
+            # ---- 3. Short-lived session: update meeting bookkeeping ----
+            if meeting_sent_any:
+                try:
+                    async with AsyncSessionLocal() as db:
+                        db_meeting = await db.get(Meeting, meeting.id)
+                        if db_meeting:
+                            db_meeting.reminder_sent_at = now
+                            db_meeting.reminder_sent_count = (
+                                getattr(db_meeting, 'reminder_sent_count', 0) or 0
+                            ) + 1
+                            await db.commit()
+                except Exception as e:
+                    logger.error(f"Error updating reminder bookkeeping for meeting {meeting.id}: {e}")
+
+        if sent_count > 0 or failed_count > 0:
+            logger.info(f"📊 Reminders processed: {sent_count} sent, {failed_count} failed")
 
     async def _reminders_already_sent(self, db: AsyncSession, meeting_id) -> bool:
-            """Check if reminders already sent for this meeting."""
-            now = self._get_current_time()
-            one_hour_ago = now - timedelta(hours=1)
+        """Check if reminders already sent for this meeting."""
+        now = self._get_current_time()
+        one_hour_ago = now - timedelta(hours=1)
 
-            result = await db.execute(
-                select(Notification.id).where(
-                    Notification.meeting_id == meeting_id,
-                    Notification.template_name == "meeting_reminder",
-                    Notification.status == NotificationStatus.SUCCESSFUL,
-                    Notification.sent_at >= one_hour_ago
-                ).limit(1)
-            )
-            return result.first() is not None
+        result = await db.execute(
+            select(Notification.id).where(
+                Notification.meeting_id == meeting_id,
+                Notification.template_name == "meeting_reminder",
+                Notification.status == NotificationStatus.SUCCESSFUL,
+                Notification.sent_at >= one_hour_ago
+            ).limit(1)
+        )
+        return result.first() is not None
 
     async def _send_reminder_to_participant(
         self,
-        db: AsyncSession,
         meeting: Meeting,
         participant: MeetingParticipant,
         minutes_until: int
     ) -> bool:
         """Send a reminder email to a participant, rendered from meeting_reminder.html."""
         try:
-            # Check if already sent to this participant
-            result = await db.execute(
-                select(Notification).where(
-                    Notification.meeting_id == meeting.id,
-                    Notification.participant_id == participant.id,
-                    Notification.template_name == "meeting_reminder",
-                    Notification.status == NotificationStatus.SUCCESSFUL
+            # ---- Short-lived session: "already sent to this participant" check ----
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Notification).where(
+                        Notification.meeting_id == meeting.id,
+                        Notification.participant_id == participant.id,
+                        Notification.template_name == "meeting_reminder",
+                        Notification.status == NotificationStatus.SUCCESSFUL
+                    )
                 )
-            )
-            if result.scalar_one_or_none():
-                return False
+                if result.scalar_one_or_none():
+                    return False
+            # session released — no connection held during template render / SMTP send below
 
             # Organization branding. base.html's logo slot only supports a
             # plain image URL (no CID/inline-attachment markup), so only
@@ -204,13 +227,11 @@ class ReminderScheduler:
 
             subject = f"⏰ Reminder: {meeting.title} starts in {minutes_until} minutes"
 
-            # NOTE: previously this called a Python-string HTML builder
-            # (_build_reminder_html). Now rendered from
-            # app/templates/email/meeting_reminder.html, which extends the
-            # existing base.html, via email_service's Jinja2 environment.
-            # email_service._render_template already auto-injects
-            # year/project_name/frontend_url as defaults - only the
-            # template-specific and header-override variables need to be
+            # NOTE: rendered from app/templates/email/meeting_reminder.html,
+            # which extends the existing base.html, via email_service's
+            # Jinja2 environment. email_service._render_template already
+            # auto-injects year/project_name/frontend_url as defaults - only
+            # the template-specific and header-override variables need to be
             # passed here.
             html_content = email_service.render_template(
                 "meeting_reminder.html",
@@ -235,7 +256,7 @@ class ReminderScheduler:
                 }
             )
 
-            # Send email with logo support
+            # ---- Slow network call: NO db session held during this ----
             result = await email_service.send_email(
                 to_email=participant.email,
                 subject=subject,
@@ -243,7 +264,12 @@ class ReminderScheduler:
                 logo_info=logo_info
             )
 
-            if result:
+            if not result:
+                logger.error(f"❌ Failed to send reminder to {participant.email}")
+                return False
+
+            # ---- Short-lived session: just to record the notification row ----
+            async with AsyncSessionLocal() as db:
                 notification = Notification(
                     id=uuid.uuid4(),
                     channel=NotificationChannel.EMAIL,
@@ -261,11 +287,8 @@ class ReminderScheduler:
                 db.add(notification)
                 await db.commit()
 
-                logger.info(f"✅ Reminder sent to {participant.email} for '{meeting.title}'")
-                return True
-            else:
-                logger.error(f"❌ Failed to send reminder to {participant.email}")
-                return False
+            logger.info(f"✅ Reminder sent to {participant.email} for '{meeting.title}'")
+            return True
 
         except Exception as e:
             logger.error(f"Error sending reminder to {participant.email}: {e}")

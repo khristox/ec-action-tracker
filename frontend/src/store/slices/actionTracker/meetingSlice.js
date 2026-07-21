@@ -1,6 +1,7 @@
 // src/store/slices/actionTracker/meetingSlice.js
 import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
 import api from '../../../services/api';
+import { deduplicatedGet, deduplicatedPost, deduplicatedPut, deduplicatedDelete } from '../../../utils/requestUtils';
 
 // ==================== Types & Constants ====================
 
@@ -234,7 +235,7 @@ const normalizeMeetingStatus = (meeting) => {
   return meeting;
 };
 
-// ==================== Async Thunks ====================
+// ==================== Async Thunks with Deduplication ====================
 
 // Fetch attributes from ACTION_TRACKER group (includes meeting statuses and action statuses)
 export const fetchActionTrackerAttributes = createAsyncThunk(
@@ -250,15 +251,17 @@ export const fetchActionTrackerAttributes = createAsyncThunk(
         return { fromCache: true };
       }
       
-      // Fetch from ACTION_TRACKER attribute group
-      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes', {
-        params: {
+      // ✅ Use deduplicatedGet with a unique key
+      const response = await deduplicatedGet(
+        '/attribute-groups/ACTION_TRACKER/attributes',
+        {
           active_only: true,
           sort_by: 'sort_order',
           sort_order: 'asc',
           limit: 100
-        }
-      });
+        },
+        { key: 'action_tracker_attributes' }
+      );
       
       const allAttributes = response.data.items || response.data.data || response.data || [];
       
@@ -280,15 +283,18 @@ export const fetchMeetingStatusOptions = createAsyncThunk(
   'meetings/fetchMeetingStatusOptions',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes', {
-        params: {
+      // ✅ Use deduplicatedGet with a unique key
+      const response = await deduplicatedGet(
+        '/attribute-groups/ACTION_TRACKER/attributes',
+        {
           active_only: true,
           search: 'MEETING_STATUS',
           sort_by: 'sort_order',
           sort_order: 'asc',
           limit: 20
-        }
-      });
+        },
+        { key: 'meeting_status_options' }
+      );
       
       const attributes = response.data.items || [];
       
@@ -317,15 +323,18 @@ export const fetchActionStatusOptions = createAsyncThunk(
   'meetings/fetchActionStatusOptions',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes', {
-        params: {
+      // ✅ Use deduplicatedGet with a unique key
+      const response = await deduplicatedGet(
+        '/attribute-groups/ACTION_TRACKER/attributes',
+        {
           active_only: true,
           search: 'ACTION_STATUS',
           sort_by: 'sort_order',
           sort_order: 'asc',
           limit: 50
-        }
-      });
+        },
+        { key: 'action_status_options' }
+      );
       
       const attributes = response.data.items || [];
       
@@ -353,11 +362,18 @@ export const fetchActionStatusOptions = createAsyncThunk(
   }
 );
 
+// Create Meeting
 export const createMeeting = createAsyncThunk(
   'meetings/createMeeting',
   async (meetingData, { rejectWithValue }) => {
     try {
-      const response = await api.post('/action-tracker/meetings/', meetingData);
+      // ✅ Use deduplicatedPost with a unique key based on meeting data
+      const key = `create_meeting_${JSON.stringify(meetingData)}`;
+      const response = await deduplicatedPost(
+        '/action-tracker/meetings/',
+        meetingData,
+        { key }
+      );
       return response.data;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -365,6 +381,7 @@ export const createMeeting = createAsyncThunk(
   }
 );
 
+// Fetch Meetings with deduplication
 export const fetchMeetings = createAsyncThunk(
   'meetings/fetchMeetings',
   async (params = {}, { rejectWithValue, getState }) => {
@@ -383,7 +400,13 @@ export const fetchMeetings = createAsyncThunk(
         }
       });
       
-      const response = await api.get('/action-tracker/meetings/', { params: mergedParams });
+      // ✅ Use deduplicatedGet with a key based on the params
+      const key = `meetings_list_${JSON.stringify(mergedParams)}`;
+      const response = await deduplicatedGet(
+        '/action-tracker/meetings/',
+        mergedParams,
+        { key }
+      );
       
       const items = (response.data.items || response.data || []).map(normalizeMeetingStatus);
       
@@ -400,12 +423,20 @@ export const fetchMeetings = createAsyncThunk(
   }
 );
 
+// Fetch Meeting By ID with deduplication
 export const fetchMeetingById = createAsyncThunk(
   'meetings/fetchMeetingById',
-  async (id, { rejectWithValue, getState }) => {
+  async (id, { rejectWithValue, getState, signal }) => {
     try {
       if (!id) throw new Error('Meeting ID is required');
-      const response = await api.get(`/action-tracker/meetings/${id}`);
+      
+      // ✅ Use deduplicatedGet with a unique key for this meeting
+      const response = await deduplicatedGet(
+        `/action-tracker/meetings/${id}`,
+        {},
+        { key: `meeting_${id}` }
+      );
+      
       const meeting = normalizeMeetingStatus(response.data);
       
       const state = getState();
@@ -425,16 +456,26 @@ export const fetchMeetingById = createAsyncThunk(
       
       return meeting;
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
       return rejectWithValue(handleApiError(error));
     }
   }
 );
 
+// Update Meeting
 export const updateMeeting = createAsyncThunk(
   'meetings/updateMeeting',
   async ({ id, data }, { rejectWithValue }) => {
     try {
-      const response = await api.put(`/action-tracker/meetings/${id}`, data);
+      // ✅ Use deduplicatedPut with a unique key
+      const key = `update_meeting_${id}`;
+      const response = await deduplicatedPut(
+        `/action-tracker/meetings/${id}`,
+        data,
+        { key }
+      );
       return normalizeMeetingStatus(response.data);
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -442,11 +483,17 @@ export const updateMeeting = createAsyncThunk(
   }
 );
 
+// Delete Meeting
 export const deleteMeeting = createAsyncThunk(
   'meetings/deleteMeeting',
   async (id, { rejectWithValue }) => {
     try {
-      await api.delete(`/action-tracker/meetings/${id}`);
+      // ✅ Use deduplicatedDelete with a unique key
+      const key = `delete_meeting_${id}`;
+      await deduplicatedDelete(
+        `/action-tracker/meetings/${id}`,
+        { key }
+      );
       return id;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -454,6 +501,7 @@ export const deleteMeeting = createAsyncThunk(
   }
 );
 
+// Update Meeting Status
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateMeetingStatus',
   async ({ id, status, comment }, { rejectWithValue, getState, dispatch }) => {
@@ -476,11 +524,15 @@ export const updateMeetingStatus = createAsyncThunk(
       
       console.log('Updating meeting status:', { id, status: statusValue, comment });
       
-      // Make the PATCH request
-      const response = await api.patch(
+      // ✅ Use deduplicatedPost with a unique key
+      const key = `update_meeting_status_${id}`;
+      const response = await deduplicatedPost(
         `/action-tracker/meetings/${id}/status`,
         null,
-        { params: { status: statusValue.toLowerCase(), comment: comment || '' } }
+        { 
+          key,
+          params: { status: statusValue.toLowerCase(), comment: comment || '' }
+        }
       );
       
       console.log('Status update response:', response.data);
@@ -490,7 +542,11 @@ export const updateMeetingStatus = createAsyncThunk(
       
       // IMPORTANT: Refresh the meeting data after status update
       // This ensures we have the latest data from the server
-      const refreshedMeeting = await api.get(`/action-tracker/meetings/${id}`);
+      const refreshedMeeting = await deduplicatedGet(
+        `/action-tracker/meetings/${id}`,
+        {},
+        { key: `meeting_${id}_refresh`, forceRefresh: true }
+      );
       const finalData = normalizeMeetingStatus(refreshedMeeting.data);
       
       return finalData;
@@ -501,12 +557,18 @@ export const updateMeetingStatus = createAsyncThunk(
   }
 );
 
-
+// Add Meeting Minutes
 export const addMeetingMinutes = createAsyncThunk(
   'meetings/addMeetingMinutes',
   async ({ id, minutesData }, { rejectWithValue }) => {
     try {
-      const response = await api.post(`/action-tracker/meetings/${id}/minutes`, minutesData);
+      // ✅ Use deduplicatedPost with a unique key
+      const key = `add_meeting_minutes_${id}`;
+      const response = await deduplicatedPost(
+        `/action-tracker/meetings/${id}/minutes`,
+        minutesData,
+        { key }
+      );
       return response.data;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -514,11 +576,18 @@ export const addMeetingMinutes = createAsyncThunk(
   }
 );
 
+// Fetch Meeting Minutes
 export const fetchMeetingMinutes = createAsyncThunk(
   'meetings/fetchMeetingMinutes',
-  async (meetingId, { rejectWithValue }) => {
+  async (meetingId, { rejectWithValue,signal }) => {
     try {
-      const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
+      // ✅ Use deduplicatedGet with a unique key
+      const key = `meeting_minutes_${meetingId}`;
+      const response = await deduplicatedGet(
+        `/action-tracker/meetings/${meetingId}/minutes`,
+        {},
+        { key,signal }
+      );
       
       let minutesData = [];
       const data = response.data;
@@ -545,11 +614,18 @@ export const fetchMeetingMinutes = createAsyncThunk(
   }
 );
 
+// Create Meeting Minutes
 export const createMeetingMinutes = createAsyncThunk(
   'meetings/createMeetingMinutes',
   async ({ meetingId, data }, { rejectWithValue }) => {
     try {
-      const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, data);
+      // ✅ Use deduplicatedPost with a unique key
+      const key = `create_meeting_minutes_${meetingId}`;
+      const response = await deduplicatedPost(
+        `/action-tracker/meetings/${meetingId}/minutes`,
+        data,
+        { key }
+      );
       return response.data;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -557,11 +633,17 @@ export const createMeetingMinutes = createAsyncThunk(
   }
 );
 
+// Delete Meeting Minutes
 export const deleteMeetingMinutes = createAsyncThunk(
   'meetings/deleteMeetingMinutes',
   async ({ meetingId, minutesId }, { rejectWithValue }) => {
     try {
-      await api.delete(`/action-tracker/meetings/${meetingId}/minutes/${minutesId}`);
+      // ✅ Use deduplicatedDelete with a unique key
+      const key = `delete_meeting_minutes_${meetingId}_${minutesId}`;
+      await deduplicatedDelete(
+        `/action-tracker/meetings/${meetingId}/minutes/${minutesId}`,
+        { key }
+      );
       return minutesId;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -569,11 +651,18 @@ export const deleteMeetingMinutes = createAsyncThunk(
   }
 );
 
+// Update Meeting Minutes
 export const updateMeetingMinutes = createAsyncThunk(
   'meetings/updateMeetingMinutes',
   async ({ meetingId, minutesId, data }, { rejectWithValue }) => {
     try {
-      const response = await api.put(`/action-tracker/meetings/${meetingId}/minutes/${minutesId}`, data);
+      // ✅ Use deduplicatedPut with a unique key
+      const key = `update_meeting_minutes_${meetingId}_${minutesId}`;
+      const response = await deduplicatedPut(
+        `/action-tracker/meetings/${meetingId}/minutes/${minutesId}`,
+        data,
+        { key }
+      );
       return response.data;
     } catch (error) {
       return rejectWithValue(handleApiError(error));
@@ -581,29 +670,110 @@ export const updateMeetingMinutes = createAsyncThunk(
   }
 );
 
+// Fetch Meeting Participants with deduplication
 export const fetchMeetingParticipants = createAsyncThunk(
-  'meetings/fetchMeetingParticipants',
-  async (id, { rejectWithValue }) => {
+  'notifications/fetchMeetingParticipants',
+  async (meetingId, { getState, rejectWithValue, signal }) => {
     try {
-      const response = await api.get(`/action-tracker/meetings/${id}/participants`);
-      const items = response.data.items || response.data.data || response.data || [];
-      const total = response.data.total || items.length;
+      // ✅ Try to get participants from current meeting first
+      const state = getState();
+      const currentMeeting = state.meetings?.currentMeeting;
       
-      return {
-        items: Array.isArray(items) ? items : [],
-        total: total,
-      };
+      if (currentMeeting && currentMeeting.id === meetingId) {
+        if (currentMeeting.participants && Array.isArray(currentMeeting.participants)) {
+          return currentMeeting.participants;
+        }
+        if (currentMeeting.members && Array.isArray(currentMeeting.members)) {
+          return currentMeeting.members;
+        }
+        if (currentMeeting.attendees && Array.isArray(currentMeeting.attendees)) {
+          return currentMeeting.attendees;
+        }
+        if (currentMeeting.metadata?.participants) {
+          return currentMeeting.metadata.participants;
+        }
+        if (currentMeeting.metadata?.members) {
+          return currentMeeting.metadata.members;
+        }
+      }
+      
+      // ✅ Use deduplicatedGet with a unique key
+      const key = `meeting_participants_${meetingId}`;
+      
+      try {
+        const response = await deduplicatedGet(
+          `/action-tracker/meetings/${meetingId}/members`,
+          {},
+          { key }
+        );
+        if (response.data) {
+          if (Array.isArray(response.data)) return response.data;
+          if (response.data.items && Array.isArray(response.data.items)) return response.data.items;
+          if (response.data.participants && Array.isArray(response.data.participants)) return response.data.participants;
+          if (response.data.members && Array.isArray(response.data.members)) return response.data.members;
+        }
+      } catch (err) {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') throw err;
+        if (err.response?.status !== 404) console.warn('Could not fetch from /members endpoint:', err.message);
+      }
+      
+      // Fallback: try to fetch from meeting endpoint
+      try {
+        const response = await deduplicatedGet(
+          `/meetings/${meetingId}`,
+          { include: 'participants,members' },
+          { key: `meeting_with_participants_${meetingId}` }
+        );
+        if (response.data) {
+          if (response.data.participants && Array.isArray(response.data.participants)) return response.data.participants;
+          if (response.data.members && Array.isArray(response.data.members)) return response.data.members;
+          if (response.data.attendees && Array.isArray(response.data.attendees)) return response.data.attendees;
+        }
+      } catch (err) {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') throw err;
+        if (err.response?.status !== 404) console.warn('Could not fetch meeting with participants:', err.message);
+      }
+      
+      // Second fallback: try action-tracker meeting endpoint
+      try {
+        const response = await deduplicatedGet(
+          `/action-tracker/meetings/${meetingId}`,
+          {},
+          { key: `action_tracker_meeting_${meetingId}` }
+        );
+        if (response.data) {
+          if (response.data.participants && Array.isArray(response.data.participants)) return response.data.participants;
+          if (response.data.members && Array.isArray(response.data.members)) return response.data.members;
+        }
+      } catch (err) {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') throw err;
+        if (err.response?.status !== 404) console.warn('Could not fetch action-tracker meeting:', err.message);
+      }
+      
+      return [];
+      
     } catch (error) {
-      return rejectWithValue(handleApiError(error));
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
+      return rejectWithValue(error.response?.data?.message || 'Failed to load participants');
     }
   }
 );
 
+// Fetch Meeting Actions
 export const fetchMeetingActions = createAsyncThunk(
   'meetings/fetchMeetingActions',
   async (id, { rejectWithValue }) => {
     try {
-      const response = await api.get(`/action-tracker/meetings/${id}/actions`);
+      // ✅ Use deduplicatedGet with a unique key
+      const key = `meeting_actions_${id}`;
+      const response = await deduplicatedGet(
+        `/action-tracker/meetings/${id}/actions`,
+        {},
+        { key }
+      );
+      
       const items = response.data.items || response.data.data || response.data || [];
       const total = response.data.total || items.length;
       
@@ -617,6 +787,7 @@ export const fetchMeetingActions = createAsyncThunk(
   }
 );
 
+// Export Meetings
 export const exportMeetings = createAsyncThunk(
   'meetings/exportMeetings',
   async (format = 'csv', { rejectWithValue, getState }) => {
@@ -627,10 +798,13 @@ export const exportMeetings = createAsyncThunk(
         ...meetings.filters,
       };
       
-      const response = await api.get('/action-tracker/meetings/export', {
+      // ✅ Use deduplicatedGet with a unique key
+      const key = `export_meetings_${format}_${JSON.stringify(params)}`;
+      const response = await deduplicatedGet(
+        '/action-tracker/meetings/export',
         params,
-        responseType: 'blob',
-      });
+        { key, responseType: 'blob' }
+      );
       
       const url = window.URL.createObjectURL(response.data);
       const link = document.createElement('a');

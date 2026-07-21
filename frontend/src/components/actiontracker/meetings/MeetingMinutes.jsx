@@ -16,36 +16,20 @@ import {
   Divider,
   useTheme,
   alpha,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Collapse,
-  Card,
-  CardContent,
   Accordion,
   AccordionSummary,
   AccordionDetails,
 } from '@mui/material';
-import {
-  Refresh as RefreshIcon,
-  Description as DescriptionIcon,
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  ExpandMore as ExpandMoreIcon,
-  CheckCircle as CheckCircleIcon,
-  Schedule as ScheduleIcon,
-  Assignment as AssignmentIcon,
-} from '@mui/icons-material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DescriptionIcon from '@mui/icons-material/Description';
+import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 import { format } from 'date-fns';
 import {
-  fetchMeetingMinutes,
   selectMeetingMinutes,
-  clearMeetingMinutes,
-  fetchActionTrackerAttributes,
 } from '../../../store/slices/actionTracker/meetingSlice';
 import AddMinutesDialog from './components/AddMinutesDialog';
 import EditMinuteDialog from "./components/EditMinuteDialog";
@@ -90,6 +74,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   // ==================== REFS FOR PREVENTING INFINITE LOOPS ====================
   const isMountedRef = useRef(true);
   const fetchAttemptedRef = useRef(false);
+  const hasFetchedRef = useRef(false);
   const previousMinutesStringRef = useRef('');
 
   // ==================== LOCAL STATE ====================
@@ -106,11 +91,9 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== API CALLS ====================
 
-  // ✅ FIXED: fetchMinutes is stable and only depends on meetingId
   const fetchMinutes = useCallback(async () => {
     if (!meetingId || !isMountedRef.current) return;
 
-    // Prevent concurrent requests
     if (fetchAttemptedRef.current) return;
     fetchAttemptedRef.current = true;
 
@@ -121,12 +104,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
       
       if (isMountedRef.current) {
-        // ✅ Store in Redux and local state
         const minutesData = response.data?.items || response.data || [];
         setMinutes(minutesData);
-        
-        // Also update the Redux store if needed
-        // dispatch(fetchMeetingMinutes(meetingId)); // Uncomment if you want to use Redux
       }
     } catch (err) {
       if (isMountedRef.current) {
@@ -136,7 +115,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
-        // Reset the fetch attempt after a short delay
         setTimeout(() => {
           fetchAttemptedRef.current = false;
         }, 500);
@@ -146,23 +124,19 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== EFFECTS ====================
 
-  // ✅ FIXED: Initial fetch - only runs once when meetingId changes
   useEffect(() => {
     isMountedRef.current = true;
-    fetchAttemptedRef.current = false;
-    previousMinutesStringRef.current = '';
 
-    if (meetingId) {
+    if (meetingId && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
       fetchMinutes();
     }
 
     return () => {
       isMountedRef.current = false;
-      fetchAttemptedRef.current = false;
     };
-  }, [meetingId, fetchMinutes]);
+  }, [meetingId]);
 
-  // ✅ FIXED: Update local state when Redux state changes
   useEffect(() => {
     if (minutesList && isMountedRef.current) {
       const currentString = JSON.stringify(minutesList);
@@ -173,7 +147,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   }, [minutesList]);
 
-  // ✅ FIXED: Success message cleanup
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
@@ -190,6 +163,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const handleRefresh = useCallback(() => {
     if (!isMountedRef.current) return;
     fetchAttemptedRef.current = false;
+    hasFetchedRef.current = false;
     previousMinutesStringRef.current = '';
     fetchMinutes();
     if (onRefresh) onRefresh();
@@ -200,8 +174,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, data);
       setSuccessMessage('Minutes added successfully!');
       setAddDialogOpen(false);
-      // Refresh the list
       fetchAttemptedRef.current = false;
+      hasFetchedRef.current = false;
       fetchMinutes();
       return response.data;
     } catch (err) {
@@ -215,8 +189,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       setSuccessMessage('Minutes updated successfully!');
       setEditDialogOpen(false);
       setSelectedMinute(null);
-      // Refresh the list
       fetchAttemptedRef.current = false;
+      hasFetchedRef.current = false;
       fetchMinutes();
       return response.data;
     } catch (err) {
@@ -230,8 +204,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     try {
       await api.delete(`/action-tracker/meetings/${meetingId}/minutes/${minuteId}`);
       setSuccessMessage('Minutes deleted successfully!');
-      // Refresh the list
       fetchAttemptedRef.current = false;
+      hasFetchedRef.current = false;
       fetchMinutes();
     } catch (err) {
       setError(err.message || 'Failed to delete minutes');
@@ -262,11 +236,11 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   return (
     <Box>
       {/* Header */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
           Meeting Minutes ({minutes.length})
         </Typography>
-        <Stack direction="row" spacing={1}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Tooltip title={!canEdit ? "Meeting must be active to add minutes" : "Add new minutes"}>
             <span>
               <Button
@@ -297,8 +271,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
               <RefreshIcon />
             </IconButton>
           </Tooltip>
-        </Stack>
-      </Stack>
+        </Box>
+      </Box>
 
       {/* Messages */}
       {successMessage && (
@@ -354,7 +328,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           {minutes.map((minute) => {
             const isExpanded = expandedMinutes.includes(minute.id);
             const actionCount = minute.actions?.length || 0;
-            const discussionPreview = getPlainTextPreview(minute.discussion, 200);
 
             return (
               <Paper
@@ -383,13 +356,13 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                       '&:hover': { bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02) },
                     }}
                   >
-                    <Stack direction="row" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
+                    <Box sx={{ display: 'flex', width: '100%', alignItems: 'center', gap: 2, pr: 1 }}>
                       <DescriptionIcon sx={{ color: isDarkMode ? '#818CF8' : '#6366F1' }} />
                       <Box sx={{ flex: 1 }}>
                         <Typography variant="subtitle1" fontWeight={600} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
                           {minute.topic || minute.title || 'Untitled Minutes'}
                         </Typography>
-                        <Stack direction="row" spacing={2} alignItems="center">
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 0.5 }}>
                           <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
                             {safeFormatDate(minute.created_at)}
                           </Typography>
@@ -407,40 +380,48 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                               }}
                             />
                           )}
-                        </Stack>
+                        </Box>
                       </Box>
-                      <Stack direction="row" spacing={0.5}>
-                        {canEdit && (
-                          <>
-                            <Tooltip title="Edit">
-                              <IconButton
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedMinute(minute);
-                                  setEditDialogOpen(true);
-                                }}
-                                sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
-                              >
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Delete">
-                              <IconButton
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteMinute(minute.id);
-                                }}
-                                sx={{ color: isDarkMode ? '#F87171' : 'error.main' }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </>
-                        )}
-                      </Stack>
-                    </Stack>
+                      {canEdit && (
+                        // ✅ FIX: Use a div with onClick instead of IconButton inside AccordionSummary
+                        // This prevents nested buttons
+                        <Box 
+                          component="div" 
+                          onClick={(e) => e.stopPropagation()} 
+                          sx={{ display: 'flex', gap: 0.5 }}
+                        >
+                          <Tooltip title="Edit">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMinute(minute);
+                                setEditDialogOpen(true);
+                              }}
+                              sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
+                              // ✅ Add this to prevent the button from triggering the accordion
+                              component="span"
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMinute(minute.id);
+                              }}
+                              sx={{ color: isDarkMode ? '#F87171' : 'error.main' }}
+                              // ✅ Add this to prevent the button from triggering the accordion
+                              component="span"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      )}
+                    </Box>
                   </AccordionSummary>
                   <AccordionDetails sx={{ px: 3, pb: 3, pt: 1 }}>
                     <Divider sx={{ mb: 2, borderColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#E5E7EB' }} />
@@ -521,7 +502,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
       {/* Edit Minutes Dialog */}
       {selectedMinute && (
-        <EditMinutesDialog
+        <EditMinuteDialog
           open={editDialogOpen}
           onClose={() => {
             setEditDialogOpen(false);

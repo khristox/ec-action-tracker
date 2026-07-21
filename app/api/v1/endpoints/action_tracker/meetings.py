@@ -44,7 +44,7 @@ from app.models.meetings.action_tracker import (
 )
 from app.schemas.action_tracker import (
     MeetingCreateResponse, MeetingMinutesResponse, MeetingPaginationResponse, 
-    MeetingCreate, MeetingParticipantResponse, MeetingParticipantUpdate, 
+    MeetingCreate, MeetingParticipantCreate, MeetingParticipantResponse, MeetingParticipantUpdate, 
     MeetingStatusHistoryResponse, MeetingUpdate, MeetingResponse, 
     MeetingListResponse, NotificationRequest, ZoomMeetingCreate
 )
@@ -1187,3 +1187,340 @@ async def delete_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete meeting: {str(e)}"
         )
+    
+
+
+# ==================== MEETING PARTICIPANTS ENDPOINTS ====================
+
+@router.get("/{meeting_id}/members", response_model=List[MeetingParticipantResponse])
+async def get_meeting_participants(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Get all participants for a meeting with privacy protection.
+    Phone and email are partially masked for privacy.
+    """
+    try:
+        # Check if meeting exists
+        meeting = await db.execute(
+            select(Meeting).where(Meeting.id == meeting_id)
+        )
+        meeting = meeting.scalar_one_or_none()
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
+        
+        # Get all participants for this meeting
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.meeting_id == meeting_id,
+                MeetingParticipant.is_active == True
+            )
+        )
+        participants = result.scalars().all()
+        
+        # Prepare response - partially mask phone and email
+        response_participants = []
+        for p in participants:
+            participant_dict = {
+                "id": p.id,
+                "meeting_id": p.meeting_id,
+                # FIX: Use participant_id instead of user_id (or check the actual field name)
+                "participant_id": getattr(p, 'participant_id', None),
+                "name": p.name,
+                "title": getattr(p, 'title', None),
+                "organization": getattr(p, 'organization', None),
+                "is_chairperson": getattr(p, 'is_chairperson', False),
+                "is_secretary": getattr(p, 'is_secretary', False),
+                "attendance_status": getattr(p, 'attendance_status', 'pending'),
+                "apology_comment": getattr(p, 'apology_comment', None),
+                "created_at": p.created_at,
+                "updated_at": getattr(p, 'updated_at', None),
+                "is_active": p.is_active,
+                "email": mask_email(p.email) if hasattr(p, 'email') and p.email else None,
+                "telephone": mask_phone_number(p.telephone) if hasattr(p, 'telephone') and p.telephone else None,
+            }
+            response_participants.append(participant_dict)
+        
+        return response_participants
+        
+    except SQLAlchemyError as e:
+        logger.error(f"Database error fetching participants: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error"
+        )
+
+
+
+
+@router.post("/{meeting_id}/members", response_model=MeetingParticipantResponse)
+async def add_meeting_participant(
+    meeting_id: UUID,
+    participant_data: MeetingParticipantCreate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Add a participant to a meeting
+    """
+    try:
+        # Check if meeting exists
+        meeting = await db.execute(
+            select(Meeting).where(Meeting.id == meeting_id)
+        )
+        meeting = meeting.scalar_one_or_none()
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
+        
+        # Check if participant already exists
+        existing = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.meeting_id == meeting_id,
+                MeetingParticipant.user_id == participant_data.user_id
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Participant already added to this meeting"
+            )
+        
+        # Create new meeting participant
+        new_participant = MeetingParticipant(
+            id=uuid.uuid4(),
+            meeting_id=meeting_id,
+            user_id=participant_data.user_id,
+            name=participant_data.name,
+            email=participant_data.email,
+            telephone=participant_data.telephone,
+            title=participant_data.title,
+            organization=participant_data.organization,
+            is_chairperson=participant_data.is_chairperson or False,
+            is_secretary=participant_data.is_secretary or False,
+            attendance_status=participant_data.attendance_status or "pending",
+            apology_comment=participant_data.apology_comment,
+            created_by_id=current_user.id,
+            created_at=datetime.now(),
+            is_active=True
+        )
+        
+        db.add(new_participant)
+        await db.commit()
+        await db.refresh(new_participant)
+        return new_participant
+        
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error adding participant: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error"
+        )
+
+
+@router.delete("/{meeting_id}/members/{participant_id}")
+async def remove_meeting_participant(
+    meeting_id: UUID,
+    participant_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Remove a participant from a meeting
+    """
+    try:
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == participant_id,
+                MeetingParticipant.meeting_id == meeting_id
+            )
+        )
+        participant = result.scalar_one_or_none()
+        
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found"
+            )
+        
+        # Soft delete
+        participant.is_active = False
+        participant.updated_by_id = current_user.id
+        participant.updated_at = datetime.now()
+        
+        await db.commit()
+        return {"message": "Participant removed successfully"}
+        
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error removing participant: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error"
+        )
+
+
+@router.patch("/{meeting_id}/members/{participant_id}", response_model=MeetingParticipantResponse)
+async def update_meeting_participant(
+    meeting_id: UUID,
+    participant_id: UUID,
+    participant_data: MeetingParticipantUpdate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update a meeting participant's details
+    """
+    try:
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == participant_id,
+                MeetingParticipant.meeting_id == meeting_id
+            )
+        )
+        participant = result.scalar_one_or_none()
+        
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found"
+            )
+        
+        # Update fields
+        update_data = participant_data.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(participant, key, value)
+        
+        participant.updated_by_id = current_user.id
+        participant.updated_at = datetime.now()
+        
+        await db.commit()
+        await db.refresh(participant)
+        return participant
+        
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error updating participant: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error"
+        )
+
+
+# Also add the PATCH endpoint for attendance status (used by ParticipantsTab)
+@router.patch("/{meeting_id}/participants/{participant_id}")
+async def update_participant_attendance(
+    meeting_id: UUID,
+    participant_id: UUID,
+    attendance_data: dict,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update a participant's attendance status
+    """
+    try:
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == participant_id,
+                MeetingParticipant.meeting_id == meeting_id
+            )
+        )
+        participant = result.scalar_one_or_none()
+        
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found"
+            )
+        
+        # Update attendance fields
+        if 'attendance_status' in attendance_data:
+            participant.attendance_status = attendance_data['attendance_status']
+        if 'apology_comment' in attendance_data:
+            participant.apology_comment = attendance_data['apology_comment']
+        
+        participant.updated_by_id = current_user.id
+        participant.updated_at = datetime.now()
+        
+        await db.commit()
+        await db.refresh(participant)
+        return participant
+        
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error updating attendance: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error"
+        )
+    
+
+
+# ==================== PRIVACY HELPER FUNCTIONS ====================
+
+def mask_phone_number(phone: str) -> str:
+    """
+    Mask a phone number for privacy.
+    Shows first 2 and last 2 digits, hides the rest with asterisks.
+    Example: +256789123456 -> +2******56
+    """
+    if not phone:
+        return None
+    
+    # Remove any non-digit characters for counting
+    digits = ''.join(c for c in phone if c.isdigit())
+    if len(digits) <= 4:
+        return phone
+    
+    # Find where the digits start in the original string
+    # Keep the prefix (like +, 0, etc.)
+    prefix = ''
+    for char in phone:
+        if char.isdigit():
+            break
+        prefix += char
+    
+    # Get first 2 and last 2 digits
+    first_two = digits[:2]
+    last_two = digits[-2:]
+    masked_digits = first_two + '*' * (len(digits) - 4) + last_two
+    
+    return prefix + masked_digits
+
+
+def mask_email(email: str) -> str:
+    """
+    Mask an email address for privacy.
+    Shows first 2 characters and the domain, hides the rest.
+    Example: john.doe@example.com -> jo***@example.com
+    """
+    if not email:
+        return None
+    
+    parts = email.split('@')
+    if len(parts) != 2:
+        # If no domain, just mask the email
+        if len(email) <= 3:
+            return email[0] + '*' * (len(email) - 1)
+        return email[:2] + '*' * (len(email) - 2)
+    
+    local_part = parts[0]
+    domain = parts[1]
+    
+    if len(local_part) <= 2:
+        # If local part is very short, just show first character and asterisks
+        masked_local = local_part[0] + '*' * (len(local_part) - 1)
+    else:
+        # Show first 2 characters, then asterisks for the rest
+        masked_local = local_part[:2] + '*' * (len(local_part) - 2)
+    
+    return f"{masked_local}@{domain}"

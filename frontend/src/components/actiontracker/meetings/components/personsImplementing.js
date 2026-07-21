@@ -1,165 +1,220 @@
 // src/components/actiontracker/meetings/components/personsImplementing.js
 
 /**
- * Parse persons implementing from an action object
- * @param {Object} action - The action object from the API
- * @returns {Array} Array of person objects with row_id, assigned_to_id, name, phone, email
+ * Persons Implementing utilities for action tracker
+ * Handles person selection, privacy, and data management
  */
-export const parsePersonsFromAction = (action) => {
-  if (!action) return [];
 
-  // If the action already has a persons_implementing array, use it
-  if (Array.isArray(action.persons_implementing) && action.persons_implementing.length > 0) {
-    return action.persons_implementing.map((p) => ({
-      row_id: `p_${p.id || Math.random().toString(36).slice(2, 7)}`,
-      assigned_to_id: p.assigned_to_id || p.id || null,
-      name: p.name || p.full_name || '',
-      phone: p.phone || p.telephone || '',
-      email: p.email || ''
-    }));
-  }
+// ==================== CONSTANTS ====================
 
-  // Fallback: parse from legacy single assignee fields
-  let parsedAssignment = null;
+// Label shown in place of a masked person's real name
+const PRIVATE_NAME_LABEL = 'Private (System User)';
+const PRIVATE_FIELD_LABEL = '••••••••';
 
-  if (action.assigned_to_name) {
-    try {
-      const data = typeof action.assigned_to_name === 'string'
-        ? JSON.parse(action.assigned_to_name)
-        : action.assigned_to_name;
+// Source types for person selection
+const SOURCE_TYPES = {
+  SYSTEM_USER: 'system_user',
+  EXTERNAL: 'external',
+  UNKNOWN: 'unknown',
+};
 
-      parsedAssignment = {
-        type: data.type || 'manual',
-        id: data.id,
-        name: data.name || data.full_name || data.username,
-        email: data.email,
-        phone: data.phone || data.telephone,
-        assigned_to_id: action.assigned_to_id || data.id,
-        assigned_to_name: data
-      };
-    } catch (e) {
-      parsedAssignment = {
-        type: 'manual',
-        id: null,
-        name: action.assigned_to_name,
-        email: '',
-        phone: '',
-        assigned_to_id: null,
-        assigned_to_name: { name: action.assigned_to_name, type: 'manual' }
-      };
-    }
-  } else if (action.assigned_to) {
-    parsedAssignment = {
-      type: 'user',
-      id: action.assigned_to.id,
-      name: action.assigned_to.full_name || action.assigned_to.username,
-      email: action.assigned_to.email,
-      phone: action.assigned_to.phone || action.assigned_to.telephone,
-      assigned_to_id: action.assigned_to.id,
-    };
-  }
+// ==================== UTILITY FUNCTIONS ====================
 
-  if (parsedAssignment) {
-    return [{
-      row_id: `p_${parsedAssignment.assigned_to_id || 'legacy'}`,
-      assigned_to_id: parsedAssignment.assigned_to_id || null,
-      name: parsedAssignment.name || '',
-      phone: parsedAssignment.phone || '',
-      email: parsedAssignment.email || ''
-    }];
-  }
-
-  return [];
+/**
+ * Generate a unique row ID for a person entry
+ */
+const generateRowId = () => {
+  return `row_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 };
 
 /**
- * Build payload for persons implementing
- * @param {Array} persons - Array of person objects
- * @returns {Object} Object with persons_implementing, assigned_to_id, and assigned_to_name
+ * Check if a person row is from a private/system user source
  */
-export const buildPersonsPayload = (persons) => {
-  const cleanedPersons = (persons || [])
-    .filter((p) => p.name?.trim() || p.email?.trim() || p.phone?.trim())
-    .map((p) => ({
-      id: p.assigned_to_id || null,
-      name: p.name?.trim() || '',
-      email: p.email?.trim() || '',
-      phone: p.phone?.trim() || ''
-    }));
+export const isPersonSourcePrivate = (row) => {
+  if (!row) return false;
+  if (row.source_type === SOURCE_TYPES.SYSTEM_USER) return true;
+  if (row.assigned_to_id && !row.name) return true;
+  if (row.is_private === true) return true;
+  return false;
+};
 
-  const firstPerson = cleanedPersons[0];
+/**
+ * Get display information for a person row with privacy protection
+ * Completely camouflages phone and email for system users
+ */
+export const getPersonDisplayInfo = (row) => {
+  if (!row) {
+    return {
+      displayName: '',
+      displayEmail: '',
+      displayPhone: '',
+      isPrivate: false,
+    };
+  }
+
+  const isPrivate = isPersonSourcePrivate(row);
+
+  if (isPrivate) {
+    return {
+      displayName: PRIVATE_NAME_LABEL,
+      displayEmail: PRIVATE_FIELD_LABEL,
+      displayPhone: PRIVATE_FIELD_LABEL,
+      isPrivate: true,
+    };
+  }
 
   return {
-    persons_implementing: cleanedPersons,
-    assigned_to_id: firstPerson?.id || null,
-    assigned_to_name: firstPerson
-      ? { 
-          name: firstPerson.name, 
-          email: firstPerson.email, 
-          phone: firstPerson.phone, 
-          type: firstPerson.id ? 'user' : 'manual' 
-        }
-      : null
+    displayName: row.name || '',
+    displayEmail: row.email || '',
+    displayPhone: row.phone || '',
+    isPrivate: false,
   };
 };
 
 /**
- * Create an empty person row
- * @returns {Object} Empty person object
+ * Create an empty person object
  */
-export const createEmptyPerson = () => ({
-  row_id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-  assigned_to_id: null,
-  name: '',
-  phone: '',
-  email: ''
-});
-
-/**
- * Add a person to the list
- * @param {Array} persons - Current list of persons
- * @returns {Array} New list with empty person added
- */
-export const addPerson = (persons) => {
-  return [...persons, createEmptyPerson()];
+export const createEmptyPerson = () => {
+  return {
+    row_id: generateRowId(),
+    name: '',
+    email: '',
+    phone: '',
+    assigned_to_id: null,
+    source_type: SOURCE_TYPES.EXTERNAL,
+    is_private: false,
+  };
 };
 
 /**
- * Remove a person from the list
- * @param {Array} persons - Current list of persons
- * @param {string} rowId - ID of the person to remove
- * @returns {Array} New list without the person
- */
-export const removePerson = (persons, rowId) => {
-  return persons.filter((p) => p.row_id !== rowId);
-};
-
-/**
- * Update a person in the list
- * @param {Array} persons - Current list of persons
- * @param {string} rowId - ID of the person to update
- * @param {Object} patch - Properties to update
- * @returns {Array} New list with updated person
+ * Update a person in the array
  */
 export const updatePerson = (persons, rowId, patch) => {
-  return persons.map((p) => (p.row_id === rowId ? { ...p, ...patch } : p));
+  if (!persons || !Array.isArray(persons)) return [];
+  return persons.map((person) => {
+    if (person.row_id !== rowId) return person;
+    if (patch.assigned_to_id === null) {
+      return {
+        ...person,
+        ...patch,
+        source_type: SOURCE_TYPES.EXTERNAL,
+        is_private: false,
+      };
+    }
+    return { ...person, ...patch };
+  });
 };
 
 /**
- * Handle person picked from selector
- * @param {Array} persons - Current list of persons
- * @param {string} rowId - ID of the person to update
- * @param {Object|null} picked - Picked user object or null
- * @returns {Array} New list with updated person
+ * Remove a person from the array
+ */
+export const removePerson = (persons, rowId) => {
+  if (!persons || !Array.isArray(persons)) return [];
+  return persons.filter((person) => person.row_id !== rowId);
+};
+
+/**
+ * Handle person picked from AssignToSelector
  */
 export const handlePersonPicked = (persons, rowId, picked) => {
-  if (!picked) {
-    return updatePerson(persons, rowId, { assigned_to_id: null });
+  if (!persons || !Array.isArray(persons)) return [];
+  
+  return persons.map((person) => {
+    if (person.row_id !== rowId) return person;
+
+    if (!picked) {
+      return {
+        ...person,
+        assigned_to_id: null,
+        name: '',
+        email: '',
+        phone: '',
+        source_type: SOURCE_TYPES.EXTERNAL,
+        is_private: false,
+      };
+    }
+
+    const isSystemUser = picked.is_system_user === true || picked.source === 'system_user';
+    
+    if (isSystemUser) {
+      return {
+        ...person,
+        assigned_to_id: picked.id,
+        name: PRIVATE_NAME_LABEL,
+        email: PRIVATE_FIELD_LABEL,
+        phone: PRIVATE_FIELD_LABEL,
+        source_type: SOURCE_TYPES.SYSTEM_USER,
+        is_private: true,
+      };
+    }
+
+    return {
+      ...person,
+      assigned_to_id: picked.id,
+      name: picked.name || '',
+      email: picked.email || '',
+      phone: picked.phone || '',
+      source_type: SOURCE_TYPES.EXTERNAL,
+      is_private: false,
+    };
+  });
+};
+
+/**
+ * Build the payload for API submission
+ */
+export const buildPersonsPayload = (persons) => {
+  if (!persons || !Array.isArray(persons)) {
+    return { persons_implementing: [] };
   }
-  return updatePerson(persons, rowId, {
-    assigned_to_id: picked.id || picked.assigned_to_id || null,
-    name: picked.name || '',
-    email: picked.email || '',
-    phone: picked.phone || ''
+
+  const cleaned = persons.map((person) => {
+    if (isPersonSourcePrivate(person)) {
+      return {
+        assigned_to_id: person.assigned_to_id,
+        source_type: person.source_type || SOURCE_TYPES.SYSTEM_USER,
+        is_private: true,
+      };
+    }
+
+    return {
+      name: person.name || '',
+      email: person.email || '',
+      phone: person.phone || '',
+      assigned_to_id: person.assigned_to_id || null,
+      source_type: person.source_type || SOURCE_TYPES.EXTERNAL,
+      is_private: false,
+    };
+  });
+
+  return { persons_implementing: cleaned };
+};
+
+/**
+ * Parse persons from an action object (for editing)
+ */
+export const parsePersonsFromAction = (action) => {
+  if (!action) return [];
+  
+  const personsData = action.persons_implementing || action.persons || [];
+  
+  if (!Array.isArray(personsData) || personsData.length === 0) {
+    return [];
+  }
+
+  return personsData.map((person, index) => {
+    const isPrivate = person.is_private === true || 
+                      person.source_type === SOURCE_TYPES.SYSTEM_USER ||
+                      (person.assigned_to_id && !person.name);
+
+    return {
+      row_id: person.row_id || `row_${Date.now()}_${index}`,
+      name: isPrivate ? PRIVATE_NAME_LABEL : (person.name || ''),
+      email: isPrivate ? PRIVATE_FIELD_LABEL : (person.email || ''),
+      phone: isPrivate ? PRIVATE_FIELD_LABEL : (person.phone || ''),
+      assigned_to_id: person.assigned_to_id || null,
+      source_type: isPrivate ? SOURCE_TYPES.SYSTEM_USER : (person.source_type || SOURCE_TYPES.EXTERNAL),
+      is_private: isPrivate,
+    };
   });
 };

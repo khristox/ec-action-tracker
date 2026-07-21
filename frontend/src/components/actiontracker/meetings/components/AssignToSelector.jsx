@@ -119,6 +119,7 @@ const AssignToSelector = ({
     debouncedSearch(term);
   }, [debouncedSearch]);
 
+  // ✅ FIXED: Use the correct /members endpoint
   const fetchSystemUsers = useCallback(async () => {
     setLoadingSystemUsers(true);
     setError(null);
@@ -131,7 +132,8 @@ const AssignToSelector = ({
       let currentParticipants = [];
       if (meetingId) {
         try {
-          const participantResponse = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
+          // ✅ FIXED: Use /members endpoint instead of /participants
+          const participantResponse = await api.get(`/action-tracker/meetings/${meetingId}/members`);
           currentParticipants = participantResponse.data?.items || participantResponse.data || [];
         } catch (err) {
           console.warn('Could not fetch participants for privacy check:', err);
@@ -163,6 +165,7 @@ const AssignToSelector = ({
     }
   }, [meetingId]);
 
+  // ✅ FIXED: Use the correct /members endpoint for participants
   const fetchParticipants = useCallback(async () => {
     if (!meetingId) {
       setParticipants([]);
@@ -171,7 +174,8 @@ const AssignToSelector = ({
     setLoadingParticipants(true);
     setError(null);
     try {
-      const response = await api.get(`/action-tracker/meetings/${meetingId}/participants`);
+      // ✅ FIXED: Use /members endpoint instead of /participants
+      const response = await api.get(`/action-tracker/meetings/${meetingId}/members`);
       const participantsData = response.data?.items || response.data || [];
       setParticipants(participantsData.map(p => ({
         id: p.user_id || p.id,
@@ -179,16 +183,15 @@ const AssignToSelector = ({
         email: p.email,
         phone: p.phone || p.telephone,
         title: p.title || p.role,
-        // Participants are NEVER treated as verified system users here, even
-        // if they happen to also have a user_id. Linking a participant to a
-        // real users.id (for the FK) must be an explicit, separate lookup —
-        // not inferred from meeting-attendance data.
         type: 'participant',
-        original_email: p.email
+        original_email: p.email,
+        is_chairperson: p.is_chairperson || false,
+        is_secretary: p.is_secretary || false,
+        attendance_status: p.attendance_status || 'pending'
       })));
     } catch (err) {
       console.error("Failed to fetch participants:", err);
-      setError('Could not load meeting participants');
+      // Don't show error to user, just set empty array
       setParticipants([]);
     } finally {
       setLoadingParticipants(false);
@@ -225,17 +228,6 @@ const AssignToSelector = ({
   }, [participants, showFullEmail]);
 
   const handleSelectUser = useCallback((user) => {
-    // IMPORTANT: assigned_to_id is a foreign key into the `users` table on
-    // the backend. It must ONLY ever be populated when the selection is a
-    // verified system user — i.e. it came from the System Users tab and was
-    // resolved via the /users/ endpoint (type === 'system').
-    //
-    // Meeting participants, manual entries, or any other source must NEVER
-    // populate assigned_to_id, even if they carry an id-shaped value (e.g. a
-    // participant's user_id) — that id has not been verified against the
-    // users table and can cause a FK violation on save. Their full identity
-    // is instead captured entirely in assigned_to_name (JSON), which has no
-    // FK constraint and can safely hold non-system-user data.
     const isVerifiedSystemUser = user.type === 'system';
 
     const assignedTo = {
@@ -306,7 +298,6 @@ const AssignToSelector = ({
 
   const displayValue = value?.name || '';
 
-  // UserItem component - FIXED: removed `button` prop and fixed HTML nesting
   const UserItem = useCallback(({ user, selected }) => {
     const displayEmail = getDisplayEmail(user);
     const isParticipant = user.is_participant || participants.some(p => 
@@ -317,7 +308,6 @@ const AssignToSelector = ({
     
     return (
       <ListItem
-        // FIX: Use component prop instead of `button` attribute
         component="div"
         onClick={() => handleSelectUser(user)}
         selected={selected}
@@ -363,7 +353,6 @@ const AssignToSelector = ({
               )}
             </Stack>
           }
-          // FIX: Use Box with display:flex instead of Stack with flexWrap prop
           secondary={
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
               {displayEmail && (
@@ -472,11 +461,8 @@ const AssignToSelector = ({
         TransitionProps={{
           onEntered: () => searchInputRef.current?.focus(),
         }}
-        // FIX: Use slotProps for Modal to handle aria-hidden
         slotProps={{
-          modal: {
-            // This helps with the aria-hidden focus issue
-          }
+          modal: {}
         }}
       >
         <DialogTitle>

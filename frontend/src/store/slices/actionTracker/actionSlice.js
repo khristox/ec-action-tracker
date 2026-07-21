@@ -1,4 +1,5 @@
 // src/store/slices/actionTracker/actionSlice.js
+
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../../../services/api';
 
@@ -7,11 +8,14 @@ import api from '../../../services/api';
 // Action CRUD operations
 export const fetchActions = createAsyncThunk(
   'actions/fetchActions',
-  async (params = {}, { rejectWithValue }) => {
+  async (params = {}, { rejectWithValue, signal }) => {
     try {
-      const response = await api.get('/action-tracker/actions', { params });
+      const response = await api.get('/action-tracker/actions', { params, signal });
       return response.data;
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
       return rejectWithValue(error.response?.data?.detail || error.message);
     }
   }
@@ -19,15 +23,81 @@ export const fetchActions = createAsyncThunk(
 
 export const fetchActionById = createAsyncThunk(
   'actions/fetchActionById',
-  async (id, { rejectWithValue }) => {
+  async (id, { rejectWithValue, signal }) => {
     try {
-      const response = await api.get(`/action-tracker/actions/${id}`);
+      const response = await api.get(`/action-tracker/actions/${id}`, { signal });
+      const action = response.data;
+      
+      // 🔥 FIX: Ensure persons_implementing is populated from implementers
+      // Check if the backend returned implementers in the response
+      if (action.implementers && Array.isArray(action.implementers)) {
+        // Map implementers to persons_implementing format
+        action.persons_implementing = action.implementers.map(imp => ({
+          id: imp.id,
+          name: imp.name || 'Unnamed',
+          email: imp.email || '',
+          phone: imp.phone || '',
+          user_id: imp.user_id,
+          assigned_to_id: imp.user_id,
+          source_type: imp.user_id ? 'system' : 'external',
+          is_private: !!imp.user_id,
+          sort_order: imp.sort_order || 0
+        }));
+      } else if (!action.persons_implementing) {
+        // If neither exists, set empty array
+        action.persons_implementing = [];
+      }
+      
+      // Also check if we need to fetch implementers separately
+      // If the action has an ID but no implementers loaded, we should fetch them
+      if (action.id && (!action.implementers || action.implementers.length === 0) && 
+          (!action.persons_implementing || action.persons_implementing.length === 0)) {
+        // We'll fetch implementers separately in a separate thunk
+        // For now, just set empty array
+        action.persons_implementing = [];
+      }
+      
+      return action;
+    } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
+      return rejectWithValue(error.response?.data?.detail || error.message);
+    }
+  }
+);
+
+
+export const fetchActionImplementers = createAsyncThunk(
+  'actions/fetchActionImplementers',
+  async (actionId, { rejectWithValue, signal }) => {
+    try {
+      const response = await api.get(`/action-tracker/actions/${actionId}/implementers`, { signal });
+      return response.data || [];
+    } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
+      // If the endpoint doesn't exist yet, fall back to the action data
+      console.warn('Could not fetch implementers:', error.message);
+      return [];
+    }
+  }
+);
+
+// Also add a thunk to update implementers
+export const updateActionImplementers = createAsyncThunk(
+  'actions/updateActionImplementers',
+  async ({ actionId, implementers }, { rejectWithValue }) => {
+    try {
+      const response = await api.put(`/action-tracker/actions/${actionId}/implementers`, implementers);
       return response.data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.detail || error.message);
     }
   }
 );
+
 
 export const createAction = createAsyncThunk(
   'actions/createAction',
@@ -104,11 +174,14 @@ export const addActionComment = createAsyncThunk(
 
 export const fetchActionComments = createAsyncThunk(
   'actions/fetchActionComments',
-  async ({ id, skip = 0, limit = 50 }, { rejectWithValue }) => {
+  async ({ id, skip = 0, limit = 50 }, { rejectWithValue, signal }) => {
     try {
-      const response = await api.get(`/action-tracker/actions/${id}/comments`, { params: { skip, limit } });
+      const response = await api.get(`/action-tracker/actions/${id}/comments`, { params: { skip, limit }, signal });
       return response.data;
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
       return rejectWithValue(error.response?.data?.detail || error.message);
     }
   }
@@ -141,11 +214,14 @@ export const deleteComment = createAsyncThunk(
 // History operations
 export const fetchActionHistory = createAsyncThunk(
   'actions/fetchActionHistory',
-  async ({ id, skip = 0, limit = 50 }, { rejectWithValue }) => {
+  async ({ id, skip = 0, limit = 50 }, { rejectWithValue, signal }) => {
     try {
-      const response = await api.get(`/action-tracker/actions/${id}/history`, { params: { skip, limit } });
+      const response = await api.get(`/action-tracker/actions/${id}/history`, { params: { skip, limit }, signal });
       return response.data;
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
       return rejectWithValue(error.response?.data?.detail || error.message);
     }
   }
@@ -154,13 +230,14 @@ export const fetchActionHistory = createAsyncThunk(
 // User tasks
 export const fetchMyTasks = createAsyncThunk(
   'actions/fetchMyTasks',
-  async (params = {}, { rejectWithValue }) => {
+  async (params = {}, { rejectWithValue, signal }) => {
     try {
-      const response = await api.get('/action-tracker/actions/my-tasks', { params });
-      
-      // Return the data directly - the reducer will handle formatting
+      const response = await api.get('/action-tracker/actions/my-tasks', { params, signal });
       return response.data;
     } catch (error) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        throw error;
+      }
       console.error('Fetch my tasks error:', error);
       return rejectWithValue(error.response?.data?.detail || error.message);
     }
@@ -216,6 +293,7 @@ export const createActionFromMinutes = createAsyncThunk(
     }
   }
 );
+
 // ==================== INITIAL STATE ====================
 
 const initialState = {
@@ -224,6 +302,7 @@ const initialState = {
   currentAction: null,
   comments: [],
   history: [],
+  implementers: [],
   myTasks: { items: [], total: 0, totalPages: 0, currentPage: 1, limit: 10 },
   overdueTasks: [],
   statistics: null,
@@ -235,6 +314,7 @@ const initialState = {
   
   // Status
   loading: false,
+  myTasksLoading: false,
   updatingProgress: false,
   submittingComment: false,
   error: null,
@@ -266,6 +346,7 @@ const actionSlice = createSlice({
       state.currentAction = null;
       state.comments = [];
       state.history = [];
+      state.implementers = [];
     },
     
     // Pagination
@@ -328,10 +409,33 @@ const actionSlice = createSlice({
       .addCase(fetchActionById.fulfilled, (state, action) => {
         state.loading = false;
         state.currentAction = action.payload;
+        // 🔥 FIX: Ensure persons_implementing is set from the action payload
+        state.implementers = action.payload.persons_implementing || 
+                            action.payload.implementers || [];
+        // Also ensure the currentAction has persons_implementing
+        if (state.currentAction && !state.currentAction.persons_implementing) {
+          state.currentAction.persons_implementing = state.implementers;
+        }
       })
       .addCase(fetchActionById.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
+      })
+      
+      // ========== FETCH IMPLEMENTERS ==========
+      .addCase(fetchActionImplementers.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchActionImplementers.fulfilled, (state, action) => {
+        state.loading = false;
+        state.implementers = action.payload || [];
+        if (state.currentAction) {
+          state.currentAction.persons_implementing = action.payload || [];
+        }
+      })
+      .addCase(fetchActionImplementers.rejected, (state) => {
+        state.loading = false;
+        state.implementers = [];
       })
       
       // ========== CREATE ACTION ==========
@@ -362,6 +466,11 @@ const actionSlice = createSlice({
         }
         if (state.currentAction?.id === action.payload.id) {
           state.currentAction = action.payload;
+          state.implementers = action.payload.persons_implementing || 
+                              action.payload.implementers || [];
+          if (state.currentAction && !state.currentAction.persons_implementing) {
+            state.currentAction.persons_implementing = state.implementers;
+          }
         }
       })
       .addCase(updateAction.rejected, (state, action) => {
@@ -382,6 +491,11 @@ const actionSlice = createSlice({
         }
         if (state.currentAction?.id === action.payload.id) {
           state.currentAction = action.payload;
+          state.implementers = action.payload.persons_implementing || 
+                              action.payload.implementers || [];
+          if (state.currentAction && !state.currentAction.persons_implementing) {
+            state.currentAction.persons_implementing = state.implementers;
+          }
         }
       })
       .addCase(updateActionProgress.rejected, (state, action) => {
@@ -402,6 +516,11 @@ const actionSlice = createSlice({
         }
         if (state.currentAction?.id === action.payload.id) {
           state.currentAction = action.payload;
+          state.implementers = action.payload.persons_implementing || 
+                              action.payload.implementers || [];
+          if (state.currentAction && !state.currentAction.persons_implementing) {
+            state.currentAction.persons_implementing = state.implementers;
+          }
         }
       })
       .addCase(assignAction.rejected, (state, action) => {
@@ -420,6 +539,7 @@ const actionSlice = createSlice({
         state.total -= 1;
         if (state.currentAction?.id === action.payload) {
           state.currentAction = null;
+          state.implementers = [];
         }
       })
       .addCase(deleteAction.rejected, (state, action) => {
@@ -483,12 +603,11 @@ const actionSlice = createSlice({
       
       // ========== MY TASKS ==========
       .addCase(fetchMyTasks.pending, (state) => {
-        state.loading = true;
+        state.myTasksLoading = true;
         state.error = null;
       })
       .addCase(fetchMyTasks.fulfilled, (state, action) => {
-        state.loading = false;
-        // Handle the response - backend returns an array directly
+        state.myTasksLoading = false;
         const tasks = Array.isArray(action.payload) ? action.payload : (action.payload?.items || []);
         state.myTasks = {
           items: tasks,
@@ -499,7 +618,7 @@ const actionSlice = createSlice({
         };
       })
       .addCase(fetchMyTasks.rejected, (state, action) => {
-        state.loading = false;
+        state.myTasksLoading = false;
         state.error = action.payload;
         console.error('MyTasks error:', action.payload);
       })
@@ -554,7 +673,12 @@ const actionSlice = createSlice({
         state.loading = false;
         state.actions.unshift(action.payload);
         state.total += 1;
-        state.currentAction = action.payload; // Optional: set as current
+        state.currentAction = action.payload;
+        state.implementers = action.payload.persons_implementing || 
+                            action.payload.implementers || [];
+        if (state.currentAction && !state.currentAction.persons_implementing) {
+          state.currentAction.persons_implementing = state.implementers;
+        }
       })
       .addCase(createActionFromMinutes.rejected, (state, action) => {
         state.loading = false;
@@ -582,6 +706,7 @@ export const {
 // Basic selectors
 export const selectAllActions = (state) => state.actions?.actions || [];
 export const selectCurrentAction = (state) => state.actions?.currentAction || null;
+export const selectActionImplementers = (state) => state.actions?.implementers || [];
 export const selectActionsLoading = (state) => state.actions?.loading || false;
 export const selectUpdatingProgress = (state) => state.actions?.updatingProgress || false;
 export const selectSubmittingComment = (state) => state.actions?.submittingComment || false;
@@ -597,6 +722,7 @@ export const selectActionHistory = (state) => state.actions?.history || [];
 
 // Tasks
 export const selectMyTasks = (state) => state.actions?.myTasks || { items: [], total: 0, totalPages: 0 };
+export const selectMyTasksLoading = (state) => state.actions?.myTasksLoading || false;
 export const selectOverdueTasks = (state) => state.actions?.overdueTasks || [];
 
 // Statistics
@@ -636,6 +762,13 @@ export const selectActionsByPriority = (state, priority) => {
 export const selectActionsByAssignee = (state, userId) => {
   const actions = selectAllActions(state);
   return actions.filter(a => a.assigned_to_id === userId);
+};
+
+export const selectPersonImplementingNames = (state) => {
+  const action = selectCurrentAction(state);
+  if (!action) return [];
+  const implementers = action.persons_implementing || [];
+  return implementers.map(p => p.name || 'Unnamed');
 };
 
 // ==================== EXPORT REDUCER ====================

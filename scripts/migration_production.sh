@@ -273,3 +273,20 @@ ALTER COLUMN status TYPE notification_status
 USING status::notification_status;
 ALTER TABLE notifications
 ALTER COLUMN status SET DEFAULT 'pending'::notification_status;
+
+
+
+CREATE TABLE action_implementers (
+    id UUID PRIMARY KEY,
+    action_id UUID NOT NULL REFERENCES meeting_actions(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX ix_action_implementers_action_id ON action_implementers(action_id);
+CREATE INDEX ix_action_implementers_user_id ON action_implementers(user_id);

@@ -5,9 +5,8 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 import json
 
-from sqlalchemy import select, or_
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.general.dynamic_attribute import Attribute
 
@@ -64,16 +63,11 @@ async def get_valid_meeting_statuses(db: AsyncSession) -> List[Dict[str, Any]]:
         return []
 
 
-async def get_valid_status_short_names(db: AsyncSession) -> List[str]:
-    """Get list of valid status short names"""
-    statuses = await get_valid_meeting_statuses(db)
-    return [s["short_name"] for s in statuses if s.get("short_name")]
-
-
-async def get_status_by_short_name(db: AsyncSession, short_name: str):
-    """Get status from attributes table by short_name (case-insensitive)."""
+async def get_status_by_short_name(db: AsyncSession, short_name: str, code_prefix: str = "MEETING_STATUS_%"):
+    """Get status from attributes table by short_name (case-insensitive) with an optional code prefix filter safely."""
     result = await db.execute(
         select(Attribute).where(
+            Attribute.code.like(code_prefix),
             or_(
                 func.lower(Attribute.short_name) == func.lower(short_name),
                 func.lower(Attribute.name) == func.lower(short_name),
@@ -82,18 +76,27 @@ async def get_status_by_short_name(db: AsyncSession, short_name: str):
             Attribute.is_active == True
         )
     )
-    return result.scalar_one_or_none()
+    # Use .scalars().first() to guarantee safe recovery if multiple rows match
+    return result.scalars().first()
 
-async def get_status_id_by_short_name(db: AsyncSession, short_name: str):
+
+async def get_status_id_by_short_name(db: AsyncSession, short_name: str, code_prefix: str = "MEETING_STATUS_%"):
     """Get status ID from attributes table by short_name (case-insensitive)."""
-    status = await get_status_by_short_name(db, short_name)
+    status = await get_status_by_short_name(db, short_name, code_prefix=code_prefix)
     return status.id if status else None
 
-async def get_valid_status_short_names(db: AsyncSession):
-    """Get all valid status short names from attributes table."""
-    result = await db.execute(
-        select(Attribute.short_name).where(
-            Attribute.is_active == True
-        )
-    )
+
+async def get_valid_status_short_names(db: AsyncSession, code_prefix: Optional[str] = None) -> List[str]:
+    """Get list of valid status short names with an optional prefix filter."""
+    if code_prefix == "MEETING_STATUS_%" or code_prefix is None:
+        statuses = await get_valid_meeting_statuses(db)
+        if statuses:
+            return [s["short_name"] for s in statuses if s.get("short_name")]
+
+    # Fallback or general prefix query
+    stmt = select(Attribute.short_name).where(Attribute.is_active == True)
+    if code_prefix:
+        stmt = stmt.where(Attribute.code.like(code_prefix))
+        
+    result = await db.execute(stmt)
     return [r[0] for r in result.all() if r[0]]

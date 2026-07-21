@@ -379,51 +379,87 @@ async def build_meeting_items(
 def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
     """Build response for meeting minutes with error handling."""
     try:
-        return {
-            "id": minute.id,
-            "meeting_id": minute.meeting_id,
-            "topic": minute.topic,
-            "discussion": minute.discussion,
-            "decisions": minute.decisions,
-            "timestamp": safe_isoformat(minute.timestamp),
-            "recorded_by_id": minute.recorded_by_id,
-            "recorded_by_name": minute.recorded_by.username if minute.recorded_by else None,
-            "created_by_id": minute.created_by_id,
-            "created_by_name": minute.created_by.username if minute.created_by else None,
-            "created_at": safe_isoformat(minute.created_at),
-            "updated_by_id": minute.updated_by_id,
-            "updated_by_name": minute.updated_by.username if minute.updated_by else None,
-            "updated_at": safe_isoformat(minute.updated_at),
-            "is_active": minute.is_active,
-            "is_default": safe_get_attribute(minute, 'is_default', False),
-            "actions": [
+        def build_action_dict(action) -> Dict[str, Any]:
+            # Map ORM 'implementers' relationship → persons_implementing field
+            implementers = getattr(action, 'implementers', None) or []
+            persons_implementing = [
                 {
-                    "id": action.id,
-                    "minute_id": action.minute_id,
-                    "description": action.description,
-                    "assigned_to_id": action.assigned_to_id,
-                    "assigned_to_name": action.assigned_to_name,
-                    "due_date": safe_isoformat(action.due_date),
-                    "priority": action.priority,
-                    "remarks": action.remarks,
-                    "completed_at": safe_isoformat(action.completed_at),
-                    "overall_progress_percentage": action.overall_progress_percentage or 0,
-                    "overall_status_name": action.overall_status_name,
-                    "assigned_at": safe_isoformat(action.assigned_at),
-                    "created_at": safe_isoformat(action.created_at),
-                    "assigned_by_id": action.assigned_by_id,
-                    "overall_status_id": action.overall_status_id,
-                    "is_active": action.is_active,
-                    "updated_at": safe_isoformat(action.updated_at),
-                    "created_by_id": action.created_by_id,
+                    "user_id":        str(p.user_id) if p.user_id else None,
+                    "assigned_to_id": str(p.user_id) if p.user_id else None,
+                    "name":           p.name  or "",
+                    "email":          p.email or "",
+                    "phone":          p.phone or "",
+                    "source_type":    "system" if p.user_id else "external",
+                    "is_private":     bool(p.user_id),
                 }
+                for p in implementers
+            ]
+
+            assigned = action.assigned_to_name
+            if isinstance(assigned, dict):
+                assigned_to_name_display = assigned.get('name', 'Unassigned')
+            elif isinstance(assigned, str):
+                assigned_to_name_display = assigned
+            else:
+                assigned_to_name_display = 'Unassigned'
+
+            return {
+                "id":                           action.id,
+                "minute_id":                    action.minute_id,
+                "description":                  action.description,
+                "assigned_to_id":               action.assigned_to_id,
+                "assigned_to_name":             action.assigned_to_name,
+                "assigned_to_name_display":     assigned_to_name_display,
+                "due_date":                     safe_isoformat(action.due_date),
+                "priority":                     action.priority,
+                "remarks":                      action.remarks,
+                "completed_at":                 safe_isoformat(action.completed_at),
+                "overall_progress_percentage":  action.overall_progress_percentage or 0,
+                "overall_status_id":            action.overall_status_id,
+                "overall_status_name":          action.overall_status_name,
+                "assigned_at":                  safe_isoformat(action.assigned_at),
+                "assigned_by_id":               action.assigned_by_id,
+                "created_at":                   safe_isoformat(action.created_at),
+                "updated_at":                   safe_isoformat(action.updated_at),
+                "created_by_id":                action.created_by_id,
+                "is_active":                    action.is_active,
+                # ── New fields ──────────────────────────────────────────────
+                "title":                        action.title,
+                "issue_challenge":              action.issue_challenge,
+                "type_of_action":               action.type_of_action,
+                "date_initiated":               safe_isoformat(action.date_initiated),
+                "is_key_action":                action.is_key_action or False,
+                "tags":                         action.tags or [],
+                "assign_to_meeting_id":         action.assign_to_meeting_id,
+                "persons_implementing":         persons_implementing,
+                "persons_implementing_display": persons_implementing,
+            }
+
+        return {
+            "id":               minute.id,
+            "meeting_id":       minute.meeting_id,
+            "topic":            minute.topic,
+            "discussion":       minute.discussion,
+            "decisions":        minute.decisions,
+            "timestamp":        safe_isoformat(minute.timestamp),
+            "recorded_by_id":   minute.recorded_by_id,
+            "recorded_by_name": minute.recorded_by.username if minute.recorded_by else None,
+            "created_by_id":    minute.created_by_id,
+            "created_by_name":  minute.created_by.username if minute.created_by else None,
+            "created_at":       safe_isoformat(minute.created_at),
+            "updated_by_id":    minute.updated_by_id,
+            "updated_by_name":  minute.updated_by.username if minute.updated_by else None,
+            "updated_at":       safe_isoformat(minute.updated_at),
+            "is_active":        minute.is_active,
+            "is_default":       safe_get_attribute(minute, 'is_default', False),
+            "actions": [
+                build_action_dict(action)
                 for action in (minute.actions or [])
-            ] if hasattr(minute, 'actions') else []
+            ] if hasattr(minute, 'actions') else [],
         }
     except Exception as e:
         logger.error(f"Error building minutes response: {e}", exc_info=True)
         return {}
-
 
 def build_status_history_response(history: MeetingStatusHistory) -> Optional[MeetingStatusHistoryResponse]:
     """Build response for status history entry with error handling."""
@@ -1009,10 +1045,10 @@ async def update_meeting_status(
     """
     try:
         meeting = await get_meeting_or_404(db, meeting_id)
-        status_info = await get_status_by_short_name(db, status_value)
-        
+        # Supply code_prefix explicitly to restrict lookup to MEETING_STATUS_%
+        status_info = await get_status_by_short_name(db, status_value, code_prefix="MEETING_STATUS_%")        
         if not status_info:
-            valid = await get_valid_status_short_names(db)
+            valid = await get_valid_status_short_names(db, code_prefix="MEETING_STATUS_%")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status. Valid: {', '.join(valid)}"
@@ -1067,23 +1103,32 @@ async def get_meeting_minutes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user)
 ):
     """
     Get all minutes for a meeting with improved connection handling.
     """
     try:
         async def get_minutes_query():
-            query = select(MeetingMinutes).where(
-                MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
-            ).order_by(desc(MeetingMinutes.created_at))
+            query = (
+                select(MeetingMinutes)
+                .where(
+                    MeetingMinutes.meeting_id == meeting_id,
+                    MeetingMinutes.is_active == True
+                )
+                .options(
+                    selectinload(MeetingMinutes.actions).selectinload(MeetingAction.implementers),
+                    selectinload(MeetingMinutes.created_by),
+                    selectinload(MeetingMinutes.recorded_by),
+                )
+                .order_by(desc(MeetingMinutes.created_at))
+            )
             result = await db.execute(query.offset(skip).limit(limit))
             return result.scalars().all()
-        
+
         minutes = await execute_db_operation(get_minutes_query, max_retries=2)
         return [build_minutes_response(m) for m in minutes if m]
-        
+
     except SQLAlchemyError as e:
         logger.error(f"Database error fetching minutes for meeting {meeting_id}: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -1096,7 +1141,7 @@ async def get_meeting_minutes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch minutes: {str(e)}"
         )
-
+    
 
 @router.post("/{meeting_id}/minutes", response_model=MeetingMinutesResponse, status_code=status.HTTP_201_CREATED)
 async def add_meeting_minutes(

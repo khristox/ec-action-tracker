@@ -33,7 +33,9 @@ const generateRowId = () => {
 export const isPersonSourcePrivate = (row) => {
   if (!row) return false;
   if (row.source_type === SOURCE_TYPES.SYSTEM_USER) return true;
-  if (row.assigned_to_id && !row.name) return true;
+  // Check both field names — backend uses user_id, frontend uses assigned_to_id
+  const userId = row.user_id || row.assigned_to_id;
+  if (userId && !row.name) return true;
   if (row.is_private === true) return true;
   return false;
 };
@@ -81,6 +83,7 @@ export const createEmptyPerson = () => {
     email: '',
     phone: '',
     assigned_to_id: null,
+    user_id: null,
     source_type: SOURCE_TYPES.EXTERNAL,
     is_private: false,
   };
@@ -97,6 +100,7 @@ export const updatePerson = (persons, rowId, patch) => {
       return {
         ...person,
         ...patch,
+        user_id: null,
         source_type: SOURCE_TYPES.EXTERNAL,
         is_private: false,
       };
@@ -126,6 +130,7 @@ export const handlePersonPicked = (persons, rowId, picked) => {
       return {
         ...person,
         assigned_to_id: null,
+        user_id: null,
         name: '',
         email: '',
         phone: '',
@@ -140,6 +145,7 @@ export const handlePersonPicked = (persons, rowId, picked) => {
       return {
         ...person,
         assigned_to_id: picked.id,
+        user_id: picked.id,
         name: PRIVATE_NAME_LABEL,
         email: PRIVATE_FIELD_LABEL,
         phone: PRIVATE_FIELD_LABEL,
@@ -151,6 +157,7 @@ export const handlePersonPicked = (persons, rowId, picked) => {
     return {
       ...person,
       assigned_to_id: picked.id,
+      user_id: picked.id,
       name: picked.name || '',
       email: picked.email || '',
       phone: picked.phone || '',
@@ -161,7 +168,11 @@ export const handlePersonPicked = (persons, rowId, picked) => {
 };
 
 /**
- * Build the payload for API submission
+ * Build the payload for API submission.
+ *
+ * The ActionImplementer table stores the user FK as `user_id`.
+ * The backend _get_person_user_id() helper now reads user_id first,
+ * then falls back to assigned_to_id. We send both so either path works.
  */
 export const buildPersonsPayload = (persons) => {
   if (!persons || !Array.isArray(persons)) {
@@ -169,19 +180,24 @@ export const buildPersonsPayload = (persons) => {
   }
 
   const cleaned = persons.map((person) => {
+    // Resolve the user id from whichever field is populated
+    const userId = person.user_id || person.assigned_to_id || null;
+
     if (isPersonSourcePrivate(person)) {
       return {
-        assigned_to_id: person.assigned_to_id,
+        user_id:        userId,   // primary key the backend reads
+        assigned_to_id: userId,   // legacy alias
         source_type: person.source_type || SOURCE_TYPES.SYSTEM_USER,
         is_private: true,
       };
     }
 
     return {
-      name: person.name || '',
-      email: person.email || '',
-      phone: person.phone || '',
-      assigned_to_id: person.assigned_to_id || null,
+      name:           person.name  || '',
+      email:          person.email || '',
+      phone:          person.phone || '',
+      user_id:        userId,
+      assigned_to_id: userId,
       source_type: person.source_type || SOURCE_TYPES.EXTERNAL,
       is_private: false,
     };
@@ -191,7 +207,12 @@ export const buildPersonsPayload = (persons) => {
 };
 
 /**
- * Parse persons from an action object (for editing)
+ * Parse persons from an action object (for editing).
+ *
+ * The API response from the detail endpoint serialises ActionImplementer rows
+ * into persons_implementing. Each row has a `user_id` column (not assigned_to_id).
+ * We normalise both field names here so the editor works regardless of which
+ * endpoint produced the data.
  */
 export const parsePersonsFromAction = (action) => {
   if (!action) return [];
@@ -203,18 +224,24 @@ export const parsePersonsFromAction = (action) => {
   }
 
   return personsData.map((person, index) => {
-    const isPrivate = person.is_private === true || 
-                      person.source_type === SOURCE_TYPES.SYSTEM_USER ||
-                      (person.assigned_to_id && !person.name);
+    // Backend ActionImplementer stores the FK as user_id; schema may also
+    // surface it as assigned_to_id — accept either.
+    const userId = person.user_id || person.assigned_to_id || null;
+
+    const isPrivate =
+      person.is_private === true ||
+      person.source_type === SOURCE_TYPES.SYSTEM_USER ||
+      (userId && !person.name);
 
     return {
-      row_id: person.row_id || `row_${Date.now()}_${index}`,
-      name: isPrivate ? PRIVATE_NAME_LABEL : (person.name || ''),
-      email: isPrivate ? PRIVATE_FIELD_LABEL : (person.email || ''),
-      phone: isPrivate ? PRIVATE_FIELD_LABEL : (person.phone || ''),
-      assigned_to_id: person.assigned_to_id || null,
-      source_type: isPrivate ? SOURCE_TYPES.SYSTEM_USER : (person.source_type || SOURCE_TYPES.EXTERNAL),
-      is_private: isPrivate,
+      row_id:         person.row_id || `row_${Date.now()}_${index}`,
+      name:           isPrivate ? PRIVATE_NAME_LABEL  : (person.name  || ''),
+      email:          isPrivate ? PRIVATE_FIELD_LABEL : (person.email || ''),
+      phone:          isPrivate ? PRIVATE_FIELD_LABEL : (person.phone || ''),
+      assigned_to_id: userId,   // keep the frontend key the rest of the UI expects
+      user_id:        userId,   // also carry user_id for buildPersonsPayload
+      source_type:    isPrivate ? SOURCE_TYPES.SYSTEM_USER : (person.source_type || SOURCE_TYPES.EXTERNAL),
+      is_private:     isPrivate,
     };
   });
 };

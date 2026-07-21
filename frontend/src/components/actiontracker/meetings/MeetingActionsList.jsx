@@ -31,11 +31,10 @@ import {
   Divider,
   useTheme,
   alpha,
-  Collapse,
-  List,
-  ListItem,
-  ListItemAvatar,
-  ListItemText,
+  Card,
+  CardContent,
+  Grid,
+  useMediaQuery,
   Badge,
 } from '@mui/material';
 import {
@@ -53,11 +52,8 @@ import {
   Save as Save,
   Close as Close,
   Lock as LockIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  Label as LabelIcon,
-  Flag as FlagIcon,
-  Lightbulb as LightbulbIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import {
@@ -108,9 +104,9 @@ const canEditActions = (meetingStatus) => {
 };
 
 const formatDate = (dateString) => {
-  if (!dateString) return 'No due date';
+  if (!dateString) return '-';
   try {
-    return format(new Date(dateString), 'MMM d, yyyy');
+    return format(new Date(dateString), 'EEE, dd-MMM-yyyy');
   } catch {
     return 'Invalid date';
   }
@@ -130,11 +126,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   // ==================== REDUX SELECTORS ====================
   const minutesList = useSelector(selectMeetingMinutes);
   const statusOptions = useSelector(selectActionStatusOptions);
-  const loadingStatusOptions = useSelector(selectActionTrackerLoading);
   const statusOptionsError = useSelector(selectActionTrackerError);
   const { updatingProgress } = useSelector((state) => state.actions || {});
 
@@ -149,22 +145,30 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [editingAction, setEditingAction] = useState(null);
+  const [loadingActionId, setLoadingActionId] = useState(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [showProgressDialog, setShowProgressDialog] = useState(false);
   const [selectedAction, setSelectedAction] = useState(null);
-  const [localUpdating, setLocalUpdating] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  const [expandedActions, setExpandedActions] = useState({});
 
   const progressFormRef = useRef(null);
 
   // ==================== COMPUTED VALUES ====================
   const canEdit = useMemo(() => canEditActions(meetingStatus), [meetingStatus]);
-  const isUpdating = localUpdating || updatingProgress;
   const hasNoMinutes = minutesList.length === 0 && !loading;
   const statusMessage = useMemo(() => getStatusMessage(meetingStatus), [meetingStatus]);
+
+  const tagSuggestions = useMemo(() => {
+    const set = new Set();
+    actions.forEach(a => {
+      if (Array.isArray(a.tags)) {
+        a.tags.forEach(t => { if (t) set.add(t); });
+      }
+    });
+    return Array.from(set).sort();
+  }, [actions]);
 
   // ==================== HELPER FUNCTIONS ====================
 
@@ -179,14 +183,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     }
     return null;
   }
-
-  const getProgressColor = useCallback((value) => {
-    if (value >= 100) return isDarkMode ? '#34D399' : 'success.main';
-    if (value >= 75) return isDarkMode ? '#A78BFA' : 'secondary.main';
-    if (value >= 50) return isDarkMode ? '#FBBF24' : 'warning.main';
-    if (value >= 25) return isDarkMode ? '#60A5FA' : 'primary.main';
-    return isDarkMode ? '#6B7280' : 'grey.500';
-  }, [isDarkMode]);
 
   const getStatusConfig = useCallback((action) => {
     const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
@@ -227,50 +223,33 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     };
   }, [statusOptions, isDarkMode]);
 
-  const getAssignedToName = useCallback((action) => {
+  const getImplementersNames = useCallback((action) => {
     if (action.persons_implementing && action.persons_implementing.length > 0) {
-      const firstPerson = action.persons_implementing[0];
-      return firstPerson.name || 'Unassigned';
+      return action.persons_implementing.map(p => p.name).filter(Boolean).join(', ');
     }
-    if (action.assigned_to?.full_name) {
-      return action.assigned_to.full_name;
-    }
-    if (action.assigned_to?.username) {
-      return action.assigned_to.username;
-    }
-    if (typeof action.assigned_to_name === 'string') {
-      return action.assigned_to_name;
-    }
+    if (action.assigned_to?.full_name) return action.assigned_to.full_name;
+    if (action.assigned_to?.username) return action.assigned_to.username;
+    if (typeof action.assigned_to_name === 'string') return action.assigned_to_name;
     if (action.assigned_to_name && typeof action.assigned_to_name === 'object') {
       return action.assigned_to_name.name || action.assigned_to_name.email || 'Unassigned';
     }
     return 'Unassigned';
   }, []);
 
-  const getImplementers = useCallback((action) => {
+  const getImplementersList = useCallback((action) => {
     if (action.persons_implementing && action.persons_implementing.length > 0) {
       return action.persons_implementing;
     }
     if (action.assigned_to || action.assigned_to_name) {
       return [{
-        name: getAssignedToName(action),
+        name: getImplementersNames(action),
         email: action.assigned_to?.email || action.assigned_to_name?.email,
         phone: action.assigned_to?.phone || action.assigned_to_name?.phone,
         user_id: action.assigned_to?.id || action.assigned_to_id,
       }];
     }
     return [];
-  }, [getAssignedToName]);
-
-  const getPriorityLabel = useCallback((priority) => {
-    const map = {
-      1: { label: 'High', color: '#EF4444' },
-      2: { label: 'Medium', color: '#F59E0B' },
-      3: { label: 'Low', color: '#10B981' },
-      4: { label: 'Very Low', color: '#9CA3AF' },
-    };
-    return map[priority] || map[2];
-  }, []);
+  }, [getImplementersNames]);
 
   // ==================== API CALLS ====================
 
@@ -278,7 +257,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     if (!meetingId || !isMountedRef.current || isFetchingRef.current) {
       return Promise.resolve();
     }
-    
+
     isFetchingRef.current = true;
     return dispatch(fetchMeetingMinutes(meetingId))
       .finally(() => {
@@ -302,9 +281,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           actionsData.push(...minute.actions);
         }
       });
-      
+
       const currentString = JSON.stringify(actionsData);
-      
+
       if (currentString !== previousMinutesStringRef.current) {
         previousMinutesStringRef.current = currentString;
         if (isMountedRef.current) {
@@ -326,10 +305,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== EFFECTS ====================
 
-  // Initial fetch - only once on mount or when meetingId changes
   useEffect(() => {
     if (!meetingId) return;
-    
+
     let isActive = true;
     isMountedRef.current = true;
     previousMinutesStringRef.current = '';
@@ -352,11 +330,10 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       }
     };
 
-    // Debounce fetch to prevent multiple calls
     if (fetchTimeoutRef.current) {
       clearTimeout(fetchTimeoutRef.current);
     }
-    
+
     fetchTimeoutRef.current = setTimeout(() => {
       if (isActive) {
         fetchData();
@@ -373,14 +350,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     };
   }, [meetingId, fetchMinutes, fetchAttributes]);
 
-  // Extract actions when minutes change
   useEffect(() => {
     if (minutesList && isMountedRef.current) {
       extractActionsFromMinutes();
     }
   }, [minutesList, extractActionsFromMinutes]);
 
-  // Success message timeout
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
@@ -392,18 +367,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   }, [successMessage]);
 
-  // Log errors
-  useEffect(() => {
-    if (statusOptionsError) {
-      console.error('Failed to load status options:', statusOptionsError);
-    }
-  }, [statusOptionsError]);
-
   // ==================== EVENT HANDLERS ====================
 
   const handleRefresh = useCallback(() => {
     if (!isMountedRef.current || isFetchingRef.current) return;
-    
+
     setLoading(true);
     previousMinutesStringRef.current = '';
     fetchMinutes()
@@ -419,10 +387,26 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     navigate(`/actions/${actionId}`);
   }, [navigate]);
 
-  const handleEditAction = useCallback((action) => {
+  const handleEditAction = useCallback(async (action) => {
     if (!isMountedRef.current) return;
-    setEditingAction(action);
-    setShowEditDialog(true);
+
+    setLoadingActionId(action.id);
+    let fullAction = action;
+
+    try {
+      const res = await api.get(`/action-tracker/actions/${action.id}`);
+      if (res?.data) {
+        fullAction = { ...action, ...res.data };
+      }
+    } catch (err) {
+      console.error('Could not fetch full action detail, using list data:', err);
+    }
+
+    if (isMountedRef.current) {
+      setEditingAction(fullAction);
+      setShowEditDialog(true);
+      setLoadingActionId(null);
+    }
   }, []);
 
   const handleAssignAction = useCallback((action) => {
@@ -473,18 +457,15 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleActionCreate = useCallback(async (payload) => {
     if (!isMountedRef.current || !meetingId) return;
-    
-    if (isFetchingRef.current) {
-      console.log('Already fetching, skipping...');
-      return;
-    }
+
+    if (isFetchingRef.current) return;
 
     try {
       let minuteId = payload.minute_id;
       if (!minuteId && minutesList && minutesList.length > 0) {
         minuteId = minutesList[0]?.id;
       }
-      
+
       if (!minuteId) {
         const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
           title: 'General',
@@ -531,12 +512,42 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     }
   }, [meetingId, minutesList, fetchMinutes, handleActionCreated]);
 
-  const toggleExpand = useCallback((actionId) => {
-    setExpandedActions(prev => ({
-      ...prev,
-      [actionId]: !prev[actionId]
-    }));
-  }, []);
+  const handleActionUpdate = useCallback(async (payload) => {
+    if (!isMountedRef.current || !editingAction?.id) return;
+
+    try {
+      const response = await api.put(
+        `/action-tracker/actions/${editingAction.id}`,
+        {
+          description: payload.description,
+          due_date: payload.due_date || null,
+          priority: payload.priority || 2,
+          remarks: payload.remarks || null,
+          assigned_to_id: payload.assigned_to_id,
+          assigned_to_name: payload.assigned_to_name,
+          title: payload.title || null,
+          issue_challenge: payload.issue_challenge || null,
+          type_of_action: payload.type_of_action || null,
+          date_initiated: payload.date_initiated || null,
+          is_key_action: payload.is_key_action || false,
+          tags: payload.tags || [],
+          assign_to_meeting_id: payload.assign_to_meeting_id || null,
+          minute_id: payload.minute_id || editingAction.minute_id || null,
+          persons_implementing: payload.persons_implementing || []
+        }
+      );
+
+      handleEditSave();
+      return response.data;
+    } catch (err) {
+      console.error('Error updating action:', err);
+      const errorMessage = extractErrorMessage(err);
+      if (isMountedRef.current) {
+        setError(errorMessage);
+      }
+      throw err;
+    }
+  }, [editingAction, handleEditSave]);
 
   // ==================== RENDER ====================
 
@@ -555,12 +566,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     <Fade in timeout={500}>
       <Box>
         {/* ==================== HEADER ==================== */}
-        <Stack 
+        <Stack
           direction="row"
-          sx={{ 
+          sx={{
             justifyContent: 'space-between',
             alignItems: 'center',
-            mb: 3 
+            mb: 3
           }}
         >
           <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
@@ -669,388 +680,361 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               </Button>
             </Box>
           </Grow>
+        ) : isMobile ? (
+          /* ==================== MOBILE CARD LAYOUT (No Horizontal Scrolling) ==================== */
+          <Stack spacing={2}>
+            {actions.map((action, index) => {
+              const statusConfig = getStatusConfig(action);
+              const implementers = getImplementersList(action);
+              const implementerNames = getImplementersNames(action);
+              const priorityLevel = action.priority || 2;
+
+              return (
+                <Card 
+                  key={action.id} 
+                  variant="outlined"
+                  sx={{ 
+                    borderRadius: 2, 
+                    bgcolor: isDarkMode ? '#1F2937' : 'background.paper',
+                    borderColor: isDarkMode ? '#374151' : '#E5E7EB',
+                    boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.05)',
+                  }}
+                >
+                  <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                    {/* Top Row: Index and Status */}
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1.5}>
+                      <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                        #{index + 1} • {action.meeting_title || action.minutes?.meeting?.title || 'Meeting Committee'}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        label={statusConfig.label}
+                        color={statusConfig.color}
+                        sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600, ...statusConfig.chipSx }}
+                      />
+                    </Stack>
+
+                    {/* Action Title / Description */}
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'text.primary', mb: 1 }}>
+                      {action.description}
+                    </Typography>
+
+                    {/* Issue / Challenge */}
+                    {action.issue_challenge && (
+                      <Box sx={{ mb: 1.5, p: 1, borderRadius: 1, bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02) }}>
+                        <Typography variant="caption" fontWeight={600} display="block" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                          Issue/Challenge:
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                          {action.issue_challenge}
+                        </Typography>
+                      </Box>
+                    )}
+
+                    {/* Details Grid */}
+                    <Grid container spacing={1} sx={{ mb: 1.5, fontSize: '0.75rem' }}>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Date Initiated</Typography>
+                        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>{formatDate(action.date_initiated || action.created_at)}</Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Expected Resolution</Typography>
+                        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>{formatDate(action.due_date)}</Typography>
+                      </Grid>
+                      
+                      {/* Person(s) Implementing with Badge for count > 1 */}
+                      <Grid item xs={12} sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Person(s) field</Typography>
+                        <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.5 }}>
+                          <Badge
+                            badgeContent={implementers.length > 1 ? implementers.length : null}
+                            color="primary"
+                            sx={{
+                              '& .MuiBadge-badge': {
+                                fontSize: '0.65rem',
+                                height: 16,
+                                minWidth: 16,
+                              }
+                            }}
+                          >
+                            <Avatar
+                              sx={{
+                                width: 26,
+                                height: 26,
+                                bgcolor: isDarkMode ? alpha('#7C3AED', 0.3) : 'primary.light',
+                                fontSize: '0.7rem',
+                                color: isDarkMode ? '#A78BFA' : 'primary.contrastText'
+                              }}
+                            >
+                              {getInitials(implementers[0]?.name)}
+                            </Avatar>
+                          </Badge>
+                          <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                            {implementerNames}
+                          </Typography>
+                        </Stack>
+                      </Grid>
+
+                      {action.remarks && (
+                        <Grid item xs={12} sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Latest Update</Typography>
+                          <Typography variant="body2" sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>{action.remarks}</Typography>
+                        </Grid>
+                      )}
+                    </Grid>
+
+                    {/* Footer Row: Priority & Actions */}
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" pt={1} borderTop={`1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`}>
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', mr: 0.5 }}>Priority:</Typography>
+                        <Stack direction="row" spacing={0.1}>
+                          {[1, 2, 3].map((starIdx) => (
+                            starIdx <= (5 - priorityLevel) ? (
+                              <StarIcon key={starIdx} sx={{ fontSize: 14, color: '#F59E0B' }} />
+                            ) : (
+                              <StarBorderIcon key={starIdx} sx={{ fontSize: 14, color: isDarkMode ? '#374151' : '#E5E7EB' }} />
+                            )
+                          ))}
+                        </Stack>
+                      </Stack>
+
+                      {/* Action Tool Buttons */}
+                      <Stack direction="row" spacing={0.5}>
+                        <Tooltip title="Update Progress">
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenProgressDialog(action)}
+                              disabled={!canEdit}
+                              sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main' }}
+                            >
+                              <TrendingUpIcon sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Edit Action">
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleEditAction(action)}
+                              disabled={!canEdit || loadingActionId === action.id}
+                              sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
+                            >
+                              {loadingActionId === action.id ? <CircularProgress size={14} /> : <EditIcon sx={{ fontSize: 18 }} />}
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Assign User">
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleAssignAction(action)}
+                              disabled={!canEdit}
+                              sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}
+                            >
+                              <PersonAdd sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="View Details">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleViewAction(action.id)}
+                            sx={{ color: isDarkMode ? '#9CA3AF' : 'default' }}
+                          >
+                            <VisibilityIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </Stack>
         ) : (
-          // ==================== ACTIONS TABLE ====================
+          /* ==================== DESKTOP TABLE LAYOUT ==================== */
           <TableContainer
             component={Paper}
             variant="outlined"
             sx={{
               borderRadius: 2,
               bgcolor: isDarkMode ? '#1F2937' : 'background.paper',
-              borderColor: isDarkMode ? '#374151' : '#E5E7EB'
+              borderColor: isDarkMode ? '#374151' : '#E5E7EB',
+              overflowX: 'auto',
             }}
           >
-            <Table>
+            <Table size="small" sx={{ minWidth: 1200 }}>
               <TableHead>
                 <TableRow sx={{ bgcolor: isDarkMode ? alpha('#A78BFA', 0.1) : 'action.hover' }}>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Description</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Assigned To</TableCell>
+                  <TableCell width="40" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>#</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Issue/Challenge</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Initiated</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Action</TableCell>
                   <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Due Date</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Priority</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Progress</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Person(s) Implementing</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Latest Update</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Updated</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Priority</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Status</TableCell>
                   <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {actions.map((action) => {
+                {actions.map((action, index) => {
                   const statusConfig = getStatusConfig(action);
-                  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
-                  const assignedToName = getAssignedToName(action);
-                  const progress = action.overall_progress_percentage || 0;
-                  const progressColor = getProgressColor(progress);
-                  const implementers = getImplementers(action);
-                  const priorityInfo = getPriorityLabel(action.priority);
-                  const isExpanded = expandedActions[action.id] || false;
-                  const isKeyAction = action.is_key_action || false;
+                  const implementers = getImplementersList(action);
+                  const implementerNames = getImplementersNames(action);
+                  const priorityLevel = action.priority || 2;
 
                   return (
-                    <React.Fragment key={action.id}>
-                      <TableRow hover sx={{
-                        '&:hover': { bgcolor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.02) },
-                        bgcolor: isKeyAction ? (isDarkMode ? alpha('#F59E0B', 0.05) : alpha('#F59E0B', 0.03)) : 'transparent'
-                      }}>
-                        <TableCell>
-                          <Stack spacing={0.5}>
-                            <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
-                              {action.description}
-                            </Typography>
-                            {/* Show additional info badges */}
-                            <Stack 
-                              direction="row" 
-                              spacing={1}
-                              sx={{ 
-                                alignItems: 'center',
-                                flexWrap: 'wrap' 
+                    <TableRow 
+                      key={action.id} 
+                      hover 
+                      sx={{
+                        '&:hover': { 
+                          bgcolor: isDarkMode ? '#FFFFFF0D' : '#00000005' 
+                        },
+                      }}
+                    >
+                      <TableCell sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', fontSize: '0.75rem', fontWeight: 500 }}>
+                        {index + 1}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 180 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                          {action.issue_challenge || '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                        {formatDate(action.date_initiated || action.created_at)}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 200 }}>
+                        <Typography variant="body2" fontWeight={500} sx={{ fontSize: '0.75rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: isDarkMode ? '#FFFFFF' : 'text.primary' }}>
+                          {action.description}
+                        </Typography>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                        {formatDate(action.due_date)}
+                      </TableCell>
+
+                      {/* Person(s) Implementing with Circular Badge for > 1 */}
+                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 160 }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Badge
+                            badgeContent={implementers.length > 1 ? implementers.length : null}
+                            color="primary"
+                            sx={{
+                              '& .MuiBadge-badge': {
+                                fontSize: '0.65rem',
+                                height: 16,
+                                minWidth: 16,
+                              }
+                            }}
+                          >
+                            <Avatar
+                              sx={{
+                                width: 26,
+                                height: 26,
+                                bgcolor: isDarkMode ? alpha('#7C3AED', 0.3) : 'primary.light',
+                                fontSize: '0.75rem',
+                                color: isDarkMode ? '#A78BFA' : 'primary.contrastText'
                               }}
                             >
-                              {action.title && (
-                                <Chip
-                                  label={action.title}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ height: 20, fontSize: '0.65rem' }}
-                                />
-                              )}
-                              {action.type_of_action && (
-                                <Chip
-                                  label={action.type_of_action}
-                                  size="small"
-                                  variant="outlined"
-                                  color="info"
-                                  sx={{ height: 20, fontSize: '0.65rem' }}
-                                />
-                              )}
-                              {isKeyAction && (
-                                <Chip
-                                  label="Key Action"
-                                  size="small"
-                                  color="warning"
-                                  icon={<LightbulbIcon sx={{ fontSize: 12 }} />}
-                                  sx={{ height: 20, fontSize: '0.6rem' }}
-                                />
-                              )}
-                              {action.tags && action.tags.length > 0 && (
-                                <Chip
-                                  label={`+${action.tags.length} tags`}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ height: 20, fontSize: '0.6rem' }}
-                                />
-                              )}
-                              {action.remarks && (
-                                <Tooltip title={action.remarks}>
-                                  <Chip
-                                    label="Has remarks"
-                                    size="small"
-                                    variant="outlined"
-                                    sx={{ height: 20, fontSize: '0.6rem' }}
-                                  />
-                                </Tooltip>
-                              )}
-                            </Stack>
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Stack direction="row" alignItems="center" spacing={1}>
-                            {implementers.length > 0 ? (
-                              <Badge
-                                badgeContent={implementers.length > 1 ? implementers.length : null}
-                                color="primary"
-                                sx={{
-                                  '& .MuiBadge-badge': {
-                                    fontSize: '0.6rem',
-                                    height: 16,
-                                    minWidth: 16,
-                                  }
-                                }}
-                              >
-                                <Avatar
-                                  sx={{
-                                    width: 28,
-                                    height: 28,
-                                    bgcolor: isDarkMode ? alpha('#A78BFA', 0.2) : 'primary.light',
-                                    fontSize: '0.75rem',
-                                    color: isDarkMode ? '#A78BFA' : 'primary.contrastText'
-                                  }}
-                                >
-                                  {getInitials(implementers[0]?.name)}
-                                </Avatar>
-                              </Badge>
-                            ) : (
-                              <Avatar
-                                sx={{
-                                  width: 28,
-                                  height: 28,
-                                  bgcolor: isDarkMode ? alpha('#6B7280', 0.2) : 'grey.300',
-                                  fontSize: '0.75rem',
-                                  color: isDarkMode ? '#6B7280' : 'grey.600'
-                                }}
-                              >
-                                ?
-                              </Avatar>
-                            )}
-                            <Box>
-                              <Typography variant="body2" sx={{ color: isDarkMode ? '#D1D5DB' : 'inherit' }}>
-                                {assignedToName}
-                              </Typography>
-                              {implementers.length > 1 && (
-                                <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-                                  +{implementers.length - 1} more
-                                </Typography>
-                              )}
-                            </Box>
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Stack direction="row" alignItems="center" spacing={1}>
-                            <ScheduleIcon fontSize="small" sx={{ color: isOverdue ? (isDarkMode ? '#F87171' : 'error') : (isDarkMode ? '#6B7280' : 'action') }} />
-                            <Typography variant="body2" sx={{ color: isOverdue ? (isDarkMode ? '#F87171' : 'error') : (isDarkMode ? '#D1D5DB' : 'text.primary') }}>
-                              {formatDate(action.due_date)}
-                            </Typography>
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={priorityInfo.label}
-                            sx={{
-                              height: 24,
-                              fontWeight: 600,
-                              bgcolor: alpha(priorityInfo.color, 0.15),
-                              color: priorityInfo.color,
-                              borderColor: alpha(priorityInfo.color, 0.3),
+                              {getInitials(implementers[0]?.name)}
+                            </Avatar>
+                          </Badge>
+                          <Typography 
+                            variant="body2" 
+                            sx={{ 
+                              fontSize: '0.75rem', 
+                              overflow: 'hidden', 
+                              textOverflow: 'ellipsis', 
+                              whiteSpace: 'nowrap', 
+                              color: isDarkMode ? '#D1D5DB' : 'text.primary' 
                             }}
-                            variant="outlined"
-                          />
-                        </TableCell>
-                        <TableCell sx={{ minWidth: 150 }}>
-                          <Stack spacing={0.5}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Typography variant="caption" fontWeight={500} sx={{ color: progressColor }}>
-                                {progress}%
-                              </Typography>
-                              {progress === 100 && (
-                                <CheckCircleIcon sx={{ fontSize: 14, color: isDarkMode ? '#34D399' : 'success.main' }} />
-                              )}
-                            </Box>
-                            <LinearProgress
-                              variant="determinate"
-                              value={progress}
-                              sx={{
-                                height: 6,
-                                borderRadius: 3,
-                                bgcolor: isDarkMode ? '#374151' : 'action.disabledBackground',
-                                '& .MuiLinearProgress-bar': {
-                                  bgcolor: progressColor,
-                                  borderRadius: 3
-                                }
-                              }}
-                            />
-                          </Stack>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Stack 
-                            direction="row" 
-                            spacing={0.5}
-                            sx={{ justifyContent: 'center' }}
                           >
-                            <Tooltip title={canEdit ? "Update Progress" : "Meeting must be started to update progress"}>
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleOpenProgressDialog(action)}
-                                  disabled={!canEdit}
-                                  sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main' }}
-                                >
-                                  <TrendingUpIcon fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title={canEdit ? "Edit Action" : "Meeting must be started to edit actions"}>
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleEditAction(action)}
-                                  disabled={!canEdit}
-                                  sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
-                                >
-                                  <EditIcon fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title={canEdit ? "Assign User" : "Meeting must be started to assign users"}>
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleAssignAction(action)}
-                                  disabled={!canEdit}
-                                  sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}
-                                >
-                                  <PersonAdd fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title="View Details">
+                            {implementerNames}
+                          </Typography>
+                        </Stack>
+                      </TableCell>
+
+                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 180 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                          {action.remarks || '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                        {formatDate(action.updated_at || action.created_at)}
+                      </TableCell>
+                      <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                        <Stack direction="row" spacing={0.2} justifyContent="center">
+                          {[1, 2, 3].map((starIdx) => (
+                            starIdx <= (5 - priorityLevel) ? (
+                              <StarIcon key={starIdx} sx={{ fontSize: 16, color: '#F59E0B' }} />
+                            ) : (
+                              <StarBorderIcon key={starIdx} sx={{ fontSize: 16, color: isDarkMode ? '#374151' : '#E5E7EB' }} />
+                            )
+                          ))}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          size="small"
+                          label={statusConfig.label}
+                          color={statusConfig.color}
+                          sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600, ...statusConfig.chipSx }}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Stack direction="row" spacing={0.2} justifyContent="center">
+                          <Tooltip title="Update Progress">
+                            <span>
                               <IconButton
                                 size="small"
-                                onClick={() => handleViewAction(action.id)}
-                                sx={{ color: isDarkMode ? '#9CA3AF' : 'default' }}
+                                onClick={() => handleOpenProgressDialog(action)}
+                                disabled={!canEdit}
+                                sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
-                                <VisibilityIcon fontSize="small" />
+                                <TrendingUpIcon sx={{ fontSize: 16 }} />
                               </IconButton>
-                            </Tooltip>
-                            <Tooltip title="More Info">
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Edit Action">
+                            <span>
                               <IconButton
                                 size="small"
-                                onClick={() => toggleExpand(action.id)}
-                                sx={{ color: isDarkMode ? '#9CA3AF' : 'default' }}
+                                onClick={() => handleEditAction(action)}
+                                disabled={!canEdit || loadingActionId === action.id}
+                                sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
-                                {isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                                {loadingActionId === action.id ? <CircularProgress size={14} /> : <EditIcon sx={{ fontSize: 16 }} />}
                               </IconButton>
-                            </Tooltip>
-                          </Stack>
-                        </TableCell>
-                      </TableRow>
-
-                      {/* ==================== EXPANDED ROW ==================== */}
-                      <TableRow>
-                        <TableCell colSpan={6} sx={{ p: 0, borderBottom: isExpanded ? '1px solid' : 'none', borderColor: isDarkMode ? '#374151' : '#E5E7EB' }}>
-                          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                            <Box sx={{ p: 2, bgcolor: isDarkMode ? alpha('#FFFFFF', 0.02) : alpha('#000000', 0.02) }}>
-                              <Stack spacing={2}>
-                                {/* New Fields Display */}
-                                <Stack 
-                                  direction="row" 
-                                  spacing={2}
-                                  sx={{ flexWrap: 'wrap' }}
-                                >
-                                  {action.title && (
-                                    <Stack direction="row" spacing={1} alignItems="center">
-                                      <LabelIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
-                                      <Typography variant="caption" fontWeight={600}>Title:</Typography>
-                                      <Typography variant="caption">{action.title}</Typography>
-                                    </Stack>
-                                  )}
-                                  {action.type_of_action && (
-                                    <Stack direction="row" spacing={1} alignItems="center">
-                                      <FlagIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
-                                      <Typography variant="caption" fontWeight={600}>Type:</Typography>
-                                      <Typography variant="caption">{action.type_of_action}</Typography>
-                                    </Stack>
-                                  )}
-                                  {action.date_initiated && (
-                                    <Stack direction="row" spacing={1} alignItems="center">
-                                      <ScheduleIcon fontSize="small" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }} />
-                                      <Typography variant="caption" fontWeight={600}>Initiated:</Typography>
-                                      <Typography variant="caption">{formatDate(action.date_initiated)}</Typography>
-                                    </Stack>
-                                  )}
-                                </Stack>
-
-                                {/* Issue/Challenge */}
-                                {action.issue_challenge && (
-                                  <Box>
-                                    <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-                                      Issue / Challenge:
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ mt: 0.5, color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
-                                      {action.issue_challenge}
-                                    </Typography>
-                                  </Box>
-                                )}
-
-                                {/* Remarks */}
-                                {action.remarks && (
-                                  <Box>
-                                    <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-                                      Remarks:
-                                    </Typography>
-                                    <Typography variant="body2" sx={{ mt: 0.5, color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
-                                      {action.remarks}
-                                    </Typography>
-                                  </Box>
-                                )}
-
-                                {/* Implementers List */}
-                                {implementers.length > 1 && (
-                                  <Box>
-                                    <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-                                      All Implementers:
-                                    </Typography>
-                                    <List dense sx={{ mt: 0.5 }}>
-                                      {implementers.map((person, idx) => (
-                                        <ListItem key={idx} sx={{ px: 0, py: 0.5 }}>
-                                          <ListItemAvatar sx={{ minWidth: 32 }}>
-                                            <Avatar sx={{ width: 24, height: 24, fontSize: '0.65rem' }}>
-                                              {getInitials(person.name)}
-                                            </Avatar>
-                                          </ListItemAvatar>
-                                          <ListItemText
-                                            primary={person.name}
-                                            secondary={
-                                              <Stack direction="row" spacing={1} component="span">
-                                                {person.email && <Typography variant="caption">{person.email}</Typography>}
-                                                {person.phone && <Typography variant="caption">{person.phone}</Typography>}
-                                              </Stack>
-                                            }
-                                            primaryTypographyProps={{ variant: 'caption', fontWeight: 500 }}
-                                            secondaryTypographyProps={{ variant: 'caption', component: 'span' }}
-                                          />
-                                        </ListItem>
-                                      ))}
-                                    </List>
-                                  </Box>
-                                )}
-
-                                {/* Tags */}
-                                {action.tags && action.tags.length > 0 && (
-                                  <Box>
-                                    <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
-                                      Tags:
-                                    </Typography>
-                                    <Stack 
-                                      direction="row" 
-                                      spacing={0.5}
-                                      sx={{ mt: 0.5, flexWrap: 'wrap' }}
-                                    >
-                                      {action.tags.map((tag, idx) => (
-                                        <Chip
-                                          key={idx}
-                                          label={tag}
-                                          size="small"
-                                          variant="outlined"
-                                          sx={{ height: 20, fontSize: '0.6rem' }}
-                                        />
-                                      ))}
-                                    </Stack>
-                                  </Box>
-                                )}
-                              </Stack>
-                            </Box>
-                          </Collapse>
-                        </TableCell>
-                      </TableRow>
-                    </React.Fragment>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Assign User">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleAssignAction(action)}
+                                disabled={!canEdit}
+                                sx={{ color: isDarkMode ? '#34D399' : 'success.main', '&.Mui-disabled': { opacity: 0.4 } }}
+                              >
+                                <PersonAdd sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="View Details">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleViewAction(action.id)}
+                              sx={{ color: isDarkMode ? '#9CA3AF' : 'default' }}
+                            >
+                              <VisibilityIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
               </TableBody>
@@ -1060,7 +1044,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
         {/* ==================== DIALOGS ==================== */}
 
-        {/* Add Action Dialog */}
         <AddActionDialog
           open={showAddDialog}
           onClose={() => setShowAddDialog(false)}
@@ -1069,31 +1052,31 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           meetingId={meetingId}
           meetingName={null}
           minutes={minutesList}
+          tagSuggestions={tagSuggestions}
           selectedMinuteId={null}
           loading={loading}
           error={error}
           busy={false}
         />
 
-        {/* Edit Action Dialog */}
         <AddActionDialog
           open={showEditDialog}
           onClose={() => {
             setShowEditDialog(false);
             setEditingAction(null);
           }}
-          onSave={handleActionCreate}
+          onSave={handleActionUpdate}
           editingAction={editingAction}
           meetingId={meetingId}
           meetingName={null}
           minutes={minutesList}
+          tagSuggestions={tagSuggestions}
           selectedMinuteId={editingAction?.minute_id || null}
           loading={loading}
           error={error}
           busy={false}
         />
 
-        {/* Progress Dialog */}
         <Dialog
           open={showProgressDialog}
           onClose={() => setShowProgressDialog(false)}
@@ -1108,49 +1091,25 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               flexDirection: 'column',
               overflow: 'hidden',
               m: 1,
-              boxShadow: isDarkMode
-                ? '0 20px 60px rgba(0,0,0,0.6)'
-                : '0 20px 60px rgba(0,0,0,0.15)',
             }
           }}
         >
-          <DialogTitle sx={{
-            pb: 1.5,
-            pt: 2.5,
-            px: 3,
-            color: isDarkMode ? '#FFFFFF' : 'inherit',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
+          <DialogTitle sx={{ 
+            pb: 1.5, 
+            pt: 2.5, 
+            px: 3, 
+            display: 'flex', 
+            alignItems: 'center', 
             justifyContent: 'space-between',
+            color: isDarkMode ? '#FFFFFF' : 'inherit',
           }}>
-            <Typography variant="h6" fontWeight={600}>
-              Update Progress
-            </Typography>
-            <IconButton
-              onClick={() => setShowProgressDialog(false)}
-              size="small"
-              sx={{
-                color: isDarkMode ? '#9CA3AF' : 'text.secondary',
-                '&:hover': {
-                  bgcolor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.04),
-                }
-              }}
-            >
+            <Typography variant="h6" fontWeight={600}>Update Progress</Typography>
+            <IconButton onClick={() => setShowProgressDialog(false)} size="small">
               <Close />
             </IconButton>
           </DialogTitle>
-          <Divider sx={{ borderColor: isDarkMode ? '#374151' : '#E5E7EB', flexShrink: 0 }} />
-          <DialogContent
-            sx={{
-              p: 0,
-              overflowY: 'auto',
-              flex: 1,
-              '&:first-of-type': {
-                pt: 0,
-              }
-            }}
-          >
+          <Divider sx={{ borderColor: isDarkMode ? '#374151' : '#E5E7EB' }} />
+          <DialogContent sx={{ p: 0, overflowY: 'auto', flex: 1 }}>
             <UpdateProgress
               ref={progressFormRef}
               actionId={selectedAction?.id}
@@ -1160,29 +1119,19 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               embedded={true}
             />
           </DialogContent>
-          <DialogActions
-            sx={{
-              p: 2,
-              px: 3,
-              flexShrink: 0,
-              gap: 1.5,
-              borderTop: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
-              bgcolor: isDarkMode ? '#1F2937' : '#FAFAFA',
-            }}
-          >
-            <Button
-              onClick={() => setShowProgressDialog(false)}
+          <DialogActions sx={{ 
+            p: 2, 
+            px: 3, 
+            gap: 1.5, 
+            borderTop: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+            bgcolor: isDarkMode ? '#1F2937' : '#FAFAFA',
+          }}>
+            <Button 
+              onClick={() => setShowProgressDialog(false)} 
               variant="outlined"
               sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                borderRadius: 2,
                 borderColor: isDarkMode ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.15)',
                 color: isDarkMode ? '#D1D5DB' : 'text.secondary',
-                '&:hover': {
-                  borderColor: isDarkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.25)',
-                  bgcolor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.03),
-                },
               }}
             >
               Cancel
@@ -1192,12 +1141,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               startIcon={<Save fontSize="small" />}
               onClick={() => progressFormRef.current?.submitForm()}
               sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                borderRadius: 2,
-                px: 3,
                 bgcolor: isDarkMode ? '#7C3AED' : 'primary.main',
-                boxShadow: isDarkMode ? 'none' : undefined,
                 '&:hover': {
                   bgcolor: isDarkMode ? '#6D28D9' : 'primary.dark',
                 },
@@ -1208,7 +1152,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
           </DialogActions>
         </Dialog>
 
-        {/* Assign User Dialog */}
         <AssignUserDialog
           open={showAssignDialog}
           action={selectedAction}

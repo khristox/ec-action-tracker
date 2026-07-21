@@ -504,7 +504,7 @@ export const deleteMeeting = createAsyncThunk(
 // Update Meeting Status
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateMeetingStatus',
-  async ({ id, status, comment }, { rejectWithValue, getState, dispatch }) => {
+  async ({ id, status, comment }, { rejectWithValue, getState }) => {
     try {
       const state = getState();
       const meetingStatusOptions = state.meetings.meetingStatusOptions;
@@ -524,14 +524,15 @@ export const updateMeetingStatus = createAsyncThunk(
       
       console.log('Updating meeting status:', { id, status: statusValue, comment });
       
-      // ✅ Use deduplicatedPost with a unique key
-      const key = `update_meeting_status_${id}`;
-      const response = await deduplicatedPost(
+      // ✅ Send parameters matching backend expectation (query parameters or payload)
+      const response = await api.patch(
         `/action-tracker/meetings/${id}/status`,
         null,
         { 
-          key,
-          params: { status: statusValue.toLowerCase(), comment: comment || '' }
+          params: { 
+            status: statusValue.toLowerCase(), 
+            comment: comment || '' 
+          } 
         }
       );
       
@@ -540,13 +541,8 @@ export const updateMeetingStatus = createAsyncThunk(
       // Normalize the response
       const normalizedData = normalizeMeetingStatus(response.data);
       
-      // IMPORTANT: Refresh the meeting data after status update
-      // This ensures we have the latest data from the server
-      const refreshedMeeting = await deduplicatedGet(
-        `/action-tracker/meetings/${id}`,
-        {},
-        { key: `meeting_${id}_refresh`, forceRefresh: true }
-      );
+      // Refresh the meeting data after status update
+      const refreshedMeeting = await api.get(`/action-tracker/meetings/${id}`);
       const finalData = normalizeMeetingStatus(refreshedMeeting.data);
       
       return finalData;
@@ -556,7 +552,6 @@ export const updateMeetingStatus = createAsyncThunk(
     }
   }
 );
-
 // Add Meeting Minutes
 export const addMeetingMinutes = createAsyncThunk(
   'meetings/addMeetingMinutes',

@@ -1,3 +1,4 @@
+# app/crud/meetings/action_tracker.py
 """
 Action Tracker CRUD Operations
 Complete implementation with all CRUD operations for all entities
@@ -720,8 +721,24 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         return person_dict.get('phone') or person_dict.get('telephone')
     
     def _get_person_user_id(self, person_dict: Dict[str, Any]) -> Optional[UUID]:
-        """Extract user_id from person dictionary"""
-        return person_dict.get('assigned_to_id')
+        """Extract user_id from person dictionary and safely cast to UUID if present.
+
+        The ActionImplementer table stores the FK as `user_id`.
+        The frontend sends the value under `user_id` (preferred) and also
+        mirrors it to `assigned_to_id` for backward compatibility.
+        We accept all three possible field names so nothing is silently dropped.
+        """
+        raw_id = (
+            person_dict.get('user_id') or
+            person_dict.get('assigned_to_id') or
+            person_dict.get('id')
+        )
+        if raw_id is not None and not isinstance(raw_id, UUID):
+            try:
+                return UUID(str(raw_id))
+            except (ValueError, TypeError):
+                return None
+        return raw_id
     
     # ==================== CREATE ====================
     
@@ -734,6 +751,12 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             # ==================== LEGACY FIELDS ====================
             assigned_to_id = action_data.get('assigned_to_id')
+            if assigned_to_id is not None and not isinstance(assigned_to_id, UUID):
+                try:
+                    assigned_to_id = UUID(str(assigned_to_id))
+                except (ValueError, TypeError):
+                    assigned_to_id = None
+
             assigned_to_name = action_data.get('assigned_to_name')
             
             if assigned_to_id:
@@ -975,7 +998,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 )
             )
         
-        # Sort with NULL due_dates at the end
+        # Sort safely: use string comparison or separate out NULLs without type clashes
         query = query.order_by(
             case(
                 (MeetingAction.due_date.is_(None), 1),
@@ -1063,6 +1086,12 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             # ==================== UPDATE LEGACY FIELDS ====================
             if 'assigned_to_id' in update_data:
                 assigned_to_id = update_data.get('assigned_to_id')
+                if assigned_to_id is not None and not isinstance(assigned_to_id, UUID):
+                    try:
+                        assigned_to_id = UUID(str(assigned_to_id))
+                    except (ValueError, TypeError):
+                        assigned_to_id = None
+
                 assigned_to_name = update_data.get('assigned_to_name')
                 
                 if assigned_to_id and not assigned_to_name:
@@ -1177,6 +1206,12 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     ) -> Optional[MeetingAction]:
         """Assign an action to a user - updates both legacy fields and implementers"""
         try:
+            if assigned_to_id is not None and not isinstance(assigned_to_id, UUID):
+                try:
+                    assigned_to_id = UUID(str(assigned_to_id))
+                except (ValueError, TypeError):
+                    raise ValueError(f"Invalid UUID format for assigned_to_id: {assigned_to_id}")
+
             action = await self.get(db, action_id)
             if not action:
                 return None
@@ -1445,7 +1480,12 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         
         if include_actions:
             query = query.options(
-                selectinload(MeetingMinutes.actions),
+                # ── FIX: also eager-load implementers on every action ──────────
+                # Without this, action.implementers is always [] when accessed
+                # through the minutes list endpoint, even when rows exist in the
+                # action_implementers table. The detail endpoint was fine because
+                # CRUDMeetingAction.get() already had selectinload(implementers).
+                selectinload(MeetingMinutes.actions).selectinload(MeetingAction.implementers),
                 selectinload(MeetingMinutes.created_by),
                 selectinload(MeetingMinutes.recorded_by)
             )
@@ -1465,7 +1505,7 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
             MeetingMinutes.id == minute_id,
             MeetingMinutes.is_active == True
         ).options(
-            selectinload(MeetingMinutes.actions),
+            selectinload(MeetingMinutes.actions).selectinload(MeetingAction.implementers),
             selectinload(MeetingMinutes.created_by),
             selectinload(MeetingMinutes.recorded_by)
         )

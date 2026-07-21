@@ -343,7 +343,6 @@ class MeetingActionUpdate(ORMBase):
     @model_validator(mode="after")
     def validate_update(self) -> "MeetingActionUpdate":
         """Ensure at least one field is being updated"""
-        # Get all fields that are not None
         fields = [f for f in self.model_fields.keys() if getattr(self, f) is not None]
         if not fields:
             raise ValueError("At least one field must be provided for update")
@@ -397,9 +396,51 @@ class MeetingActionResponse(MeetingActionBase):
     meeting_title: Optional[str] = None
     meeting_date: Optional[datetime] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def map_orm_implementers(cls, data: Any) -> Any:
+        """Map SQLAlchemy model implementers relationship to schema persons_implementing field automatically"""
+        if hasattr(data, "implementers") and not getattr(data, "persons_implementing", None):
+            orm_implementers = getattr(data, "implementers", None)
+            if orm_implementers:
+                mapped_persons = [
+                    {
+                        "user_id": str(p.user_id) if p.user_id else None,
+                        "assigned_to_id": str(p.user_id) if p.user_id else None,
+                        "name": p.name or "",
+                        "email": p.email or "",
+                        "phone": p.phone or "",
+                        "source_type": "system" if p.user_id else "external",
+                        "is_private": bool(p.user_id),
+                    }
+                    for p in orm_implementers
+                ]
+                if isinstance(data, dict):
+                    data["persons_implementing"] = mapped_persons
+                else:
+                    setattr(data, "persons_implementing", mapped_persons)
+        return data
+
     @model_validator(mode="after")
     def set_display_names(self) -> "MeetingActionResponse":
         """Extract clean display names from structured data"""
+
+        if not self.persons_implementing:
+            orm_implementers = getattr(self, 'implementers', None)
+            if orm_implementers:
+                self.persons_implementing = [
+                    {
+                        "user_id":        str(p.user_id) if p.user_id else None,
+                        "assigned_to_id": str(p.user_id) if p.user_id else None,
+                        "name":           p.name  or "",
+                        "email":          p.email or "",
+                        "phone":          p.phone or "",
+                        "source_type":    "system" if p.user_id else "external",
+                        "is_private":     bool(p.user_id),
+                    }
+                    for p in orm_implementers
+                ]
+
         # Set primary assignee display name
         assigned = self.assigned_to_name
         if isinstance(assigned, dict):
@@ -409,17 +450,16 @@ class MeetingActionResponse(MeetingActionBase):
         else:
             self.assigned_to_name_display = 'Unassigned'
         
-        # Build persons_implementing display with privacy protection
+        # Build persons_implementing_display with privacy masking
         if self.persons_implementing:
             display_list = []
             for person in self.persons_implementing:
                 if isinstance(person, dict):
                     display_person = person.copy()
-                    # Mask email for privacy if it's a system user
                     if display_person.get('is_private') and display_person.get('email'):
                         email = display_person['email']
                         if '@' in email:
-                            local, domain = email.split('@')
+                            local, domain = email.split('@', 1)
                             if len(local) > 2:
                                 display_person['email'] = f"{local[:2]}***@{domain}"
                     display_list.append(display_person)
@@ -458,7 +498,6 @@ class MeetingMinutesBase(BaseModel):
         if v is None:
             return None
         if isinstance(v, str):
-            # Remove excessive whitespace but preserve HTML structure
             return ' '.join(v.split())
         return str(v) if v else None
     
@@ -486,9 +525,6 @@ class MeetingMinutesCreate(MeetingMinutesBase):
     @model_validator(mode="after")
     def validate_minimum_data(self) -> "MeetingMinutesCreate":
         """Ensure at least one content field is provided"""
-        if not self.topic and not self.discussion and not self.decisions:
-            # Allow empty minutes - they can be updated later
-            pass
         return self
 
 
@@ -646,7 +682,7 @@ class MinuteSearchParams(BaseModel):
     model_config = ConfigDict(extra="ignore")
     
     meeting_id: Optional[UUID] = None
-    search_term: Optional[str] = Field(None, max_length=200, description="Search in topic, discussion, decisions")
+    search_temp: Optional[str] = Field(None, max_length=200, description="Search in topic, discussion, decisions")
     start_date: Optional[datetime] = Field(None, description="Filter by start date")
     end_date: Optional[datetime] = Field(None, description="Filter by end date")
     include_default: bool = Field(True, description="Include default minutes")
@@ -654,26 +690,10 @@ class MinuteSearchParams(BaseModel):
     has_actions: Optional[bool] = Field(None, description="Filter by whether it has actions")
     min_actions: Optional[int] = Field(None, ge=0, description="Minimum number of actions")
     max_actions: Optional[int] = Field(None, ge=0, description="Maximum number of actions")
-    
-    @model_validator(mode="after")
-    def validate_date_range(self) -> "MinuteSearchParams":
-        """Validate date range"""
-        if self.start_date and self.end_date and self.start_date > self.end_date:
-            raise ValueError("Start date must be before end date")
-        return self
-    
-    @model_validator(mode="after")
-    def validate_actions_range(self) -> "MinuteSearchParams":
-        """Validate actions range"""
-        if self.min_actions is not None and self.max_actions is not None:
-            if self.min_actions > self.max_actions:
-                raise ValueError("Min actions must be less than or equal to max actions")
-        return self
 
 
 # ==================== REBUILD MODELS ====================
 
-# Rebuild models to resolve forward references
 MeetingMinutesResponse.model_rebuild()
 MeetingActionResponse.model_rebuild()
 MinuteActionSummary.model_rebuild()

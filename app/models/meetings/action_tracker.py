@@ -730,6 +730,7 @@ class MeetingAction(Base):
     issue_challenge = Column(Text, nullable=True)
     is_key_action = Column(Boolean, default=False, nullable=False)
     type_of_action = Column(String(100), nullable=True)
+    category = Column(String(100), nullable=True)
     date_initiated = Column(DateTime(timezone=True), nullable=True)
     tags = Column(JSON, nullable=True)  # list[str], e.g. ["urgent", "budget"]
     assign_to_meeting_id = Column(
@@ -963,6 +964,7 @@ class ActionImplementer(Base):
     __table_args__ = (
         Index('ix_action_implementers_action_id', 'action_id'),
         Index('ix_action_implementers_user_id', 'user_id'),
+        Index('ix_action_implementers_email', 'email'),
     )
 
     id = Column(CustomUUID, primary_key=True, default=uuid4)
@@ -978,21 +980,28 @@ class ActionImplementer(Base):
     phone = Column(String(50), nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
 
+    # Set when user_id was resolved. NULL = still an external person.
+    linked_at = Column(DateTime(timezone=True), nullable=True)
+    # Set when the "you have been assigned an action" email went out.
+    notified_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
     action = relationship("MeetingAction", back_populates="implementers")
+
     user = relationship("User", foreign_keys=[user_id], lazy="selectin")
 
     def to_dict(self) -> dict:
         return {
             "id": str(self.id),
             "user_id": str(self.user_id) if self.user_id else None,
+            "is_system_user": self.user_id is not None,
             "name": self.name,
             "email": self.email,
             "phone": self.phone,
+            "sort_order": self.sort_order,
         }
-
     def __repr__(self) -> str:
         return f"<ActionImplementer id={self.id} name='{self.name}' action_id={self.action_id}>"
 

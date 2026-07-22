@@ -290,3 +290,34 @@ CREATE TABLE action_implementers (
 -- Indexes
 CREATE INDEX ix_action_implementers_action_id ON action_implementers(action_id);
 CREATE INDEX ix_action_implementers_user_id ON action_implementers(user_id);
+
+
+
+
+ALTER TABLE action_implementers ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE action_implementers ADD COLUMN participant_id UUID REFERENCES participants(id);
+
+ALTER TABLE action_implementers ADD CONSTRAINT ck_ai_has_subject
+  CHECK (user_id IS NOT NULL OR participant_id IS NOT NULL);
+
+
+ALTER TABLE action_implementers ADD COLUMN linked_at TIMESTAMPTZ;
+ALTER TABLE action_implementers ADD COLUMN notified_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS ix_action_implementers_email_lower
+    ON action_implementers (lower(email));
+CREATE INDEX IF NOT EXISTS ix_action_implementers_phone
+    ON action_implementers (phone) WHERE phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_users_email_lower ON users (lower(email));
+
+UPDATE action_implementers SET linked_at = created_at
+    WHERE user_id IS NOT NULL AND linked_at IS NULL;
+UPDATE action_implementers SET email = lower(trim(email))
+    WHERE email IS NOT NULL AND email <> lower(trim(email));
+
+
+ALTER TABLE meeting_actions ADD COLUMN category VARCHAR(100);
+CREATE INDEX IF NOT EXISTS ix_meeting_actions_category
+    ON meeting_actions (category);
+
+ALTER TABLE meeting_actions ADD COLUMN category VARCHAR(100);

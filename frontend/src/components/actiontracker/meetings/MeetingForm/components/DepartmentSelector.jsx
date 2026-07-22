@@ -1,298 +1,283 @@
 // src/components/meetings/MeetingForm/components/DepartmentSelector.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+//
+// ADJUST THIS IMPORT to wherever your axios instance lives (the one that logs
+// "API Request:" from api.js). Everything else is self-contained.
+import api from '../../../../../services/api';
+
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Stack,
-  Typography,
-  Box,
-  FormHelperText,
-  CircularProgress,
+  ListSubheader,
   TextField,
   InputAdornment,
+  Box,
+  Stack,
+  Typography,
   Chip,
-  IconButton,
-  Divider,
-  Popover,
-  Paper,
-  List,
-  ListItemButton,
-  ListItemText,
-  ListItemAvatar,
   Avatar,
-  Button,
-  Alert
+  IconButton,
+  FormHelperText,
+  CircularProgress,
+  Tooltip,
 } from '@mui/material';
 import {
-  Domain as DepartmentIcon,
   Search as SearchIcon,
-  Close as Close,
-  CheckCircle as CheckCircleIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Business as BusinessIcon,
 } from '@mui/icons-material';
-import api from '../../../../../services/api';
 
-// Custom hook for debouncing
-const useDebounce = (value, delay) => {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  
-  return debouncedValue;
+const ENDPOINT = '/auth/me/departments';
+
+// ----------------------------------------------------------------------------
+// Module-level cache + in-flight de-duplication.
+//
+// This is what stops the repeated /auth/me/departments calls. Two mounts (or
+// React StrictMode's double-invoke in dev) now share one promise instead of
+// firing one request each, and a remount reuses the cached list instead of
+// clearing it and re-fetching — which is what made a selection appear to
+// vanish while the list was momentarily empty.
+// ----------------------------------------------------------------------------
+let cache = null;
+let inFlight = null;
+
+// IMPORTANT: meetings.restricted_department_id has a foreign key to
+// organization_nodes.id. /auth/me/departments returns the current user's
+// *memberships*, whose own `id` is the membership row — not the node. Reading
+// `id` first sends the membership id and the insert fails with
+// ForeignKeyViolationError. Node-shaped keys are therefore checked first, and
+// plain `id` is only the last resort (for when the endpoint really does return
+// node objects).
+const NODE_ID_KEYS = [
+  'organization_node_id',
+  'node_id',
+  'department_id',
+  'organization_id',
+  'id',
+];
+
+const pickNodeId = (d) => {
+  for (const key of NODE_ID_KEYS) {
+    const v = d?.[key];
+    if (v !== undefined && v !== null && v !== '') return String(v);
+  }
+  return '';
 };
 
-export const DepartmentSelector = ({ value, onChange, disabled, required = false }) => {
-  const [departments, setDepartments] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [popoverAnchor, setPopoverAnchor] = useState(null);
-  
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+const normaliseDepartment = (d) => ({
+  id: pickNodeId(d),
+  name: d?.name ?? d?.department_name ?? d?.node_name ?? d?.title ?? 'Unnamed department',
+  role: d?.role ?? d?.membership_role ?? d?.member_role ?? null,
+  raw: d,
+});
 
-  // Fetch user's departments
-  const fetchUserDepartments = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await api.get('/auth/me/departments', {
-        params: { limit: 100, active_only: true }
-      });
-      
-      // Handle response structure
-      let departmentsData = [];
-      if (response.data?.success === true && Array.isArray(response.data.data)) {
-        departmentsData = response.data.data;
-      } else if (Array.isArray(response.data)) {
-        departmentsData = response.data;
-      } else if (response.data?.items) {
-        departmentsData = response.data.items;
+const extractList = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.departments)) return payload.departments;
+  return [];
+};
+
+const loadDepartments = ({ force = false } = {}) => {
+  if (!force && cache) return Promise.resolve(cache);
+  if (!force && inFlight) return inFlight;
+
+  inFlight = api
+    .get(ENDPOINT)
+    .then((res) => {
+      const raw = extractList(res?.data ?? res);
+
+      // One-time dev log so the real payload shape is visible without a
+      // network-tab hunt. Confirm which key holds the organization_nodes id,
+      // then trim NODE_ID_KEYS to just that one.
+      if (import.meta.env?.DEV && raw.length) {
+        console.debug('[DepartmentSelector] raw record:', raw[0]);
       }
-      
-      // Transform data - remove path from being stored
-      const transformedDepartments = departmentsData.map(dept => ({
-        id: dept.department_id || dept.id,
-        name: dept.department_name || dept.name,
-        code: dept.code || dept.department_code || '',
-        description: dept.description || '',
-        role: dept.role || 'member',
-        status: dept.status || 'active',
-        is_primary: dept.is_primary || false,
-        user_id: dept.user_id,
-        assignment_id: dept.id
-      }));
-      
-      setDepartments(transformedDepartments);
-      
-      if (transformedDepartments.length === 0) {
-        setError('No departments assigned to your account. Please contact your administrator.');
-      }
-      
-    } catch (error) {
-      console.error('Error fetching departments:', error);
-      setError('Unable to load your departments. Please refresh or contact support.');
-      setDepartments([]);
-    } finally {
-      setLoading(false);
-    }
+
+      const list = raw.map(normaliseDepartment).filter((d) => d.id);
+      cache = list;
+      return list;
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+
+  return inFlight;
+};
+
+/** Call after the user joins/leaves a department elsewhere in the app. */
+export const invalidateDepartmentCache = () => {
+  cache = null;
+  inFlight = null;
+};
+
+// ============================================================================
+// Component
+// ============================================================================
+
+export const DepartmentSelector = ({
+  value,
+  onChange,
+  disabled = false,
+  required = false,
+  error = false,
+  helperText,
+  label = 'Department',
+}) => {
+  const [departments, setDepartments] = useState(() => cache ?? []);
+  const [loading, setLoading] = useState(() => !cache);
+  const [loadError, setLoadError] = useState(null);
+  const [search, setSearch] = useState('');
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  // Load departments on mount
+  const fetchList = useCallback((opts) => {
+    setLoading(true);
+    setLoadError(null);
+    return loadDepartments(opts)
+      .then((list) => {
+        if (!mountedRef.current) return;
+        setDepartments(list);
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return;
+        setLoadError(
+          err?.response?.data?.detail ||
+            err?.message ||
+            'Could not load departments'
+        );
+      })
+      .finally(() => {
+        if (mountedRef.current) setLoading(false);
+      });
+  }, []);
+
+  // Empty dependency array on purpose. fetchList is stable, and nothing about
+  // this fetch depends on props — listing `onChange` or `value` here is what
+  // makes the request loop.
   useEffect(() => {
-    fetchUserDepartments();
-  }, [fetchUserDepartments]);
+    fetchList();
+  }, [fetchList]);
 
-  // Filter departments based on search term
-  const filteredDepartments = useMemo(() => {
-    if (!debouncedSearchTerm) return departments;
-    
-    const term = debouncedSearchTerm.toLowerCase();
-    return departments.filter(dept =>
-      dept.name?.toLowerCase().includes(term) ||
-      dept.code?.toLowerCase().includes(term)
-    );
-  }, [departments, debouncedSearchTerm]);
+  // --------------------------------------------------------------------------
+  // Controlled value.
+  //
+  // Always a string, never undefined, so MUI cannot flip the Select from
+  // controlled to uncontrolled (the warning you were seeing at line 305).
+  // --------------------------------------------------------------------------
+  const selectedId = value === null || value === undefined ? '' : String(value);
 
-  // Handle department selection
-  const handleChange = useCallback((selectedValue) => {
-    onChange(selectedValue);
-    setSearchTerm('');
-    setPopoverAnchor(null);
-  }, [onChange]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return departments;
+    return departments.filter((d) => d.name.toLowerCase().includes(q));
+  }, [departments, search]);
 
-  // Handle clear selection
-  const handleClear = useCallback(() => {
-    onChange('');
-    setSearchTerm('');
-  }, [onChange]);
+  // If a department is selected but is not in the currently rendered list —
+  // because the list is still loading, or the search filtered it out — render
+  // a hidden MenuItem for it anyway. Without this the value is out of range,
+  // MUI renders an empty control, and the selection looks like it was lost.
+  const selectedIsRenderable = filtered.some((d) => d.id === selectedId);
+  const selectedDepartment = departments.find((d) => d.id === selectedId);
 
-  // Handle refresh
-  const handleRefresh = useCallback(() => {
-    fetchUserDepartments();
-  }, [fetchUserDepartments]);
+  const handleChange = useCallback(
+    (event) => {
+      const next = event.target.value;
+      const id = next === '' ? null : next;
+      // Second argument is the full department object, so the parent can also
+      // record the name (for the Review step) without a second lookup.
+      const dept = id ? departments.find((d) => d.id === id) ?? null : null;
+      onChange?.(id, dept);
+    },
+    [onChange, departments]
+  );
 
-  // Get role badge color
-  const getRoleColor = (role) => {
-    switch (role?.toLowerCase()) {
-      case 'head': return 'error';
-      case 'manager': return 'warning';
-      case 'supervisor': return 'info';
-      case 'member': return 'default';
-      default: return 'default';
-    }
-  };
+  const handleRefresh = useCallback(
+    (event) => {
+      event.stopPropagation();
+      fetchList({ force: true });
+    },
+    [fetchList]
+  );
 
-  // Get role label
-  const getRoleLabel = (role) => {
-    switch (role?.toLowerCase()) {
-      case 'head': return 'Dept Head';
-      case 'manager': return 'Manager';
-      case 'supervisor': return 'Supervisor';
-      case 'member': return 'Member';
-      default: return role || 'Member';
-    }
-  };
-
-  // Custom Select renderer - ONLY shows name, never ID or path
-  const renderValue = useCallback(() => {
-    if (!value) return '';
-    const dept = departments.find(d => d.id === value);
-    if (!dept) return '';
-    
-    return (
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <DepartmentIcon fontSize="small" sx={{ color: '#FF9800' }} />
-        <Typography variant="body2">{dept.name}</Typography>
-        {dept.role && (
-          <Chip 
-            label={getRoleLabel(dept.role)} 
-            size="small" 
-            color={getRoleColor(dept.role)}
-            sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
-          />
-        )}
-      </Stack>
-    );
-  }, [value, departments]);
-
-  // Handle popover open/close
-  const handleOpenPopover = (event) => {
-    if (!disabled) {
-      setPopoverAnchor(event.currentTarget);
-    }
-  };
-
-  const handleClosePopover = () => {
-    setPopoverAnchor(null);
-    setSearchTerm('');
-  };
-
-  const isOpen = Boolean(popoverAnchor);
-
-  // If no departments and not loading, show message
-  if (!loading && departments.length === 0 && !error) {
-    return (
-      <FormControl fullWidth disabled={disabled}>
-        <InputLabel>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <DepartmentIcon fontSize="small" />
-            <span>Department {required && '*'}</span>
-          </Stack>
-        </InputLabel>
-        <Select
-          value=""
-          disabled
-          label="Department *"
-          renderValue={() => ''}
-        >
-          <MenuItem disabled>No departments available</MenuItem>
-        </Select>
-        <FormHelperText>No departments assigned to your account</FormHelperText>
-      </FormControl>
-    );
-  }
+  const renderRow = (dept) => (
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0 }}>
+      <Avatar sx={{ width: 28, height: 28, fontSize: 13 }}>
+        {dept.name?.charAt(0)?.toUpperCase() || <BusinessIcon sx={{ fontSize: 16 }} />}
+      </Avatar>
+      <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0 }}>
+        {dept.name}
+      </Typography>
+      {dept.role && (
+        <Chip
+          label={dept.role}
+          size="small"
+          variant="outlined"
+          sx={{ height: 20, textTransform: 'capitalize' }}
+        />
+      )}
+    </Stack>
+  );
 
   return (
-    <>
-      <FormControl fullWidth disabled={disabled} required={required}>
-        <InputLabel>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <DepartmentIcon fontSize="small" />
-            <span>Department {required && '*'}</span>
-          </Stack>
-        </InputLabel>
-        
-        <Select
-          value={value || ''}
-          onChange={(e) => handleChange(e.target.value)}
-          label="Department *"
-          renderValue={renderValue}
-          onClick={handleOpenPopover}
-          IconComponent={() => null}
-          endAdornment={
-            value && !disabled ? (
-              <Close 
-                fontSize="small" 
-                sx={{ 
-                  mr: 1, 
-                  cursor: 'pointer',
-                  opacity: 0.7,
-                  '&:hover': { opacity: 1 }
-                }} 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleClear();
-                }}
-              />
-            ) : null
-          }
-          MenuProps={{ open: false }}
-        />
-        
-        <FormHelperText>
-          {departments.length === 0 && !loading && !error
-            ? "No departments found"
-            : "Select the department this meeting belongs to"}
-        </FormHelperText>
-      </FormControl>
-
-      {/* Custom Popover Menu with Search */}
-      <Popover
-        open={isOpen}
-        anchorEl={popoverAnchor}
-        onClose={handleClosePopover}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'left',
+    <FormControl
+      fullWidth
+      disabled={disabled}
+      required={required}
+      error={Boolean(error || loadError)}
+    >
+      <InputLabel id="department-selector-label">{label}</InputLabel>
+      <Select
+        labelId="department-selector-label"
+        id="department-selector"
+        label={label}
+        value={selectedId}
+        onChange={handleChange}
+        // Close on select, and reset the search so the next open starts clean.
+        onClose={() => setSearch('')}
+        renderValue={() => {
+          if (!selectedId) return null;
+          if (selectedDepartment) return renderRow(selectedDepartment);
+          // Selected but not yet loaded — show a placeholder rather than blank.
+          return (
+            <Typography variant="body2" color="text.secondary">
+              {loading ? 'Loading…' : 'Selected department'}
+            </Typography>
+          );
         }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: 'left',
-        }}
-        PaperProps={{
-          sx: {
-            width: popoverAnchor?.clientWidth || 400,
-            maxHeight: 400,
-            p: 0,
-            mt: 1,
-            borderRadius: 2
-          }
+        MenuProps={{
+          autoFocus: false,
+          PaperProps: { sx: { maxHeight: 380 } },
         }}
       >
-        <Stack spacing={1} sx={{ p: 2 }}>
-          {/* Search Input */}
+        {/* Search. ListSubheader is not a menu item, so it will not be
+            selected by MUI's type-ahead or arrow keys. */}
+        <ListSubheader sx={{ p: 1, bgcolor: 'background.paper' }}>
           <TextField
             size="small"
-            placeholder="Search departments..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            fullWidth
             autoFocus
+            placeholder="Search departments..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            // Stop the Select stealing keystrokes for its type-ahead, and
+            // stop Escape/Space closing the menu while typing.
+            onKeyDown={(e) => e.stopPropagation()}
             slotProps={{
               input: {
                 startAdornment: (
@@ -300,111 +285,73 @@ export const DepartmentSelector = ({ value, onChange, disabled, required = false
                     <SearchIcon fontSize="small" />
                   </InputAdornment>
                 ),
-                endAdornment: loading && (
-                  <InputAdornment position="end">
-                    <CircularProgress size={16} />
-                  </InputAdornment>
-                )
-              }
+              },
             }}
           />
+        </ListSubheader>
 
-          {/* Loading State */}
-          {loading && (
-            <Stack alignItems="center" sx={{ py: 3 }}>
-              <CircularProgress size={30} />
-              <Typography variant="caption" sx={{ mt: 1 }}>
-                Loading your departments...
-              </Typography>
+        {/* Keeps the controlled value in range while loading or filtering. */}
+        {selectedId && !selectedIsRenderable && (
+          <MenuItem value={selectedId} sx={{ display: 'none' }}>
+            {selectedDepartment ? renderRow(selectedDepartment) : selectedId}
+          </MenuItem>
+        )}
+
+        {loading && departments.length === 0 && (
+          <MenuItem disabled>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+              <CircularProgress size={16} />
+              <Typography variant="body2">Loading departments…</Typography>
             </Stack>
-          )}
+          </MenuItem>
+        )}
 
-          {/* Error State */}
-          {error && !loading && (
-            <Alert 
-              severity="error" 
-              action={
-                <Button color="inherit" size="small" onClick={handleRefresh} startIcon={<RefreshIcon />}>
-                  Retry
-                </Button>
-              }
-            >
-              {error}
-            </Alert>
-          )}
+        {!loading && filtered.length === 0 && (
+          <MenuItem disabled>
+            <Typography variant="body2" color="text.secondary">
+              {search ? 'No departments match that search' : 'No departments available'}
+            </Typography>
+          </MenuItem>
+        )}
 
-          {/* No Results */}
-          {!loading && !error && filteredDepartments.length === 0 && (
-            <Alert severity="info">
-              {searchTerm 
-                ? `No departments matching "${searchTerm}"` 
-                : "You don't have any departments assigned yet."}
-            </Alert>
-          )}
+        {filtered.map((dept) => (
+          <MenuItem key={dept.id} value={dept.id}>
+            {renderRow(dept)}
+          </MenuItem>
+        ))}
 
-          {/* Departments List - No path displayed */}
-          {!loading && !error && filteredDepartments.length > 0 && (
-            <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
-              <List dense disablePadding>
-                {filteredDepartments.map((dept) => (
-                  <ListItemButton
-                    key={dept.id}
-                    selected={value === dept.id}
-                    onClick={() => handleChange(dept.id)}
-                  >
-                    <ListItemAvatar>
-                      <Avatar sx={{ bgcolor: 'primary.light', width: 32, height: 32 }}>
-                        <DepartmentIcon fontSize="small" />
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Typography variant="body2" fontWeight={value === dept.id ? 600 : 400}>
-                            {dept.name}
-                          </Typography>
-                          {dept.code && (
-                            <Chip 
-                              label={dept.code} 
-                              size="small" 
-                              variant="outlined" 
-                              sx={{ height: 20, fontSize: '0.65rem' }}
-                            />
-                          )}
-                          <Chip 
-                            label={getRoleLabel(dept.role)} 
-                            size="small" 
-                            color={getRoleColor(dept.role)}
-                            sx={{ height: 20, fontSize: '0.65rem' }}
-                          />
-                        </Stack>
-                      }
-                    />
-                    {value === dept.id && (
-                      <CheckCircleIcon color="primary" fontSize="small" />
-                    )}
-                  </ListItemButton>
-                ))}
-              </List>
-            </Paper>
-          )}
+        {/* Footer: count + refresh. */}
+        <ListSubheader
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            py: 0.5,
+            bgcolor: 'background.paper',
+            borderTop: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            {filtered.length} available
+          </Typography>
+          <Tooltip title="Reload departments">
+            <span>
+              <IconButton size="small" onClick={handleRefresh} disabled={loading}>
+                <RefreshIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </ListSubheader>
+      </Select>
 
-          {/* Summary */}
-          {!loading && !error && filteredDepartments.length > 0 && (
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="caption" color="text.secondary">
-                Showing {filteredDepartments.length} of {departments.length} departments
-              </Typography>
-              {value && (
-                <Button size="small" onClick={handleClear} startIcon={<Close />}>
-                  Clear
-                </Button>
-              )}
-            </Stack>
-          )}
-        </Stack>
-      </Popover>
-    </>
+      <FormHelperText>
+        {loadError ||
+          helperText ||
+          'Only members of the selected department can access this meeting'}
+      </FormHelperText>
+    </FormControl>
   );
 };
 

@@ -460,8 +460,7 @@ class MeetingActionResponse(MeetingActionBase):
                         email = display_person['email']
                         if '@' in email:
                             local, domain = email.split('@', 1)
-                            if len(local) > 2:
-                                display_person['email'] = f"{local[:2]}***@{domain}"
+                           
                     display_list.append(display_person)
                 else:
                     display_list.append(person)

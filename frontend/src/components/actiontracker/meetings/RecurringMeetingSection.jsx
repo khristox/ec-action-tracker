@@ -536,24 +536,7 @@ const MeetingForm = () => {
         <Container maxWidth="md" sx={{ px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
 
           {/* Desktop Header */}
-          {!isMobile && (
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 1 }}>
-              <Box>
-                <Typography variant="h4" fontWeight={800} color="primary">
-                  {isEditMode ? 'Edit Meeting' : 'Create New Meeting'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {isEditMode ? 'Update meeting details' : 'Fill in the details to schedule a new meeting'}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1}>
-                <Button variant="outlined" startIcon={<Cancel />} onClick={handleCancel} disabled={apiLoading}>Cancel</Button>
-                {isEditMode && (
-                  <Button variant="outlined" color="info" startIcon={<VisibilityIcon />} onClick={() => navigate(`/meetings/${id}`)}>View</Button>
-                )}
-              </Stack>
-            </Box>
-          )}
+          
 
           <Paper sx={{ p: { xs: 2, sm: 3, md: 4 }, borderRadius: { xs: 2, md: 3 } }}>
 

@@ -68,27 +68,16 @@ const VALIDATION_MESSAGES = {
 // Helper Functions - UTC Date Handling
 // ============================================================================
 
-/**
- * Safely parse a date value to a Date object using UTC
- * Handles strings in YYYY-MM-DD format and Date objects
- */
 const safeParseDate = (value) => {
   if (!value) return null;
-  
-  // If it's already a Date object and valid, return it
   if (value instanceof Date && !isNaN(value.getTime())) {
     return value;
   }
-  
-  // If it's a string
   if (typeof value === 'string') {
-    // If it's in YYYY-MM-DD format, parse as UTC
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
       const [year, month, day] = value.split('-').map(Number);
       return new Date(Date.UTC(year, month - 1, day));
     }
-    
-    // Try to parse as ISO string
     try {
       const parsed = new Date(value);
       if (!isNaN(parsed.getTime())) {
@@ -98,33 +87,21 @@ const safeParseDate = (value) => {
       // Ignore
     }
   }
-  
   return null;
 };
 
-/**
- * Safely parse a time value to a Date object
- * Handles strings in HH:mm:ss format and Date objects
- */
 const safeParseTime = (value) => {
   if (!value) return null;
-  
-  // If it's already a Date object and valid, return it
   if (value instanceof Date && !isNaN(value.getTime())) {
     return value;
   }
-  
-  // If it's a string
   if (typeof value === 'string') {
-    // If it's in HH:mm:ss format
     if (/^\d{2}:\d{2}(:\d{2})?$/.test(value)) {
       const [hours, minutes, seconds = '00'] = value.split(':').map(Number);
       const date = new Date();
       date.setHours(hours, minutes, seconds, 0);
       return date;
     }
-    
-    // Try to parse as ISO string
     try {
       const parsed = new Date(value);
       if (!isNaN(parsed.getTime())) {
@@ -134,40 +111,11 @@ const safeParseTime = (value) => {
       // Ignore
     }
   }
-  
   return null;
 };
 
-/**
- * Format a date for display using UTC
- */
-const formatDateUTC = (value) => {
-  if (!value) return null;
-  const date = safeParseDate(value);
-  if (!date) return null;
-  try {
-    return format(date, 'PPP');
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Format a time for display
- */
-const formatTimeDisplay = (value) => {
-  if (!value) return null;
-  const time = safeParseTime(value);
-  if (!time) return null;
-  try {
-    return format(time, 'p');
-  } catch {
-    return null;
-  }
-};
-
 // ============================================================================
-// Sub-Components
+// Sub-Components - COMPACT versions with minimal padding
 // ============================================================================
 
 const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) => (
@@ -178,15 +126,16 @@ const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) 
       color: (theme) => theme.palette.mode === 'light' ? '#1a1a2e' : '#ffffff',
       display: 'flex',
       alignItems: 'center',
-      gap: 1,
+      gap: 0.75,
+      fontSize: '0.8rem',
     }}
   >
-    <Icon sx={{ fontSize: 18, color: '#667eea' }} />
+    <Icon sx={{ fontSize: 16, color: '#667eea' }} />
     {title}
     {tooltip && (
       <Tooltip title={tooltip} arrow>
         <IconButton size="small" sx={{ p: 0 }}>
-          <HelpIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+          <HelpIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
         </IconButton>
       </Tooltip>
     )}
@@ -196,7 +145,7 @@ const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) 
         size="small"
         color={status === 'complete' ? 'success' : 'default'}
         variant={status === 'complete' ? 'filled' : 'outlined'}
-        sx={{ height: 20, fontSize: '0.65rem' }}
+        sx={{ height: 18, fontSize: '0.55rem', '& .MuiChip-label': { px: 0.75 } }}
       />
     )}
   </Typography>
@@ -204,6 +153,7 @@ const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) 
 
 SectionHeader.displayName = 'SectionHeader';
 
+// COMPACT SectionPaper - minimal padding
 const SectionPaper = ({ children, ...props }) => {
   const theme = useTheme();
   const isLight = theme.palette.mode === 'light';
@@ -212,7 +162,7 @@ const SectionPaper = ({ children, ...props }) => {
     <Paper
       elevation={0}
       sx={{
-        p: { xs: 1.5, sm: 2 },
+        p: { xs: 1, sm: 1.25 },
         borderRadius: 2,
         bgcolor: isLight
           ? alpha(theme.palette.primary.main, 0.02)
@@ -235,6 +185,7 @@ const SectionPaper = ({ children, ...props }) => {
   );
 };
 
+// COMPACT FormTextField - reduced spacing
 const FormTextField = memo(({ 
   icon: Icon, 
   required = false, 
@@ -263,18 +214,21 @@ const FormTextField = memo(({
             bgcolor: isLight ? '#ffffff' : 'rgba(255,255,255,0.1)',
           },
         },
+        '& .MuiOutlinedInput-input': {
+          py: 1,
+        },
         ...props.sx,
       }}
       slotProps={{
         input: {
           startAdornment: Icon && (
-            <InputAdornment position="start">
-              <Icon sx={{ fontSize: 20, color: 'text.secondary' }} />
+            <InputAdornment position="start" sx={{ mr: 0.5 }}>
+              <Icon sx={{ fontSize: 18, color: 'text.secondary' }} />
             </InputAdornment>
           ),
           endAdornment: success && (
-            <InputAdornment position="end">
-              <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />
+            <InputAdornment position="end" sx={{ ml: 0.5 }}>
+              <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
             </InputAdornment>
           ),
           ...props.slotProps?.input,
@@ -293,46 +247,27 @@ FormTextField.displayName = 'FormTextField';
 // ============================================================================
 
 export const BasicInfoStep = memo(({
-  // Form Data
   formData,
   setFormData,
-  
-  // Organization
   organizationId,
   setOrganizationId,
-  
-  // UI State
   isMobile = false,
   apiLoading = false,
   isSubmitting = false,
-  
-  // Event Handlers
   handleChange,
   handleDateChange,
   handleStartTimeChange,
   handleEndTimeChange,
-  
-  // Validation
   errors = {},
   touched = {},
-  
-  // Callbacks
   onFieldTouch,
   onValidationChange,
 }) => {
   const theme = useTheme();
   const isLight = theme.palette.mode === 'light';
 
-  // ==========================================================================
-  // Local State
-  // ==========================================================================
-
   const [localErrors, setLocalErrors] = useState({});
   const [fieldTouched, setFieldTouched] = useState({});
-
-  // ==========================================================================
-  // Memoized Values
-  // ==========================================================================
 
   const isTitleFilled = useMemo(
     () => formData?.title?.trim()?.length > 0,
@@ -347,11 +282,6 @@ export const BasicInfoStep = memo(({
   const isStartTimeFilled = useMemo(
     () => !!formData?.start_time,
     [formData?.start_time]
-  );
-
-  const isEndTimeFilled = useMemo(
-    () => !!formData?.end_time,
-    [formData?.end_time]
   );
 
   const isScheduleComplete = useMemo(
@@ -375,10 +305,6 @@ export const BasicInfoStep = memo(({
     return true;
   }, [formData, isTitleFilled, isDateFilled, isStartTimeFilled]);
 
-  // ==========================================================================
-  // Memoized Picker Values - UTC Date Handling
-  // ==========================================================================
-
   const datePickerValue = useMemo(
     () => safeParseDate(formData?.meeting_date),
     [formData?.meeting_date]
@@ -393,10 +319,6 @@ export const BasicInfoStep = memo(({
     () => safeParseTime(formData?.end_time),
     [formData?.end_time]
   );
-
-  // ==========================================================================
-  // Schedule Display - Uses UTC
-  // ==========================================================================
 
   const scheduleDisplay = useMemo(() => {
     if (!isDateFilled || !isStartTimeFilled) return null;
@@ -429,10 +351,6 @@ export const BasicInfoStep = memo(({
       return null;
     }
   }, [formData.meeting_date, formData.start_time, formData.end_time, isDateFilled, isStartTimeFilled]);
-
-  // ==========================================================================
-  // Callbacks
-  // ==========================================================================
 
   const handleFieldTouch = useCallback((fieldName) => {
     setFieldTouched(prev => ({ ...prev, [fieldName]: true }));
@@ -493,17 +411,13 @@ export const BasicInfoStep = memo(({
     }
   }, [handleChange, setFormData, handleFieldTouch, validateField, onValidationChange]);
 
-  // ==========================================================================
-  // Render
-  // ==========================================================================
-
   if (apiLoading && !formData) {
     return (
-      <Box sx={{ width: '100%', p: 2 }}>
-        <Stack spacing={2}>
-          <Skeleton variant="rounded" height={100} />
+      <Box sx={{ width: '100%', p: 1 }}>
+        <Stack spacing={1.5}>
           <Skeleton variant="rounded" height={80} />
-          <Skeleton variant="rounded" height={120} />
+          <Skeleton variant="rounded" height={60} />
+          <Skeleton variant="rounded" height={80} />
         </Stack>
       </Box>
     );
@@ -511,17 +425,15 @@ export const BasicInfoStep = memo(({
 
   return (
     <Box sx={{ width: '100%' }}>
-      <Stack spacing={2.5}>
-        {/* ============================================
-             Meeting Details Section
-             ============================================ */}
+      <Stack spacing={1.5}>
+        {/* Meeting Details Section - COMPACT */}
         <SectionPaper>
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <SectionHeader
               icon={TitleIcon}
               title="Meeting Details"
               status={isTitleFilled ? 'complete' : null}
-              statusText={isTitleFilled ? '✓ Title set' : undefined}
+              statusText={isTitleFilled ? '✓' : undefined}
               tooltip="Provide a clear, descriptive title for your meeting"
             />
 
@@ -532,25 +444,25 @@ export const BasicInfoStep = memo(({
               value={formData?.title || ''}
               onChange={handleFieldChange('title')}
               onBlur={() => handleFieldTouch('title')}
-              placeholder="Enter a clear, descriptive meeting title"
+              placeholder="Enter meeting title"
               icon={TitleIcon}
               success={isTitleFilled}
               error={!!(localErrors.title || errors.title)}
               helperText={
                 localErrors.title || 
                 errors.title || 
-                `${formData?.title?.length || 0}/200 characters`
+                `${formData?.title?.length || 0}/200`
               }
               disabled={apiLoading || isSubmitting}
               slotProps={{
                 input: {
                   endAdornment: formData?.title && formData.title.length > 0 && (
-                    <InputAdornment position="end">
+                    <InputAdornment position="end" sx={{ ml: 0.5 }}>
                       <Chip
                         label={`${formData.title.length}/200`}
                         size="small"
                         color={formData.title.length > 190 ? 'warning' : 'default'}
-                        sx={{ height: 20, fontSize: '0.65rem' }}
+                        sx={{ height: 18, fontSize: '0.55rem', '& .MuiChip-label': { px: 0.75 } }}
                       />
                     </InputAdornment>
                   ),
@@ -563,14 +475,14 @@ export const BasicInfoStep = memo(({
             />
 
             <FormTextField
-              label="Description (Optional)"
+              label="Description"
               name="description"
               value={formData?.description || ''}
               onChange={handleFieldChange('description')}
               onBlur={() => handleFieldTouch('description')}
-              placeholder="Add context, objectives, or background information for this meeting"
+              placeholder="Add context..."
               multiline
-              rows={2}
+              rows={isMobile ? 1 : 2}
               icon={DescriptionIcon}
               disabled={apiLoading || isSubmitting}
               inputProps={{
@@ -581,20 +493,18 @@ export const BasicInfoStep = memo(({
           </Stack>
         </SectionPaper>
 
-        {/* ============================================
-             Schedule Section - FIXED UTC DATE HANDLING
-             ============================================ */}
+        {/* Schedule Section - COMPACT */}
         <SectionPaper>
-          <Stack spacing={2}>
+          <Stack spacing={1}>
             <SectionHeader
               icon={EventIcon}
               title="Schedule"
               status={isScheduleComplete ? 'complete' : null}
-              statusText={isScheduleComplete ? '✓ Scheduled' : undefined}
+              statusText={isScheduleComplete ? '✓' : undefined}
               tooltip="Set the date and time for your meeting"
             />
 
-            <Grid container spacing={1.5}>
+            <Grid container spacing={1}>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <DatePicker
                   label="Meeting Date *"
@@ -607,22 +517,17 @@ export const BasicInfoStep = memo(({
                       required: true,
                       size: 'small',
                       error: !!(localErrors.meeting_date || errors.meeting_date),
-                      helperText: localErrors.meeting_date || errors.meeting_date || 'Select a date for the meeting',
+                      helperText: localErrors.meeting_date || errors.meeting_date || 'Select date',
                       sx: {
                         '& .MuiOutlinedInput-root': {
                           bgcolor: isLight ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.05)',
-                          '&:hover': {
-                            bgcolor: isLight ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.08)',
-                          },
-                          '&.Mui-focused': {
-                            bgcolor: isLight ? '#ffffff' : 'rgba(255,255,255,0.1)',
-                          },
                         },
+                        '& .MuiOutlinedInput-input': { py: 1 },
                       },
                       slotProps: {
                         input: {
                           startAdornment: (
-                            <InputAdornment position="start">
+                            <InputAdornment position="start" sx={{ mr: 0.5 }}>
                               <EventIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                             </InputAdornment>
                           ),
@@ -643,22 +548,17 @@ export const BasicInfoStep = memo(({
                       required: true,
                       size: 'small',
                       error: !!(localErrors.start_time || errors.start_time),
-                      helperText: localErrors.start_time || errors.start_time || 'Select the start time',
+                      helperText: localErrors.start_time || errors.start_time || 'Start',
                       sx: {
                         '& .MuiOutlinedInput-root': {
                           bgcolor: isLight ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.05)',
-                          '&:hover': {
-                            bgcolor: isLight ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.08)',
-                          },
-                          '&.Mui-focused': {
-                            bgcolor: isLight ? '#ffffff' : 'rgba(255,255,255,0.1)',
-                          },
                         },
+                        '& .MuiOutlinedInput-input': { py: 1 },
                       },
                       slotProps: {
                         input: {
                           startAdornment: (
-                            <InputAdornment position="start">
+                            <InputAdornment position="start" sx={{ mr: 0.5 }}>
                               <AccessTimeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                             </InputAdornment>
                           ),
@@ -678,22 +578,17 @@ export const BasicInfoStep = memo(({
                     textField: {
                       size: 'small',
                       error: !!(localErrors.end_time || errors.end_time),
-                      helperText: localErrors.end_time || errors.end_time || 'Select the end time (optional)',
+                      helperText: localErrors.end_time || errors.end_time || 'End (opt.)',
                       sx: {
                         '& .MuiOutlinedInput-root': {
                           bgcolor: isLight ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.05)',
-                          '&:hover': {
-                            bgcolor: isLight ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.08)',
-                          },
-                          '&.Mui-focused': {
-                            bgcolor: isLight ? '#ffffff' : 'rgba(255,255,255,0.1)',
-                          },
                         },
+                        '& .MuiOutlinedInput-input': { py: 1 },
                       },
                       slotProps: {
                         input: {
                           startAdornment: (
-                            <InputAdornment position="start">
+                            <InputAdornment position="start" sx={{ mr: 0.5 }}>
                               <AccessTimeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                             </InputAdornment>
                           ),
@@ -705,40 +600,43 @@ export const BasicInfoStep = memo(({
               </Grid>
             </Grid>
 
-            {/* Schedule Summary */}
-            {scheduleDisplay && (
-              <Fade in timeout={400}>
-                <Alert
-                  icon={<ScheduleIcon />}
-                  severity="success"
-                  sx={{
-                    mt: 1,
-                    '& .MuiAlert-message': {
-                      width: '100%',
-                    },
-                  }}
-                >
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <Typography variant="body2">
-                      <strong>Meeting scheduled for:</strong>
-                    </Typography>
-                    <Typography variant="body2">
-                      {scheduleDisplay.full}
-                    </Typography>
-                  </Stack>
-                </Alert>
-              </Fade>
-            )}
+            {/* Schedule Summary - COMPACT */}
+            <Box 
+              sx={{ 
+                visibility: scheduleDisplay ? 'visible' : 'hidden',
+                opacity: scheduleDisplay ? 1 : 0,
+                height: scheduleDisplay ? 'auto' : 0,
+                overflow: 'hidden',
+                transition: 'opacity 0.2s ease',
+              }}
+            >
+              <Alert
+                icon={<ScheduleIcon sx={{ fontSize: 16 }} />}
+                severity="success"
+                sx={{
+                  py: 0.25,
+                  px: 1,
+                  alignItems: 'center',
+                  minHeight: 0,
+                  '& .MuiAlert-icon': { py: 0, pr: 0.5 },
+                  '& .MuiAlert-message': { py: 0.25, width: '100%' },
+                }}
+              >
+                <Typography variant="caption" component="div" sx={{ fontWeight: 500, lineHeight: 1.3 }}>
+                  <strong>Scheduled:</strong> {scheduleDisplay?.full || ''}
+                </Typography>
+              </Alert>
+            </Box>
 
-            {/* Time Validation Warning */}
+            {/* Time Validation Warning - COMPACT */}
             {formData?.start_time && formData?.end_time && (
               (() => {
                 const start = safeParseTime(formData.start_time);
                 const end = safeParseTime(formData.end_time);
                 if (start && end && end <= start) {
                   return (
-                    <Alert severity="error" icon={<WarningIcon />}>
-                      End time must be after start time
+                    <Alert severity="error" icon={<WarningIcon sx={{ fontSize: 16 }} />} sx={{ py: 0, px: 1 }}>
+                      <Typography variant="caption">End time must be after start time</Typography>
                     </Alert>
                   );
                 }
@@ -748,44 +646,37 @@ export const BasicInfoStep = memo(({
           </Stack>
         </SectionPaper>
 
-        {/* ============================================
-             Validation Summary
-             ============================================ */}
+        {/* Validation Summary - COMPACT */}
         {!isFormValid && Object.keys(touched).length > 0 && (
-          <Alert severity="info" icon={<InfoIcon />}>
-            Please fill in all required fields to continue:
-            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
-              {!isTitleFilled && <li>Meeting title is required</li>}
-              {!isDateFilled && <li>Meeting date is required</li>}
-              {!isStartTimeFilled && <li>Start time is required</li>}
-              {formData?.title?.length < 3 && formData?.title?.length > 0 && (
-                <li>Title must be at least 3 characters</li>
-              )}
-              {formData?.start_time && formData?.end_time && 
-                (() => {
-                  const start = safeParseTime(formData.start_time);
-                  const end = safeParseTime(formData.end_time);
-                  return start && end && end <= start && (
-                    <li>End time must be after start time</li>
-                  );
-                })()
-              }
-            </ul>
+          <Alert 
+            severity="info" 
+            icon={<InfoIcon sx={{ fontSize: 16 }} />}
+            sx={{ 
+              py: 0.5, 
+              px: 1.5,
+              '& .MuiAlert-message': { py: 0.25 },
+              '& ul': { m: 0, pl: 1.5 }
+            }}
+          >
+            <Typography variant="caption" component="div">
+              Please fill in all required fields:
+              <ul style={{ margin: '2px 0 0 0', paddingLeft: '16px' }}>
+                {!isTitleFilled && <li>Meeting title</li>}
+                {!isDateFilled && <li>Meeting date</li>}
+                {!isStartTimeFilled && <li>Start time</li>}
+                {formData?.title?.length < 3 && formData?.title?.length > 0 && (
+                  <li>Title must be at least 3 characters</li>
+                )}
+              </ul>
+            </Typography>
           </Alert>
         )}
 
-        {/* ============================================
-             Hidden Form Data (for form submission)
-             ============================================ */}
         <input type="hidden" name="organizationId" value={organizationId} />
       </Stack>
     </Box>
   );
 });
-
-// ============================================================================
-// Display Name for Debugging
-// ============================================================================
 
 BasicInfoStep.displayName = 'BasicInfoStep';
 

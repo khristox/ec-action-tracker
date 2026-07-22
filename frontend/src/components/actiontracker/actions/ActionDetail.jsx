@@ -4,24 +4,24 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Container, Paper, Typography, Box, Stack, Chip, Button, IconButton,
+  Paper, Typography, Box, Stack, Chip, Button, IconButton,
   Divider, LinearProgress, Avatar, TextField, Grid,
   List, ListItem, ListItemText, Dialog, DialogTitle,
   DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Skeleton, Alert, Collapse,
-  useTheme, useMediaQuery, Tooltip, CircularProgress
+  useTheme, useMediaQuery, CircularProgress, Card,
+  CardContent, Tooltip, Badge, Tabs, Tab
 } from '@mui/material';
 import {
-  ArrowBack, Edit, Delete, History, Person, Schedule,
+  ArrowBack, Delete, History,
   Description, OpenInNew, AccessTime, Event, Info,
   PriorityHigh, CheckCircle, Cancel, PlayCircle, Pending,
   ExpandMore, ExpandLess, TaskAlt, Error as ErrorIcon,
   WatchLater, CheckCircleOutlined, PauseCircle, CancelOutlined,
-  HighlightOff, HourglassEmpty, People, Label, Flag, Lightbulb,
-  Link as LinkIcon
+  HighlightOff, HourglassEmpty, People, Label, Lightbulb, Schedule,
+  Assignment, Flag, Category, Refresh, MoreVert, Person,
+  Email, Phone
 } from '@mui/icons-material';
-import EmailIcon from '@mui/icons-material/Email';
-import PhoneIcon from '@mui/icons-material/Phone';
 import LockIcon from '@mui/icons-material/Lock';
 
 import {
@@ -160,21 +160,113 @@ const STATUS_CONFIG = {
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
-// ==================== LAYOUT PRIMITIVES ====================
+// ==================== COMPACT FIELD ITEM ====================
 
-const FieldRow = ({ label, value, icon, color, isDarkMode }) => (
-  <Box sx={{ mb: 1.5, display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap', gap: 0.5 }}>
-    <Box sx={{ minWidth: 140, display: 'flex', alignItems: 'center', gap: 1 }}>
-      {icon && <span style={{ color: color || (isDarkMode ? 'rgba(255,255,255,0.5)' : '#6B7280'), display: 'flex' }}>{icon}</span>}
-      <Typography variant="caption" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.5)' : '#6B7280', fontWeight: 600 }}>
-        {label}
-      </Typography>
+const DetailField = ({ label, value, icon, isDarkMode }) => (
+  <Box sx={{ 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: 1.5, 
+    py: 1,
+    borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#F3F4F6'}`,
+    '&:last-child': { borderBottom: 'none' }
+  }}>
+    <Box sx={{ 
+      color: isDarkMode ? 'rgba(255,255,255,0.4)' : '#9CA3AF', 
+      display: 'flex', 
+      alignItems: 'center',
+      minWidth: 20
+    }}>
+      {icon ? React.cloneElement(icon, { fontSize: 'small' }) : <Info fontSize="small" />}
     </Box>
-    <Typography variant="body2" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.9)' : 'inherit', flex: 1, minWidth: 120 }}>
+    <Typography 
+      variant="body2" 
+      sx={{ 
+        color: isDarkMode ? 'rgba(255,255,255,0.5)' : '#6B7280',
+        fontWeight: 500,
+        minWidth: 100,
+        flexShrink: 0,
+        fontSize: '0.8rem'
+      }}
+    >
+      {label}
+    </Typography>
+    <Typography 
+      variant="body2" 
+      sx={{ 
+        color: isDarkMode ? '#FFFFFF' : '#111827', 
+        fontWeight: 500,
+        wordBreak: 'break-word',
+        flex: 1,
+        fontSize: '0.85rem'
+      }}
+    >
       {value || '—'}
     </Typography>
   </Box>
 );
+
+// ==================== IMPLEMENTER CARD ====================
+
+const ImplementerCard = ({ person, isDarkMode }) => {
+  const getInitials = (name) => {
+    if (!name) return '?';
+    const parts = name.split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return parts[0]?.[0]?.toUpperCase() || '?';
+  };
+
+  return (
+    <Box
+      sx={{
+        p: 1.5,
+        borderRadius: 1.5,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        bgcolor: isDarkMode ? 'rgba(255,255,255,0.02)' : '#F9FAFB',
+        border: isDarkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid #E5E7EB',
+        transition: 'all 0.2s',
+        '&:hover': {
+          bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#F3F4F6',
+        }
+      }}
+    >
+      <Stack direction="row" alignItems="center" spacing={1.5}>
+        <Avatar sx={{ width: 32, height: 32, fontSize: '0.75rem', bgcolor: 'primary.main' }}>
+          {getInitials(person.name)}
+        </Avatar>
+        <Box>
+          <Typography variant="body2" fontWeight={600} sx={{ color: isDarkMode ? '#fff' : 'text.primary' }}>
+            {person.name}
+          </Typography>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            {person.email && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Email sx={{ fontSize: 12 }} />
+                {person.email}
+              </Typography>
+            )}
+            {person.phone && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Phone sx={{ fontSize: 12 }} />
+                {person.phone}
+              </Typography>
+            )}
+          </Stack>
+        </Box>
+      </Stack>
+      {person.is_private && (
+        <Chip 
+          label="Private" 
+          size="small" 
+          icon={<LockIcon sx={{ fontSize: '10px !important' }} />} 
+          sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600 }} 
+        />
+      )}
+    </Box>
+  );
+};
 
 // ==================== COMPONENT ====================
 
@@ -183,18 +275,15 @@ const ActionDetail = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isDarkMode = theme.palette.mode === 'dark';
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  // Redux state
   const { currentAction, loading, updatingProgress, error: reduxError } = useSelector((state) => state.actions);
   const statusOptions = useSelector(selectActionStatusOptions);
   const loadingStatusOptions = useSelector(selectActionTrackerLoading);
-  const statusOptionsError = useSelector(selectActionTrackerError);
   const currentUser = useSelector((state) => state.auth?.user);
   const implementers = useSelector(selectActionImplementers);
 
-  // Local UI state
   const [history, setHistory] = useState([]);
   const [progress, setProgress] = useState(0);
   const [selectedStatusId, setSelectedStatusId] = useState('');
@@ -207,6 +296,7 @@ const ActionDetail = () => {
   const [showDeleteTaskDialog, setShowDeleteTaskDialog] = useState(false);
   const [deletingTask, setDeletingTask] = useState(false);
   const [isActionInProgress, setIsActionInProgress] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
 
   const displayImplementers = useMemo(() => {
     if (currentAction?.persons_implementing && currentAction.persons_implementing.length > 0) {
@@ -217,8 +307,6 @@ const ActionDetail = () => {
     }
     return [];
   }, [currentAction?.persons_implementing, implementers]);
-
-  // ==================== EFFECTS ====================
 
   useEffect(() => {
     if (id && !isValidUUID(id)) {
@@ -279,8 +367,6 @@ const ActionDetail = () => {
       }
     }
   }, [currentAction?.overall_progress_percentage, currentAction?.overall_status_id, currentAction?.overall_status_name]);
-
-  // ==================== HANDLERS ====================
 
   const refreshAction = useCallback(() => {
     if (id) dispatch(fetchActionById(id));
@@ -387,8 +473,6 @@ const ActionDetail = () => {
     }
   };
 
-  // ==================== COMPUTED PROPERTIES ====================
-
   const isCompleted = useMemo(() =>
     Boolean(currentAction?.completed_at || currentAction?.overall_progress_percentage === 100),
     [currentAction?.completed_at, currentAction?.overall_progress_percentage]
@@ -412,13 +496,6 @@ const ActionDetail = () => {
     return currentUser.is_admin || currentAction.created_by_id === currentUser.id;
   };
 
-  const getInitials = (name) => {
-    if (!name) return '?';
-    const parts = name.split(' ').filter(Boolean);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return parts[0]?.[0]?.toUpperCase() || '?';
-  };
-
   const getStatusName = (statusId) => {
     const option = statusOptions.find(opt => opt.id === statusId);
     return option?.label || option?.short_name || 'Unknown';
@@ -430,32 +507,19 @@ const ActionDetail = () => {
     return STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
   };
 
-  // Common Paper Card styling for unified single-card layout
-  const centralCardSx = {
-    p: { xs: 2.5, sm: 4 },
-    borderRadius: 3,
-    bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.03)' : '#ffffff',
-    border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.06)',
-    boxShadow: isDarkMode ? 'none' : '0 4px 20px rgba(0,0,0,0.04)',
-  };
-
-  // ==================== EARLY RETURNS ====================
-
   if (loading && !currentAction) {
     return (
-      <Container sx={{ py: 4 }} maxWidth="md">
-        <Stack spacing={2.5}>
-          <Skeleton variant="rectangular" height={70} sx={{ borderRadius: 2 }} />
-          <Skeleton variant="rectangular" height={350} sx={{ borderRadius: 3 }} />
-        </Stack>
-      </Container>
+      <Box sx={{ width: '100%', minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress sx={{ color: theme.palette.primary.main }} />
+        <Typography sx={{ ml: 2, color: theme.palette.text.secondary }}>Loading task details...</Typography>
+      </Box>
     );
   }
 
   if (!currentAction) {
     return (
-      <Container maxWidth="sm" sx={{ py: 8 }}>
-        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3 }}>
+      <Box sx={{ width: '100%', p: 4, display: 'flex', justifyContent: 'center' }}>
+        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2, maxWidth: 500, width: '100%' }}>
           <ErrorIcon sx={{ fontSize: 56, color: 'error.main', mb: 2 }} />
           <Typography variant="h6" fontWeight={700}>Task Not Found</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>
@@ -465,72 +529,56 @@ const ActionDetail = () => {
             Go Back
           </Button>
         </Paper>
-      </Container>
+      </Box>
     );
   }
 
-  // ==================== MAIN RENDER ====================
-
   return (
-    <Container maxWidth="md" sx={{ py: { xs: 2, md: 3 }, pb: { xs: 8, md: 4 } }}>
+    <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: isDarkMode ? '#0F172A' : '#F3F4F6', p: { xs: 1.5, sm: 3 } }}>
       
-      {/* Top Bar Navigation (Back Button Only) */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2.5}>
-        <Button
-          startIcon={<ArrowBack />}
-          onClick={handleGoBack}
-          size="small"
-          sx={{
-            color: isDarkMode ? 'rgba(255,255,255,0.7)' : 'text.secondary',
-            textTransform: 'none',
-            fontWeight: 600,
-            '&:hover': { bgcolor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }
-          }}
-        >
-          Back
-        </Button>
-      </Stack>
+      {/* ========== STICKY HEADER ========== */}
+      <Paper 
+        elevation={0}
+        sx={{ 
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          p: { xs: 2, sm: 3 },
+          borderRadius: 2,
+          bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.95)' : '#FFFFFF',
+          border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #E5E7EB',
+          backdropFilter: 'blur(8px)',
+          mb: 2
+        }}
+      >
+        <Stack direction="row" alignItems="center" spacing={2} flexWrap="wrap">
+          <IconButton onClick={handleGoBack} size="small" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280' }}>
+            <ArrowBack />
+          </IconButton>
+          
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography 
+              variant="h6" 
+              fontWeight={700} 
+              sx={{ 
+                color: isDarkMode ? '#FFFFFF' : '#111827',
+                fontSize: { xs: '1rem', sm: '1.25rem' },
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}
+            >
+              {currentAction.title || currentAction.description || 'Action Tracker Form'}
+            </Typography>
+          </Box>
 
-      {/* Global Errors */}
-      {(localError || reduxError) && (
-        <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => { setLocalError(''); dispatch(clearError()); }}>
-          {localError || reduxError}
-        </Alert>
-      )}
-
-      {/* Completed Banner */}
-      {isCompleted && (
-        <Alert
-          severity="success"
-          icon={<TaskAlt />}
-          sx={{
-            mb: 3,
-            borderRadius: 2,
-            bgcolor: isDarkMode ? 'rgba(52, 211, 153, 0.12)' : 'success.light',
-            color: isDarkMode ? '#34D399' : 'success.dark',
-            '& .MuiAlert-icon': { color: isDarkMode ? '#34D399' : 'success.main' }
-          }}
-        >
-          Completed on {currentAction.completed_at ? new Date(currentAction.completed_at).toLocaleDateString() : 'recently'}
-        </Alert>
-      )}
-
-      {/* ==================== CENTRAL CARD CONTAINER ==================== */}
-      <Paper sx={centralCardSx}>
-        
-        {/* Title & Overview Section */}
-        <Box sx={{ mb: 3.5 }}>
-          <Typography variant="h5" fontWeight={700} gutterBottom sx={{ color: isDarkMode ? '#fff' : 'text.primary', lineHeight: 1.35, fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
-            {currentAction.title || currentAction.description}
-          </Typography>
-
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
             <Chip
               icon={activePriority.icon}
               label={activePriority.label}
               color={activePriority.color}
               size="small"
-              sx={{ fontWeight: 600, height: 24 }}
+              sx={{ height: 24, fontSize: '0.7rem' }}
             />
             <Chip
               icon={currentStatusConfig.icon}
@@ -542,269 +590,356 @@ const ActionDetail = () => {
                 color: currentStatusConfig.color,
                 fontWeight: 600,
                 height: 24,
+                fontSize: '0.7rem',
                 '& .MuiChip-icon': { color: currentStatusConfig.color }
               }}
             />
-            {currentAction.type_of_action && (
-              <Chip label={currentAction.type_of_action} variant="outlined" size="small" sx={{ height: 24 }} />
-            )}
-            {currentAction.is_key_action && (
-              <Chip icon={<Lightbulb fontSize="small" />} label="Key Action" color="warning" size="small" sx={{ height: 24 }} />
-            )}
-            {currentAction.meeting_title && (
-              <Chip
-                icon={<OpenInNew fontSize="small" />}
-                label={currentAction.meeting_title}
-                variant="outlined"
-                size="small"
-                clickable
-                onClick={() => navigate(`/meetings/${currentAction.minutes?.meeting_id}`)}
-                sx={{ height: 24 }}
-              />
-            )}
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={refreshAction} disabled={isActionInProgress}>
+                <Refresh fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Stack>
+        </Stack>
 
-          {currentAction.tags && currentAction.tags.length > 0 && (
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
-              {currentAction.tags.map((tag, idx) => (
-                <Chip key={idx} label={`#${tag}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-              ))}
-            </Stack>
-          )}
-        </Box>
-
-        <Divider sx={{ mb: 3.5, borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
-
-        {/* Core Details & Implementers Section */}
-        <Box sx={{ mb: 3.5 }}>
-          <Typography variant="subtitle2" fontWeight={700} color="text.secondary" textTransform="uppercase" letterSpacing={0.5} sx={{ mb: 2, fontSize: '0.75rem' }}>
-            Action Specification
-          </Typography>
-
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
-              <FieldRow label="Issue / Challenge" value={currentAction.issue_challenge} icon={<ErrorIcon fontSize="small" />} isDarkMode={isDarkMode} />
-              <FieldRow label="Date Initiated" value={currentAction.date_initiated ? new Date(currentAction.date_initiated).toLocaleDateString() : null} icon={<Event fontSize="small" />} isDarkMode={isDarkMode} />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FieldRow label="Due Date" value={currentAction.due_date ? new Date(currentAction.due_date).toLocaleDateString() : null} icon={<Schedule fontSize="small" />} isDarkMode={isDarkMode} />
-              <FieldRow label="Category / Title" value={currentAction.title} icon={<Label fontSize="small" />} isDarkMode={isDarkMode} />
-            </Grid>
-          </Grid>
-
-          {displayImplementers.length > 0 && (
-            <>
-              <Box sx={{ mt: 3, mb: 1.5 }}>
-                <Typography variant="subtitle2" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.85rem' }}>
-                  <People fontSize="small" color="action" />
-                  Assigned Implementers ({displayImplementers.length})
-                </Typography>
-              </Box>
-
-              <Stack spacing={1}>
-                {displayImplementers.map((person, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      p: 1.5,
-                      borderRadius: 2,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: 1,
-                      bgcolor: isDarkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.015)',
-                      border: isDarkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.04)',
-                    }}
-                  >
-                    <Stack direction="row" alignItems="center" spacing={1.5}>
-                      <Avatar sx={{ width: 32, height: 32, fontSize: '0.8rem', bgcolor: 'primary.main' }}>
-                        {getInitials(person.name)}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="body2" fontWeight={600} sx={{ color: isDarkMode ? '#fff' : 'text.primary' }}>
-                          {person.name}
-                        </Typography>
-                        <Stack direction="row" spacing={1.5} flexWrap="wrap">
-                          {person.email && (
-                            <Typography variant="caption" color="text.secondary">
-                              {person.email}
-                            </Typography>
-                          )}
-                          {person.phone && (
-                            <Typography variant="caption" color="text.secondary">
-                              {person.phone}
-                            </Typography>
-                          )}
-                        </Stack>
-                      </Box>
-                    </Stack>
-                    {person.is_private && (
-                      <Chip label="Private" size="small" icon={<LockIcon sx={{ fontSize: '10px !important' }} />} sx={{ height: 20, fontSize: '0.65rem' }} />
-                    )}
-                  </Box>
-                ))}
-              </Stack>
-            </>
-          )}
-        </Box>
-
-        <Divider sx={{ mb: 3.5, borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
-
-        {/* Progress & Timeline Control Section */}
-        <Box sx={{ mb: 1 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-            <Typography variant="subtitle2" fontWeight={700} color="text.secondary" textTransform="uppercase" letterSpacing={0.5} sx={{ fontSize: '0.75rem' }}>
-              Current Progress
+        {/* Progress Bar in Header */}
+        <Box sx={{ mt: 1.5 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+            <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280' }}>
+              Progress
             </Typography>
-            <Typography variant="h6" fontWeight={800} color={isCompleted ? 'success.main' : 'primary.main'}>
+            <Typography variant="caption" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : '#111827' }}>
               {progress}%
             </Typography>
           </Stack>
-
           <LinearProgress
             variant="determinate"
             value={progress}
             sx={{
-              height: 8,
-              borderRadius: 4,
-              mb: 2.5,
-              bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-              '& .MuiLinearProgress-bar': { bgcolor: isCompleted ? '#34D399' : '#60A5FA', borderRadius: 4 }
+              height: 4,
+              borderRadius: 2,
+              bgcolor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB',
+              '& .MuiLinearProgress-bar': { bgcolor: isCompleted ? '#34D399' : '#3B82F6', borderRadius: 2 }
             }}
           />
-
-          {!isCompleted && (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} mb={3}>
-              <Button
-                fullWidth
-                variant="outlined"
-                onClick={() => setShowProgressDialog(true)}
-                disabled={isActionInProgress}
-                size="small"
-                sx={{ py: 1, borderRadius: 2, fontWeight: 600 }}
-              >
-                Update Progress
-              </Button>
-              <Button
-                fullWidth
-                variant="contained"
-                color="success"
-                startIcon={<TaskAlt />}
-                onClick={() => setShowCompleteConfirm(true)}
-                disabled={isActionInProgress}
-                size="small"
-                sx={{ py: 1, borderRadius: 2, fontWeight: 600 }}
-              >
-                Mark Completed
-              </Button>
-            </Stack>
-          )}
-
-          <Divider sx={{ my: 3, borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
-
-          {/* Collapsible History Drawer */}
-          <Box
-            sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => setHistoryExpanded((v) => !v)}
-          >
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <History fontSize="small" color="action" />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ color: isDarkMode ? '#fff' : 'text.primary' }}>
-                Activity & Status History
-              </Typography>
-              <Chip label={history.length} size="small" sx={{ height: 20, fontSize: '0.7rem' }} />
-            </Stack>
-            <IconButton size="small">
-              {historyExpanded ? <ExpandLess /> : <ExpandMore />}
-            </IconButton>
-          </Box>
-
-          <Collapse in={historyExpanded}>
-            <Box sx={{ mt: 2 }}>
-              {history.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-                  No update logs recorded yet.
-                </Typography>
-              ) : (
-                <List disablePadding>
-                  {history.map((entry, index) => {
-                    const statusName = getStatusName(entry.individual_status_id);
-                    const statusConfig = STATUS_CONFIG[entry.status_value] || getStatusConfigForHistory(entry.individual_status_id, statusName);
-
-                    return (
-                      <React.Fragment key={entry.id || index}>
-                        <ListItem alignItems="flex-start" sx={{ px: 0, py: 1.5 }}>
-                          <ListItemText
-                            primary={
-                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                <Chip
-                                  label={statusName}
-                                  size="small"
-                                  icon={statusConfig.icon}
-                                  sx={{
-                                    height: 22,
-                                    fontSize: '0.7rem',
-                                    bgcolor: statusConfig.bgColor,
-                                    border: `1px solid ${statusConfig.borderColor}`,
-                                    color: statusConfig.color,
-                                    fontWeight: 600,
-                                    '& .MuiChip-icon': { color: statusConfig.color }
-                                  }}
-                                />
-                                <Typography variant="caption" fontWeight={600} color="text.secondary">
-                                  {entry.progress_percentage}% completed
-                                </Typography>
-                              </Stack>
-                            }
-                            secondary={
-                              <Box sx={{ mt: 0.75 }}>
-                                {entry.remarks && (
-                                  <Typography variant="body2" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.85)' : 'text.primary', mb: 0.5, fontSize: '0.85rem' }}>
-                                    {entry.remarks}
-                                  </Typography>
-                                )}
-                                <Stack direction="row" spacing={1.5} alignItems="center">
-                                  <Typography variant="caption" color="text.secondary">
-                                    By {entry.created_by_name || 'System'}
-                                  </Typography>
-                                  <span>•</span>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {entry.created_at ? new Date(entry.created_at.replace('Z', '')).toLocaleString() : 'Recent'}
-                                  </Typography>
-                                </Stack>
-                              </Box>
-                            }
-                          />
-                        </ListItem>
-                        {index < history.length - 1 && <Divider component="li" sx={{ opacity: 0.5 }} />}
-                      </React.Fragment>
-                    );
-                  })}
-                </List>
-              )}
-            </Box>
-          </Collapse>
         </Box>
 
-        {/* Delete Button moved safely to the bottom of the Central Card */}
-        {canDeleteTask() && !isCompleted && (
-          <Box sx={{ mt: 4, pt: 3, borderTop: `1px dashed ${isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`, display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Action Buttons */}
+        {!isCompleted && (
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
             <Button
-              color="error"
-              startIcon={<Delete fontSize="small" />}
-              onClick={() => setShowDeleteTaskDialog(true)}
+              variant="outlined"
               size="small"
+              onClick={() => setShowProgressDialog(true)}
               disabled={isActionInProgress}
-              sx={{ textTransform: 'none', fontWeight: 600 }}
-              variant="text"
+              sx={{ 
+                flex: 1,
+                borderRadius: 1.5,
+                fontWeight: 600,
+                fontSize: '0.7rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB',
+                color: isDarkMode ? '#FFFFFF' : '#374151',
+                py: 0.75
+              }}
             >
-              Delete Task Permanently
+              Update
             </Button>
+            <Button
+              variant="contained"
+              color="success"
+              size="small"
+              startIcon={<CheckCircle sx={{ fontSize: 16 }} />}
+              onClick={() => setShowCompleteConfirm(true)}
+              disabled={isActionInProgress}
+              sx={{ 
+                flex: 1,
+                borderRadius: 1.5,
+                fontWeight: 600,
+                fontSize: '0.7rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                bgcolor: '#10B981',
+                '&:hover': { bgcolor: '#059669' },
+                py: 0.75
+              }}
+            >
+              Complete
+            </Button>
+          </Stack>
+        )}
+      </Paper>
+
+      {(localError || reduxError) && (
+        <Alert 
+          severity="error" 
+          sx={{ mb: 2, borderRadius: 1.5 }} 
+          onClose={() => { setLocalError(''); dispatch(clearError()); }}
+        >
+          {localError || reduxError}
+        </Alert>
+      )}
+
+      {isCompleted && (
+        <Alert
+          severity="success"
+          icon={<TaskAlt />}
+          sx={{ mb: 2, borderRadius: 1.5 }}
+        >
+          Completed on {currentAction.completed_at ? new Date(currentAction.completed_at).toLocaleDateString() : 'recently'}
+        </Alert>
+      )}
+
+      {/* ========== MAIN CONTENT ========== */}
+      <Paper 
+        elevation={0}
+        sx={{ 
+          borderRadius: 2,
+          bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.4)' : '#FFFFFF',
+          border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #E5E7EB',
+          overflow: 'hidden'
+        }}
+      >
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => setActiveTab(v)}
+          variant={isMobile ? "fullWidth" : "standard"}
+          sx={{
+            px: { xs: 1, sm: 3 },
+            pt: 1,
+            '& .MuiTab-root': {
+              fontWeight: 600,
+              textTransform: 'none',
+              fontSize: '0.8rem',
+              minHeight: 40
+            }
+          }}
+        >
+          <Tab label="Details & Implementers" icon={<Info sx={{ fontSize: 18 }} />} iconPosition="start" />
+          <Tab label="History" icon={<History sx={{ fontSize: 18 }} />} iconPosition="start" />
+        </Tabs>
+
+        <Divider />
+
+        {/* ===== TAB 1: DETAILS & IMPLEMENTERS ===== */}
+        {activeTab === 0 && (
+          <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            <Grid container spacing={3}>
+              {/* LEFT COLUMN - Details */}
+              <Grid item xs={12} md={6}>
+                <Typography 
+                  variant="subtitle2" 
+                  fontWeight={600} 
+                  sx={{ 
+                    color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
+                    mb: 1.5,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    fontSize: '0.7rem'
+                  }}
+                >
+                  Details
+                </Typography>
+                <Box>
+                  <DetailField 
+                    label="Category" 
+                    value={currentAction.title} 
+                    icon={<Category />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Key Action" 
+                    value={currentAction.is_key_action ? 'Yes' : 'No'} 
+                    icon={<Lightbulb />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Issue" 
+                    value={currentAction.issue_challenge} 
+                    icon={<ErrorIcon />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Type" 
+                    value={currentAction.type_of_action} 
+                    icon={<Info />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Action" 
+                    value={currentAction.description} 
+                    icon={<Assignment />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Priority" 
+                    value={activePriority.label} 
+                    icon={<Flag />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Initiated" 
+                    value={currentAction.date_initiated ? new Date(currentAction.date_initiated).toLocaleDateString() : '—'} 
+                    icon={<Event />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Due Date" 
+                    value={currentAction.due_date ? new Date(currentAction.due_date).toLocaleDateString() : '—'} 
+                    icon={<AccessTime />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                  <DetailField 
+                    label="Tags" 
+                    value={currentAction.tags?.join(', ')} 
+                    icon={<Label />} 
+                    isDarkMode={isDarkMode} 
+                  />
+                </Box>
+              </Grid>
+
+              {/* RIGHT COLUMN - Implementers */}
+              <Grid item xs={12} md={6}>
+                <Typography 
+                  variant="subtitle2" 
+                  fontWeight={600} 
+                  sx={{ 
+                    color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
+                    mb: 1.5,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    fontSize: '0.7rem'
+                  }}
+                >
+                  Implementers {displayImplementers.length > 0 && `(${displayImplementers.length})`}
+                </Typography>
+                {displayImplementers.length === 0 ? (
+                  <Box 
+                    sx={{ 
+                      p: 3, 
+                      textAlign: 'center',
+                      border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
+                      borderRadius: 2
+                    }}
+                  >
+                    <People sx={{ fontSize: 40, color: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB', mb: 1 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      No implementers assigned
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Stack spacing={1.5}>
+                    {displayImplementers.map((person, idx) => (
+                      <ImplementerCard 
+                        key={idx} 
+                        person={person} 
+                        isDarkMode={isDarkMode} 
+                      />
+                    ))}
+                  </Stack>
+                )}
+              </Grid>
+            </Grid>
           </Box>
         )}
 
+        {/* ===== TAB 2: HISTORY ===== */}
+        {activeTab === 1 && (
+          <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            {history.length === 0 ? (
+              <Box 
+                sx={{ 
+                  p: 4, 
+                  textAlign: 'center',
+                  border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
+                  borderRadius: 2
+                }}
+              >
+                <History sx={{ fontSize: 40, color: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB', mb: 1 }} />
+                <Typography variant="body2" color="text.secondary">
+                  No update logs recorded yet.
+                </Typography>
+              </Box>
+            ) : (
+              <List disablePadding>
+                {history.map((entry, index) => {
+                  const statusName = getStatusName(entry.individual_status_id);
+                  const statusConfig = STATUS_CONFIG[entry.status_value] || getStatusConfigForHistory(entry.individual_status_id, statusName);
+
+                  return (
+                    <React.Fragment key={entry.id || index}>
+                      <ListItem alignItems="flex-start" sx={{ px: 0, py: 1.5 }}>
+                        <ListItemText
+                          primary={
+                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                              <Chip
+                                label={statusName}
+                                size="small"
+                                icon={statusConfig.icon}
+                                sx={{
+                                  height: 22,
+                                  fontSize: '0.7rem',
+                                  bgcolor: statusConfig.bgColor,
+                                  border: `1px solid ${statusConfig.borderColor}`,
+                                  color: statusConfig.color,
+                                  fontWeight: 600,
+                                  '& .MuiChip-icon': { color: statusConfig.color }
+                                }}
+                              />
+                              <Typography variant="caption" fontWeight={600} color="text.secondary">
+                                {entry.progress_percentage}% completed
+                              </Typography>
+                            </Stack>
+                          }
+                          secondary={
+                            <Box sx={{ mt: 0.75 }}>
+                              {entry.remarks && (
+                                <Typography variant="body2" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.85)' : 'text.primary', mb: 0.5, fontSize: '0.85rem' }}>
+                                  {entry.remarks}
+                                </Typography>
+                              )}
+                              <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
+                                <Typography variant="caption" color="text.secondary">
+                                  By {entry.created_by_name || 'System'}
+                                </Typography>
+                                <span>•</span>
+                                <Typography variant="caption" color="text.secondary">
+                                  {entry.created_at ? new Date(entry.created_at.replace('Z', '')).toLocaleString() : 'Recent'}
+                                </Typography>
+                              </Stack>
+                            </Box>
+                          }
+                        />
+                      </ListItem>
+                      {index < history.length - 1 && <Divider component="li" sx={{ opacity: 0.5 }} />}
+                    </React.Fragment>
+                  );
+                })}
+              </List>
+            )}
+          </Box>
+        )}
       </Paper>
+
+      {/* ========== DELETE BUTTON ========== */}
+      {canDeleteTask() && !isCompleted && (
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            color="error"
+            startIcon={<Delete fontSize="small" />}
+            onClick={() => setShowDeleteTaskDialog(true)}
+            size="small"
+            disabled={isActionInProgress}
+            sx={{ textTransform: 'none', fontWeight: 500 }}
+            variant="text"
+          >
+            Delete Task
+          </Button>
+        </Box>
+      )}
+
+      {/* ========== DIALOGS ========== */}
 
       {/* Progress Dialog */}
       <Dialog
@@ -812,14 +947,14 @@ const ActionDetail = () => {
         onClose={() => setShowProgressDialog(false)}
         fullWidth
         maxWidth="xs"
-        PaperProps={{ sx: { borderRadius: 3, p: 1 } }}
+        PaperProps={{ sx: { borderRadius: 2, p: 1 } }}
       >
-        <DialogTitle fontWeight={700}>Update Task Progress</DialogTitle>
+        <DialogTitle fontWeight={700}>Update Progress</DialogTitle>
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
             <Box>
               <Typography variant="body2" fontWeight={600} gutterBottom>
-                Progress Percentage: {progress}%
+                Progress: {progress}%
               </Typography>
               <input
                 type="range"
@@ -850,7 +985,7 @@ const ActionDetail = () => {
 
             <TextField
               fullWidth
-              label="Remarks / Note"
+              label="Remarks"
               multiline
               rows={2}
               size="small"
@@ -868,33 +1003,33 @@ const ActionDetail = () => {
             disabled={updatingProgress || !selectedStatusId || isActionInProgress}
             size="small"
           >
-            Save Changes
+            Save
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Mark Complete Confirmation Dialog */}
-      <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)} PaperProps={{ sx: { borderRadius: 3, p: 1, maxWidth: 360 } }}>
+      {/* Mark Complete Confirmation */}
+      <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)} PaperProps={{ sx: { borderRadius: 2, p: 1, maxWidth: 360 } }}>
         <DialogTitle fontWeight={700}>Complete Task?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            This will immediately mark the progress at 100% and record completion.
+            This will mark progress at 100% and record completion.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setShowCompleteConfirm(false)} size="small">Cancel</Button>
           <Button color="success" variant="contained" onClick={handleMarkAsCompleted} disabled={isActionInProgress} size="small">
-            Confirm Complete
+            Confirm
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Delete Task Confirmation Dialog */}
-      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)} PaperProps={{ sx: { borderRadius: 3, p: 1, maxWidth: 360 } }}>
+      {/* Delete Confirmation */}
+      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)} PaperProps={{ sx: { borderRadius: 2, p: 1, maxWidth: 360 } }}>
         <DialogTitle fontWeight={700} color="error">Delete Task</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            Are you sure you want to delete this action item permanently? This action cannot be reversed.
+            Are you sure you want to delete this action item permanently?
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -904,7 +1039,8 @@ const ActionDetail = () => {
           </Button>
         </DialogActions>
       </Dialog>
-    </Container>
+
+    </Box>
   );
 };
 

@@ -101,12 +101,30 @@ export const RECURRENCE_PRESETS = {
 // VISIBILITY & ACCESS
 // ============================================================================
 
-export const VISIBILITY_OPTIONS = [
-  { value: 'open', label: 'Open to All', description: 'Anyone can view and join this meeting', color: '#4CAF50' },
-  { value: 'department', label: 'Department Only', description: 'Restricted to selected department only', color: '#FF9800' }
-];
+export const VISIBILITY = {
+  OPEN: 'open',
+  DEPARTMENT: 'department',
+};
 
-export const isRestrictedVisibility = (visibility) => visibility === 'department';
+export const VISIBILITY_OPTIONS = [
+  { value: VISIBILITY.DEPARTMENT, label: 'Department Only', description: 'Restricted to selected department only', color: '#FF9800' },
+  { value: VISIBILITY.OPEN, label: 'Open to All', description: 'Anyone can view and join this meeting', color: '#4CAF50' }
+];
+/**
+ * The single source of truth for the form's default visibility.
+ * MeetingForm, VisibilitySelector and AccessControlStep all read this, so the
+ * three can never drift apart.
+ */
+export const DEFAULT_VISIBILITY = VISIBILITY.DEPARTMENT;
+
+export const isRestrictedVisibility = (visibility) => visibility === VISIBILITY.DEPARTMENT;
+
+export const isValidVisibility = (visibility) =>
+  VISIBILITY_OPTIONS.some((o) => o.value === visibility);
+
+/** Coerce anything (undefined, null, a stale enum like 'all') to a valid value. */
+export const normaliseVisibility = (visibility) =>
+  isValidVisibility(visibility) ? visibility : DEFAULT_VISIBILITY;
 
 // ============================================================================
 // PARTICIPANT CONFIGURATION
@@ -209,6 +227,11 @@ export const DEFAULT_MEETING_FORM = {
   secretary_name: '',
   gps_latitude: '',
   gps_longitude: '',
+
+  // Access control. These were missing entirely, which is why the form had no
+  // visibility default to fall back on.
+  visibility: DEFAULT_VISIBILITY,
+  restricted_department_id: null,
 };
 
 export default {
@@ -220,7 +243,9 @@ export default {
   RECURRENCE_TYPES,
   END_OPTIONS,
   RECURRENCE_PRESETS,
+  VISIBILITY,
   VISIBILITY_OPTIONS,
+  DEFAULT_VISIBILITY,
   PARTICIPANT_TABS,
   PARTICIPANT_ROLES,
   PARTICIPANT_ROLES_OPTIONS,
@@ -238,4 +263,6 @@ export default {
   getRecurrenceType,
   getRecurrenceIntervalText,
   isRestrictedVisibility,
+  isValidVisibility,
+  normaliseVisibility,
 };

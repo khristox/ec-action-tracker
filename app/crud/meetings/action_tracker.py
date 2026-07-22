@@ -42,6 +42,13 @@ from app.schemas.action_tracker import MeetingCreate, MeetingUpdate
 
 from app.models.meetings.action_tracker import participant_list_members
 
+from app.services.implementer_linking import (
+    normalize_email,
+    normalize_phone,
+    resolve_implementer_user_id,
+    resolve_person_identity,
+)
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -447,6 +454,388 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         )
         return result.scalars().all()
 
+    # ==================== ADD MISSING METHODS ====================
+    
+    async def add_participants_to_list_batch(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        participant_ids: List[UUID],
+        added_by_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Add multiple participants to a list.
+        
+        Args:
+            db: Database session
+            list_id: ID of the list to add participants to
+            participant_ids: List of participant IDs to add
+            added_by_id: ID of the user adding the participants
+        
+        Returns:
+            Dict with added_count, skipped_count, skipped_ids, errors
+        """
+        added_count = 0
+        skipped_ids = []
+        errors = []
+        
+        for participant_id in participant_ids:
+            try:
+                # Check if participant exists
+                participant_query = select(Participant).where(
+                    Participant.id == participant_id,
+                    Participant.is_active == True
+                )
+                participant_result = await db.execute(participant_query)
+                participant = participant_result.scalar_one_or_none()
+                
+                if not participant:
+                    errors.append(f"Participant {participant_id} not found")
+                    continue
+                
+                # Check if already in list
+                check_stmt = select(participant_list_members).where(
+                    participant_list_members.c.participant_list_id == list_id,
+                    participant_list_members.c.participant_id == participant_id
+                )
+                check_result = await db.execute(check_stmt)
+                existing = check_result.first()
+                
+                if existing:
+                    skipped_ids.append(str(participant_id))
+                    continue
+                
+                # Add to list
+                insert_stmt = participant_list_members.insert().values(
+                    participant_list_id=list_id,
+                    participant_id=participant_id,
+                    added_by_id=added_by_id
+                )
+                await db.execute(insert_stmt)
+                added_count += 1
+                
+            except Exception as e:
+                errors.append(str(e))
+                logger.error(f"Error adding participant {participant_id} to list {list_id}: {str(e)}")
+        
+        await db.commit()
+        
+        return {
+            "added_count": added_count,
+            "skipped_count": len(skipped_ids),
+            "skipped_ids": skipped_ids,
+            "errors": errors
+        }
+    
+    async def get_list_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        skip: int = 0,
+        limit: int = 20,
+        search: Optional[str] = None
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Get participants in a list with pagination and search.
+        
+        Returns:
+            Tuple of (items, total_count)
+        """
+        # Build query
+        query = (
+            select(Participant)
+            .join(
+                participant_list_members,
+                Participant.id == participant_list_members.c.participant_id
+            )
+            .where(
+                participant_list_members.c.participant_list_id == list_id,
+                Participant.is_active == True
+            )
+        )
+        
+        # Add search filter
+        if search:
+            query = query.where(
+                (Participant.name.ilike(f"%{search}%")) |
+                (Participant.email.ilike(f"%{search}%")) |
+                (Participant.organization.ilike(f"%{search}%")) |
+                (Participant.telephone.ilike(f"%{search}%"))
+            )
+        
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Add pagination
+        query = query.order_by(Participant.name).offset(skip).limit(limit)
+        result = await db.execute(query)
+        participants = result.scalars().all()
+        
+        # Convert to dict
+        items = []
+        for p in participants:
+            # Clean phone number if it's in scientific notation
+            telephone = p.telephone
+            if telephone and isinstance(telephone, str) and 'E' in telephone.upper():
+                try:
+                    telephone = str(int(float(telephone)))
+                except (ValueError, TypeError):
+                    pass
+            
+            items.append({
+                "id": str(p.id),
+                "name": p.name,
+                "email": p.email,
+                "telephone": telephone,
+                "title": p.title,
+                "organization": p.organization,
+                "notes": p.notes,
+                "created_by_id": str(p.created_by_id) if p.created_by_id else None,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                "updated_by_id": str(p.updated_by_id) if p.updated_by_id else None,
+                "is_active": p.is_active,
+            })
+        
+        return items, total
+    
+    async def get_participants_not_in_list_paginated(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> Tuple[List[Participant], int]:
+        """
+        Get participants that are NOT in a specific list.
+        
+        Returns:
+            Tuple of (participants, total_count)
+        """
+        # Subquery to get participant IDs in the list
+        in_list_subquery = (
+            select(participant_list_members.c.participant_id)
+            .where(participant_list_members.c.participant_list_id == list_id)
+        )
+        
+        # Main query
+        query = select(Participant).where(
+            Participant.is_active == True,
+            Participant.id.not_in(in_list_subquery)
+        )
+        
+        # Add search filter
+        if search:
+            query = query.where(
+                (Participant.name.ilike(f"%{search}%")) |
+                (Participant.email.ilike(f"%{search}%")) |
+                (Participant.organization.ilike(f"%{search}%"))
+            )
+        
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Add pagination
+        query = query.order_by(Participant.name).offset(skip).limit(limit)
+        result = await db.execute(query)
+        participants = result.scalars().all()
+        
+        return participants, total
+    
+    async def remove_participant_from_list(
+        self,
+        db: AsyncSession,
+        list_id: UUID,
+        participant_id: UUID,
+        updated_by_id: UUID
+    ) -> bool:
+        """
+        Remove a participant from a list.
+        
+        Returns:
+            True if removed, False if not found
+        """
+        # Check if the relation exists
+        check_stmt = select(participant_list_members).where(
+            participant_list_members.c.participant_list_id == list_id,
+            participant_list_members.c.participant_id == participant_id
+        )
+        check_result = await db.execute(check_stmt)
+        existing = check_result.first()
+        
+        if not existing:
+            return False
+        
+        # Delete the relation
+        delete_stmt = delete(participant_list_members).where(
+            participant_list_members.c.participant_list_id == list_id,
+            participant_list_members.c.participant_id == participant_id
+        )
+        await db.execute(delete_stmt)
+        
+        # Update the list's updated_at
+        update_stmt = (
+            update(ParticipantList)
+            .where(ParticipantList.id == list_id)
+            .values(
+                updated_at=datetime.now(),
+                updated_by_id=updated_by_id
+            )
+        )
+        await db.execute(update_stmt)
+        
+        await db.commit()
+        return True
+    
+    async def soft_delete(
+        self,
+        db: AsyncSession,
+        id: UUID,
+        updated_by_id: UUID
+    ) -> None:
+        """
+        Soft delete a participant list.
+        """
+        update_stmt = (
+            update(ParticipantList)
+            .where(ParticipantList.id == id)
+            .values(
+                is_active=False,
+                updated_at=datetime.now(),
+                updated_by_id=updated_by_id
+            )
+        )
+        await db.execute(update_stmt)
+        await db.commit()
+        logger.info(f"Soft deleted participant list {id}")
+    
+    async def get_accessible_lists(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Get all participant lists accessible to a user.
+        
+        Includes:
+        - Lists created by the user
+        - Global lists
+        """
+        try:
+            query = select(ParticipantList).where(
+                ParticipantList.is_active == True,
+                (
+                    (ParticipantList.created_by_id == user_id) |
+                    (ParticipantList.is_global == True)
+                )
+            )
+            
+            count_query = select(func.count()).select_from(query.subquery())
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            query = query.order_by(ParticipantList.name).offset(skip).limit(limit)
+            result = await db.execute(query)
+            lists = result.scalars().all()
+            
+            items = []
+            for list_obj in lists:
+                items.append({
+                    "id": str(list_obj.id),
+                    "name": list_obj.name,
+                    "description": list_obj.description,
+                    "is_global": list_obj.is_global,
+                    "created_by_id": str(list_obj.created_by_id) if list_obj.created_by_id else None,
+                    "created_at": list_obj.created_at.isoformat() if list_obj.created_at else None,
+                    "updated_at": list_obj.updated_at.isoformat() if list_obj.updated_at else None,
+                    "updated_by_id": str(list_obj.updated_by_id) if list_obj.updated_by_id else None,
+                    "is_active": list_obj.is_active,
+                })
+            
+            return items, total
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching accessible lists: {e}")
+            return [], 0
+    
+    async def get_list_with_participants(
+        self,
+        db: AsyncSession,
+        list_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a participant list with its participants.
+        """
+        try:
+            query = select(ParticipantList).where(
+                ParticipantList.id == list_id,
+                ParticipantList.is_active == True
+            )
+            result = await db.execute(query)
+            list_obj = result.scalar_one_or_none()
+            
+            if not list_obj:
+                return None
+            
+            # Get participants in this list
+            participants_query = (
+                select(Participant)
+                .join(
+                    participant_list_members,
+                    Participant.id == participant_list_members.c.participant_id
+                )
+                .where(
+                    participant_list_members.c.participant_list_id == list_id,
+                    Participant.is_active == True
+                )
+                .order_by(Participant.name)
+            )
+            participants_result = await db.execute(participants_query)
+            participants = participants_result.scalars().all()
+            
+            # Convert participants to dict
+            participant_dicts = []
+            for p in participants:
+                participant_dicts.append({
+                    "id": str(p.id),
+                    "name": p.name,
+                    "email": p.email,
+                    "telephone": p.telephone,
+                    "title": p.title,
+                    "organization": p.organization,
+                    "notes": p.notes,
+                    "created_by_id": str(p.created_by_id) if p.created_by_id else None,
+                    "created_at": p.created_at.isoformat() if p.created_at else None,
+                    "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                    "updated_by_id": str(p.updated_by_id) if p.updated_by_id else None,
+                    "is_active": p.is_active,
+                })
+            
+            return {
+                "id": str(list_obj.id),
+                "name": list_obj.name,
+                "description": list_obj.description,
+                "is_global": list_obj.is_global,
+                "created_by_id": str(list_obj.created_by_id) if list_obj.created_by_id else None,
+                "created_at": list_obj.created_at.isoformat() if list_obj.created_at else None,
+                "updated_at": list_obj.updated_at.isoformat() if list_obj.updated_at else None,
+                "updated_by_id": str(list_obj.updated_by_id) if list_obj.updated_by_id else None,
+                "is_active": list_obj.is_active,
+                "participants": participant_dicts,
+                "participant_count": len(participant_dicts),
+            }
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching list with participants: {e}")
+            return None
+
 
 # ============================================================================
 # MEETING CRUD
@@ -739,6 +1128,23 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             except (ValueError, TypeError):
                 return None
         return raw_id
+
+
+    async def _resolve_person_user_id(self, db, person_dict) -> Optional[UUID]:
+        """
+        Validate the client-supplied id against the users table.
+
+        The picker hands us meeting_participants.id values, which are NOT
+        user ids. An unvalidated id here is what caused
+        fk_action_implementers_user violations. Unknown id -> fall back to
+        matching on email -> otherwise NULL (external person, which is a
+        perfectly valid state).
+        """
+        return await resolve_implementer_user_id(
+            db,
+            user_id=self._get_person_user_id(person_dict),
+            email=self._get_person_email(person_dict),
+        )
     
     # ==================== CREATE ====================
     
@@ -813,14 +1219,25 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 for idx, person_data in enumerate(persons_implementing):
                     person_dict = self._normalize_person_data(person_data)
                     
-                    implementer = ActionImplementer(
-                        id=uuid4(),
-                        action_id=action.id,
-                        user_id=self._get_person_user_id(person_dict),
+                    resolved_user_id = await self._resolve_person_user_id(db, person_dict)
+
+                    user_id, name, email, phone = await resolve_person_identity(
+                        db,
+                        raw_id=self._get_person_user_id(person_dict),
                         name=self._get_person_name(person_dict),
                         email=self._get_person_email(person_dict),
                         phone=self._get_person_phone(person_dict),
-                        sort_order=idx
+                    )
+
+                    implementer = ActionImplementer(
+                        id=uuid4(),
+                        action_id=action.id,
+                        user_id=user_id,
+                        name=name,
+                        email=email,
+                        phone=phone,
+                        sort_order=idx,
+                        linked_at=datetime.now() if user_id else None,
                     )
                     db.add(implementer)
                     logger.info(f"Added implementer: {implementer.name} (sort_order: {idx})")
@@ -857,7 +1274,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 selectinload(MeetingAction.created_by),
                 selectinload(MeetingAction.updated_by),
                 selectinload(MeetingAction.overall_status),
-                selectinload(MeetingAction.implementers),  # ✅ Load implementers
+                selectinload(MeetingAction.implementers),
                 selectinload(MeetingAction.comments),
                 selectinload(MeetingAction.status_history)
             )
@@ -922,7 +1339,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
             selectinload(MeetingAction.assigned_to),
             selectinload(MeetingAction.assigned_by),
-            selectinload(MeetingAction.implementers)  # ✅ Load implementers
+            selectinload(MeetingAction.implementers)
         )
         
         # Build conditions for matching assignments
@@ -932,27 +1349,38 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         if user_id:
             conditions.append(MeetingAction.assigned_to_id == user_id)
         
-        # 2. Check legacy assigned_to_name JSON for email/phone match
-        if user_email:
-            conditions.append(
-                MeetingAction.assigned_to_name.op('->>')('email').like(f"%{user_email}%")
-            )
-        if user_phone:
-            conditions.append(
-                MeetingAction.assigned_to_name.op('->>')('phone').like(f"%{user_phone}%")
-            )
-        
-        # 3. Check implementers table
+
+        # 3. Check implementers table — this is now the primary source
         implementer_conditions = []
+
+        # Already linked to my account
         if user_id:
             implementer_conditions.append(ActionImplementer.user_id == user_id)
+
+        # Not yet linked, but assigned to my email address
         if user_email:
-            implementer_conditions.append(ActionImplementer.email.like(f"%{user_email}%"))
+            implementer_conditions.append(
+                and_(
+                    ActionImplementer.user_id.is_(None),
+                    func.lower(ActionImplementer.email) == user_email.strip().lower(),
+                )
+            )
+
+        # Not yet linked, but assigned to my phone
         if user_phone:
-            implementer_conditions.append(ActionImplementer.phone.like(f"%{user_phone}%"))
-        
+            normalized_phone = normalize_phone(user_phone)
+            if normalized_phone:
+                implementer_conditions.append(
+                    and_(
+                        ActionImplementer.user_id.is_(None),
+                        ActionImplementer.phone == normalized_phone,
+                    )
+                )
+
         if implementer_conditions:
-            implementer_subquery = select(ActionImplementer.action_id).where(or_(*implementer_conditions))
+            implementer_subquery = select(ActionImplementer.action_id).where(
+                or_(*implementer_conditions)
+            )
             conditions.append(MeetingAction.id.in_(implementer_subquery))
         
         # Apply OR condition
@@ -1070,16 +1498,28 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 persons_implementing = update_data.get('persons_implementing', [])
                 for idx, person_data in enumerate(persons_implementing):
                     person_dict = self._normalize_person_data(person_data)
-                    
-                    implementer = ActionImplementer(
-                        id=uuid4(),
-                        action_id=action_id,
-                        user_id=self._get_person_user_id(person_dict),
+
+
+                    user_id, name, email, phone = await resolve_person_identity(
+                        db,
+                        raw_id=self._get_person_user_id(person_dict),
                         name=self._get_person_name(person_dict),
                         email=self._get_person_email(person_dict),
                         phone=self._get_person_phone(person_dict),
-                        sort_order=idx
                     )
+
+                    implementer = ActionImplementer(
+                        id=uuid4(),
+                        action_id=action.id,
+                        user_id=user_id,
+                        name=name,
+                        email=email,
+                        phone=phone,
+                        sort_order=idx,
+                        linked_at=datetime.now() if user_id else None,
+                    )
+
+                    
                     db.add(implementer)
                     logger.info(f"Updated implementer: {implementer.name} (sort_order: {idx})")
             
@@ -1248,6 +1688,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.execute(
                 delete(ActionImplementer).where(ActionImplementer.action_id == action_id)
             )
+
             
             # Create a single implementer for the assigned user
             implementer = ActionImplementer(
@@ -1480,11 +1921,6 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         
         if include_actions:
             query = query.options(
-                # ── FIX: also eager-load implementers on every action ──────────
-                # Without this, action.implementers is always [] when accessed
-                # through the minutes list endpoint, even when rows exist in the
-                # action_implementers table. The detail endpoint was fine because
-                # CRUDMeetingAction.get() already had selectinload(implementers).
                 selectinload(MeetingMinutes.actions).selectinload(MeetingAction.implementers),
                 selectinload(MeetingMinutes.created_by),
                 selectinload(MeetingMinutes.recorded_by)

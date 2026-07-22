@@ -23,6 +23,17 @@ import {
 } from '../../../../store/slices/actionTracker/meetingSlice';
 
 // ============================================================================
+// Constants - IMPORT FROM AccessControlStep
+// ============================================================================
+
+// Define these here to avoid circular imports
+export const VISIBILITY = {
+  DEPARTMENT: 'department',
+  OPEN: 'open',
+};
+export const DEFAULT_VISIBILITY = VISIBILITY.DEPARTMENT; // 👈 Department Only is default
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -67,16 +78,6 @@ const getErrorMessage = (error) => {
 
 /**
  * Format a Date object to YYYY-MM-DD using LOCAL components.
- *
- * The DatePicker (MUI + AdapterDateFns) always hands back a Date
- * representing LOCAL midnight of the picked calendar day - it has no
- * concept of UTC. Reading UTC components (getUTCFullYear/getUTCDate) off
- * that Date shifts the day backward for any timezone ahead of UTC: local
- * midnight of July 8 in UTC+3 is 2026-07-07T21:00:00Z, so getUTCDate()
- * would wrongly return 7. This is what caused meeting_date to save one day
- * behind. A plain calendar date has no time-of-day meaning, so it must
- * stay entirely in local-component arithmetic and never touch UTC or
- * toISOString().
  */
 const formatDateLocal = (date) => {
   if (!date) return null;
@@ -90,26 +91,20 @@ const formatDateLocal = (date) => {
 };
 
 /**
- * Parse a YYYY-MM-DD string to a Date at LOCAL midnight - matches what the
- * DatePicker itself produces, so the same calendar day survives every
- * round trip through form state regardless of the browser's timezone
- * offset.
+ * Parse a YYYY-MM-DD string to a Date at LOCAL midnight
  */
 const parseDateLocal = (dateStr) => {
   if (!dateStr) return null;
   
-  // If it's already a Date object
   if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
     return dateStr;
   }
   
-  // If it's a string in YYYY-MM-DD format
   if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
   }
   
-  // Try parsing as ISO string
   try {
     const d = new Date(dateStr);
     if (!isNaN(d.getTime())) return d;
@@ -131,7 +126,6 @@ const parseTime = (timeStr) => {
   }
   
   if (typeof timeStr === 'string') {
-    // If it's in HH:mm:ss format
     if (/^\d{2}:\d{2}(:\d{2})?$/.test(timeStr)) {
       const [hours, minutes, seconds = '00'] = timeStr.split(':').map(Number);
       const date = new Date();
@@ -216,8 +210,8 @@ export const useMeetingForm = () => {
     statuses: {}
   });
   
-  // Visibility & department
-  const [visibility, setVisibility] = useState('open');
+  // Visibility & department - FIXED: Default to Department Only
+  const [visibility, setVisibility] = useState(DEFAULT_VISIBILITY); // 👈 THIS IS THE FIX
   const [restrictedDepartmentId, setRestrictedDepartmentId] = useState(null);
   const [restrictedDepartmentName, setRestrictedDepartmentName] = useState('');
   const [gpsEnabled, setGpsEnabled] = useState(false);
@@ -297,6 +291,7 @@ export const useMeetingForm = () => {
   const handleClearRestrictedDepartment = useCallback(() => {
     setRestrictedDepartmentId(null);
     setRestrictedDepartmentName('');
+    setVisibility(VISIBILITY.OPEN);
     setFormDirty(true);
   }, []);
 
@@ -361,8 +356,6 @@ export const useMeetingForm = () => {
       dispatch(fetchMeetingById(id)).unwrap()
         .then(async (meeting) => {
           if (meeting && isMounted.current) {
-            // Parse dates using LOCAL midnight - see formatDateLocal/
-            // parseDateLocal comments above for why UTC was wrong here.
             const meetingDate = parseDateLocal(meeting.meeting_date);
             const startTime = parseTime(meeting.start_time);
             const endTime = parseTime(meeting.end_time);
@@ -389,7 +382,7 @@ export const useMeetingForm = () => {
             });
             
             if (meeting.gps_coordinates) setGpsEnabled(true);
-            setVisibility(meeting.visibility || 'open');
+            setVisibility(meeting.visibility || DEFAULT_VISIBILITY);
             
             const deptId = meeting.restricted_department_id || null;
             setRestrictedDepartmentId(deptId);
@@ -447,12 +440,6 @@ export const useMeetingForm = () => {
     setFormDirty(true);
   }, []);
 
-  /**
-   * Handle date change - stores as YYYY-MM-DD string using LOCAL components.
-   * The DatePicker gives us local midnight of the picked day; formatting
-   * with local components (not UTC) preserves the exact calendar day the
-   * user selected, regardless of timezone.
-   */
   const handleDateChange = useCallback((date) => {
     if (!date) {
       setFormData(prev => ({ ...prev, meeting_date: null }));
@@ -460,7 +447,6 @@ export const useMeetingForm = () => {
       return;
     }
 
-    // Parse the date
     let dateObj = date;
     if (typeof date === 'string') {
       dateObj = new Date(date);
@@ -471,7 +457,6 @@ export const useMeetingForm = () => {
       return;
     }
 
-    // Format as YYYY-MM-DD using LOCAL components
     const formattedDate = formatDateLocal(dateObj);
 
     setFormData(prev => ({ 
@@ -481,9 +466,6 @@ export const useMeetingForm = () => {
     setFormDirty(true);
   }, []);
 
-  /**
-   * Handle start time change - stores as Date object
-   */
   const handleStartTimeChange = useCallback((time) => {
     if (!time) {
       setFormData(prev => ({ ...prev, start_time: null }));
@@ -504,9 +486,6 @@ export const useMeetingForm = () => {
     setFormDirty(true);
   }, []);
 
-  /**
-   * Handle end time change - stores as Date object
-   */
   const handleEndTimeChange = useCallback((time) => {
     if (!time) {
       setFormData(prev => ({ ...prev, end_time: null }));
@@ -657,17 +636,10 @@ export const useMeetingForm = () => {
   // ==========================================================================
   
   const buildMeetingPayload = useCallback(() => {
-    // Get the date as a string in YYYY-MM-DD format - this is already
-    // correct (produced by formatDateLocal in handleDateChange, or
-    // parseDateLocal + re-formatted on load), so it's sent through as-is
-    // below rather than being rebuilt from startDateTime.toISOString(),
-    // which was the second point where the day used to shift.
     const meetingDateStr = formData.meeting_date;
     
-    // Create start datetime
     let startDateTime = null;
     if (meetingDateStr) {
-      // Parse the date string at local midnight
       const dateObj = parseDateLocal(meetingDateStr);
       if (dateObj) {
         startDateTime = new Date(dateObj);
@@ -686,7 +658,6 @@ export const useMeetingForm = () => {
       if (endTime) {
         endDateTime = new Date(startDateTime);
         endDateTime.setHours(endTime.getHours(), endTime.getMinutes());
-        // If end time is before start time, add a day
         if (endDateTime <= startDateTime) {
           endDateTime.setDate(endDateTime.getDate() + 1);
         }
@@ -695,7 +666,6 @@ export const useMeetingForm = () => {
 
     const chairpersonParticipant = meetingParticipants.find(p => p.is_chairperson === true);
 
-    // Clean participants - only include allowed fields
     const cleanParticipants = meetingParticipants.map(p => {
       const participant = {
         id: p.is_existing ? p.id : undefined,
@@ -707,7 +677,6 @@ export const useMeetingForm = () => {
         is_chairperson: Boolean(p.is_chairperson),
         is_secretary: p.name === formData.secretary_name,
       };
-      // Remove undefined values
       Object.keys(participant).forEach(key => {
         if (participant[key] === undefined) delete participant[key];
       });
@@ -717,10 +686,6 @@ export const useMeetingForm = () => {
     const payload = {
       title: formData.title,
       description: formData.description || null,
-      // Send the already-correct YYYY-MM-DD string directly - do NOT
-      // rebuild it from startDateTime.toISOString().split('T')[0]; that
-      // round-trips a local-time Date through UTC and shifts the day for
-      // any timezone ahead of UTC.
       meeting_date: meetingDateStr || null,
       start_time: startDateTime ? startDateTime.toISOString() : null,
       end_time: endDateTime ? endDateTime.toISOString() : null,
@@ -734,7 +699,7 @@ export const useMeetingForm = () => {
       chairperson_name: chairpersonParticipant?.name || null,
       organization_id: restrictedDepartmentId || null,
       visibility: visibility,
-      restricted_department_id: visibility === 'department' ? restrictedDepartmentId : null,
+      restricted_department_id: visibility === VISIBILITY.DEPARTMENT ? restrictedDepartmentId : null,
       custom_participants: cleanParticipants,
     };
 
@@ -778,7 +743,7 @@ export const useMeetingForm = () => {
       return;
     }
 
-    if (visibility === 'department' && !restrictedDepartmentId) {
+    if (visibility === VISIBILITY.DEPARTMENT && !restrictedDepartmentId) {
       setSnackbar({ open: true, message: 'Please select a department for restricted meeting access', severity: 'warning' });
       return;
     }
@@ -789,7 +754,6 @@ export const useMeetingForm = () => {
     try {
       const basePayload = buildMeetingPayload();
 
-      // Manually remove any remaining unwanted fields
       delete basePayload.has_online_meeting;
       delete basePayload.has_physical_meeting;
       delete basePayload.platform;

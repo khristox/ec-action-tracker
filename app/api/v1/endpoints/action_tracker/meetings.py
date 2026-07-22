@@ -1244,8 +1244,11 @@ async def get_meeting_participants(
     current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Get all participants for a meeting with privacy protection.
-    Phone and email are partially masked for privacy.
+    Get all participants for a meeting.
+
+    Contact details are returned in full: they are the whole point of a
+    participant record, and they are the key used to link a participant to
+    a system account later.
     """
     try:
         # Check if meeting exists
@@ -1286,8 +1289,9 @@ async def get_meeting_participants(
                 "created_at": p.created_at,
                 "updated_at": getattr(p, 'updated_at', None),
                 "is_active": p.is_active,
-                "email": mask_email(p.email) if hasattr(p, 'email') and p.email else None,
-                "telephone": mask_phone_number(p.telephone) if hasattr(p, 'telephone') and p.telephone else None,
+                "email": p.email,
+                "telephone": p.telephone,
+                
             }
             response_participants.append(participant_dict)
         
@@ -1510,62 +1514,3 @@ async def update_participant_attendance(
     
 
 
-# ==================== PRIVACY HELPER FUNCTIONS ====================
-
-def mask_phone_number(phone: str) -> str:
-    """
-    Mask a phone number for privacy.
-    Shows first 2 and last 2 digits, hides the rest with asterisks.
-    Example: +256789123456 -> +2******56
-    """
-    if not phone:
-        return None
-    
-    # Remove any non-digit characters for counting
-    digits = ''.join(c for c in phone if c.isdigit())
-    if len(digits) <= 4:
-        return phone
-    
-    # Find where the digits start in the original string
-    # Keep the prefix (like +, 0, etc.)
-    prefix = ''
-    for char in phone:
-        if char.isdigit():
-            break
-        prefix += char
-    
-    # Get first 2 and last 2 digits
-    first_two = digits[:2]
-    last_two = digits[-2:]
-    masked_digits = first_two + '*' * (len(digits) - 4) + last_two
-    
-    return prefix + masked_digits
-
-
-def mask_email(email: str) -> str:
-    """
-    Mask an email address for privacy.
-    Shows first 2 characters and the domain, hides the rest.
-    Example: john.doe@example.com -> jo***@example.com
-    """
-    if not email:
-        return None
-    
-    parts = email.split('@')
-    if len(parts) != 2:
-        # If no domain, just mask the email
-        if len(email) <= 3:
-            return email[0] + '*' * (len(email) - 1)
-        return email[:2] + '*' * (len(email) - 2)
-    
-    local_part = parts[0]
-    domain = parts[1]
-    
-    if len(local_part) <= 2:
-        # If local part is very short, just show first character and asterisks
-        masked_local = local_part[0] + '*' * (len(local_part) - 1)
-    else:
-        # Show first 2 characters, then asterisks for the rest
-        masked_local = local_part[:2] + '*' * (len(local_part) - 2)
-    
-    return f"{masked_local}@{domain}"

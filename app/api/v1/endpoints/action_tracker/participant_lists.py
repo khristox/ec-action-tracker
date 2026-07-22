@@ -1,7 +1,9 @@
-from asyncio.log import logger
+# app/api/v1/endpoints/action_tracker/participant_lists.py
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request,  status
-from sqlalchemy import select
+import logging
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
@@ -21,12 +23,11 @@ from app.schemas.action_tracker_participants import (
     ParticipantResponse
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ==================== HELPER FUNCTIONS ====================
-
-# app/api/v1/endpoints/action_tracker/participant_lists.py
 
 async def get_and_verify_list(
     db: AsyncSession,
@@ -49,7 +50,6 @@ async def get_and_verify_list(
     Raises:
         HTTPException: If list not found or permission denied
     """
-    # Now returns a dictionary, not an ORM object
     list_dict = await participant_list.get(db, list_id, include_participants=False)
     
     if not list_dict:
@@ -74,6 +74,7 @@ async def get_and_verify_list(
     
     return list_dict
 
+
 # ==================== CREATE OPERATIONS ====================
 
 @router.post(
@@ -96,9 +97,10 @@ async def create_participant_list(
     - **is_global**: Whether the list is accessible by all users (default: false)
     - **participant_ids**: Optional list of participant IDs to add initially
     """
-    return await participant_list.create(
+    result = await participant_list.create(
         db, list_in, current_user.id
     )
+    return result
 
 
 # ==================== READ OPERATIONS ====================
@@ -126,7 +128,7 @@ async def get_participant_lists(
         # Calculate pagination
         page = skip // limit + 1 if limit > 0 else 1
         pages = (total + limit - 1) // limit if limit > 0 else 1
-        # Return in the expected format
+        
         return {
             "items": lists,
             "total": total,
@@ -141,7 +143,6 @@ async def get_participant_lists(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch participant lists: {str(e)}"
         )
-    
 
 
 @router.get(
@@ -171,7 +172,6 @@ async def get_participant_list(
         )
     
     # Check access
-    print(list_obj['created_by_id'])
     if not list_obj['is_global'] and str(list_obj['created_by_id']) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -205,9 +205,64 @@ async def update_participant_list(
     - **is_global**: Whether the list should be global
     - **participant_ids**: Complete replacement list of participant IDs
     """
-    list_obj = await get_and_verify_list(db, list_id, current_user, require_ownership=True)
-    
-    return await participant_list.update(db, list_obj, list_in, current_user.id)
+    try:
+        # Verify the list exists and user has ownership
+        await get_and_verify_list(db, list_id, current_user, require_ownership=True)
+        
+        # Get the existing list object (not dict) for the update
+        from app.models.meetings.action_tracker import ParticipantList
+        result = await db.execute(
+            select(ParticipantList).where(ParticipantList.id == list_id)
+        )
+        list_obj = result.scalar_one_or_none()
+        
+        if not list_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant list not found"
+            )
+        
+        # Update using the ORM object
+        # CRUDBase.update() signature: update(db, db_obj, obj_in)
+        updated_list = await participant_list.update(
+            db=db,
+            db_obj=list_obj,
+            obj_in=list_in
+        )
+        
+        # Manually update the audit fields after the update
+        if updated_list:
+            updated_list.updated_by_id = current_user.id
+            updated_list.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(updated_list)
+        
+        # Convert to response format (dictionary)
+        # This ensures the response matches the ParticipantListResponse schema
+        return {
+            "id": str(updated_list.id),
+            "name": updated_list.name,
+            "description": updated_list.description,
+            "is_global": updated_list.is_global,
+            "created_by_id": str(updated_list.created_by_id) if updated_list.created_by_id else None,
+            "created_at": updated_list.created_at.isoformat() if updated_list.created_at else None,
+            "updated_by_id": str(updated_list.updated_by_id) if updated_list.updated_by_id else None,
+            "updated_at": updated_list.updated_at.isoformat() if updated_list.updated_at else None,
+            "is_active": updated_list.is_active,
+            "member_count": len(updated_list.participants) if updated_list.participants else 0,
+            "participant_count": len(updated_list.participants) if updated_list.participants else 0,
+            "participants": []
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating participant list {list_id}: {str(e)}")
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update participant list: {str(e)}"
+        )
 
 
 # ==================== DELETE OPERATIONS ====================
@@ -242,9 +297,6 @@ async def delete_participant_list(
     summary="Get list members",
     description="Get all participants in a specific list with pagination."
 )
-# app/api/v1/endpoints/action_tracker/participant_lists.py
-
-@router.get("/{list_id}/members", response_model=PaginatedParticipantResponse)
 async def get_list_members(
     list_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -257,10 +309,10 @@ async def get_list_members(
     Get all members of a participant list with pagination.
     """
     try:
-        # Verify access using the helper (now works with dict)
+        # Verify access using the helper
         await get_and_verify_list(db, list_id, current_user, require_ownership=False)
         
-        # Get members - this now returns dictionaries
+        # Get members
         members, total = await participant_list.get_list_participants(
             db, list_id, skip, limit, search
         )
@@ -270,7 +322,7 @@ async def get_list_members(
         pages = (total + limit - 1) // limit if limit > 0 else 1
         
         return {
-            "items": members,  # Already dictionaries
+            "items": members,
             "total": total,
             "page": page,
             "size": limit,
@@ -285,7 +337,8 @@ async def get_list_members(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get list members: {str(e)}"
         )
-    
+
+
 @router.post(
     "/{list_id}/members",
     response_model=BulkAddParticipantsResponse,
@@ -314,12 +367,13 @@ async def add_members_to_list(
     await get_and_verify_list(db, list_id, current_user, require_ownership=True)
     
     result = await participant_list.add_participants_to_list_batch(
-        db, list_id, request.participant_ids, current_user.id
+        db=db,
+        list_id=list_id,
+        participant_ids=request.participant_ids,
+        added_by_id=current_user.id
     )
     
     return result
-
-
 
 
 @router.get("/{list_id}/available-participants")
@@ -360,7 +414,6 @@ async def get_available_participants(
     }
 
 
-
 @router.delete("/{list_id}/members/{participant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_member_from_list(
     list_id: UUID,
@@ -368,13 +421,6 @@ async def remove_member_from_list(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    
-    print("=" * 50)
-    print("DELETE ENDPOINT WAS REACHED!")
-    print(f"list_id: {list_id}")
-    print(f"participant_id: {participant_id}")
-    print(f"current_user: {current_user.id}")
-    print("=" * 50)
     """Remove a participant from a list"""
     try:
         # First check if list exists and user has access
@@ -385,12 +431,12 @@ async def remove_member_from_list(
                 detail="Participant list not found"
             )
         # Check access
-        if list_obj['created_by_id']  != str(current_user.id):
+        if list_obj['created_by_id'] != str(current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied to this list"
             )
-        print(f"Attempting to remove participant {participant_id} from list {list_id} by user {current_user.id}"   )
+        
         # Remove the member
         success = await participant_list.remove_participant_from_list(
             db, list_id, participant_id, updated_by_id=current_user.id
@@ -412,5 +458,3 @@ async def remove_member_from_list(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove member: {str(e)}"
         )
-    
- 

@@ -528,20 +528,55 @@ class ActionSummary(ORMBase):
         return self
 
 
+class MyTaskImplementer(ORMBase):
+    """One person implementing a task. May or may not have a system account."""
+    id: UUID
+    user_id: Optional[UUID] = None
+    is_system_user: bool = False
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    sort_order: int = 0
+
+
 class MyTaskResponse(ORMBase):
+    # ---- identity ----
     id: UUID
     description: str
-    meeting_title: str
+    title: Optional[str] = None
+
+    # ---- meeting context ----
+    meeting_title: str = ""
     meeting_date: Optional[datetime] = None
+
+    # ---- scheduling ----
     due_date: Optional[datetime] = None
+    date_initiated: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    # ---- classification ----
+    priority: int = 2
+    type_of_action: Optional[str] = None
+    is_key_action: bool = False
+    issue_challenge: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+
+    # ---- progress ----
     overall_progress_percentage: int = 0
     overall_status_name: Optional[str] = None
-    priority: int = 2
+    overall_status_id: Optional[UUID] = None
     is_overdue: bool = False
+
+    # ---- assignment ----
     assigned_by_name: Optional[str] = None
     assigned_at: Optional[datetime] = None
     assigned_to_display_name: Optional[str] = None
+    implementers: List[MyTaskImplementer] = Field(default_factory=list)
 
+    @property
+    def has_implementers(self) -> bool:
+        return bool(self.implementers)
 
 # ==================== Notification Schemas ====================
 

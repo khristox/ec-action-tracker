@@ -714,6 +714,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         await db.commit()
         logger.info(f"Soft deleted participant list {id}")
     
+
     async def get_accessible_lists(
         self,
         db: AsyncSession,
@@ -723,35 +724,64 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         Get all participant lists accessible to a user.
-        
-        Includes:
-        - Lists created by the user
-        - Global lists
         """
         try:
-            query = select(ParticipantList).where(
-                ParticipantList.is_active == True,
-                (
-                    (ParticipantList.created_by_id == user_id) |
-                    (ParticipantList.is_global == True)
+            # Use the association table directly
+            member_count_subquery = (
+                select(
+                    participant_list_members.c.participant_list_id,
+                    func.count(participant_list_members.c.participant_id).label('member_count')
+                )
+                .group_by(participant_list_members.c.participant_list_id)
+                .subquery()
+            )
+            
+            # Main query with member count
+            query = (
+                select(
+                    ParticipantList,
+                    func.coalesce(member_count_subquery.c.member_count, 0).label('participant_count')
+                )
+                .outerjoin(
+                    member_count_subquery,
+                    ParticipantList.id == member_count_subquery.c.participant_list_id
+                )
+                .where(
+                    ParticipantList.is_active == True,
+                    (
+                        (ParticipantList.created_by_id == user_id) |
+                        (ParticipantList.is_global == True)
+                    )
                 )
             )
             
-            count_query = select(func.count()).select_from(query.subquery())
+            # Count query for pagination
+            count_query = select(func.count()).select_from(
+                select(ParticipantList).where(
+                    ParticipantList.is_active == True,
+                    (
+                        (ParticipantList.created_by_id == user_id) |
+                        (ParticipantList.is_global == True)
+                    )
+                ).subquery()
+            )
             count_result = await db.execute(count_query)
             total = count_result.scalar() or 0
             
+            # Apply pagination and ordering
             query = query.order_by(ParticipantList.name).offset(skip).limit(limit)
             result = await db.execute(query)
-            lists = result.scalars().all()
+            rows = result.all()
             
+            # Build response items with participant count
             items = []
-            for list_obj in lists:
+            for list_obj, participant_count in rows:
                 items.append({
                     "id": str(list_obj.id),
                     "name": list_obj.name,
                     "description": list_obj.description,
                     "is_global": list_obj.is_global,
+                    "participant_count": participant_count,
                     "created_by_id": str(list_obj.created_by_id) if list_obj.created_by_id else None,
                     "created_at": list_obj.created_at.isoformat() if list_obj.created_at else None,
                     "updated_at": list_obj.updated_at.isoformat() if list_obj.updated_at else None,
@@ -764,7 +794,8 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         except SQLAlchemyError as e:
             logger.error(f"Database error fetching accessible lists: {e}")
             return [], 0
-    
+        
+
     async def get_list_with_participants(
         self,
         db: AsyncSession,
@@ -1807,54 +1838,51 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     # ==================== DELETE ====================
     
     async def soft_delete(self, db: AsyncSession, action_id: UUID, user_id: UUID) -> bool:
-        """Soft delete an action"""
-        try:
-            action = await self.get(db, action_id)
-            if not action:
-                return False
-            
-            # Check permission
-            if action.created_by_id != user_id:
-                user_result = await db.execute(
-                    select(User).where(User.id == user_id)
+            """Soft delete an action"""
+            try:
+                action = await self.get(db, action_id)
+                if not action:
+                    return False
+                
+                # Check permission
+                if action.created_by_id != user_id:
+                    user_result = await db.execute(
+                        select(User).where(User.id == user_id)
+                    )
+                    user = user_result.scalar_one_or_none()
+                    is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
+                    if not is_admin:
+                        raise ValueError("Only the task creator or admin can delete this action")
+                
+                action.is_active = False
+                action.updated_at = datetime.now()
+                action.updated_by_id = user_id
+                
+                # Soft delete comments
+                comments_result = await db.execute(
+                    select(ActionComment).where(ActionComment.action_id == action_id)
                 )
-                user = user_result.scalar_one_or_none()
-                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
-                if not is_admin:
-                    raise ValueError("Only the task creator or admin can delete this action")
-            
-            action.is_active = False
-            action.updated_at = datetime.now()
-            action.updated_by_id = user_id
-            
-            # Soft delete comments
-            comments_result = await db.execute(
-                select(ActionComment).where(ActionComment.action_id == action_id)
-            )
-            for comment in comments_result.scalars().all():
-                comment.is_active = False
-                comment.updated_at = datetime.now()
-                comment.updated_by_id = user_id
-            
-            # Soft delete implementers
-            await db.execute(
-                update(ActionImplementer).where(
-                    ActionImplementer.action_id == action_id
-                ).values(
-                    is_active=False,
-                    updated_at=datetime.now(),
-                    updated_by_id=user_id
+                for comment in comments_result.scalars().all():
+                    comment.is_active = False
+                    comment.updated_at = datetime.now()
+                    comment.updated_by_id = user_id
+                
+                # Soft delete implementers safely using ORM objects
+                implementers_result = await db.execute(
+                    select(ActionImplementer).where(ActionImplementer.action_id == action_id)
                 )
-            )
+                for implementer in implementers_result.scalars().all():
+                    implementer.is_active = False
+                    implementer.updated_at = datetime.now()
+                    implementer.updated_by_id = user_id
+                
+                await db.commit()
+                return True
+                
+            except Exception as e:
+                await db.rollback()
+                raise ValueError(f"Failed to delete action: {str(e)}")
             
-            await db.commit()
-            return True
-            
-        except Exception as e:
-            await db.rollback()
-            raise ValueError(f"Failed to delete action: {str(e)}")
-
-
 # ============================================================================
 # MEETING MINUTES CRUD
 # ============================================================================
@@ -1996,6 +2024,31 @@ class CRUDMeetingParticipant(AuditMixin):
         except Exception as e:
             logger.error(f"Error fetching participants for meeting {meeting_id}: {str(e)}")
             return []
+
+    async def soft_delete(
+        self, 
+        db: AsyncSession, 
+        participant_id: UUID, 
+        deleted_by_id: UUID
+    ) -> Optional[MeetingParticipant]:
+        """Soft delete a meeting participant with audit fields"""
+        try:
+            result = await db.execute(
+                select(MeetingParticipant).where(
+                    MeetingParticipant.id == participant_id,
+                    MeetingParticipant.is_active == True
+                )
+            )
+            db_obj = result.scalar_one_or_none()
+            if db_obj:
+                db_obj.is_active = False
+                await self._update_audit_fields(db_obj, deleted_by_id)
+                await db.commit()
+                await db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete meeting participant: {str(e)}")
     
     async def update_attendance(
         self, 

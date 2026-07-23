@@ -1,6 +1,6 @@
 // src/components/actiontracker/meetings/components/AddActionDialog.jsx
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, LinearProgress, Alert,
@@ -29,6 +29,64 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format } from 'date-fns';
 import PersonsImplementingEditor from './PersonsImplementingEditor';
 import { parsePersonsFromAction, buildPersonsPayload } from './personsImplementing';
+
+// ==================== MASKING HELPERS ====================
+
+// Helper function to mask phone numbers
+const maskPhoneOnly = (text) => {
+  if (!text) return '';
+  
+  // Match and mask phone numbers
+  return text.replace(/(\+?\d{1,3}[-.\s]?)?(\d{2,3})[-.\s]?\d{3}[-.\s]?(\d{4})/g, (match, p1, p2, p3) => {
+    const prefix = p1 ? p1 : '';
+    return `${prefix}${p2 ? p2 : '***'}-***-${p3}`;
+  });
+};
+
+// Helper function to mask email addresses
+const maskEmail = (email) => {
+  if (!email) return '';
+  
+  // Split email into local part and domain
+  const [localPart, domain] = email.split('@');
+  if (!domain) return email;
+  
+  // Mask the local part: show first 2 characters and last character, mask the rest
+  let maskedLocal;
+  if (localPart.length <= 3) {
+    // For short emails, show first character and mask the rest
+    maskedLocal = localPart.charAt(0) + '*'.repeat(localPart.length - 1);
+  } else {
+    // Show first 2 and last 1 character
+    maskedLocal = localPart.substring(0, 2) + '*'.repeat(localPart.length - 3) + localPart.charAt(localPart.length - 1);
+  }
+  
+  // Mask domain: show first 1-2 characters and last 1-2 characters
+  const [domainName, tld] = domain.split('.');
+  if (!tld) return `${maskedLocal}@${domain}`;
+  
+  let maskedDomain;
+  if (domainName.length <= 3) {
+    maskedDomain = domainName.charAt(0) + '*'.repeat(domainName.length - 1);
+  } else {
+    maskedDomain = domainName.substring(0, 2) + '*'.repeat(domainName.length - 3) + domainName.charAt(domainName.length - 1);
+  }
+  
+  return `${maskedLocal}@${maskedDomain}.${tld}`;
+};
+
+// Helper function to mask both phone and email in a text
+const maskContactInfo = (text) => {
+  if (!text) return '';
+  
+  // First mask phone numbers
+  let masked = maskPhoneOnly(text);
+  // Then mask emails (email addresses don't contain spaces)
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  masked = masked.replace(emailRegex, (match) => maskEmail(match));
+  
+  return masked;
+};
 
 // ==================== HELPERS ====================
 
@@ -194,37 +252,37 @@ const PRIORITY_OPTIONS = [
 const EMPTY_ARRAY = [];
 
 // ==================== LAYOUT PRIMITIVES ====================
-// IMPORTANT: these must live at module scope, not inside AddActionDialog.
-// A component defined inside another component's render body gets a new
-// function identity every render. React then treats it as a brand-new
-// component type, unmounts the previous subtree (including any focused
-// input inside it), and mounts a fresh one — which is what was causing
-// focus to drop out of "Title / Category" on every keystroke.
 
-const FlexRow = ({ children, gap = 2, wrap = true, isMobile = false, sx = {} }) => (
-  <Box sx={{
-    display: 'flex',
-    flexDirection: isMobile ? 'column' : 'row',
-    gap: isMobile ? 2 : gap,
-    width: '100%',
-    flexWrap: wrap ? 'wrap' : 'nowrap',
-    mb: 2.5,
-    ...sx,
-  }}>
-    {children}
-  </Box>
-);
+const FlexRow = ({ children, gap = 2, wrap = true, ismobile = 'false', sx = {} }) => {
+  const mobileBool = ismobile === 'true';
+  return (
+    <Box sx={{
+      display: 'flex',
+      flexDirection: mobileBool ? 'column' : 'row',
+      gap: mobileBool ? 2 : gap,
+      width: '100%',
+      flexWrap: wrap ? 'wrap' : 'nowrap',
+      mb: 2.5,
+      ...sx,
+    }}>
+      {children}
+    </Box>
+  );
+};
 
-const FlexItem = ({ children, flex = 1, minWidth = '0', isMobile = false, sx = {} }) => (
-  <Box sx={{
-    flex,
-    minWidth,
-    width: isMobile ? '100%' : 'auto',
-    ...sx,
-  }}>
-    {children}
-  </Box>
-);
+const FlexItem = ({ children, flex = 1, minWidth = '0', ismobile = 'false', sx = {} }) => {
+  const mobileBool = ismobile === 'true';
+  return (
+    <Box sx={{
+      flex,
+      minWidth,
+      width: mobileBool ? '100%' : 'auto',
+      ...sx,
+    }}>
+      {children}
+    </Box>
+  );
+};
 
 // ==================== MAIN COMPONENT ====================
 
@@ -304,6 +362,23 @@ const AddActionDialog = ({
   const prevOpenRef = useRef(false);
   const prevEditingIdRef = useRef(undefined);
 
+  // Function to mask persons data before passing to editor
+  const maskPersonsData = useCallback((persons) => {
+    if (!persons || !Array.isArray(persons)) return persons;
+    
+    return persons.map(person => ({
+      ...person,
+      // Mask email and phone in the person object if they exist
+      email: person.email ? maskEmail(person.email) : person.email,
+      phone: person.phone ? maskPhoneOnly(person.phone) : person.phone,
+      // Also mask any other fields that might contain contact info
+      contact_info: person.contact_info ? maskContactInfo(person.contact_info) : person.contact_info,
+      // Keep the original values for internal use
+      _originalEmail: person.email,
+      _originalPhone: person.phone,
+    }));
+  }, []);
+
   // Reset form when dialog opens
   useEffect(() => {
     const editingId = editingAction?.id ?? null;
@@ -312,13 +387,17 @@ const AddActionDialog = ({
 
     if (justOpened || editingTargetChanged) {
       if (editingAction) {
+        // Parse and mask persons implementing data
+        const parsedPersons = parsePersonsFromAction(editingAction);
+        const maskedPersons = maskPersonsData(parsedPersons);
+        
         setFormData({
           title: editingAction.title || '',
           issue_challenge: editingAction.issue_challenge || '',
           description: editingAction.description || '',
           is_key_action: !!editingAction.is_key_action,
           type_of_action: editingAction.type_of_action || '',
-          persons_implementing: parsePersonsFromAction(editingAction),
+          persons_implementing: maskedPersons,
           date_initiated: editingAction.date_initiated ? new Date(editingAction.date_initiated) : new Date(),
           due_date: editingAction.due_date ? new Date(editingAction.due_date) : null,
           priority: editingAction.priority || 2,
@@ -359,9 +438,15 @@ const AddActionDialog = ({
 
     prevOpenRef.current = open;
     prevEditingIdRef.current = editingId;
-  }, [editingAction, open, selectedMinuteId, hasMinutes, meetingsList]);
+  }, [editingAction, open, selectedMinuteId, hasMinutes, meetingsList, maskPersonsData]);
 
   // ==================== HANDLERS ====================
+
+  const handlePersonsChange = useCallback((persons) => {
+    // Mask the data before storing in form state
+    const maskedPersons = maskPersonsData(persons);
+    setFormData(prev => ({ ...prev, persons_implementing: maskedPersons }));
+  }, [maskPersonsData]);
 
   const handleSave = async () => {
     if (!formData.description.trim()) {
@@ -382,6 +467,14 @@ const AddActionDialog = ({
     setLocalError(null);
     setIsSubmitting(true);
 
+    // When building payload, use original unmasked data if available
+    const personsPayload = buildPersonsPayload(formData.persons_implementing.map(person => ({
+      ...person,
+      // Use original values if they were masked
+      email: person._originalEmail || person.email,
+      phone: person._originalPhone || person.phone,
+    })));
+
     const payload = {
       title: formData.title.trim() || null,
       issue_challenge: formData.issue_challenge || null,
@@ -396,7 +489,7 @@ const AddActionDialog = ({
       remarks: formData.remarks || '',
       minute_id: formData.minute_id || null,
       meeting_id: meetingId,
-      ...buildPersonsPayload(formData.persons_implementing)
+      ...personsPayload
     };
 
     try {
@@ -457,9 +550,9 @@ const AddActionDialog = ({
         fullWidth
         maxWidth="md"
         fullScreen={isMobile}
-        TransitionComponent={Slide}
-        TransitionProps={{ direction: isMobile ? 'up' : 'down' }}
+        slots={{ transition: Slide }}
         slotProps={{
+          transition: { direction: isMobile ? 'up' : 'down' },
           paper: {
             sx: {
               borderRadius: isMobile ? 0 : 2.5,
@@ -528,8 +621,8 @@ const AddActionDialog = ({
           )}
 
           {/* ===== ROW 1: TITLE (40%) + TYPE (60%) ===== */}
-          <FlexRow gap={2} isMobile={isMobile}>
-            <FlexItem flex="0 0 40%" minWidth={isMobile ? '100%' : '200px'} isMobile={isMobile}>
+          <FlexRow gap={2} ismobile={isMobile ? 'true' : 'false'}>
+            <FlexItem flex="0 0 40%" minWidth={isMobile ? '100%' : '200px'} ismobile={isMobile ? 'true' : 'false'}>
               <TextField
                 fullWidth
                 label="Title / Category"
@@ -541,7 +634,7 @@ const AddActionDialog = ({
                 size="small"
               />
             </FlexItem>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '250px'} isMobile={isMobile}>
+            <FlexItem flex="1" minWidth={isMobile ? '100%' : '250px'} ismobile={isMobile ? 'true' : 'false'}>
               <Autocomplete
                 freeSolo
                 fullWidth
@@ -567,7 +660,7 @@ const AddActionDialog = ({
           <Box sx={{ mb: 2.5, width: '100%' }}>
             <PersonsImplementingEditor
               value={formData.persons_implementing}
-              onChange={(persons) => setFormData({ ...formData, persons_implementing: persons })}
+              onChange={handlePersonsChange}
               disabled={isLoading}
               meetingId={meetingId}
             />
@@ -672,8 +765,8 @@ const AddActionDialog = ({
           </Box>
 
           {/* ===== ROW 6: PRIORITY (50%) + DUE DATE (50%) ===== */}
-          <FlexRow gap={2} isMobile={isMobile}>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '150px'} isMobile={isMobile}>
+          <FlexRow gap={2} ismobile={isMobile ? 'true' : 'false'}>
+            <FlexItem flex="1" minWidth={isMobile ? '100%' : '150px'} ismobile={isMobile ? 'true' : 'false'}>
               <FormControl fullWidth size="small" sx={inputStyles}>
                 <InputLabel>Priority</InputLabel>
                 <Select
@@ -693,7 +786,7 @@ const AddActionDialog = ({
                 </Select>
               </FormControl>
             </FlexItem>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '150px'} isMobile={isMobile}>
+            <FlexItem flex="1" minWidth={isMobile ? '100%' : '150px'} ismobile={isMobile ? 'true' : 'false'}>
               <DatePicker
                 label="Due Date"
                 value={formData.due_date}
@@ -737,58 +830,21 @@ const AddActionDialog = ({
             />
           </Box>
 
-          {/* ===== ROW 8: TAGS (50%) + REMARKS (50%) ===== */}
-          <FlexRow gap={2} isMobile={isMobile} sx={{ mt: 2 }}>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '200px'} isMobile={isMobile}>
-              <Autocomplete
-                multiple
-                freeSolo
-                fullWidth
-                options={tagSuggestions}
-                value={formData.tags}
-                onChange={(e, newValue) => setFormData({ ...formData, tags: newValue })}
-                disabled={isLoading}
-                size="small"
-                renderTags={(value, getTagProps) =>
-                  value.map((option, index) => (
-                    <Chip 
-                      key={index}
-                      label={option} 
-                      size="small" 
-                      {...getTagProps({ index })} 
-                      sx={{ 
-                        borderRadius: 1,
-                        fontSize: '0.75rem',
-                      }} 
-                    />
-                  ))
-                }
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Tags"
-                    placeholder="Add tags (press Enter after each tag)"
-                    size="small"
-                    sx={inputStyles}
-                  />
-                )}
-              />
-            </FlexItem>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '200px'} isMobile={isMobile}>
-              <TextField
-                fullWidth
-                label="Remarks"
-                multiline
-                rows={isMobile ? 1 : 2}
-                value={formData.remarks}
-                onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                placeholder={placeholders.remarks}
-                disabled={isLoading}
-                sx={inputStyles}
-                size="small"
-              />
-            </FlexItem>
-          </FlexRow>
+          {/* ===== ROW 8: REMARKS - FULL WIDTH (Tags Hidden) ===== */}
+          <Box sx={{ mt: 2, width: '100%' }}>
+            <TextField
+              fullWidth
+              label="Remarks"
+              multiline
+              rows={isMobile ? 2 : 3}
+              value={formData.remarks}
+              onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+              placeholder={placeholders.remarks}
+              disabled={isLoading}
+              sx={inputStyles}
+              size="small"
+            />
+          </Box>
         </DialogContent>
 
         <Divider sx={{ borderColor: colors.border, flexShrink: 0 }} />

@@ -20,7 +20,7 @@ import {
   WatchLater, CheckCircleOutlined, PauseCircle, CancelOutlined,
   HighlightOff, HourglassEmpty, People, Label, Lightbulb, Schedule,
   Assignment, Flag, Category, Refresh, MoreVert, Person,
-  Email, Phone
+  Email, Phone, Star as StarIcon
 } from '@mui/icons-material';
 import LockIcon from '@mui/icons-material/Lock';
 
@@ -45,10 +45,10 @@ import api from '../../../services/api';
 // ==================== CONSTANTS ====================
 
 const PRIORITY = {
-  1: { label: 'High', color: 'error', icon: <PriorityHigh /> },
-  2: { label: 'Medium', color: 'warning', icon: <Schedule /> },
-  3: { label: 'Low', color: 'success', icon: <CheckCircle /> },
-  4: { label: 'Very Low', color: 'default', icon: <Info /> },
+  1: { label: 'High', color: 'error', icon: <PriorityHigh />, stars: 4 },
+  2: { label: 'Medium-High', color: 'warning', icon: <Schedule />, stars: 3 },
+  3: { label: 'Medium-Low', color: 'info', icon: <Info />, stars: 2 },
+  4: { label: 'Low', color: 'success', icon: <CheckCircle />, stars: 1 },
 };
 
 const STATUS_CONFIG = {
@@ -159,6 +159,45 @@ const STATUS_CONFIG = {
 };
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+// ==================== PRIORITY STARS ====================
+
+const PriorityStars = ({ priority }) => {
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+  
+  const getStars = (priority) => {
+    switch(priority) {
+      case 1: return 4;
+      case 2: return 3;
+      case 3: return 2;
+      case 4: return 1;
+      default: return 0;
+    }
+  };
+  
+  const starCount = getStars(priority);
+  const filledColor = isDarkMode ? '#FBBF24' : '#F59E0B';
+  const emptyColor = isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB';
+  const priorityLabel = PRIORITY[priority]?.label || 'Unknown';
+  
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      {[1, 2, 3, 4].map((index) => (
+        <StarIcon 
+          key={index}
+          sx={{ 
+            fontSize: 16,
+            color: index <= starCount ? filledColor : emptyColor,
+          }}
+        />
+      ))}
+      <Typography variant="caption" sx={{ ml: 0.5, color: 'text.secondary', fontWeight: 500, fontSize: '0.7rem' }}>
+        ({priorityLabel})
+      </Typography>
+    </Box>
+  );
+};
 
 // ==================== COMPACT FIELD ITEM ====================
 
@@ -308,17 +347,42 @@ const ActionDetail = () => {
     return [];
   }, [currentAction?.persons_implementing, implementers]);
 
+  // Cancel token ref for API requests
+  const cancelTokenRef = useRef(null);
+
+  // Use system back for navigation
+  const handleGoBack = () => {
+    window.history.back();
+  };
+
+  // FIX: Navigate to meetings using system back or fallback
   useEffect(() => {
     if (id && !isValidUUID(id)) {
-      navigate('/actions/my-tasks', { replace: true });
+      if (window.history.length > 2) {
+        window.history.back();
+      } else {
+        navigate('/meetings', { replace: true });
+      }
     }
   }, [id, navigate]);
 
   useEffect(() => {
     if (!id) return;
+    
+    // Create cancel token
+    const source = api.CancelToken?.source?.();
+    if (source) {
+      cancelTokenRef.current = source;
+    }
+
     dispatch(fetchActionById(id));
     dispatch(fetchActionTrackerAttributes());
+    
     return () => {
+      // Cancel any pending requests
+      if (cancelTokenRef.current) {
+        cancelTokenRef.current.cancel('Component unmounted');
+      }
       dispatch(clearCurrentAction());
       dispatch(clearError());
     };
@@ -338,15 +402,21 @@ const ActionDetail = () => {
   const fetchHistory = useCallback(async (actionId) => {
     if (!actionId) return;
     try {
-      const res = await api.get(`/action-tracker/actions/${actionId}/history`);
+      const source = api.CancelToken?.source?.();
+      const res = await api.get(`/action-tracker/actions/${actionId}/history`, {
+        cancelToken: source?.token
+      });
       const historyData = (res.data || []).map((entry) => ({
         ...entry,
         created_by_name: entry.created_by_name || entry.created_by?.username || 'System'
       }));
       setHistory(historyData);
     } catch (err) {
-      console.error('Failed to fetch history:', err);
-      setHistory([]);
+      // Ignore cancel errors
+      if (err?.message !== 'canceled' && err?.code !== 'ERR_CANCELED') {
+        console.error('Failed to fetch history:', err);
+        setHistory([]);
+      }
     }
   }, []);
 
@@ -371,15 +441,6 @@ const ActionDetail = () => {
   const refreshAction = useCallback(() => {
     if (id) dispatch(fetchActionById(id));
   }, [id, dispatch]);
-
-  const handleGoBack = useCallback(() => {
-    const hasHistory = window.history.state?.idx > 0 || window.history.length > 2;
-    if (hasHistory) {
-      navigate(-1);
-    } else {
-      navigate('/actions/my-tasks');
-    }
-  }, [navigate]);
 
   const handleUpdateProgress = async () => {
     if (!selectedStatusId && !selectedStatusValue) {
@@ -462,7 +523,13 @@ const ActionDetail = () => {
     try {
       await dispatch(deleteAction(id)).unwrap();
       setShowDeleteTaskDialog(false);
-      navigate('/actions/my-tasks');
+      
+      // Use system back after deletion
+      if (window.history.length > 2) {
+        window.history.back();
+      } else {
+        navigate('/meetings');
+      }
     } catch (err) {
       console.error('Failed to delete task:', err);
       setLocalError(err.message || 'Failed to delete task');
@@ -774,7 +841,7 @@ const ActionDetail = () => {
                   />
                   <DetailField 
                     label="Priority" 
-                    value={activePriority.label} 
+                    value={<PriorityStars priority={currentAction?.priority} />} 
                     icon={<Flag />} 
                     isDarkMode={isDarkMode} 
                   />
@@ -947,11 +1014,11 @@ const ActionDetail = () => {
         onClose={() => setShowProgressDialog(false)}
         fullWidth
         maxWidth="xs"
-        PaperProps={{ sx: { borderRadius: 2, p: 1 } }}
+        PaperProps={{ sx: { borderRadius: 2, p: 0 } }}
       >
-        <DialogTitle fontWeight={700}>Update Progress</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2.5} sx={{ mt: 1 }}>
+        <DialogTitle fontWeight={700} sx={{ px: 3, pt: 2.5, pb: 1 }}>Update Progress</DialogTitle>
+        <DialogContent sx={{ px: 3, py: 1 }}>
+          <Stack spacing={2.5} sx={{ mt: 0.5 }}>
             <Box>
               <Typography variant="body2" fontWeight={600} gutterBottom>
                 Progress: {progress}%
@@ -995,7 +1062,7 @@ const ActionDetail = () => {
             />
           </Stack>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
           <Button onClick={() => setShowProgressDialog(false)} size="small">Cancel</Button>
           <Button
             variant="contained"
@@ -1009,14 +1076,14 @@ const ActionDetail = () => {
       </Dialog>
 
       {/* Mark Complete Confirmation */}
-      <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)} PaperProps={{ sx: { borderRadius: 2, p: 1, maxWidth: 360 } }}>
-        <DialogTitle fontWeight={700}>Complete Task?</DialogTitle>
-        <DialogContent>
+      <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)} PaperProps={{ sx: { borderRadius: 2, p: 0, maxWidth: 360 } }}>
+        <DialogTitle fontWeight={700} sx={{ px: 3, pt: 2.5, pb: 1 }}>Complete Task?</DialogTitle>
+        <DialogContent sx={{ px: 3, py: 1 }}>
           <Typography variant="body2" color="text.secondary">
             This will mark progress at 100% and record completion.
           </Typography>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
           <Button onClick={() => setShowCompleteConfirm(false)} size="small">Cancel</Button>
           <Button color="success" variant="contained" onClick={handleMarkAsCompleted} disabled={isActionInProgress} size="small">
             Confirm
@@ -1025,14 +1092,14 @@ const ActionDetail = () => {
       </Dialog>
 
       {/* Delete Confirmation */}
-      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)} PaperProps={{ sx: { borderRadius: 2, p: 1, maxWidth: 360 } }}>
-        <DialogTitle fontWeight={700} color="error">Delete Task</DialogTitle>
-        <DialogContent>
+      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)} PaperProps={{ sx: { borderRadius: 2, p: 0, maxWidth: 360 } }}>
+        <DialogTitle fontWeight={700} color="error" sx={{ px: 3, pt: 2.5, pb: 1 }}>Delete Task</DialogTitle>
+        <DialogContent sx={{ px: 3, py: 1 }}>
           <Typography variant="body2" color="text.secondary">
             Are you sure you want to delete this action item permanently?
           </Typography>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
           <Button onClick={() => setShowDeleteTaskDialog(false)} disabled={deletingTask} size="small">Cancel</Button>
           <Button color="error" variant="contained" onClick={handleDeleteTask} disabled={deletingTask} size="small">
             {deletingTask ? 'Deleting...' : 'Delete'}

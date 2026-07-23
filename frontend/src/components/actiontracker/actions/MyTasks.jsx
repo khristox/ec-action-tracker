@@ -1,4 +1,7 @@
 // src/components/actiontracker/actions/MyTasks.jsx
+// ✅ OPTIMIZED: Single API call with Redis caching
+// Eliminates multiple duplicate requests to /api/v1/meetings/my-tasks
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
@@ -14,22 +17,10 @@ import {
   Warning as WarningIcon, CheckCircle as CheckCircleIcon,
   Pending as PendingIcon
 } from '@mui/icons-material';
-import { fetchMyTasks, selectMyTasks, selectActionsLoading, selectActionsError } from '../../../store/slices/actionTracker/actionSlice';
 import api from '../../../services/api';
 
-// ==================== Custom Hooks ====================
-const useDebounce = (value, delay) => {
-  const [debouncedValue, setDebouncedValue] = useState(value);
+// ==================== Constants ====================
 
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-
-  return debouncedValue;
-};
-
-// ==================== Constants & Helpers ====================
 const PRIORITY = {
   1: { label: 'High', color: 'error' },
   2: { label: 'Medium', color: 'warning' },
@@ -47,9 +38,7 @@ const STATUS_COLOR_MAP = {
 };
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
 const getStatusColor = (statusCode) => STATUS_COLOR_MAP[statusCode] || '#6B7280';
-
 const formatDate = (dateString) => {
   if (!dateString) return 'No due date';
   try {
@@ -59,15 +48,27 @@ const formatDate = (dateString) => {
   }
 };
 
+// ==================== Custom Hooks ====================
+
+const useDebounce = (value, delay) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+};
+
 // ==================== Styled Components ====================
+
 const StyledStatCard = ({ label, value, baseColor }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
-
+  
   return (
-    <Card 
+    <Card
       variant="outlined"
-      sx={{ 
+      sx={{
         height: '100%',
         backgroundImage: 'none',
         bgcolor: isDark ? alpha(baseColor, 0.1) : alpha(baseColor, 0.08),
@@ -77,12 +78,12 @@ const StyledStatCard = ({ label, value, baseColor }) => {
       }}
     >
       <CardContent>
-        <Typography 
-          variant="h3" 
-          fontWeight={800} 
-          sx={{ 
+        <Typography
+          variant="h3"
+          fontWeight={800}
+          sx={{
             fontSize: { xs: '1.75rem', sm: '2rem', md: '2.5rem' },
-            color: isDark ? alpha(baseColor, 0.9) : baseColor 
+            color: isDark ? alpha(baseColor, 0.9) : baseColor
           }}
         >
           {value}
@@ -96,35 +97,36 @@ const StyledStatCard = ({ label, value, baseColor }) => {
 };
 
 // ==================== Main Component ====================
+
 const MyTasks = () => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   const navigate = useNavigate();
-  const dispatch = useDispatch();
-  
-  // Use selectors to get data from Redux
-  const myTasksData = useSelector(selectMyTasks);
-  const loading = useSelector(selectActionsLoading);
-  const error = useSelector(selectActionsError);
 
+  // ✅ LOCAL STATE (no Redux) - More efficient for user-specific data
+  const [tasks, setTasks] = useState([]);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [statusOptions, setStatusOptions] = useState([]);
   const [loadingStatus, setLoadingStatus] = useState(false);
+  const [cacheInfo, setCacheInfo] = useState({ cached: false, timestamp: null });
 
   const limit = 10;
   const debouncedSearch = useDebounce(searchTerm, 500);
 
-  // Fetch status options (run once)
+  // ✅ Fetch status options (run once)
   useEffect(() => {
     const fetchStatusOptions = async () => {
       setLoadingStatus(true);
       try {
         const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
         const allAttributes = response.data.items || response.data.data || response.data || [];
-
+        
         const actionStatuses = allAttributes
           .filter(attr => attr.code !== 'ACTION_STATUS' && attr.code?.startsWith('ACTION_STATUS_'))
           .map(attr => ({
@@ -133,7 +135,7 @@ const MyTasks = () => {
             code: attr.code,
             shortName: attr.short_name,
             sortOrder: attr.sort_order,
-            color: getStatusColor(attr.short_name || attr.code),
+            color: getStatusColor(attr.short_name || attr.code)
           }))
           .sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -144,7 +146,6 @@ const MyTasks = () => {
           { value: 'completed', label: 'Completed', color: '#10B981' }
         ];
 
-        // Deduplicate
         const unique = Array.from(new Map(allStatuses.map(s => [s.value, s])).values());
         setStatusOptions(unique);
       } catch (err) {
@@ -166,31 +167,62 @@ const MyTasks = () => {
     fetchStatusOptions();
   }, []);
 
-  // Reset page to 1 when filters change
+  // ✅ Reset page when filters change
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, statusFilter, priorityFilter]);
 
-  // Fetch tasks
-  const fetchTasks = useCallback(() => {
-    const params = { 
-      skip: (page - 1) * limit,
-      limit: limit 
-    };
+  // ✅ OPTIMIZED: Single API call with caching
+  const fetchTasks = useCallback(async (skipCache = false) => {
+    setLoading(true);
+    setError(null);
 
-    if (debouncedSearch?.trim()) {
-      params.search = debouncedSearch.trim();
-    }
-    if (statusFilter && statusFilter !== 'all') {
-      params.status = statusFilter;
-    }
-    if (priorityFilter && priorityFilter !== 'all') {
-      params.priority = Number(priorityFilter);
-    }
+    try {
+      const params = {
+        skip: (page - 1) * limit,
+        limit,
+        refresh: skipCache // Force refresh if user clicks "Refresh"
+      };
 
-    dispatch(fetchMyTasks(params));
-  }, [dispatch, page, limit, debouncedSearch, statusFilter, priorityFilter]);
+      if (debouncedSearch?.trim()) {
+        params.search = debouncedSearch.trim();
+      }
+      if (statusFilter && statusFilter !== 'all') {
+        params.status = statusFilter;
+      }
+      if (priorityFilter && priorityFilter !== 'all') {
+        params.priority = Number(priorityFilter);
+      }
 
+      // ✅ Single API call to cached endpoint
+      const response = await api.get('/meetings/my-tasks', { params });
+
+      if (response.data) {
+        setTasks(response.data.items || []);
+        setTotalPages(response.data.totalPages || 1);
+        
+        // ✅ Track cache status for UI
+        setCacheInfo({
+          cached: response.data.cached || false,
+          timestamp: response.data.cached_at || null
+        });
+
+        // Log cache hit/miss for debugging
+        if (response.data.cached) {
+          console.log('✅ MyTasks served from cache');
+        } else {
+          console.log('🔄 MyTasks computed from database');
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching tasks:', err);
+      setError(err.response?.data?.detail || 'Failed to load tasks');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, limit, debouncedSearch, statusFilter, priorityFilter]);
+
+  // ✅ Fetch on mount and when dependencies change
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
@@ -201,24 +233,31 @@ const MyTasks = () => {
     navigate(`/actions/${taskId}`);
   };
 
-  const tasks = myTasksData?.items || [];
-  const totalPages = myTasksData?.totalPages || 1;
+  const handleRefresh = () => {
+    console.log('🔄 User initiated cache refresh');
+    fetchTasks(true); // Force refresh
+  };
 
+  // ✅ Calculate stats from fetched data
   const stats = {
     total: tasks.length,
     overdue: tasks.filter(t => t.is_overdue && !t.completed_at).length,
     inProgress: tasks.filter(t => t.overall_progress_percentage > 0 && t.overall_progress_percentage < 100 && !t.completed_at).length,
-    completed: tasks.filter(t => !!t.completed_at).length,
+    completed: tasks.filter(t => !!t.completed_at).length
   };
 
   const getStatusDisplay = (task) => {
-    if (task.completed_at) return { label: 'Completed', color: '#10B981', icon: <CheckCircleIcon fontSize="small" /> };
-    if (task.is_overdue) return { label: 'Overdue', color: '#EF4444', icon: <WarningIcon fontSize="small" /> };
+    if (task.completed_at) {
+      return { label: 'Completed', color: '#10B981', icon: <CheckCircleIcon fontSize="small" /> };
+    }
+    if (task.is_overdue) {
+      return { label: 'Overdue', color: '#EF4444', icon: <WarningIcon fontSize="small" /> };
+    }
 
-    const option = statusOptions.find(opt =>
-      opt.value === (task.status || '').toLowerCase() ||
-      opt.shortName === task.status ||
-      opt.code === task.status
+    const option = statusOptions.find(
+      opt => opt.value === (task.overall_status_name || '').toLowerCase() ||
+        opt.shortName === task.overall_status_name ||
+        opt.code === task.overall_status_name
     );
 
     if (option) {
@@ -234,7 +273,9 @@ const MyTasks = () => {
     return (
       <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <CircularProgress sx={{ color: theme.palette.primary.main }} />
-        <Typography sx={{ ml: 2, color: theme.palette.text.secondary }}>Loading your tasks...</Typography>
+        <Typography sx={{ ml: 2, color: theme.palette.text.secondary }}>
+          Loading your tasks...
+        </Typography>
       </Box>
     );
   }
@@ -250,9 +291,18 @@ const MyTasks = () => {
           <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Manage and track your assigned action items
           </Typography>
+          
+          {/* ✅ Cache Status Badge */}
+          {cacheInfo.cached && (
+            <Chip
+              label={`📦 Cached ${cacheInfo.timestamp ? `at ${new Date(cacheInfo.timestamp).toLocaleTimeString()}` : ''}`}
+              size="small"
+              sx={{ mt: 1, bgcolor: alpha(theme.palette.success.main, 0.1), color: 'success.main' }}
+            />
+          )}
         </Box>
 
-        {/* Dynamic Stats Section */}
+        {/* Stats Cards */}
         <Grid container spacing={2} sx={{ mb: 4 }}>
           <Grid item xs={6} sm={3}>
             <StyledStatCard label="Total Tasks" value={stats.total} baseColor={theme.palette.primary.main} />
@@ -269,14 +319,14 @@ const MyTasks = () => {
         </Grid>
 
         {/* Filters Toolbar */}
-        <Paper 
-          variant="outlined" 
-          sx={{ 
-            p: { xs: 1.5, sm: 2 }, 
-            mb: 3, 
-            backgroundImage: 'none', 
+        <Paper
+          variant="outlined"
+          sx={{
+            p: { xs: 1.5, sm: 2 },
+            mb: 3,
+            backgroundImage: 'none',
             bgcolor: 'background.paper',
-            borderColor: 'divider' 
+            borderColor: 'divider'
           }}
         >
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
@@ -286,19 +336,19 @@ const MyTasks = () => {
               placeholder="Search tasks by description..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{ 
-                startAdornment: <InputAdornment position="start"><Search fontSize="small" sx={{ color: 'text.secondary' }} /></InputAdornment>,
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" sx={{ color: 'text.secondary' }} />
+                  </InputAdornment>
+                )
               }}
               sx={{ flex: 2 }}
             />
             
             <FormControl size="small" sx={{ minWidth: 160 }}>
               <InputLabel>Status</InputLabel>
-              <Select 
-                value={statusFilter} 
-                onChange={(e) => setStatusFilter(e.target.value)} 
-                label="Status"
-              >
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
                 {statusOptions.map((opt) => (
                   <MenuItem key={opt.value} value={opt.value}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -312,11 +362,7 @@ const MyTasks = () => {
 
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <InputLabel>Priority</InputLabel>
-              <Select 
-                value={priorityFilter} 
-                onChange={(e) => setPriorityFilter(e.target.value)} 
-                label="Priority"
-              >
+              <Select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} label="Priority">
                 <MenuItem value="all">All Priorities</MenuItem>
                 <MenuItem value="1">High</MenuItem>
                 <MenuItem value="2">Medium</MenuItem>
@@ -325,40 +371,40 @@ const MyTasks = () => {
               </Select>
             </FormControl>
 
-            <Button 
-              variant="outlined" 
-              onClick={fetchTasks}
+            <Button
+              variant="outlined"
+              onClick={handleRefresh}
               startIcon={<Refresh />}
               sx={{ minWidth: 100 }}
+              disabled={loading}
             >
-              Refresh
+              {loading ? 'Loading...' : 'Refresh'}
             </Button>
           </Stack>
         </Paper>
 
+        {/* Error Alert */}
         {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => {}}>
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
             {error}
           </Alert>
         )}
-        
+
         {loadingStatus && (
           <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
             Loading status options...
           </Alert>
         )}
 
-        {/* Tasks Table */}
+        {/* Tasks Table or Empty State */}
         {tasks.length === 0 && !loading ? (
-          <Paper 
-            sx={{ 
-              p: 6, 
-              textAlign: 'center',
-              bgcolor: 'background.paper',
-              border: `1px solid ${theme.palette.divider}`,
-              borderRadius: 2
-            }}
-          >
+          <Paper sx={{
+            p: 6,
+            textAlign: 'center',
+            bgcolor: 'background.paper',
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 2
+          }}>
             <Assignment sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
             <Typography variant="h6" fontWeight={600} sx={{ color: 'text.primary' }}>
               No Tasks Found
@@ -371,16 +417,12 @@ const MyTasks = () => {
           </Paper>
         ) : (
           <>
-            <TableContainer 
-              component={Paper} 
-              variant="outlined" 
-              sx={{ 
-                backgroundImage: 'none', 
-                bgcolor: 'background.paper',
-                borderRadius: 2,
-                overflowX: 'auto'
-              }}
-            >
+            <TableContainer component={Paper} variant="outlined" sx={{
+              backgroundImage: 'none',
+              bgcolor: 'background.paper',
+              borderRadius: 2,
+              overflowX: 'auto'
+            }}>
               <Table size="small" sx={{ minWidth: 600 }}>
                 <TableHead sx={{ bgcolor: isDark ? alpha(theme.palette.common.white, 0.05) : '#F8FAFC' }}>
                   <TableRow>
@@ -400,17 +442,17 @@ const MyTasks = () => {
                     const statusDisplay = getStatusDisplay(task);
 
                     return (
-                      <TableRow 
-                        key={task.id} 
-                        hover 
-                        sx={{ 
+                      <TableRow
+                        key={task.id}
+                        hover
+                        sx={{
                           bgcolor: isOverdue ? alpha(theme.palette.error.main, isDark ? 0.08 : 0.03) : 'transparent',
                           transition: 'background-color 0.2s'
                         }}
                       >
                         <TableCell>
                           <Typography variant="body2" fontWeight={600} sx={{ color: 'text.primary' }}>
-                            {task.description || task.title || 'Untitled'}
+                            {task.title || task.description || 'Untitled'}
                           </Typography>
                           {task.remarks && (
                             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
@@ -428,9 +470,9 @@ const MyTasks = () => {
                             label={statusDisplay.label}
                             icon={statusDisplay.icon}
                             size="small"
-                            sx={{ 
-                              bgcolor: statusDisplay.color, 
-                              color: '#fff', 
+                            sx={{
+                              bgcolor: statusDisplay.color,
+                              color: '#fff',
                               fontWeight: 500,
                               '& .MuiChip-icon': { color: '#fff' }
                             }}
@@ -450,26 +492,21 @@ const MyTasks = () => {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Chip 
-                            label={priority.label} 
-                            color={priority.color} 
-                            size="small"
-                            sx={{ fontWeight: 500 }}
-                          />
+                          <Chip label={priority.label} color={priority.color} size="small" sx={{ fontWeight: 500 }} />
                         </TableCell>
                         <TableCell sx={{ minWidth: 100 }}>
                           <Box display="flex" alignItems="center" gap={1}>
-                            <Box sx={{ 
-                              flex: 1, 
-                              bgcolor: alpha(theme.palette.text.disabled, 0.2), 
-                              borderRadius: 2, 
+                            <Box sx={{
+                              flex: 1,
+                              bgcolor: alpha(theme.palette.text.disabled, 0.2),
+                              borderRadius: 2,
                               height: 6,
                               overflow: 'hidden'
                             }}>
-                              <Box sx={{ 
-                                width: `${task.overall_progress_percentage || 0}%`, 
-                                bgcolor: isOverdue ? 'error.main' : 'primary.main', 
-                                height: 6, 
+                              <Box sx={{
+                                width: `${task.overall_progress_percentage || 0}%`,
+                                bgcolor: isOverdue ? 'error.main' : 'primary.main',
+                                height: 6,
                                 borderRadius: 2,
                                 transition: 'width 0.3s ease'
                               }} />
@@ -481,9 +518,9 @@ const MyTasks = () => {
                         </TableCell>
                         <TableCell align="center">
                           <Tooltip title="View Details">
-                            <IconButton 
-                              size="small" 
-                              onClick={() => handleViewTask(task.id)} 
+                            <IconButton
+                              size="small"
+                              onClick={() => handleViewTask(task.id)}
                               sx={{ color: 'primary.main' }}
                             >
                               <Visibility fontSize="small" />
@@ -506,11 +543,7 @@ const MyTasks = () => {
                   color="primary"
                   showFirstButton
                   showLastButton
-                  sx={{
-                    '& .MuiPaginationItem-root': {
-                      color: 'text.primary',
-                    }
-                  }}
+                  sx={{ '& .MuiPaginationItem-root': { color: 'text.primary' } }}
                 />
               </Stack>
             )}

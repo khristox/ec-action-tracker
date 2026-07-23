@@ -97,6 +97,7 @@ class Role(Base, TimestampMixin):
     code = Column(String(50), unique=True, nullable=False, index=True)
     description = Column(String(255), nullable=True)
     is_system_role = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True) 
     priority = Column(Integer, default=0, nullable=False, server_default=text("0"))
     
     # FIXED: Changed relationship loading strategies to prevent circular references

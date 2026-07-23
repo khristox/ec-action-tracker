@@ -1,13 +1,13 @@
 // src/components/actiontracker/meetings/components/ParticipantsTab.jsx
 
-import React, { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
-  Box, Paper, Typography, Stack, Grid, Avatar, Chip, IconButton,
+  Box, Paper, Typography, Stack, Avatar, Chip, IconButton,
   Tooltip, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Card, CardContent, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, Alert, CircularProgress,
-  Snackbar, Divider, LinearProgress, Fade, Zoom, useTheme, alpha,
-  MenuItem, ListItemIcon, ListItemText, Autocomplete, FormControl,
+  Snackbar, Divider, LinearProgress, Fade, useTheme, alpha,
+  MenuItem, ListItemText, FormControl,
   InputLabel, Select, FormHelperText, Pagination, InputAdornment,
   debounce,
 } from '@mui/material';
@@ -25,32 +25,25 @@ import {
   Lock as LockIcon,
   PlayCircle as PlayCircleIcon,
   Schedule as ScheduleIcon,
-  Info as InfoIcon,
   Person as PersonIcon,
   Star as StarIcon,
   AssignmentInd as SecretaryIcon,
-  GroupAdd as GroupAdd,
   Save as Save,
   Delete as Delete,
   Refresh as RefreshIcon,
   Search as SearchIcon,
   VisibilityOff as VisibilityOffIcon,
-  ContentCopy as ContentCopyIcon,
-  MoreVert as MoreVertIcon,
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import api from '../../../../services/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Ensure data is always an array - FIXED to handle all response formats
 const ensureArray = (data) => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   
-  // Handle object responses with data/items properties
   if (typeof data === 'object') {
-    // Check for common response structures
     if (data.data && Array.isArray(data.data)) return data.data;
     if (data.items && Array.isArray(data.items)) return data.items;
     if (data.participants && Array.isArray(data.participants)) return data.participants;
@@ -58,13 +51,11 @@ const ensureArray = (data) => {
     if (data.results && Array.isArray(data.results)) return data.results;
     if (data.rows && Array.isArray(data.rows)) return data.rows;
     
-    // If it's an object with numeric keys, convert to array
     const values = Object.values(data);
     if (values.length > 0 && values.every(v => typeof v === 'object')) {
       return values;
     }
     
-    // If it's a single object, wrap it in an array
     if (data.id || data.name || data.email) {
       return [data];
     }
@@ -73,7 +64,6 @@ const ensureArray = (data) => {
   return [];
 };
 
-// Safe string conversion
 const safeStr = (val) => {
   if (val === null || val === undefined) return '';
   if (typeof val === 'string') return val;
@@ -81,7 +71,6 @@ const safeStr = (val) => {
   return '';
 };
 
-// Email masking
 const maskEmail = (email) => {
   if (!email) return '';
   const [local, domain] = email.split('@');
@@ -90,7 +79,6 @@ const maskEmail = (email) => {
   return `${local.substring(0, 3)}***${local.substring(local.length - 2)}@${domain}`;
 };
 
-// Phone masking
 const maskPhone = (phone) => {
   if (!phone) return '';
   const cleaned = phone.replace(/\D/g, '');
@@ -98,7 +86,6 @@ const maskPhone = (phone) => {
   return `${'*'.repeat(cleaned.length - 4)}${cleaned.slice(-4)}`;
 };
 
-// Valid MUI Alert severity values
 const VALID_SEVERITIES = new Set(['success', 'info', 'warning', 'error']);
 const safeSeverity = (s) => (VALID_SEVERITIES.has(s) ? s : 'info');
 
@@ -152,7 +139,6 @@ const StatStrip = memo(({ stats }) => {
   );
 });
 StatStrip.displayName = 'StatStrip';
-
 
 // ─── Remove Participant Dialog ─────────────────────────────────────────────────
 const RemoveParticipantDialog = memo(({ open, onClose, onConfirm, participantName }) => {
@@ -253,10 +239,9 @@ const ApologyDialog = memo(({ open, onClose, onSubmit, participantName, initialM
 });
 ApologyDialog.displayName = 'ApologyDialog';
 
-// ─── Add Participant Dialog ────────────────────────────────────────────────────
+// ─── Add Participant Dialog ────────────────────────────────────────────────    
 const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants = [] }) => {
   const theme = useTheme();
-  const isDarkMode = theme.palette.mode === 'dark';
   const [participantType, setParticipantType] = useState('existing');
   const [formData, setFormData] = useState({ name: '', email: '', telephone: '', title: '', organization: '' });
   const [selectedUser, setSelectedUser] = useState(null);
@@ -459,8 +444,8 @@ const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <PersonAdd color="primary" fontSize="small" />
             <Typography variant="subtitle1" fontWeight={700}>Add Participants</Typography>
           </Stack>
@@ -571,7 +556,7 @@ const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants 
                           }}
                           onClick={() => handleUserSelect(user)}
                         >
-                          <Stack direction="row" spacing={2} alignItems="center">
+                          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
                             <Avatar 
                               sx={{ 
                                 width: 44, 
@@ -588,7 +573,7 @@ const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants 
                                 {displayName}
                               </Typography>
                               
-                              <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                              <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', mt: 0.5 }}>
                                 {user.email && (
                                   <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                     <EmailIcon sx={{ fontSize: 12 }} />
@@ -663,7 +648,7 @@ const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants 
                   </Typography>
                   <Stack spacing={0.5}>
                     {listParticipants.map(p => (
-                      <Stack key={p.id} direction="row" spacing={1} alignItems="center">
+                      <Stack key={p.id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <PersonIcon sx={{ fontSize: 14 }} color="action" />
                         <Typography variant="caption">{p.name}</Typography>
                         <Typography variant="caption" color="text.secondary">
@@ -703,7 +688,7 @@ const RoleCell = memo(({ isChairperson, isSecretary, participantId, loading, can
     return <Typography variant="caption" color="text.secondary">Member</Typography>;
   }
   return (
-    <Stack direction="row" spacing={0.5} flexWrap="wrap">
+    <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
       {isChairperson ? (
         <Chip size="small" label="Chair" color="primary" icon={<StarIcon sx={{ fontSize: '14px !important' }} />} sx={{ height: 20, fontSize: '0.68rem' }} />
       ) : (
@@ -776,7 +761,6 @@ const ParticipantsTab = ({
   const isDarkMode = theme.palette.mode === 'dark';
   const [loading, setLoading] = useState(false);
   
-  // FIX: Ensure participants is always an array
   const [participants, setParticipants] = useState(() => ensureArray(initialParticipants));
   const [attendanceStatus, setAttendanceStatus] = useState({});
   const [apologyComments, setApologyComments] = useState({});
@@ -793,7 +777,12 @@ const ParticipantsTab = ({
   const [timeRemaining, setTimeRemaining] = useState(null);
   const [showContactInfo, setShowContactInfo] = useState(false);
 
-  // Update participants when prop changes - ensure array
+  const showSnack = useCallback((message, severity = 'success') => {
+    setSnackbar({ open: true, message: safeStr(message), severity: safeSeverity(severity) });
+  }, []);
+
+  const closeSnack = useCallback(() => setSnackbar(s => ({ ...s, open: false })), []);
+
   useEffect(() => {
     setParticipants(ensureArray(initialParticipants));
   }, [initialParticipants]);
@@ -834,7 +823,6 @@ const ParticipantsTab = ({
     return () => clearInterval(interval);
   }, [checkMeetingStatus]);
 
-  // Initialize attendance status from participants
   useEffect(() => {
     const safeParticipants = ensureArray(participants);
     if (safeParticipants && safeParticipants.length > 0) {
@@ -848,50 +836,61 @@ const ParticipantsTab = ({
     }
   }, [participants]);
 
-  const showSnack = useCallback((message, severity = 'success') => {
-    setSnackbar({ open: true, message: safeStr(message), severity: safeSeverity(severity) });
-  }, []);
-
-  const closeSnack = useCallback(() => setSnackbar(s => ({ ...s, open: false })), []);
-
-// In handleAddParticipants function
-const handleAddParticipants = async (newParticipants) => {
-  setLoading(true);
-  try {
-    for (const p of newParticipants) {
-      const payload = {
-        user_id: p.user_id || null,
-        name: p.name || null,
-        email: p.email || null,
-        // FIX: Ensure telephone is a string
-        telephone: p.telephone ? String(p.telephone) : null,
-        title: p.title || null,
-        organization: p.organization || null,
-        is_chairperson: p.is_chairperson || false,
-        is_secretary: p.is_secretary || false,
-        attendance_status: p.attendance_status || "pending",
-        apology_comment: p.apology_comment || null,
-      };
-      
-      // Remove undefined values
-      Object.keys(payload).forEach(key => {
-        if (payload[key] === undefined) {
-          delete payload[key];
+  const handleAddParticipants = async (newParticipants) => {
+    setLoading(true);
+    try {
+      const addedList = [];
+      for (const p of newParticipants) {
+        const payload = {
+          user_id: p.user_id || null,
+          name: p.name || null,
+          email: p.email || null,
+          telephone: p.telephone ? String(p.telephone) : null,
+          title: p.title || null,
+          organization: p.organization || null,
+          is_chairperson: p.is_chairperson || false,
+          is_secretary: p.is_secretary || false,
+          attendance_status: p.attendance_status || "pending",
+          apology_comment: p.apology_comment || null,
+        };
+        
+        Object.keys(payload).forEach(key => {
+          if (payload[key] === undefined) {
+            delete payload[key];
+          }
+        });
+        
+        const res = await api.post(
+          `/action-tracker/meetings/${meetingId}/members`, 
+          payload
+        );
+        if (res?.data) {
+          addedList.push(res.data);
         }
-      });
+      }
+
+      // Optimistically update local state so UI updates instantly without relying completely on laggy parent re-fetches
+      if (addedList.length > 0) {
+        setParticipants(prev => {
+          const combined = [...ensureArray(prev), ...addedList];
+          return combined;
+        });
+      }
+
+      showSnack(`Added ${newParticipants.length} participant(s) successfully`);
       
-      await api.post(
-        `/action-tracker/meetings/${meetingId}/members`, 
-        payload
-      );
+      // Trigger parent refresh if provided
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Error adding participants:', error);
+      showSnack(error.response?.data?.detail || 'Failed to add participants', 'error');
+    } finally {
+      setLoading(false);
     }
-    // ... rest of the code
-  } catch (error) {
-    // ... error handling
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
   const handleSetChairperson = useCallback(async (participantId) => {
     if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
     setLoading(true);
@@ -899,7 +898,8 @@ const handleAddParticipants = async (newParticipants) => {
       await api.patch(`/action-tracker/meetings/${meetingId}`, { chairperson_id: participantId });
       setChairpersonId(participantId);
       setParticipants(prev => prev.map(p => ({ ...p, is_chairperson: p.id === participantId })));
-      showSnack('Chairperson updated'); onRefresh?.();
+      showSnack('Chairperson updated'); 
+      if (typeof onRefresh === 'function') onRefresh();
     } catch (e) { showSnack(e.response?.data?.detail || 'Failed', 'error'); }
     finally { setLoading(false); }
   }, [meetingId, onRefresh, canEdit, showSnack]);
@@ -911,7 +911,8 @@ const handleAddParticipants = async (newParticipants) => {
       await api.patch(`/action-tracker/meetings/${meetingId}`, { secretary_id: participantId });
       setSecretaryId(participantId);
       setParticipants(prev => prev.map(p => ({ ...p, is_secretary: p.id === participantId })));
-      showSnack('Secretary updated'); onRefresh?.();
+      showSnack('Secretary updated'); 
+      if (typeof onRefresh === 'function') onRefresh();
     } catch (e) { showSnack(e.response?.data?.detail || 'Failed', 'error'); }
     finally { setLoading(false); }
   }, [meetingId, onRefresh, canEdit, showSnack]);
@@ -930,7 +931,7 @@ const handleAddParticipants = async (newParticipants) => {
         status === 'absent_with_apology' ? 'Marked absent with apology' : `Marked as ${status.replace('_', ' ')}`,
         status === 'absent' || status === 'absent_with_apology' ? 'warning' : 'success',
       );
-      onRefresh?.();
+      if (typeof onRefresh === 'function') onRefresh();
     } catch (e) { showSnack(e.response?.data?.detail || 'Failed to update attendance', 'error'); }
     finally { setLoading(false); }
   }, [meetingId, isMeetingStarted, canEdit, onRefresh, showSnack]);
@@ -957,7 +958,9 @@ const handleAddParticipants = async (newParticipants) => {
     setLoading(true);
     try {
       await api.delete(`/action-tracker/meetings/${meetingId}/participants/${participantId}`);
-      showSnack('Participant removed'); onRefresh?.();
+      setParticipants(prev => prev.filter(p => p.id !== participantId));
+      showSnack('Participant removed'); 
+      if (typeof onRefresh === 'function') onRefresh();
     } catch (e) { showSnack(e.response?.data?.detail || 'Failed to remove participant', 'error'); }
     finally { setLoading(false); setShowRemoveDialog(false); setParticipantToRemove(null); }
   }, [meetingId, onRefresh, showSnack]);
@@ -977,38 +980,136 @@ const handleAddParticipants = async (newParticipants) => {
     };
   }, [attendanceStatus, participants]);
 
-  // ── Table ──────────────────────────────────────────────────────────────────
-  const renderTable = (readOnly = false) => {
-    // CRITICAL FIX: Ensure participants is an array before rendering
+  const renderParticipantContent = (readOnly = false) => {
     const safeParticipants = ensureArray(participants);
-    
+
+    if (!safeParticipants || safeParticipants.length === 0) {
+      return (
+        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
+          <Typography variant="body2" color="text.secondary">No participants yet</Typography>
+        </Paper>
+      );
+    }
+
     return (
-      <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-        <Table size="small" sx={{ tableLayout: 'fixed' }}>
-          <TableHead>
-            <TableRow sx={{ bgcolor: isDarkMode ? alpha('#fff', 0.04) : '#f8fafc' }}>
-              {[
-                { label: 'Participant', width: '28%' },
-                { label: 'Contact',     width: '22%' },
-                { label: 'Role',        width: '18%' },
-                { label: 'Status',      width: '14%' },
-                ...(!readOnly ? [{ label: 'Actions', width: '18%', align: 'center' }] : []),
-              ].map(({ label, width, align }) => (
-                <TableCell key={label} align={align || 'left'} sx={{ fontWeight: 700, fontSize: '0.72rem', py: 0.75, px: 1.5, width, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {label}
-                </TableCell>
-              ))}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {!safeParticipants || safeParticipants.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={readOnly ? 4 : 5} align="center" sx={{ py: 4, color: 'text.secondary', fontSize: '0.8rem' }}>
-                  No participants yet
-                </TableCell>
+      <Box>
+        {/* MOBILE VIEW: Cards */}
+        <Box sx={{ display: { xs: 'flex', md: 'none' }, flexDirection: 'column', gap: 1.5 }}>
+          {safeParticipants.map((participant) => {
+            const fullName = safeStr(participant.name || participant.full_name || `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email || 'Unknown');
+            const isChairperson = chairpersonId === participant.id;
+            const isSecretary   = secretaryId   === participant.id;
+            const currentStatus = attendanceStatus[participant.id] || participant.attendance_status || 'pending';
+
+            return (
+              <Card key={participant.id} variant="outlined" sx={{ borderRadius: 2, opacity: readOnly ? 0.85 : 1 }}>
+                <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0, flex: 1 }}>
+                        <Avatar sx={{ width: 36, height: 36, fontSize: '0.85rem', bgcolor: isChairperson ? theme.palette.primary.main : isSecretary ? theme.palette.secondary.main : '#6366f1', flexShrink: 0 }}>
+                          {fullName[0]?.toUpperCase() || '?'}
+                        </Avatar>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography variant="subtitle2" fontWeight={700} noWrap>{fullName}</Typography>
+                          {participant.title && (
+                            <Typography variant="caption" color="text.secondary" noWrap display="block">
+                              {safeStr(participant.title)}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Stack>
+                      <StatusChip status={currentStatus} apologyComment={apologyComments[participant.id]} />
+                    </Stack>
+
+                    <Divider />
+
+                    <Stack spacing={0.75}>
+                      {participant.email && (
+                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }} noWrap>
+                          <EmailIcon sx={{ fontSize: 13 }} />
+                          <strong>Email:</strong> {getDisplayEmail(participant.email)}
+                        </Typography>
+                      )}
+                      {participant.telephone && (
+                        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }} noWrap>
+                          <PhoneIcon sx={{ fontSize: 13 }} />
+                          <strong>Phone:</strong> {getDisplayPhone(participant.telephone)}
+                        </Typography>
+                      )}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary">Role:</Typography>
+                        <RoleCell isChairperson={isChairperson} isSecretary={isSecretary} participantId={participant.id} loading={loading} canEdit={!readOnly && canEdit} onSetChairperson={handleSetChairperson} onSetSecretary={handleSetSecretary} />
+                      </Box>
+                    </Stack>
+
+                    {!readOnly && (
+                      <>
+                        <Divider />
+                        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" color="text.secondary" fontWeight={600}>Actions:</Typography>
+                          <Stack direction="row" spacing={0.5}>
+                            <Tooltip title="Mark Attended">
+                              <span>
+                                <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'attended')} disabled={currentStatus === 'attended' || loading || !isMeetingStarted} sx={{ p: 0.75, color: currentStatus === 'attended' ? 'success.main' : 'action.disabled' }}>
+                                  <CheckIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Mark Absent">
+                              <span>
+                                <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'absent')} disabled={currentStatus === 'absent' || loading || !isMeetingStarted} sx={{ p: 0.75, color: currentStatus === 'absent' ? 'error.main' : 'action.disabled' }}>
+                                  <Cancel sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Absent with Apology">
+                              <span>
+                                <IconButton size="small" onClick={() => handleOpenApologyDialog(participant)} disabled={currentStatus === 'absent_with_apology' || loading || !isMeetingStarted} sx={{ p: 0.75, color: currentStatus === 'absent_with_apology' ? 'warning.main' : 'action.disabled' }}>
+                                  <MessageIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            {!isChairperson && !isSecretary && (
+                              <Tooltip title="Remove">
+                                <span>
+                                  <IconButton size="small" onClick={() => { setParticipantToRemove(participant); setShowRemoveDialog(true); }} disabled={loading} sx={{ p: 0.75, color: 'action.disabled', '&:hover': { color: 'error.main' } }}>
+                                    <Delete sx={{ fontSize: 17 }} />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
+                          </Stack>
+                        </Stack>
+                      </>
+                    )}
+                  </Stack>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </Box>
+
+        {/* DESKTOP VIEW: Table */}
+        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, display: { xs: 'none', md: 'block' } }}>
+          <Table size="small" sx={{ tableLayout: 'fixed' }}>
+            <TableHead>
+              <TableRow sx={{ bgcolor: isDarkMode ? alpha('#fff', 0.04) : '#f8fafc' }}>
+                {[
+                  { label: 'Participant', width: '25%' },
+                  { label: 'Email',       width: '22%' },
+                  { label: 'Role',        width: '16%' },
+                  { label: 'Status',      width: '14%' },
+                  ...(!readOnly ? [{ label: 'Actions', width: '23%', align: 'center' }] : []),
+                ].map(({ label, width, align }) => (
+                  <TableCell key={label} align={align || 'left'} sx={{ fontWeight: 700, fontSize: '0.72rem', py: 0.75, px: 1.5, width, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {label}
+                  </TableCell>
+                ))}
               </TableRow>
-            ) : (
-              safeParticipants.map((participant) => {
+            </TableHead>
+            <TableBody>
+              {safeParticipants.map((participant) => {
                 const fullName = safeStr(participant.name || participant.full_name || `${participant.first_name || ''} ${participant.last_name || ''}`.trim() || participant.email || 'Unknown');
                 const isChairperson = chairpersonId === participant.id;
                 const isSecretary   = secretaryId   === participant.id;
@@ -1017,8 +1118,8 @@ const handleAddParticipants = async (newParticipants) => {
                 return (
                   <TableRow key={participant.id} hover sx={{ opacity: readOnly ? 0.85 : 1, '& .MuiTableCell-root': { py: 0.75, px: 1.5, fontSize: '0.8rem' } }}>
                     <TableCell>
-                      <Stack direction="row" alignItems="center" spacing={1}>
-                        <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: isChairperson ? theme.palette.primary.main : isSecretary ? theme.palette.secondary.main : '#6366f1', flexShrink: 0 }}>
+                      <Stack direction="row" sx={{ alignItems: 'center', spacing: 1 }}>
+                        <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: isChairperson ? theme.palette.primary.main : isSecretary ? theme.palette.secondary.main : '#6366f1', flexShrink: 0, mr: 1 }}>
                           {fullName[0]?.toUpperCase() || '?'}
                         </Avatar>
                         <Box sx={{ minWidth: 0 }}>
@@ -1055,60 +1156,52 @@ const handleAddParticipants = async (newParticipants) => {
                       <StatusChip status={currentStatus} apologyComment={apologyComments[participant.id]} />
                     </TableCell>
 
-            {!readOnly && (
-              <TableCell align="center">
-                <Stack 
-                  direction="row" 
-                  spacing={0.25}
-                  sx={{ 
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}
-                >
-                  <Tooltip title="Mark Attended">
-                    <span>
-                      <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'attended')} disabled={currentStatus === 'attended' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'attended' ? 'success.main' : 'action.disabled' }}>
-                        <CheckIcon sx={{ fontSize: 15 }} />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title="Mark Absent">
-                    <span>
-                      <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'absent')} disabled={currentStatus === 'absent' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'absent' ? 'error.main' : 'action.disabled' }}>
-                        <Cancel sx={{ fontSize: 15 }} />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title="Absent with Apology">
-                    <span>
-                      <IconButton size="small" onClick={() => handleOpenApologyDialog(participant)} disabled={currentStatus === 'absent_with_apology' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'absent_with_apology' ? 'warning.main' : 'action.disabled' }}>
-                        <MessageIcon sx={{ fontSize: 15 }} />
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                  {!isChairperson && !isSecretary && (
-                    <Tooltip title="Remove">
-                      <span>
-                        <IconButton size="small" onClick={() => { setParticipantToRemove(participant); setShowRemoveDialog(true); }} disabled={loading} sx={{ p: 0.5, color: 'action.disabled', '&:hover': { color: 'error.main' } }}>
-                          <Delete sx={{ fontSize: 15 }} />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  )}
-                </Stack>
-              </TableCell>
-            )}
+                    {!readOnly && (
+                      <TableCell align="center">
+                        <Stack direction="row" spacing={0.25} sx={{ justifyContent: 'center', alignItems: 'center' }}>
+                          <Tooltip title="Mark Attended">
+                            <span>
+                              <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'attended')} disabled={currentStatus === 'attended' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'attended' ? 'success.main' : 'action.disabled' }}>
+                                <CheckIcon sx={{ fontSize: 15 }} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Mark Absent">
+                            <span>
+                              <IconButton size="small" onClick={() => handleAttendanceChange(participant.id, 'absent')} disabled={currentStatus === 'absent' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'absent' ? 'error.main' : 'action.disabled' }}>
+                                <Cancel sx={{ fontSize: 15 }} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Absent with Apology">
+                            <span>
+                              <IconButton size="small" onClick={() => handleOpenApologyDialog(participant)} disabled={currentStatus === 'absent_with_apology' || loading || !isMeetingStarted} sx={{ p: 0.5, color: currentStatus === 'absent_with_apology' ? 'warning.main' : 'action.disabled' }}>
+                                <MessageIcon sx={{ fontSize: 15 }} />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          {!isChairperson && !isSecretary && (
+                            <Tooltip title="Remove">
+                              <span>
+                                <IconButton size="small" onClick={() => { setParticipantToRemove(participant); setShowRemoveDialog(true); }} disabled={loading} sx={{ p: 0.5, color: 'action.disabled', '&:hover': { color: 'error.main' } }}>
+                                  <Delete sx={{ fontSize: 15 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
     );
   };
 
-  // ── Dialogs ────────────────────────────────────────────────────────────────
   const renderDialogs = () => (
     <>
       <AddParticipantDialog open={showAddDialog} onClose={() => setShowAddDialog(false)} onAdd={handleAddParticipants} existingParticipants={participants} />
@@ -1118,7 +1211,6 @@ const handleAddParticipants = async (newParticipants) => {
     </>
   );
 
-  // ── Read-only (meeting ended) ───────────────────────────────────────────────
   if (!canEdit) {
     return (
       <Fade in>
@@ -1126,7 +1218,7 @@ const handleAddParticipants = async (newParticipants) => {
           <Alert severity="info" icon={<LockIcon sx={{ fontSize: 16 }} />} sx={{ py: 0.5, '& .MuiAlert-message': { py: 0.25 } }}>
             <Typography variant="caption" fontWeight={600}>View Only — Meeting Ended</Typography>
           </Alert>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="body2" fontWeight={600} color="text.secondary">
               {stats.total} participant{stats.total !== 1 ? 's' : ''}
             </Typography>
@@ -1137,14 +1229,13 @@ const handleAddParticipants = async (newParticipants) => {
             </Tooltip>
           </Stack>
           <StatStrip stats={stats} />
-          {renderTable(true)}
+          {renderParticipantContent(true)}
           {renderDialogs()}
         </Stack>
       </Fade>
     );
   }
 
-  // ── Active meeting UI ──────────────────────────────────────────────────────
   return (
     <Fade in>
       <Stack spacing={1.5}>
@@ -1157,38 +1248,38 @@ const handleAddParticipants = async (newParticipants) => {
                 : 'Attendance tracking will enable when meeting starts'}
           </Typography>
         </Alert>
-<Stack 
-  direction="row" 
-  sx={{ 
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 1
-  }}
->
-  <Typography variant="body2" fontWeight={600} color="text.secondary">
-    <PeopleIcon sx={{ fontSize: 15, mr: 0.5, verticalAlign: 'middle' }} />
-    {stats.total} participant{stats.total !== 1 ? 's' : ''}
-  </Typography>
-  <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-    <Tooltip title={showContactInfo ? 'Hide contact info' : 'Show contact info'}>
-      <IconButton size="small" onClick={() => setShowContactInfo(!showContactInfo)}>
-        {showContactInfo ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-      </IconButton>
-    </Tooltip>
-    <Tooltip title="Refresh">
-      <IconButton size="small" onClick={() => onRefresh?.()} disabled={loading}>
-        {loading ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
-      </IconButton>
-    </Tooltip>
-    <Button size="small" variant="contained" startIcon={<PersonAdd sx={{ fontSize: 15 }} />} onClick={() => setShowAddDialog(true)} sx={{ height: 30, fontSize: '0.75rem', px: 1.5, borderRadius: 1.5 }}>
-      Add
-    </Button>
-  </Stack>
-</Stack>
+        <Stack 
+          direction="row" 
+          sx={{ 
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 1
+          }}
+        >
+          <Typography variant="body2" fontWeight={600} color="text.secondary">
+            <PeopleIcon sx={{ fontSize: 15, mr: 0.5, verticalAlign: 'middle' }} />
+            {stats.total} participant{stats.total !== 1 ? 's' : ''}
+          </Typography>
+          <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+            <Tooltip title={showContactInfo ? 'Hide contact info' : 'Show contact info'}>
+              <IconButton size="small" onClick={() => setShowContactInfo(!showContactInfo)}>
+                {showContactInfo ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={() => typeof onRefresh === 'function' && onRefresh()} disabled={loading}>
+                {loading ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+            <Button size="small" variant="contained" startIcon={<PersonAdd sx={{ fontSize: 15 }} />} onClick={() => setShowAddDialog(true)} sx={{ height: 30, fontSize: '0.75rem', px: 1.5, borderRadius: 1.5 }}>
+              Add
+            </Button>
+          </Stack>
+        </Stack>
 
         <StatStrip stats={stats} />
-        {renderTable(false)}
+        {renderParticipantContent(false)}
         {renderDialogs()}
 
         {loading && (

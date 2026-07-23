@@ -1,4 +1,4 @@
-// SignInCard.jsx - FIXED with Account Lock Popup Support
+// SignInCard.jsx - FIXED with Adaptive Dark/Light Mode & Elegant Blue Top Accent Line for Light Mode
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -9,7 +9,7 @@ import {
   Link, Snackbar, Slide, Dialog, DialogTitle, DialogContent,
   DialogContentText, DialogActions, Paper, FormControlLabel, Checkbox,
   Zoom, Tooltip, useMediaQuery, useTheme, Fade, LinearProgress,
-  Chip
+  Chip, alpha
 } from '@mui/material';
 import {
   Visibility, VisibilityOff, PersonOutlined, LockOutlined,
@@ -114,6 +114,7 @@ const SignInCard = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isDark = theme.palette.mode === 'dark';
   
   // Auth selectors
   const { isLoading, error, isAuthenticated, loginSuccess, verificationEmailSent } = useSelector((state) => state.auth);
@@ -135,7 +136,7 @@ const SignInCard = () => {
   const [resendSuccess, setResendSuccess] = useState(false);
   const [loginCompleted, setLoginCompleted] = useState(false);
   
-  // NEW: Account Lock Dialog State
+  // Account Lock Dialog State
   const [lockDialogOpen, setLockDialogOpen] = useState(false);
   const [lockDialogMessage, setLockDialogMessage] = useState('');
   const [lockCountdown, setLockCountdown] = useState(0);
@@ -164,7 +165,6 @@ const SignInCard = () => {
            lowerError.includes('unverified');
   }, [errorMessage]);
   
-  // NEW: Improved account lock detection
   const isAccountLockedError = useMemo(() => {
     const lowerError = errorMessage.toLowerCase();
     return lowerError.includes('locked') || 
@@ -183,37 +183,28 @@ const SignInCard = () => {
     return touched[name] ? validateField(name, formData[name]) : '';
   }, [touched, formData, validateField]);
   
-  // NEW: Extract lock time from error message
   const extractLockTime = useCallback((message) => {
     if (!message) return 0;
     const match = message.match(/(\d+)\s*minute/);
     if (match) {
-      return parseInt(match[1]) * 60; // Convert minutes to seconds
+      return parseInt(match[1]) * 60;
     }
     const secondMatch = message.match(/(\d+)\s*second/);
     if (secondMatch) {
       return parseInt(secondMatch[1]);
     }
-    return 900; // Default 15 minutes
+    return 900;
   }, []);
   
-  // NEW: Show lock dialog when account locked error is detected
   useEffect(() => {
     if (isAccountLockedError && errorMessage && !lockDialogOpen && !isLocked) {
       const lockDuration = extractLockTime(errorMessage);
       setLockCountdown(lockDuration);
       setLockDialogMessage(errorMessage);
       setLockDialogOpen(true);
-      
-      // Also set the lock state in Redux if not already set
-      if (!isLocked) {
-        // The lock state should already be set by the auth slice
-        // But we can ensure it's displayed correctly
-      }
     }
   }, [isAccountLockedError, errorMessage, lockDialogOpen, isLocked, extractLockTime]);
   
-  // NEW: Countdown timer for lock dialog
   useEffect(() => {
     if (lockDialogOpen && lockCountdown > 0) {
       if (lockDialogTimerRef.current) {
@@ -225,7 +216,6 @@ const SignInCard = () => {
           if (prev <= 1) {
             clearInterval(lockDialogTimerRef.current);
             lockDialogTimerRef.current = null;
-            // Auto close dialog when countdown reaches 0
             setLockDialogOpen(false);
             dispatch(resetRateLimit());
             return 0;
@@ -243,7 +233,6 @@ const SignInCard = () => {
     }
   }, [lockDialogOpen, lockCountdown, dispatch]);
   
-  // Countdown timer for lock state (using Redux)
   useEffect(() => {
     if (isLocked && lockTimeRemaining > 0) {
       if (lockTimerRef.current) {
@@ -263,34 +252,24 @@ const SignInCard = () => {
     }
   }, [isLocked, lockTimeRemaining, dispatch]);
   
-  // Navigation on auth success
   useEffect(() => {
     if ((isAuthenticated || loginSuccess) && !loginCompleted) {
-      console.log('Authentication successful, redirecting to dashboard...');
       setLoginCompleted(true);
-      
       const timer = setTimeout(() => {
         window.location.href = '/dashboard';
       }, 300);
-      
       return () => clearTimeout(timer);
     }
   }, [isAuthenticated, loginSuccess, loginCompleted]);
   
-  // Reset login completed when component unmounts
   useEffect(() => {
     return () => {
       setLoginCompleted(false);
-      if (lockTimerRef.current) {
-        clearInterval(lockTimerRef.current);
-      }
-      if (lockDialogTimerRef.current) {
-        clearInterval(lockDialogTimerRef.current);
-      }
+      if (lockTimerRef.current) clearInterval(lockTimerRef.current);
+      if (lockDialogTimerRef.current) clearInterval(lockDialogTimerRef.current);
     };
   }, []);
   
-  // Handle unverified dialog
   useEffect(() => {
     if (isUnverifiedError && !resendDialogOpen && !isLocked && !isRateLimited && !lockDialogOpen) {
       const potentialEmail = debouncedUsername.includes('@') ? debouncedUsername : '';
@@ -300,14 +279,12 @@ const SignInCard = () => {
     }
   }, [isUnverifiedError, debouncedUsername, resendDialogOpen, isLocked, isRateLimited, lockDialogOpen]);
   
-  // Handle error snackbar - Don't show snackbar for lock errors
   useEffect(() => {
     if (errorMessage && !isUnverifiedError && !isAccountLockedError && !isRateLimitError) {
       setSnackbarOpen(true);
     }
   }, [errorMessage, isUnverifiedError, isAccountLockedError, isRateLimitError]);
   
-  // Focus username on mount
   useEffect(() => {
     if (usernameRef.current && !isLocked && !isRateLimited) {
       const timer = setTimeout(() => usernameRef.current?.focus(), 100);
@@ -315,16 +292,11 @@ const SignInCard = () => {
     }
   }, [isLocked, isRateLimited]);
   
-  // Handle field changes
   const handleChange = useCallback((e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    if (loginCompleted) {
-      setLoginCompleted(false);
-    }
-    if (error) {
-      dispatch(clearError());
-    }
+    if (loginCompleted) setLoginCompleted(false);
+    if (error) dispatch(clearError());
   }, [loginCompleted, error, dispatch]);
   
   const handleBlur = useCallback((e) => {
@@ -336,36 +308,25 @@ const SignInCard = () => {
     setShowPassword(prev => !prev);
   }, []);
   
-  // Handle form submission
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
-    
-    if (isLocked || isRateLimited || lockDialogOpen) {
-      return;
-    }
-    
+    if (isLocked || isRateLimited || lockDialogOpen) return;
     setTouched({ username: true, password: true });
-    
     if (!isFormValid) return;
     
     dispatch(clearError());
     setLoginCompleted(false);
     
     try {
-      const result = await dispatch(login({
+      await dispatch(login({
         username: formData.username.trim(),
         password: formData.password,
       })).unwrap();
-      
-      console.log('Login API response:', result);
-      
     } catch (err) {
-      console.debug('Login failed:', err);
       setLoginCompleted(false);
     }
   }, [dispatch, formData, isFormValid, isLocked, isRateLimited, lockDialogOpen]);
   
-  // Handle resend verification
   const handleResendVerification = useCallback(async () => {
     const email = resendEmail || formData.username;
     if (!email) return;
@@ -373,25 +334,19 @@ const SignInCard = () => {
     try {
       await dispatch(resendVerification(email)).unwrap();
       setResendSuccess(true);
-      
-      const timer = setTimeout(() => {
-        handleCloseDialog();
-      }, 3000);
-      
+      const timer = setTimeout(() => handleCloseDialog(), 3000);
       return () => clearTimeout(timer);
     } catch (err) {
-      console.error('Resend failed:', err);
+      // Handled in store
     }
   }, [dispatch, resendEmail, formData.username]);
   
-  // Close dialog
   const handleCloseDialog = useCallback(() => {
     setResendDialogOpen(false);
     setResendSuccess(false);
     dispatch(clearError());
   }, [dispatch]);
   
-  // NEW: Close lock dialog
   const handleCloseLockDialog = useCallback(() => {
     setLockDialogOpen(false);
     dispatch(clearError());
@@ -402,12 +357,10 @@ const SignInCard = () => {
     }
   }, [dispatch]);
   
-  // Close snackbar
   const handleCloseSnackbar = useCallback(() => {
     setSnackbarOpen(false);
   }, []);
   
-  // Handle "Enter" key for form submission
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -417,47 +370,34 @@ const SignInCard = () => {
     }
   }, [isFormValid, isLoading, isLocked, isRateLimited, lockDialogOpen, handleSubmit]);
   
-  // Get disabled state for form
   const isFormDisabled = isLoading || isLocked || isRateLimited || lockDialogOpen;
   
-  // Get button text based on state
   const getButtonText = useCallback(() => {
     if (isLoading) return <CircularProgress size={24} color="inherit" />;
     if (isLocked || lockDialogOpen) {
       const time = isLocked ? lockTimeRemaining : lockCountdown;
       const mins = Math.floor(time / 60);
       const secs = time % 60;
-      if (mins > 0) {
-        return `Account Locked (${mins}m ${secs}s)`;
-      }
-      return `Account Locked (${secs}s)`;
+      return mins > 0 ? `Locked (${mins}m ${secs}s)` : `Locked (${secs}s)`;
     }
     if (isRateLimited) {
       const mins = Math.floor(rateLimitRetryAfter / 60);
       const secs = rateLimitRetryAfter % 60;
-      if (mins > 0) {
-        return `Wait ${mins}m ${secs}s`;
-      }
-      return `Wait ${secs}s`;
+      return mins > 0 ? `Wait ${mins}m ${secs}s` : `Wait ${secs}s`;
     }
     return 'Sign In';
   }, [isLoading, isLocked, isRateLimited, lockDialogOpen, lockTimeRemaining, lockCountdown, rateLimitRetryAfter]);
   
-  // Format time helper
   const formatTimeDisplay = useCallback((seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    if (mins > 0) {
-      return `${mins}m ${secs}s`;
-    }
-    return `${secs}s`;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   }, []);
   
-  // Show loading while redirecting
   if (loginCompleted) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400, flexDirection: 'column', gap: 2 }}>
-        <CircularProgress size={48} />
+        <CircularProgress size={48} color="primary" />
         <Typography variant="body1" color="text.secondary">
           Redirecting to dashboard...
         </Typography>
@@ -468,20 +408,24 @@ const SignInCard = () => {
   return (
     <>
       <Card
-        elevation={isMobile ? 1 : 3}
+        elevation={isMobile ? 1 : 4}
         sx={{
           width: '100%',
           maxWidth: { xs: '100%', sm: 480, md: 520 },
           borderRadius: { xs: 3, sm: 4 },
+          bgcolor: isDark ? 'background.paper' : '#FFFFFF',
+          border: `1px solid ${isDark ? alpha(theme.palette.divider, 0.15) : '#E2E8F0'}`,
+          // Elegant blue top border accent line for light mode
+          borderTop: isDark ? undefined : `4px solid ${theme.palette.primary.main}`,
+          boxShadow: isDark 
+            ? '0 10px 30px -5px rgba(0, 0, 0, 0.5)' 
+            : '0 10px 25px -5px rgba(79, 70, 229, 0.08), 0 8px 10px -6px rgba(79, 70, 229, 0.04)',
           transition: 'all 0.3s ease-in-out',
-          '&:hover': {
-            boxShadow: isMobile ? 2 : 6,
-          },
           position: 'relative',
           overflow: 'hidden',
         }}
       >
-        {/* Rate Limit / Lock Progress Bar */}
+        {/* Progress bar */}
         {(isLocked || isRateLimited) && (
           <LinearProgress
             variant="determinate"
@@ -504,16 +448,25 @@ const SignInCard = () => {
           {/* Header */}
           <Box sx={{ textAlign: 'center', mb: 4 }}>
             <Zoom in timeout={500}>
-              <Group sx={{ fontSize: { xs: 40, sm: 48 }, color: 'primary.main', mb: 2 }} />
+              <Box 
+                sx={{ 
+                  display: 'inline-flex', 
+                  p: 2, 
+                  borderRadius: '50%', 
+                  bgcolor: alpha(theme.palette.primary.main, 0.08), 
+                  mb: 2 
+                }}
+              >
+                <Group sx={{ fontSize: { xs: 36, sm: 42 }, color: 'primary.main' }} />
+              </Box>
             </Zoom>
-            <Typography variant={isMobile ? "h5" : "h4"} fontWeight={700} gutterBottom>
+            <Typography variant={isMobile ? "h5" : "h4"} fontWeight={700} color="text.primary" gutterBottom>
               Welcome Back
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Sign in to manage your meetings and tasks
             </Typography>
             
-            {/* Failed Attempts Indicator */}
             {!isLocked && !lockDialogOpen && failedAttempts > 0 && (
               <Chip
                 icon={<WarningAmberOutlined />}
@@ -526,7 +479,7 @@ const SignInCard = () => {
             )}
           </Box>
           
-          {/* Account Locked Alert - Inline */}
+          {/* Account Locked Alert */}
           {isLocked && (
             <Fade in>
               <Alert 
@@ -597,7 +550,6 @@ const SignInCard = () => {
           
           {/* Form */}
           <form ref={formRef} onSubmit={handleSubmit} onKeyDown={handleKeyDown}>
-            {/* Username Field */}
             <TextField
               ref={usernameRef}
               fullWidth
@@ -611,6 +563,12 @@ const SignInCard = () => {
               disabled={isFormDisabled}
               error={!!getFieldError('username')}
               helperText={getFieldError('username')}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2.5,
+                  bgcolor: isDark ? alpha(theme.palette.background.default, 0.4) : '#F8FAFC',
+                },
+              }}
               slotProps={{
                 input: {
                   startAdornment: (
@@ -622,7 +580,6 @@ const SignInCard = () => {
               }}
             />
             
-            {/* Password Field */}
             <TextField
               fullWidth
               label="Password"
@@ -636,6 +593,12 @@ const SignInCard = () => {
               required
               disabled={isFormDisabled}
               error={!!getFieldError('password')}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2.5,
+                  bgcolor: isDark ? alpha(theme.palette.background.default, 0.4) : '#F8FAFC',
+                },
+              }}
               helperText={
                 <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                   <span>{getFieldError('password')}</span>
@@ -672,8 +635,7 @@ const SignInCard = () => {
               }}
             />
             
-            {/* Options Row */}
-            <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
               <FormControlLabel
                 control={
                   <Checkbox
@@ -690,13 +652,12 @@ const SignInCard = () => {
                 to="/forgot-password" 
                 variant="body2" 
                 underline="hover"
-                sx={{ fontSize: '0.875rem' }}
+                sx={{ fontSize: '0.875rem', fontWeight: 500 }}
               >
                 Forgot password?
               </Link>
             </Box>
             
-            {/* Submit Button */}
             <Button
               type="submit"
               fullWidth
@@ -705,23 +666,26 @@ const SignInCard = () => {
               disabled={isFormDisabled || !isFormValid}
               startIcon={!isLoading && !isLocked && !isRateLimited && !lockDialogOpen && <Login />}
               sx={{ 
-                mt: 3, 
+                mt: 3.5, 
                 mb: 2, 
                 py: { xs: 1.5, sm: 1.8 },
-                transition: 'all 0.2s ease',
-                position: 'relative',
+                borderRadius: 2.5,
+                textTransform: 'none',
+                fontWeight: 600,
+                fontSize: '1rem',
+                boxShadow: isDark ? 'none' : '0 4px 12px rgba(79, 70, 229, 0.25)',
               }}
             >
               {getButtonText()}
             </Button>
           </form>
           
-          {/* Divider */}
           <Divider sx={{ my: 3 }}>
-            <Typography variant="caption" color="text.secondary">Don't have an account?</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ px: 1, bgcolor: isDark ? 'background.paper' : '#FFFFFF' }}>
+              Don't have an account?
+            </Typography>
           </Divider>
           
-          {/* Sign Up Button */}
           <Button
             component={RouterLink} 
             to="/signup"
@@ -729,14 +693,19 @@ const SignInCard = () => {
             variant="outlined" 
             size="large"
             disabled={isLoading}
-            sx={{ py: 1.5 }}
+            sx={{ 
+              py: 1.5,
+              borderRadius: 2.5,
+              textTransform: 'none',
+              fontWeight: 600,
+            }}
           >
             Create New Account
           </Button>
         </CardContent>
       </Card>
       
-      {/* NEW: Account Lock Dialog */}
+      {/* Account Lock Dialog */}
       <Dialog
         open={lockDialogOpen}
         onClose={handleCloseLockDialog}
@@ -744,24 +713,10 @@ const SignInCard = () => {
         maxWidth="sm"
         fullWidth
         disableEscapeKeyDown
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: { xs: 2, sm: 3 },
-              overflow: 'hidden',
-              border: '2px solid',
-              borderColor: 'error.main',
-            }
-          }
-        }}
       >
-        <DialogTitle sx={{ 
-          bgcolor: 'error.main', 
-          color: 'white',
-          pb: 2,
-        }}>
+        <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', py: 2.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <LockIcon sx={{ fontSize: 32 }} />
+            <LockIcon sx={{ fontSize: 28 }} />
             <Box>
               <Typography variant="h6" component="span" fontWeight="bold">
                 Account Locked
@@ -773,13 +728,9 @@ const SignInCard = () => {
           </Box>
         </DialogTitle>
         
-        <DialogContent sx={{ pt: 3 }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Alert 
-              severity="error" 
-              variant="outlined"
-              sx={{ borderRadius: 2 }}
-            >
+        <DialogContent sx={{ pt: 3, pb: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
+            <Alert severity="error" variant="outlined" sx={{ borderRadius: 2 }}>
               <Typography variant="body2">
                 {lockDialogMessage || 'Account temporarily locked due to multiple failed login attempts.'}
               </Typography>
@@ -790,17 +741,17 @@ const SignInCard = () => {
               sx={{ 
                 p: 3, 
                 textAlign: 'center',
-                bgcolor: 'error.light',
-                borderRadius: 2,
+                bgcolor: isDark ? alpha(theme.palette.error.main, 0.08) : '#FFF8F8',
+                borderRadius: 2.5,
                 borderColor: 'error.main',
               }}
             >
-              <Typography variant="body2" color="text.secondary" gutterBottom>
+              <Typography variant="body2" color="text.secondary" gutterBottom fontWeight={500}>
                 Time remaining until unlock:
               </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
                 <TimerOutlined color="error" sx={{ fontSize: 28 }} />
-                <Typography variant="h3" fontWeight="bold" color="error.main">
+                <Typography variant="h3" fontWeight={800} color="error.main">
                   {formatTimeDisplay(lockCountdown)}
                 </Typography>
               </Box>
@@ -808,20 +759,19 @@ const SignInCard = () => {
                 variant="determinate"
                 value={(lockCountdown / (lockCountdown + 1)) * 100}
                 color="error"
-                sx={{ mt: 2, height: 8, borderRadius: 4 }}
+                sx={{ mt: 2.5, height: 8, borderRadius: 4 }}
               />
             </Paper>
             
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               <Typography variant="body2">
-                <strong>Why is this happening?</strong> Too many failed login attempts triggered our security system.
-                This protects your account from unauthorized access.
+                <strong>Why is this happening?</strong> Too many failed login attempts triggered our security system to protect your account.
               </Typography>
             </Alert>
           </Box>
         </DialogContent>
         
-        <DialogActions sx={{ p: 3, flexDirection: 'column', gap: 1.5 }}>
+        <DialogActions sx={{ p: 3, pt: 1, flexDirection: 'column', gap: 1.5 }}>
           <Button 
             onClick={handleCloseLockDialog}
             variant="contained"
@@ -829,7 +779,7 @@ const SignInCard = () => {
             fullWidth
             disabled={lockCountdown > 0}
             startIcon={lockCountdown > 0 ? <TimerOutlined /> : <RefreshOutlined />}
-            sx={{ py: 1.5 }}
+            sx={{ py: 1.5, borderRadius: 2.5, textTransform: 'none', fontWeight: 600 }}
           >
             {lockCountdown > 0 ? `Wait ${formatTimeDisplay(lockCountdown)}` : 'Try Again'}
           </Button>
@@ -840,7 +790,7 @@ const SignInCard = () => {
             }}
             variant="outlined"
             fullWidth
-            sx={{ py: 1.5 }}
+            sx={{ py: 1.5, borderRadius: 2.5, textTransform: 'none', fontWeight: 600 }}
           >
             Forgot Password?
           </Button>
@@ -854,35 +804,21 @@ const SignInCard = () => {
         TransitionComponent={SlideTransition}
         maxWidth="xs"
         fullWidth
-        disableEscapeKeyDown={false}
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: { xs: 2, sm: 3 },
-              overflow: 'hidden',
-            }
-          }
-        }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
+        <DialogTitle sx={{ pb: 1, pt: 2.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <EmailOutlined color="warning" />
-              <Typography variant="h6" component="span">Verify Your Email</Typography>
+              <Typography variant="h6" component="span" fontWeight={700}>Verify Your Email</Typography>
             </Box>
-            <IconButton
-              aria-label="close"
-              onClick={handleCloseDialog}
-              size="small"
-              disabled={isLoading}
-            >
+            <IconButton aria-label="close" onClick={handleCloseDialog} size="small" disabled={isLoading}>
               <CloseOutlined />
             </IconButton>
           </Box>
         </DialogTitle>
         
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
+        <DialogContent sx={{ pt: 1 }}>
+          <DialogContentText sx={{ mb: 2, color: 'text.secondary', fontSize: '0.9rem' }}>
             Your account hasn't been verified yet. We'll send a new verification link to:
           </DialogContentText>
           
@@ -890,43 +826,39 @@ const SignInCard = () => {
             variant="outlined" 
             sx={{ 
               p: 2, 
-              bgcolor: 'action.hover', 
+              bgcolor: isDark ? alpha(theme.palette.background.default, 0.4) : '#F8FAFC', 
               textAlign: 'center',
               borderRadius: 2,
               borderColor: 'primary.main',
-              borderWidth: 1,
             }}
           >
-            <Typography variant="subtitle1" fontWeight="bold" color="primary">
+            <Typography variant="subtitle1" fontWeight={600} color="primary" sx={{ wordBreak: 'break-all' }}>
               {resendEmail || formData.username || "your email address"}
             </Typography>
           </Paper>
           
           {resendSuccess && (
             <Fade in>
-              <Alert 
-                severity="success" 
-                sx={{ mt: 2 }}
-                icon={<CheckCircleOutlined />}
-              >
+              <Alert severity="success" sx={{ mt: 2, borderRadius: 2 }} icon={<CheckCircleOutlined />}>
                 Verification link sent! Please check your inbox and spam folder.
               </Alert>
             </Fade>
           )}
           
           {verificationEmailSent && !resendSuccess && (
-            <Alert severity="info" sx={{ mt: 2 }}>
+            <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
               Verification link has been sent. Please check your email.
             </Alert>
           )}
         </DialogContent>
         
-        <DialogActions sx={{ p: 3, pt: 0, flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5 }}>
+        <DialogActions sx={{ p: 3, pt: 1, flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5 }}>
           <Button 
             onClick={handleCloseDialog} 
             variant="outlined" 
             fullWidth={isMobile}
             disabled={isLoading}
+            sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
           >
             Close
           </Button>
@@ -936,9 +868,9 @@ const SignInCard = () => {
             disabled={isLoading || resendSuccess || verificationEmailSent}
             startIcon={<SendOutlined />}
             fullWidth={isMobile}
-            sx={{ position: 'relative', overflow: 'hidden' }}
+            sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
           >
-            {isLoading ? <CircularProgress size={20} /> : 'Resend Verification'}
+            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Resend Verification'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -956,13 +888,9 @@ const SignInCard = () => {
           variant="filled"
           onClose={handleCloseSnackbar}
           icon={<ErrorOutlined />}
-          sx={{ 
-            width: '100%',
-            minWidth: { xs: 'auto', sm: 300 },
-            boxShadow: 3,
-          }}
+          sx={{ width: '100%', minWidth: { xs: 'auto', sm: 300 }, borderRadius: 2.5 }}
         >
-          <Typography variant="body2" fontWeight="medium">
+          <Typography variant="body2" fontWeight={500}>
             {errorMessage}
           </Typography>
         </Alert>

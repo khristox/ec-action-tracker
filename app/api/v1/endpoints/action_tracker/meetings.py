@@ -1,9 +1,10 @@
-# app/api/v1/endpoints/action_tracker/meetings.py
 """
-Meeting Management API Endpoints
+Meeting Management API Endpoints - UPDATED
 
-This module handles all meeting-related operations with improved connection management,
-caching, and error handling.
+This module handles all meeting-related operations with:
+- User-specific metrics (creator, participant, implementer)
+- Redis caching per user
+- Improved connection management and error handling
 """
 
 import asyncio
@@ -88,9 +89,16 @@ AsyncQueryFunc = Callable[[], T]
 # ==================== REDIS CACHE SETUP ====================
 
 class RedisCache:
-    """Redis cache handler with connection pooling and fallback"""
+    """
+    Redis cache handler with connection pooling, fallback, and user-specific caching.
     
-    CACHE_KEY = "meeting_stats"
+    Cache keys are user-specific:
+    - "meeting_stats:global" for global stats (if needed)
+    - "meeting_stats:user_{user_id}" for user-specific metrics
+    """
+    
+    GLOBAL_CACHE_KEY = "meeting_stats:global"
+    USER_CACHE_KEY_PREFIX = "meeting_stats:user_"
     CACHE_TTL = 300  # 5 minutes
     
     def __init__(self):
@@ -118,75 +126,95 @@ class RedisCache:
                     health_check_interval=30,
                 )
                 self._use_redis = True
-                logger.info("Redis connection established for stats caching")
+                logger.info("✅ Redis connection established for stats caching")
             except ImportError:
-                logger.warning("redis library not installed, using in-memory cache fallback")
+                logger.warning("⚠️ redis library not installed, using in-memory cache fallback")
                 self._use_redis = False
             except Exception as e:
-                logger.warning(f"Redis connection failed: {e}, using in-memory cache fallback")
+                logger.warning(f"⚠️ Redis connection failed: {e}, using in-memory cache fallback")
                 self._use_redis = False
         except Exception as e:
-            logger.warning(f"Redis initialization failed: {e}, using in-memory cache fallback")
+            logger.warning(f"⚠️ Redis initialization failed: {e}, using in-memory cache fallback")
             self._use_redis = False
         finally:
             self._initialized = True
     
-    async def get_stats(self) -> Optional[Dict[str, Any]]:
+    def _get_user_cache_key(self, user_id: UUID) -> str:
+        """Generate user-specific cache key"""
+        return f"{self.USER_CACHE_KEY_PREFIX}{user_id}"
+    
+    async def get_stats(self, user_id: Optional[UUID] = None) -> Optional[Dict[str, Any]]:
         """Get cached stats with fallback to memory"""
+        cache_key = self._get_user_cache_key(user_id) if user_id else self.GLOBAL_CACHE_KEY
+        
         try:
             if self._use_redis and self.redis:
-                cached = await self.redis.get(self.CACHE_KEY)
+                cached = await self.redis.get(cache_key)
                 if cached:
+                    logger.debug(f"📦 Cache HIT for key: {cache_key}")
                     return json.loads(cached)
-            return await self._get_memory_cache()
+            return await self._get_memory_cache(cache_key)
         except Exception as e:
             logger.warning(f"Failed to read stats from cache: {e}")
             return None
     
-    async def set_stats(self, stats_data: Dict[str, Any]) -> None:
+    async def set_stats(self, stats_data: Dict[str, Any], user_id: Optional[UUID] = None) -> None:
         """Store stats with fallback to memory"""
+        cache_key = self._get_user_cache_key(user_id) if user_id else self.GLOBAL_CACHE_KEY
+        
         try:
             json_data = json.dumps(stats_data)
             if self._use_redis and self.redis:
-                await self.redis.setex(self.CACHE_KEY, self.CACHE_TTL, json_data)
+                await self.redis.setex(cache_key, self.CACHE_TTL, json_data)
+                logger.debug(f"💾 Stats cached in Redis for key: {cache_key}")
             else:
-                await self._set_memory_cache(stats_data)
+                await self._set_memory_cache(cache_key, stats_data)
         except Exception as e:
             logger.warning(f"Failed to write stats to cache: {e}")
     
-    async def invalidate(self) -> None:
+    async def invalidate(self, user_id: Optional[UUID] = None) -> None:
         """Invalidate the cache"""
+        cache_key = self._get_user_cache_key(user_id) if user_id else self.GLOBAL_CACHE_KEY
+        
         try:
             if self._use_redis and self.redis:
-                await self.redis.delete(self.CACHE_KEY)
+                await self.redis.delete(cache_key)
+                logger.debug(f"🗑️  Cache invalidated in Redis for key: {cache_key}")
             else:
-                await self._clear_memory_cache()
+                await self._clear_memory_cache(cache_key)
         except Exception as e:
             logger.warning(f"Failed to invalidate cache: {e}")
+    
+    async def invalidate_user_stats(self, user_id: UUID) -> None:
+        """Invalidate stats for a specific user"""
+        await self.invalidate(user_id)
+        logger.info(f"Invalidated stats for user {user_id}")
     
     # ==================== IN-MEMORY CACHE FALLBACK ====================
     
     _memory_cache = {}
     _memory_expiry = {}
     
-    async def _get_memory_cache(self) -> Optional[Dict[str, Any]]:
+    async def _get_memory_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
         """Get from in-memory cache"""
-        if self.CACHE_KEY in self._memory_cache:
-            if datetime.now() < self._memory_expiry.get(self.CACHE_KEY, datetime.min):
-                return self._memory_cache[self.CACHE_KEY]
+        if cache_key in self._memory_cache:
+            if datetime.now() < self._memory_expiry.get(cache_key, datetime.min):
+                logger.debug(f"📦 Memory cache HIT for key: {cache_key}")
+                return self._memory_cache[cache_key]
             else:
-                await self._clear_memory_cache()
+                await self._clear_memory_cache(cache_key)
         return None
     
-    async def _set_memory_cache(self, stats_data: Dict[str, Any]) -> None:
+    async def _set_memory_cache(self, cache_key: str, stats_data: Dict[str, Any]) -> None:
         """Set in-memory cache"""
-        self._memory_cache[self.CACHE_KEY] = stats_data
-        self._memory_expiry[self.CACHE_KEY] = datetime.now() + timedelta(seconds=self.CACHE_TTL)
+        self._memory_cache[cache_key] = stats_data
+        self._memory_expiry[cache_key] = datetime.now() + timedelta(seconds=self.CACHE_TTL)
+        logger.debug(f"💾 Stats cached in memory for key: {cache_key}")
     
-    async def _clear_memory_cache(self) -> None:
+    async def _clear_memory_cache(self, cache_key: str) -> None:
         """Clear in-memory cache"""
-        self._memory_cache.pop(self.CACHE_KEY, None)
-        self._memory_expiry.pop(self.CACHE_KEY, None)
+        self._memory_cache.pop(cache_key, None)
+        self._memory_expiry.pop(cache_key, None)
 
 # Global cache instance
 _stats_cache = RedisCache()
@@ -377,9 +405,15 @@ async def build_meeting_items(
 
 
 def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
-    """Build response for meeting minutes with error handling."""
+    """Build response for meeting minutes with error handling.
+    Only includes active actions (is_active=True).
+    """
     try:
         def build_action_dict(action) -> Dict[str, Any]:
+            # Skip inactive/soft-deleted actions
+            if not action.is_active:
+                return None
+            
             # Map ORM 'implementers' relationship → persons_implementing field
             implementers = getattr(action, 'implementers', None) or []
             persons_implementing = [
@@ -393,6 +427,8 @@ def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
                     "is_private":     bool(p.user_id),
                 }
                 for p in implementers
+                # Note: ActionImplementer does NOT have an is_active field.
+                # All implementers are included as they represent the assignment history.
             ]
 
             assigned = action.assigned_to_name
@@ -423,7 +459,6 @@ def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
                 "updated_at":                   safe_isoformat(action.updated_at),
                 "created_by_id":                action.created_by_id,
                 "is_active":                    action.is_active,
-                # ── New fields ──────────────────────────────────────────────
                 "title":                        action.title,
                 "issue_challenge":              action.issue_challenge,
                 "type_of_action":               action.type_of_action,
@@ -434,6 +469,13 @@ def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
                 "persons_implementing":         persons_implementing,
                 "persons_implementing_display": persons_implementing,
             }
+
+        # Build actions list, filtering out None values (inactive actions)
+        actions = []
+        for action in (minute.actions or []):
+            action_dict = build_action_dict(action)
+            if action_dict:
+                actions.append(action_dict)
 
         return {
             "id":               minute.id,
@@ -452,15 +494,12 @@ def build_minutes_response(minute: MeetingMinutes) -> Dict[str, Any]:
             "updated_at":       safe_isoformat(minute.updated_at),
             "is_active":        minute.is_active,
             "is_default":       safe_get_attribute(minute, 'is_default', False),
-            "actions": [
-                build_action_dict(action)
-                for action in (minute.actions or [])
-            ] if hasattr(minute, 'actions') else [],
+            "actions":          actions,
         }
     except Exception as e:
         logger.error(f"Error building minutes response: {e}", exc_info=True)
         return {}
-
+    
 def build_status_history_response(history: MeetingStatusHistory) -> Optional[MeetingStatusHistoryResponse]:
     """Build response for status history entry with error handling."""
     try:
@@ -525,35 +564,57 @@ async def execute_db_operation(
 @router.get("/stats")
 async def get_meeting_stats(
     db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
     refresh: bool = Query(False, description="Force refresh the cache"),
 ):
     """
-    Get meeting statistics for the dashboard with improved connection management.
-    Results are cached for 5 minutes for better performance.
+    Get PERSONALIZED meeting statistics for the dashboard.
+    Results are cached per user for 5 minutes.
     """
     await _stats_cache.initialize()
     
     if not refresh:
-        cached_stats = await _stats_cache.get_stats()
+        cached_stats = await _stats_cache.get_stats(user_id=current_user.id)
         if cached_stats:
-            logger.info("Returning cached meeting stats")
+            logger.info(f"📦 Returning cached meeting stats for user {current_user.id}")
             return cached_stats
     
     try:
-        logger.info("Computing meeting stats from database...")
+        logger.info(f"🔄 Computing personalized meeting stats for user {current_user.id}...")
         
         async def get_stats_data():
             async with db.begin():
+                today = date.today()
+                
                 async def get_total():
                     result = await db.execute(
-                        select(func.count(Meeting.id)).where(Meeting.is_active == True)
+                        select(func.count(distinct(Meeting.id))).where(
+                            or_(
+                                Meeting.created_by_id == current_user.id,
+                                Meeting.id.in_(
+                                    select(MeetingParticipant.meeting_id).where(
+                                        MeetingParticipant.user_id == current_user.id,
+                                        MeetingParticipant.is_active == True
+                                    )
+                                ),
+                            ),
+                            Meeting.is_active == True
+                        )
                     )
                     return result.scalar() or 0
                 
                 async def get_upcoming():
-                    today = date.today()
                     result = await db.execute(
-                        select(func.count(Meeting.id)).where(
+                        select(func.count(distinct(Meeting.id))).where(
+                            or_(
+                                Meeting.created_by_id == current_user.id,
+                                Meeting.id.in_(
+                                    select(MeetingParticipant.meeting_id).where(
+                                        MeetingParticipant.user_id == current_user.id,
+                                        MeetingParticipant.is_active == True
+                                    )
+                                ),
+                            ),
                             Meeting.meeting_date >= today,
                             Meeting.is_active == True
                         )
@@ -562,10 +623,22 @@ async def get_meeting_stats(
                 
                 async def get_in_progress():
                     result = await db.execute(
-                        select(func.count(Meeting.id))
-                        .join(Attribute, Meeting.status_id == Attribute.id)
-                        .where(
-                            Attribute.short_name.in_(['started', 'ongoing', 'in_progress']),
+                        select(func.count(distinct(Meeting.id))).where(
+                            or_(
+                                Meeting.created_by_id == current_user.id,
+                                Meeting.id.in_(
+                                    select(MeetingParticipant.meeting_id).where(
+                                        MeetingParticipant.user_id == current_user.id,
+                                        MeetingParticipant.is_active == True
+                                    )
+                                ),
+                            ),
+                            Meeting.status_id.in_(
+                                select(Attribute.id).where(
+                                    Attribute.short_name.in_(['started', 'ongoing', 'in_progress']),
+                                    Attribute.is_active == True
+                                )
+                            ),
                             Meeting.is_active == True
                         )
                     )
@@ -573,10 +646,22 @@ async def get_meeting_stats(
                 
                 async def get_completed():
                     result = await db.execute(
-                        select(func.count(Meeting.id))
-                        .join(Attribute, Meeting.status_id == Attribute.id)
-                        .where(
-                            Attribute.short_name.in_(['ended', 'closed', 'completed']),
+                        select(func.count(distinct(Meeting.id))).where(
+                            or_(
+                                Meeting.created_by_id == current_user.id,
+                                Meeting.id.in_(
+                                    select(MeetingParticipant.meeting_id).where(
+                                        MeetingParticipant.user_id == current_user.id,
+                                        MeetingParticipant.is_active == True
+                                    )
+                                ),
+                            ),
+                            Meeting.status_id.in_(
+                                select(Attribute.id).where(
+                                    Attribute.short_name.in_(['ended', 'closed', 'completed']),
+                                    Attribute.is_active == True
+                                )
+                            ),
                             Meeting.is_active == True
                         )
                     )
@@ -584,21 +669,49 @@ async def get_meeting_stats(
                 
                 async def get_cancelled():
                     result = await db.execute(
-                        select(func.count(Meeting.id))
-                        .join(Attribute, Meeting.status_id == Attribute.id)
-                        .where(
-                            Attribute.short_name == 'cancelled',
+                        select(func.count(distinct(Meeting.id))).where(
+                            or_(
+                                Meeting.created_by_id == current_user.id,
+                                Meeting.id.in_(
+                                    select(MeetingParticipant.meeting_id).where(
+                                        MeetingParticipant.user_id == current_user.id,
+                                        MeetingParticipant.is_active == True
+                                    )
+                                ),
+                            ),
+                            Meeting.status_id.in_(
+                                select(Attribute.id).where(
+                                    Attribute.short_name == 'cancelled',
+                                    Attribute.is_active == True
+                                )
+                            ),
                             Meeting.is_active == True
                         )
                     )
                     return result.scalar() or 0
                 
                 async def get_today_meetings():
-                    today = date.today()
                     result = await db.execute(
-                        select(func.count(Meeting.id)).where(
+                        select(func.count(distinct(Meeting.id))).where(
+                            or_(
+                                Meeting.created_by_id == current_user.id,
+                                Meeting.id.in_(
+                                    select(MeetingParticipant.meeting_id).where(
+                                        MeetingParticipant.user_id == current_user.id,
+                                        MeetingParticipant.is_active == True
+                                    )
+                                ),
+                            ),
                             Meeting.meeting_date == today,
                             Meeting.is_active == True
+                        )
+                    )
+                    return result.scalar() or 0
+                
+                async def get_actions_assigned():
+                    result = await db.execute(
+                        select(func.count(MeetingAction.id)).where(
+                            MeetingAction.is_active == True
                         )
                     )
                     return result.scalar() or 0
@@ -610,6 +723,7 @@ async def get_meeting_stats(
                     get_completed(),
                     get_cancelled(),
                     get_today_meetings(),
+                    get_actions_assigned(),
                     return_exceptions=True
                 )
                 
@@ -619,6 +733,7 @@ async def get_meeting_stats(
                 completed = results[3] if not isinstance(results[3], Exception) else 0
                 cancelled = results[4] if not isinstance(results[4], Exception) else 0
                 today_meetings = results[5] if not isinstance(results[5], Exception) else 0
+                actions_assigned = results[6] if not isinstance(results[6], Exception) else 0
                 
                 return {
                     "total": total,
@@ -627,24 +742,26 @@ async def get_meeting_stats(
                     "completed": completed,
                     "cancelled": cancelled,
                     "today": today_meetings,
-                    "high_priority": 0,
+                    "actions_assigned": actions_assigned,
+                    "user_id": str(current_user.id),
                     "cached": False,
                     "cached_at": datetime.now().isoformat(),
                 }
         
         stats_data = await execute_db_operation(get_stats_data, max_retries=MAX_RETRIES)
-        await _stats_cache.set_stats(stats_data)
+        await _stats_cache.set_stats(stats_data, user_id=current_user.id)
         
-        logger.info(f"Meeting stats computed: {stats_data}")
+        logger.info(f"✅ Meeting stats computed for user {current_user.id}: {stats_data}")
         return stats_data
         
     except SQLAlchemyError as e:
-        logger.error(f"Database error fetching meeting stats: {str(e)}", exc_info=True)
-        stale_cache = await _stats_cache.get_stats()
+        logger.error(f"Database error fetching meeting stats for user {current_user.id}: {str(e)}", exc_info=True)
+        stale_cache = await _stats_cache.get_stats(user_id=current_user.id)
         if stale_cache:
             stale_cache["cached"] = True
             stale_cache["stale"] = True
             stale_cache["error"] = str(e)
+            logger.warning(f"⚠️ Returning stale cache for user {current_user.id}")
             return stale_cache
         
         raise HTTPException(
@@ -652,7 +769,7 @@ async def get_meeting_stats(
             detail="Database connection error. Please try again later."
         )
     except Exception as e:
-        logger.error(f"Error fetching meeting stats: {str(e)}", exc_info=True)
+        logger.error(f"Error fetching meeting stats for user {current_user.id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch stats: {str(e)}"
@@ -662,16 +779,14 @@ async def get_meeting_stats(
 @router.post("/stats/refresh")
 async def refresh_meeting_stats(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Force refresh the meeting stats cache.
-    Requires authentication.
+    Force refresh the meeting stats cache for the current user.
     """
-    await _stats_cache.invalidate()
-    
-    response = await get_meeting_stats(db, refresh=True)
-    
+    await _stats_cache.invalidate_user_stats(current_user.id)
+    logger.info(f"🔄 User {current_user.id} initiated cache refresh")
+    response = await get_meeting_stats(db, current_user, refresh=True)
     return {
         "message": "Stats cache refreshed successfully",
         "data": response
@@ -680,32 +795,30 @@ async def refresh_meeting_stats(
 
 @router.get("/stats/status")
 async def get_stats_cache_status(
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Get the current status of the stats cache.
-    Requires authentication.
+    Get the current status of the stats cache for the current user.
     """
     await _stats_cache.initialize()
-    
-    cached = await _stats_cache.get_stats()
-    
+    cached = await _stats_cache.get_stats(user_id=current_user.id)
     return {
+        "user_id": str(current_user.id),
         "cached": cached is not None,
-        "ttl_seconds": CACHE_TTL,
-        "cache_key": _stats_cache.CACHE_KEY,
-        "redis_connected": _stats_cache._use_redis
+        "ttl_seconds": _stats_cache.CACHE_TTL,
+        "cache_key": _stats_cache._get_user_cache_key(current_user.id),
+        "redis_connected": _stats_cache._use_redis,
+        "cache_timestamp": cached.get("cached_at") if cached else None,
     }
 
 
 @router.get("/filter-options")
 async def get_filter_options(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
     Get all available filter options for the meetings dropdown.
-    Requires authentication.
     """
     today = date.today()
     
@@ -773,7 +886,7 @@ async def get_filter_options(
 @router.get("/", response_model=MeetingPaginationResponse)
 async def get_meetings(
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(DEFAULT_PAGINATION_LIMIT, ge=1, le=MAX_PAGINATION_LIMIT, description="Items per page"),
     show_past: bool = Query(False, description="Include past meetings"),
@@ -793,7 +906,6 @@ async def get_meetings(
 ):
     """
     Get paginated list of meetings with comprehensive filtering.
-    Uses improved connection management and error handling.
     """
     if status_query and not status_filter:
         status_filter = status_query
@@ -928,7 +1040,7 @@ async def get_meetings(
 async def create_meeting(
     meeting_in: MeetingCreate,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
     Create a new meeting with audit fields and improved error handling.
@@ -953,7 +1065,9 @@ async def create_meeting(
             return result
         
         result = await execute_db_operation(create_meeting_transaction, max_retries=2)
-        await _stats_cache.invalidate()
+        
+        # Invalidate cache for the user who created the meeting
+        await _stats_cache.invalidate_user_stats(current_user.id)
         
         return MeetingCreateResponse(
             id=result.id,
@@ -997,7 +1111,7 @@ async def create_meeting(
 async def get_meeting(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user)
 ):
     """
     Get meeting by ID with proper connection management.
@@ -1038,14 +1152,13 @@ async def update_meeting_status(
     status_value: str = Query(..., alias="status"),
     comment: Optional[str] = Query(None),
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
     Update meeting status with audit trail and improved error handling.
     """
     try:
         meeting = await get_meeting_or_404(db, meeting_id)
-        # Supply code_prefix explicitly to restrict lookup to MEETING_STATUS_%
         status_info = await get_status_by_short_name(db, status_value, code_prefix="MEETING_STATUS_%")        
         if not status_info:
             valid = await get_valid_status_short_names(db, code_prefix="MEETING_STATUS_%")
@@ -1075,7 +1188,11 @@ async def update_meeting_status(
             return await meeting_crud.get_meeting_with_details(db, meeting_id)
         
         updated_meeting = await execute_db_operation(update_status_transaction, max_retries=2)
-        await _stats_cache.invalidate()
+        
+        # Invalidate cache for the user who updated the meeting and the creator
+        await _stats_cache.invalidate_user_stats(current_user.id)
+        if meeting.created_by_id:
+            await _stats_cache.invalidate_user_stats(meeting.created_by_id)
         
         return await utils_build_meeting_response(updated_meeting, db)
         
@@ -1107,6 +1224,7 @@ async def get_meeting_minutes(
 ):
     """
     Get all minutes for a meeting with improved connection handling.
+    Only returns active actions (is_active=True) - soft-deleted actions are excluded.
     """
     try:
         async def get_minutes_query():
@@ -1117,17 +1235,56 @@ async def get_meeting_minutes(
                     MeetingMinutes.is_active == True
                 )
                 .options(
-                    selectinload(MeetingMinutes.actions).selectinload(MeetingAction.implementers),
                     selectinload(MeetingMinutes.created_by),
                     selectinload(MeetingMinutes.recorded_by),
                 )
                 .order_by(desc(MeetingMinutes.created_at))
             )
             result = await db.execute(query.offset(skip).limit(limit))
-            return result.scalars().all()
+            minutes = result.scalars().all()
+            
+            minute_ids = [m.id for m in minutes if m]
+            
+            if minute_ids:
+                actions_query = (
+                    select(MeetingAction)
+                    .where(
+                        MeetingAction.minute_id.in_(minute_ids),
+                        MeetingAction.is_active == True
+                    )
+                    .options(
+                        selectinload(MeetingAction.implementers)
+                    )
+                    .order_by(MeetingAction.created_at.desc())
+                )
+                actions_result = await db.execute(actions_query)
+                actions = actions_result.scalars().all()
+                
+                actions_by_minute = {}
+                for action in actions:
+                    if action.minute_id not in actions_by_minute:
+                        actions_by_minute[action.minute_id] = []
+                    actions_by_minute[action.minute_id].append(action)
+                
+                for minute in minutes:
+                    minute.actions = actions_by_minute.get(minute.id, [])
+            
+            return minutes
 
         minutes = await execute_db_operation(get_minutes_query, max_retries=2)
-        return [build_minutes_response(m) for m in minutes if m]
+        
+        response = []
+        for minute in minutes:
+            minute_dict = build_minutes_response(minute)
+            if minute_dict:
+                if 'actions' in minute_dict:
+                    minute_dict['actions'] = [
+                        action for action in minute_dict.get('actions', []) 
+                        if action.get('is_active', False)
+                    ]
+                response.append(minute_dict)
+        
+        return response
 
     except SQLAlchemyError as e:
         logger.error(f"Database error fetching minutes for meeting {meeting_id}: {str(e)}", exc_info=True)
@@ -1141,14 +1298,14 @@ async def get_meeting_minutes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch minutes: {str(e)}"
         )
-    
+       
 
 @router.post("/{meeting_id}/minutes", response_model=MeetingMinutesResponse, status_code=status.HTTP_201_CREATED)
 async def add_meeting_minutes(
     meeting_id: UUID,
     minutes_in: MeetingMinutesCreate,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
     Add minutes to meeting with audit fields and improved error handling.
@@ -1175,6 +1332,10 @@ async def add_meeting_minutes(
             return minute
         
         minute = await execute_db_operation(create_minutes_transaction, max_retries=2)
+        
+        # Invalidate cache for affected users
+        await _stats_cache.invalidate_user_stats(current_user.id)
+        
         return minute
         
     except SQLAlchemyError as e:
@@ -1199,7 +1360,7 @@ async def add_meeting_minutes(
 async def delete_meeting(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),  # ✅ Fixed
+    current_user: User = Depends(deps.get_current_user),
 ):
     """
     Soft delete meeting (set is_active=False) with audit and error handling.
@@ -1214,7 +1375,11 @@ async def delete_meeting(
             await db.commit()
         
         await execute_db_operation(delete_transaction, max_retries=2)
-        await _stats_cache.invalidate()
+        
+        # Invalidate cache for affected users
+        await _stats_cache.invalidate_user_stats(current_user.id)
+        if meeting_obj.created_by_id:
+            await _stats_cache.invalidate_user_stats(meeting_obj.created_by_id)
         
     except SQLAlchemyError as e:
         await db.rollback()
@@ -1232,7 +1397,79 @@ async def delete_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete meeting: {str(e)}"
         )
-    
+
+
+@router.delete("/{meeting_id}/minutes/{minute_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_meeting_minute(
+    meeting_id: UUID,
+    minute_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Soft delete a meeting minute (set is_active=False).
+    Only the creator or an admin can delete a minute.
+    """
+    try:
+        meeting = await get_meeting_or_404(db, meeting_id)
+        
+        minute = await meeting_minutes.get_minute_by_id(db, minute_id)
+        if not minute:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Minute not found"
+            )
+        
+        if str(minute.meeting_id) != str(meeting_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Minute does not belong to this meeting"
+            )
+        
+        is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
+        if minute.created_by_id != current_user.id and not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the minute creator or admin can delete this minute"
+            )
+        
+        async def delete_transaction():
+            minute.is_active = False
+            minute.updated_by_id = current_user.id
+            minute.updated_at = datetime.now()
+            
+            if hasattr(minute, 'actions') and minute.actions:
+                for action in minute.actions:
+                    action.is_active = False
+                    action.updated_by_id = current_user.id
+                    action.updated_at = datetime.now()
+            
+            await db.commit()
+        
+        await execute_db_operation(delete_transaction, max_retries=2)
+        
+        await _stats_cache.invalidate_user_stats(current_user.id)
+        if meeting.created_by_id:
+            await _stats_cache.invalidate_user_stats(meeting.created_by_id)
+        
+        return None
+        
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error deleting minute {minute_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error. Please try again later."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting minute {minute_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete minute: {str(e)}"
+        )
 
 
 # ==================== MEETING PARTICIPANTS ENDPOINTS ====================
@@ -1243,15 +1480,8 @@ async def get_meeting_participants(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """
-    Get all participants for a meeting.
-
-    Contact details are returned in full: they are the whole point of a
-    participant record, and they are the key used to link a participant to
-    a system account later.
-    """
+    """Get all active participants for a meeting."""
     try:
-        # Check if meeting exists
         meeting = await db.execute(
             select(Meeting).where(Meeting.id == meeting_id)
         )
@@ -1262,24 +1492,31 @@ async def get_meeting_participants(
                 detail="Meeting not found"
             )
         
-        # Get all participants for this meeting
         result = await db.execute(
-            select(MeetingParticipant).where(
+            select(MeetingParticipant)
+            .where(
                 MeetingParticipant.meeting_id == meeting_id,
                 MeetingParticipant.is_active == True
             )
+            .order_by(MeetingParticipant.name)
         )
         participants = result.scalars().all()
         
-        # Prepare response - partially mask phone and email
         response_participants = []
         for p in participants:
-            participant_dict = {
+            telephone = p.telephone
+            if telephone and isinstance(telephone, str) and 'E' in telephone.upper():
+                try:
+                    telephone = str(int(float(telephone)))
+                except (ValueError, TypeError):
+                    pass
+            
+            response_participants.append({
                 "id": p.id,
                 "meeting_id": p.meeting_id,
-                # FIX: Use participant_id instead of user_id (or check the actual field name)
-                "participant_id": getattr(p, 'participant_id', None),
                 "name": p.name,
+                "email": p.email,
+                "telephone": telephone,
                 "title": getattr(p, 'title', None),
                 "organization": getattr(p, 'organization', None),
                 "is_chairperson": getattr(p, 'is_chairperson', False),
@@ -1289,11 +1526,7 @@ async def get_meeting_participants(
                 "created_at": p.created_at,
                 "updated_at": getattr(p, 'updated_at', None),
                 "is_active": p.is_active,
-                "email": p.email,
-                "telephone": p.telephone,
-                
-            }
-            response_participants.append(participant_dict)
+            })
         
         return response_participants
         
@@ -1303,8 +1536,12 @@ async def get_meeting_participants(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection error"
         )
-
-
+    except Exception as e:
+        logger.error(f"Unexpected error fetching participants: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch participants"
+        )
 
 
 @router.post("/{meeting_id}/members", response_model=MeetingParticipantResponse)
@@ -1314,11 +1551,8 @@ async def add_meeting_participant(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """
-    Add a participant to a meeting
-    """
+    """Add a participant to a meeting."""
     try:
-        # Check if meeting exists
         meeting = await db.execute(
             select(Meeting).where(Meeting.id == meeting_id)
         )
@@ -1329,27 +1563,45 @@ async def add_meeting_participant(
                 detail="Meeting not found"
             )
         
-        # Check if participant already exists
-        existing = await db.execute(
-            select(MeetingParticipant).where(
-                MeetingParticipant.meeting_id == meeting_id,
-                MeetingParticipant.user_id == participant_data.user_id
+        # Check if participant already exists by email or name
+        if participant_data.email:
+            existing = await db.execute(
+                select(MeetingParticipant).where(
+                    MeetingParticipant.meeting_id == meeting_id,
+                    MeetingParticipant.email == participant_data.email,
+                    MeetingParticipant.is_active == True
+                )
             )
-        )
-        if existing.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Participant already added to this meeting"
-            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Participant with this email already added to this meeting"
+                )
         
-        # Create new meeting participant
+        if not participant_data.email and participant_data.name:
+            existing = await db.execute(
+                select(MeetingParticipant).where(
+                    MeetingParticipant.meeting_id == meeting_id,
+                    MeetingParticipant.name == participant_data.name,
+                    MeetingParticipant.is_active == True
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Participant with this name already added to this meeting"
+                )
+        
+        telephone = participant_data.telephone
+        if telephone and isinstance(telephone, (int, float)):
+            telephone = str(int(telephone))
+        
         new_participant = MeetingParticipant(
             id=uuid.uuid4(),
             meeting_id=meeting_id,
-            user_id=participant_data.user_id,
             name=participant_data.name,
             email=participant_data.email,
-            telephone=participant_data.telephone,
+            telephone=telephone,
             title=participant_data.title,
             organization=participant_data.organization,
             is_chairperson=participant_data.is_chairperson or False,
@@ -1364,6 +1616,7 @@ async def add_meeting_participant(
         db.add(new_participant)
         await db.commit()
         await db.refresh(new_participant)
+        
         return new_participant
         
     except SQLAlchemyError as e:
@@ -1373,9 +1626,20 @@ async def add_meeting_participant(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection error"
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error adding participant: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add participant: {str(e)}"
+        )
 
 
-@router.delete("/{meeting_id}/members/{participant_id}")
+# ==================== DELETE ENDPOINTS ====================
+
+@router.delete("/{meeting_id}/participants/{participant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_meeting_participant(
     meeting_id: UUID,
     participant_id: UUID,
@@ -1383,13 +1647,19 @@ async def remove_meeting_participant(
     current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Remove a participant from a meeting
+    Remove a participant from a meeting using the meeting_participant ID.
+    This endpoint matches the frontend's /participants/{participant_id} path.
     """
     try:
+        # Check if meeting exists
+        meeting = await get_meeting_or_404(db, meeting_id)
+        
+        # Find the meeting participant by its ID
         result = await db.execute(
             select(MeetingParticipant).where(
                 MeetingParticipant.id == participant_id,
-                MeetingParticipant.meeting_id == meeting_id
+                MeetingParticipant.meeting_id == meeting_id,
+                MeetingParticipant.is_active == True
             )
         )
         participant = result.scalar_one_or_none()
@@ -1397,7 +1667,7 @@ async def remove_meeting_participant(
         if not participant:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Participant not found"
+                detail="Participant not found in this meeting"
             )
         
         # Soft delete
@@ -1406,8 +1676,16 @@ async def remove_meeting_participant(
         participant.updated_at = datetime.now()
         
         await db.commit()
-        return {"message": "Participant removed successfully"}
         
+        # Invalidate cache for affected users
+        await _stats_cache.invalidate_user_stats(current_user.id)
+        if meeting.created_by_id:
+            await _stats_cache.invalidate_user_stats(meeting.created_by_id)
+        
+        return None
+        
+    except HTTPException:
+        raise
     except SQLAlchemyError as e:
         await db.rollback()
         logger.error(f"Database error removing participant: {e}")
@@ -1415,24 +1693,91 @@ async def remove_meeting_participant(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection error"
         )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error removing participant: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove participant: {str(e)}"
+        )
 
-
-@router.patch("/{meeting_id}/members/{participant_id}", response_model=MeetingParticipantResponse)
-async def update_meeting_participant(
+# Alternative DELETE endpoint using /members/ path (kept for compatibility)
+@router.delete("/{meeting_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_meeting_member(
     meeting_id: UUID,
-    participant_id: UUID,
-    participant_data: MeetingParticipantUpdate,
+    member_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Update a meeting participant's details
+    Remove a participant from a meeting using the meeting_participant ID.
+    Alternative endpoint for compatibility.
     """
     try:
+        meeting = await get_meeting_or_404(db, meeting_id)
+        
         result = await db.execute(
             select(MeetingParticipant).where(
-                MeetingParticipant.id == participant_id,
-                MeetingParticipant.meeting_id == meeting_id
+                MeetingParticipant.id == member_id,
+                MeetingParticipant.meeting_id == meeting_id,
+                MeetingParticipant.is_active == True
+            )
+        )
+        participant = result.scalar_one_or_none()
+        
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found in this meeting"
+            )
+        
+        participant.is_active = False
+        participant.updated_by_id = current_user.id
+        participant.updated_at = datetime.now()
+        
+        await db.commit()
+        
+        await _stats_cache.invalidate_user_stats(current_user.id)
+        if meeting.created_by_id:
+            await _stats_cache.invalidate_user_stats(meeting.created_by_id)
+        
+        return None
+        
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error removing member: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection error"
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error removing member: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove member: {str(e)}"
+        )
+
+
+@router.patch("/{meeting_id}/members/{member_id}", response_model=MeetingParticipantResponse)
+async def update_meeting_member(
+    meeting_id: UUID,
+    member_id: UUID,
+    participant_data: MeetingParticipantUpdate,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """Update a meeting participant's details."""
+    try:
+        await get_meeting_or_404(db, meeting_id)
+        
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == member_id,
+                MeetingParticipant.meeting_id == meeting_id,
+                MeetingParticipant.is_active == True
             )
         )
         participant = result.scalar_one_or_none()
@@ -1443,18 +1788,21 @@ async def update_meeting_participant(
                 detail="Participant not found"
             )
         
-        # Update fields
         update_data = participant_data.dict(exclude_unset=True)
         for key, value in update_data.items():
-            setattr(participant, key, value)
+            if hasattr(participant, key):
+                setattr(participant, key, value)
         
         participant.updated_by_id = current_user.id
         participant.updated_at = datetime.now()
         
         await db.commit()
         await db.refresh(participant)
+        
         return participant
         
+    except HTTPException:
+        raise
     except SQLAlchemyError as e:
         await db.rollback()
         logger.error(f"Database error updating participant: {e}")
@@ -1462,9 +1810,15 @@ async def update_meeting_participant(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection error"
         )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error updating participant: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update participant: {str(e)}"
+        )
 
 
-# Also add the PATCH endpoint for attendance status (used by ParticipantsTab)
 @router.patch("/{meeting_id}/participants/{participant_id}")
 async def update_participant_attendance(
     meeting_id: UUID,
@@ -1473,14 +1827,13 @@ async def update_participant_attendance(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """
-    Update a participant's attendance status
-    """
+    """Update a participant's attendance status."""
     try:
         result = await db.execute(
             select(MeetingParticipant).where(
                 MeetingParticipant.id == participant_id,
-                MeetingParticipant.meeting_id == meeting_id
+                MeetingParticipant.meeting_id == meeting_id,
+                MeetingParticipant.is_active == True
             )
         )
         participant = result.scalar_one_or_none()
@@ -1491,7 +1844,6 @@ async def update_participant_attendance(
                 detail="Participant not found"
             )
         
-        # Update attendance fields
         if 'attendance_status' in attendance_data:
             participant.attendance_status = attendance_data['attendance_status']
         if 'apology_comment' in attendance_data:
@@ -1502,6 +1854,7 @@ async def update_participant_attendance(
         
         await db.commit()
         await db.refresh(participant)
+        
         return participant
         
     except SQLAlchemyError as e:
@@ -1511,6 +1864,13 @@ async def update_participant_attendance(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection error"
         )
-    
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error updating attendance: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update attendance: {str(e)}"
+        )
 
 
+# ==================== END ====================

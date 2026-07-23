@@ -96,11 +96,8 @@ const extractErrorMessage = (error) => {
   return 'An unexpected error occurred';
 };
 
-const canEditActions = (meetingStatus) => {
-  if (!meetingStatus) return false;
-  const statusLower = String(meetingStatus).toLowerCase();
-  const allowedStatuses = ['started', 'ongoing', 'in_progress', 'in progress', 'completed'];
-  return allowedStatuses.some(status => statusLower.includes(status));
+const canEditActions = () => {
+  return true;
 };
 
 const formatDate = (dateString) => {
@@ -113,10 +110,25 @@ const formatDate = (dateString) => {
 };
 
 const getInitials = (name) => {
-  if (!name) return '?';
+  if (!name || name === 'Unassigned') return '?';
   const parts = name.split(' ').filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return parts[0]?.[0]?.toUpperCase() || '?';
+};
+
+// Map priority values (1: High, 2: Medium, 3: Low, 4: Very Low) to configuration labels and visual stars
+const getPriorityConfig = (priority) => {
+  switch (Number(priority)) {
+    case 1:
+      return { label: 'High', stars: 3, color: 'error' };
+    case 2:
+      return { label: 'Medium', stars: 2, color: 'warning' };
+    case 3:
+      return { label: 'Low', stars: 1, color: 'success' };
+    case 4:
+    default:
+      return { label: 'Very Low', stars: 0, color: 'default' };
+  }
 };
 
 // ==================== MAIN COMPONENT ====================
@@ -175,9 +187,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   function getStatusMessage(status) {
     if (!status) return null;
     const statusLower = String(status).toLowerCase();
-    if (statusLower === 'scheduled' || statusLower === 'pending') {
-      return "Meeting hasn't started yet. Actions can only be created and edited once the meeting is in progress.";
-    }
     if (statusLower === 'cancelled') {
       return "Meeting has been cancelled. Actions cannot be created or edited.";
     }
@@ -225,11 +234,18 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const getImplementersNames = useCallback((action) => {
     if (action.persons_implementing && action.persons_implementing.length > 0) {
-      return action.persons_implementing.map(p => p.name).filter(Boolean).join(', ');
+      const names = action.persons_implementing.map(p => {
+        if (p.name && p.name !== 'Unassigned') return p.name;
+        if (p.full_name) return p.full_name;
+        if (p.email) return p.email;
+        return null;
+      }).filter(Boolean);
+      
+      if (names.length > 0) return names.join(', ');
     }
     if (action.assigned_to?.full_name) return action.assigned_to.full_name;
     if (action.assigned_to?.username) return action.assigned_to.username;
-    if (typeof action.assigned_to_name === 'string') return action.assigned_to_name;
+    if (typeof action.assigned_to_name === 'string' && action.assigned_to_name !== 'Unassigned') return action.assigned_to_name;
     if (action.assigned_to_name && typeof action.assigned_to_name === 'object') {
       return action.assigned_to_name.name || action.assigned_to_name.email || 'Unassigned';
     }
@@ -238,7 +254,10 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const getImplementersList = useCallback((action) => {
     if (action.persons_implementing && action.persons_implementing.length > 0) {
-      return action.persons_implementing;
+      return action.persons_implementing.map(p => ({
+        ...p,
+        name: (p.name && p.name !== 'Unassigned') ? p.name : (p.full_name || p.email || 'Unassigned')
+      }));
     }
     if (action.assigned_to || action.assigned_to_name) {
       return [{
@@ -578,14 +597,13 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
             Action Items ({actions.length})
           </Typography>
           <Stack direction="row" spacing={1}>
-            <Tooltip title={!canEdit ? (statusMessage || "Meeting must be started to add actions") : "Add new action item"}>
+            <Tooltip title="Add new action item">
               <span>
                 <Button
                   variant="contained"
-                  startIcon={!canEdit ? <LockIcon /> : <Add />}
+                  startIcon={<Add />}
                   onClick={() => setShowAddDialog(true)}
                   size="small"
-                  disabled={!canEdit}
                   sx={{
                     bgcolor: isDarkMode ? '#7C3AED' : undefined,
                     '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : undefined }
@@ -666,9 +684,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                 No action items found for this meeting.
               </Typography>
               <Typography variant="body2" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', mb: 2 }}>
-                {canEdit
-                  ? "Use \"Add Action\" above to create your first one — we'll set up the meeting minutes for you automatically."
-                  : statusMessage || "Actions can only be created once the meeting is in progress."}
+                Use "Add Action" above to create your first one — we'll set up the meeting minutes for you automatically.
               </Typography>
               <Button
                 variant="outlined"
@@ -687,7 +703,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               const statusConfig = getStatusConfig(action);
               const implementers = getImplementersList(action);
               const implementerNames = getImplementersNames(action);
-              const priorityLevel = action.priority || 2;
+              const priorityConfig = getPriorityConfig(action.priority);
 
               return (
                 <Card 
@@ -785,17 +801,19 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
                     {/* Footer Row: Priority & Actions */}
                     <Stack direction="row" justifyContent="space-between" alignItems="center" pt={1} borderTop={`1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`}>
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', mr: 0.5 }}>Priority:</Typography>
-                        <Stack direction="row" spacing={0.1}>
-                          {[1, 2, 3].map((starIdx) => (
-                            starIdx <= (5 - priorityLevel) ? (
-                              <StarIcon key={starIdx} sx={{ fontSize: 14, color: '#F59E0B' }} />
-                            ) : (
-                              <StarBorderIcon key={starIdx} sx={{ fontSize: 14, color: isDarkMode ? '#374151' : '#E5E7EB' }} />
-                            )
-                          ))}
-                        </Stack>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>Priority:</Typography>
+                        {priorityConfig.stars > 0 ? (
+                          <Stack direction="row" spacing={0.1}>
+                            {[...Array(priorityConfig.stars)].map((_, i) => (
+                              <StarIcon key={i} sx={{ fontSize: 14, color: '#F59E0B' }} />
+                            ))}
+                          </Stack>
+                        ) : (
+                          <Typography variant="caption" fontWeight={600} color="text.secondary">
+                            {priorityConfig.label}
+                          </Typography>
+                        )}
                       </Stack>
 
                       {/* Action Tool Buttons */}
@@ -805,7 +823,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <IconButton
                               size="small"
                               onClick={() => handleOpenProgressDialog(action)}
-                              disabled={!canEdit}
+                              disabled={false}
                               sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main' }}
                             >
                               <TrendingUpIcon sx={{ fontSize: 18 }} />
@@ -817,7 +835,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <IconButton
                               size="small"
                               onClick={() => handleEditAction(action)}
-                              disabled={!canEdit || loadingActionId === action.id}
+                              disabled={loadingActionId === action.id}
                               sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
                             >
                               {loadingActionId === action.id ? <CircularProgress size={14} /> : <EditIcon sx={{ fontSize: 18 }} />}
@@ -829,7 +847,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <IconButton
                               size="small"
                               onClick={() => handleAssignAction(action)}
-                              disabled={!canEdit}
+                              disabled={false}
                               sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}
                             >
                               <PersonAdd sx={{ fontSize: 18 }} />
@@ -853,7 +871,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
             })}
           </Stack>
         ) : (
-          /* ==================== DESKTOP TABLE LAYOUT ==================== */
+          /* ==================== DESKTOP TABLE LAYOUT (With Wrapping) ==================== */
           <TableContainer
             component={Paper}
             variant="outlined"
@@ -864,20 +882,20 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               overflowX: 'auto',
             }}
           >
-            <Table size="small" sx={{ minWidth: 1200 }}>
+            <Table size="small" sx={{ minWidth: 1000, tableLayout: 'fixed' }}>
               <TableHead>
                 <TableRow sx={{ bgcolor: isDarkMode ? alpha('#A78BFA', 0.1) : 'action.hover' }}>
                   <TableCell width="40" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>#</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Issue/Challenge</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Initiated</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Action</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Due Date</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Person(s) Implementing</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Latest Update</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Updated</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Priority</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Status</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Actions</TableCell>
+                  <TableCell width="140" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Issue/Challenge</TableCell>
+                  <TableCell width="100" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Initiated</TableCell>
+                  <TableCell width="160" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Action</TableCell>
+                  <TableCell width="100" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Due Date</TableCell>
+                  <TableCell width="140" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Person(s) Implementing</TableCell>
+                  <TableCell width="140" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Latest Update</TableCell>
+                  <TableCell width="100" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Updated</TableCell>
+                  <TableCell width="90" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Priority</TableCell>
+                  <TableCell width="90" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Status</TableCell>
+                  <TableCell width="120" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -885,7 +903,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                   const statusConfig = getStatusConfig(action);
                   const implementers = getImplementersList(action);
                   const implementerNames = getImplementersNames(action);
-                  const priorityLevel = action.priority || 2;
+                  const priorityConfig = getPriorityConfig(action.priority);
 
                   return (
                     <TableRow 
@@ -897,33 +915,34 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         },
                       }}
                     >
-                      <TableCell sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', fontSize: '0.75rem', fontWeight: 500 }}>
+                      <TableCell sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', fontSize: '0.75rem', fontWeight: 500, wordBreak: 'break-word', whiteSpace: 'normal' }}>
                         {index + 1}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 180 }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.75rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', color: isDarkMode ? '#D1D5DB' : 'text.primary', wordBreak: 'break-word', whiteSpace: 'normal' }}>
                           {action.issue_challenge || '-'}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
                         {formatDate(action.date_initiated || action.created_at)}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 200 }}>
-                        <Typography variant="body2" fontWeight={500} sx={{ fontSize: '0.75rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: isDarkMode ? '#FFFFFF' : 'text.primary' }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        <Typography variant="body2" fontWeight={500} sx={{ fontSize: '0.75rem', color: isDarkMode ? '#FFFFFF' : 'text.primary', wordBreak: 'break-word', whiteSpace: 'normal' }}>
                           {action.description}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
                         {formatDate(action.due_date)}
                       </TableCell>
 
                       {/* Person(s) Implementing with Circular Badge for > 1 */}
-                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 160 }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
                         <Stack direction="row" alignItems="center" spacing={1}>
                           <Badge
                             badgeContent={implementers.length > 1 ? implementers.length : null}
                             color="primary"
                             sx={{
+                              flexShrink: 0,
                               '& .MuiBadge-badge': {
                                 fontSize: '0.65rem',
                                 height: 16,
@@ -947,9 +966,8 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             variant="body2" 
                             sx={{ 
                               fontSize: '0.75rem', 
-                              overflow: 'hidden', 
-                              textOverflow: 'ellipsis', 
-                              whiteSpace: 'nowrap', 
+                              wordBreak: 'break-word', 
+                              whiteSpace: 'normal', 
                               color: isDarkMode ? '#D1D5DB' : 'text.primary' 
                             }}
                           >
@@ -958,26 +976,28 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         </Stack>
                       </TableCell>
 
-                      <TableCell sx={{ fontSize: '0.75rem', maxWidth: 180 }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.75rem', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', color: isDarkMode ? '#D1D5DB' : 'text.primary', wordBreak: 'break-word', whiteSpace: 'normal' }}>
                           {action.remarks || '-'}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
                         {formatDate(action.updated_at || action.created_at)}
                       </TableCell>
-                      <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
-                        <Stack direction="row" spacing={0.2} justifyContent="center">
-                          {[1, 2, 3].map((starIdx) => (
-                            starIdx <= (5 - priorityLevel) ? (
-                              <StarIcon key={starIdx} sx={{ fontSize: 16, color: '#F59E0B' }} />
-                            ) : (
-                              <StarBorderIcon key={starIdx} sx={{ fontSize: 16, color: isDarkMode ? '#374151' : '#E5E7EB' }} />
-                            )
-                          ))}
-                        </Stack>
+                      <TableCell align="center" sx={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        {priorityConfig.stars > 0 ? (
+                          <Stack direction="row" spacing={0.2} justifyContent="center" flexWrap="wrap">
+                            {[...Array(priorityConfig.stars)].map((_, i) => (
+                              <StarIcon key={i} sx={{ fontSize: 16, color: '#F59E0B' }} />
+                            ))}
+                          </Stack>
+                        ) : (
+                          <Typography variant="caption" fontWeight={600} color="text.secondary">
+                            {priorityConfig.label}
+                          </Typography>
+                        )}
                       </TableCell>
-                      <TableCell align="center">
+                      <TableCell align="center" sx={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
                         <Chip
                           size="small"
                           label={statusConfig.label}
@@ -985,14 +1005,14 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600, ...statusConfig.chipSx }}
                         />
                       </TableCell>
-                      <TableCell align="center">
-                        <Stack direction="row" spacing={0.2} justifyContent="center">
+                      <TableCell align="center" sx={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        <Stack direction="row" spacing={0.2} justifyContent="center" flexWrap="wrap">
                           <Tooltip title="Update Progress">
                             <span>
                               <IconButton
                                 size="small"
                                 onClick={() => handleOpenProgressDialog(action)}
-                                disabled={!canEdit}
+                                disabled={false}
                                 sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
                                 <TrendingUpIcon sx={{ fontSize: 16 }} />
@@ -1004,7 +1024,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               <IconButton
                                 size="small"
                                 onClick={() => handleEditAction(action)}
-                                disabled={!canEdit || loadingActionId === action.id}
+                                disabled={loadingActionId === action.id}
                                 sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
                                 {loadingActionId === action.id ? <CircularProgress size={14} /> : <EditIcon sx={{ fontSize: 16 }} />}
@@ -1016,7 +1036,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               <IconButton
                                 size="small"
                                 onClick={() => handleAssignAction(action)}
-                                disabled={!canEdit}
+                                disabled={false}
                                 sx={{ color: isDarkMode ? '#34D399' : 'success.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
                                 <PersonAdd sx={{ fontSize: 16 }} />

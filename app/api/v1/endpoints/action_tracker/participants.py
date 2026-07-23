@@ -163,8 +163,27 @@ async def create_participant(
         if existing_global:
             new_participant = existing_global
         else:
-            # Create new participant
+            # Convert to dict and remove fields that don't belong to Participant
             participant_dict = participant_in.dict()
+            
+            # Fields that belong to MeetingParticipant, NOT Participant
+            # Remove them before creating Participant
+            fields_to_remove = [
+                'user_id',           # Doesn't exist in Participant
+                'apology_comment',   # Belongs to MeetingParticipant
+                'attendance_status', # Belongs to MeetingParticipant
+                'is_chairperson',    # Belongs to MeetingParticipant
+                'is_secretary',      # Belongs to MeetingParticipant
+                'meeting_id',        # Belongs to MeetingParticipant
+                'participant_list_id', # Already handled separately
+                'user',              # Not a field
+                'meeting',           # Not a field
+            ]
+            
+            for field in fields_to_remove:
+                participant_dict.pop(field, None)
+            
+            # Clean phone numbers
             participant_dict = clean_phone_in_dict(participant_dict)
             
             new_participant = await participant.create(
@@ -204,6 +223,7 @@ async def create_participant(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create participant: {str(e)}"
         )
+    
 
 
 @router.post("/bulk", response_model=List[ParticipantResponse])

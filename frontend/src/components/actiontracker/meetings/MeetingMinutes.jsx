@@ -86,6 +86,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const [selectedMinute, setSelectedMinute] = useState(null);
   const [expandedMinutes, setExpandedMinutes] = useState([]);
   const [successMessage, setSuccessMessage] = useState('');
+  // ✅ Add key to force remount of EditMinuteDialog
+  const [editDialogKey, setEditDialogKey] = useState(0);
 
   const canEdit = meetingStatus !== 'cancelled' && meetingStatus !== 'ended' && meetingStatus !== 'closed';
 
@@ -189,6 +191,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       setSuccessMessage('Minutes updated successfully!');
       setEditDialogOpen(false);
       setSelectedMinute(null);
+      // ✅ Increment key to force remount and reset form state
+      setEditDialogKey(prev => prev + 1);
       fetchAttemptedRef.current = false;
       hasFetchedRef.current = false;
       fetchMinutes();
@@ -220,6 +224,14 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     );
   };
 
+  // ✅ Handler to close edit dialog and reset form
+  const handleCloseEditDialog = () => {
+    setEditDialogOpen(false);
+    setSelectedMinute(null);
+    // ✅ Increment key when closing to ensure clean state
+    setEditDialogKey(prev => prev + 1);
+  };
+
   // ==================== RENDER ====================
 
   if (loading && minutes.length === 0) {
@@ -238,7 +250,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
-          Meeting Minutes ({minutes.length})
+          Meeting Minutes({minutes.length})
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Tooltip title={!canEdit ? "Meeting must be active to add minutes" : "Add new minutes"}>
@@ -501,13 +513,12 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       />
 
       {/* Edit Minutes Dialog */}
+      {/* ✅ Add key prop to force remount and reset form state */}
       {selectedMinute && (
         <EditMinuteDialog
+          key={editDialogKey}
           open={editDialogOpen}
-          onClose={() => {
-            setEditDialogOpen(false);
-            setSelectedMinute(null);
-          }}
+          onClose={handleCloseEditDialog}
           onSave={handleEditMinute}
           minute={selectedMinute}
           loading={loading}

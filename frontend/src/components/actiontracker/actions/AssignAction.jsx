@@ -19,7 +19,7 @@ import api from '../../../services/api';
 import { 
   fetchActionById, 
   updateAction, 
-  createActionFromMinutes,  // Import the new thunk
+  createActionFromMinutes,
   clearCurrentAction,
   clearError
 } from '../../../store/slices/actionTracker/actionSlice';
@@ -49,6 +49,62 @@ const AssignAction = () => {
 
   const isEditMode = id && id !== 'undefined' && id !== 'null';
   const isCreateMode = minuteId && minuteId !== 'undefined' && minuteId !== 'null';
+
+  // Helper function to mask phone numbers
+  const maskPhoneOnly = (text) => {
+    if (!text) return '';
+    
+    // Match and mask phone numbers
+    return text.replace(/(\+?\d{1,3}[-.\s]?)?(\d{2,3})[-.\s]?\d{3}[-.\s]?(\d{4})/g, (match, p1, p2, p3) => {
+      const prefix = p1 ? p1 : '';
+      return `${prefix}${p2 ? p2 : '***'}-***-${p3}`;
+    });
+  };
+
+  // Helper function to mask email addresses
+  const maskEmail = (email) => {
+    if (!email) return '';
+    
+    // Split email into local part and domain
+    const [localPart, domain] = email.split('@');
+    if (!domain) return email;
+    
+    // Mask the local part: show first 2 characters and last character, mask the rest
+    let maskedLocal;
+    if (localPart.length <= 3) {
+      // For short emails, show first character and mask the rest
+      maskedLocal = localPart.charAt(0) + '*'.repeat(localPart.length - 1);
+    } else {
+      // Show first 2 and last 1 character
+      maskedLocal = localPart.substring(0, 2) + '*'.repeat(localPart.length - 3) + localPart.charAt(localPart.length - 1);
+    }
+    
+    // Mask domain: show first 1-2 characters and last 1-2 characters
+    const [domainName, tld] = domain.split('.');
+    if (!tld) return `${maskedLocal}@${domain}`;
+    
+    let maskedDomain;
+    if (domainName.length <= 3) {
+      maskedDomain = domainName.charAt(0) + '*'.repeat(domainName.length - 1);
+    } else {
+      maskedDomain = domainName.substring(0, 2) + '*'.repeat(domainName.length - 3) + domainName.charAt(domainName.length - 1);
+    }
+    
+    return `${maskedLocal}@${maskedDomain}.${tld}`;
+  };
+
+  // Helper function to mask both phone and email
+  const maskContactInfo = (text) => {
+    if (!text) return '';
+    
+    // First mask phone numbers
+    let masked = maskPhoneOnly(text);
+    // Then mask emails (email addresses don't contain spaces)
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    masked = masked.replace(emailRegex, (match) => maskEmail(match));
+    
+    return masked;
+  };
 
   const fetchMeetingInfo = useCallback(async () => {
     if (!isCreateMode) return;
@@ -207,7 +263,7 @@ const AssignAction = () => {
     { value: 4, label: 'Very Low', color: 'default' },
   ];
 
-  // Use loading from Redux state
+  // Use loading from Redux state (omitting meeting status checks to ensure full availability)
   if ((loading || (loading && isEditMode)) || (loadingMeeting && isCreateMode)) {
     return (
       <Container sx={{ py: 4, textAlign: 'center' }}>
@@ -274,11 +330,22 @@ const AssignAction = () => {
                   onChange={handleChange}
                   label="Assign To"
                 >
-                  {users.map((user) => (
-                    <MenuItem key={user.id} value={user.id}>
-                      {user.full_name || user.username} {user.email ? `(${user.email})` : ''}
-                    </MenuItem>
-                  ))}
+                  {users.map((user) => {
+                    const displayName = user.full_name || user.username;
+                    const phoneMasked = maskPhoneOnly(user.phone_number || '');
+                    const emailMasked = maskEmail(user.email || '');
+                    // Combine masked phone and email
+                    const details = [
+                      phoneMasked ? `Phone: ${phoneMasked}` : '',
+                      emailMasked ? `Email: ${emailMasked}` : ''
+                    ].filter(Boolean).join(' | ');
+
+                    return (
+                      <MenuItem key={user.id} value={user.id}>
+                        {displayName} {details ? `(${details})` : ''}
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
                 <FormHelperText>Select the person responsible for this action</FormHelperText>
               </FormControl>
@@ -355,7 +422,7 @@ const AssignAction = () => {
                     disabled={submitting}
                     size="large"
                   >
-                    {submitting ? 'Saving...' : (isEditMode ? 'Update Action' : 'Create Action--')}
+                    {submitting ? 'Saving...' : (isEditMode ? 'Update Action' : 'Create Action')}
                   </Button>
                 </Grid>
               </Grid>

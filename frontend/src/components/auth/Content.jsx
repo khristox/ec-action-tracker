@@ -99,7 +99,7 @@ const Content = () => {
             textTransform: 'uppercase'
           }}
         >
-          Meetings Management System
+          Action Tracker
         </Typography>
       </Stack>
 

@@ -636,7 +636,7 @@ const SignInCard = () => {
             />
             
             <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-              <FormControlLabel
+              {/* <FormControlLabel
                 control={
                   <Checkbox
                     checked={showPasswordCheckbox}
@@ -646,7 +646,7 @@ const SignInCard = () => {
                   />
                 }
                 label={<Typography variant="caption" color="text.secondary">Show password</Typography>}
-              />
+              /> */}
               <Link 
                 component={RouterLink} 
                 to="/forgot-password" 

@@ -1,4 +1,5 @@
 // src/components/actiontracker/meetings/components/RecurringMeetingSection.jsx
+// FIXED VERSION - Addresses preview calculation and API issues
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -45,13 +46,13 @@ const RECURRENCE_TYPES = [
 ];
 
 const WEEK_DAYS = [
-  { value: 'monday', label: 'M', full: 'Monday' },
-  { value: 'tuesday', label: 'T', full: 'Tuesday' },
-  { value: 'wednesday', label: 'W', full: 'Wednesday' },
-  { value: 'thursday', label: 'T', full: 'Thursday' },
-  { value: 'friday', label: 'F', full: 'Friday' },
-  { value: 'saturday', label: 'S', full: 'Saturday' },
-  { value: 'sunday', label: 'S', full: 'Sunday' },
+  { value: 'monday', label: 'M', full: 'Monday', dayIndex: 1 },
+  { value: 'tuesday', label: 'T', full: 'Tuesday', dayIndex: 2 },
+  { value: 'wednesday', label: 'W', full: 'Wednesday', dayIndex: 3 },
+  { value: 'thursday', label: 'T', full: 'Thursday', dayIndex: 4 },
+  { value: 'friday', label: 'F', full: 'Friday', dayIndex: 5 },
+  { value: 'saturday', label: 'S', full: 'Saturday', dayIndex: 6 },
+  { value: 'sunday', label: 'S', full: 'Sunday', dayIndex: 0 },
 ];
 
 const END_OPTIONS = [
@@ -59,6 +60,67 @@ const END_OPTIONS = [
   { value: 'after', label: 'After X occurrences' },
   { value: 'on', label: 'On date' },
 ];
+
+// ==================== Utility Functions ====================
+
+const getDayName = (date) => {
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  return days[date.getDay()];
+};
+
+const calculateNextOccurrence = (recurrence, fromDate) => {
+  if (!recurrence) return null;
+
+  let nextDate = new Date(fromDate);
+  nextDate.setHours(0, 0, 0, 0);
+
+  switch (recurrence.type) {
+    case 'daily':
+      nextDate.setDate(nextDate.getDate() + recurrence.interval);
+      break;
+
+    case 'weekly': {
+      // Move to next day and find first selected day
+      nextDate.setDate(nextDate.getDate() + 1);
+      let attempts = 0;
+      while (attempts < 7 && !recurrence.days?.includes(getDayName(nextDate))) {
+        nextDate.setDate(nextDate.getDate() + 1);
+        attempts++;
+      }
+      // If we've gone through a full week without finding a selected day, add a week
+      if (attempts === 7) {
+        nextDate.setDate(nextDate.getDate() + 7);
+      }
+      break;
+    }
+
+    case 'biweekly':
+      nextDate.setDate(nextDate.getDate() + 14 * recurrence.interval);
+      break;
+
+    case 'monthly':
+      if (recurrence.day_of_month === 'last') {
+        nextDate.setMonth(nextDate.getMonth() + recurrence.interval + 1, 0);
+      } else {
+        nextDate.setMonth(nextDate.getMonth() + recurrence.interval);
+        nextDate.setDate(Math.min(recurrence.day_of_month, 31));
+      }
+      break;
+
+    case 'quarterly':
+      nextDate.setMonth(nextDate.getMonth() + 3 * recurrence.interval);
+      break;
+
+    case 'yearly':
+      nextDate.setFullYear(nextDate.getFullYear() + recurrence.interval);
+      break;
+
+    default:
+      return null;
+  }
+
+  return nextDate;
+};
 
 // ==================== Component ====================
 
@@ -92,29 +154,28 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
 
   const fetchPreview = async () => {
     if (!recurrence?.enabled) return;
+    
     setLoadingPreview(true);
     try {
-      const mockDates = [];
-      let date = new Date();
-      for (let i = 0; i < 5; i++) {
-        if (recurrence.type === 'daily') {
-          date = new Date(date);
-          date.setDate(date.getDate() + recurrence.interval);
-        } else if (recurrence.type === 'weekly' || recurrence.type === 'biweekly') {
-          date = new Date(date);
-          date.setDate(date.getDate() + 7 * recurrence.interval);
-        } else if (recurrence.type === 'monthly' || recurrence.type === 'quarterly') {
-          date = new Date(date);
-          date.setMonth(date.getMonth() + recurrence.interval);
-        } else if (recurrence.type === 'yearly') {
-          date = new Date(date);
-          date.setFullYear(date.getFullYear() + recurrence.interval);
-        }
-        mockDates.push(new Date(date));
+      const dates = [];
+      let currentDate = new Date();
+      const maxToShow = Math.min(recurrence.max_occurrences || 10, 5);
+      const endDate = recurrence.end_date ? new Date(recurrence.end_date) : null;
+
+      for (let i = 0; i < maxToShow; i++) {
+        const nextDate = calculateNextOccurrence(recurrence, currentDate);
+        
+        if (!nextDate) break;
+        if (endDate && nextDate > endDate) break;
+
+        dates.push(new Date(nextDate));
+        currentDate = nextDate;
       }
-      setPreviewDates(mockDates);
+
+      setPreviewDates(dates);
     } catch (error) {
       console.error('Error fetching preview:', error);
+      setPreviewDates([]);
     } finally {
       setLoadingPreview(false);
     }
@@ -124,7 +185,7 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
     if (showPreview && recurrence?.enabled) {
       fetchPreview();
     }
-  }, [showPreview, recurrence]);
+  }, [showPreview, recurrence?.type, recurrence?.interval, recurrence?.days, recurrence?.end_option, recurrence?.end_date, recurrence?.max_occurrences]);
 
   const toggleDay = (day) => {
     const currentDays = recurrence?.days || [];
@@ -231,7 +292,7 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
                 <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                   Repeat on
                 </Typography>
-                <Stack direction="row" spacing={1}>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
                   {WEEK_DAYS.map((day) => (
                     <ToggleButton
                       key={day.value}
@@ -257,6 +318,27 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
                 {(!recurrence?.days || recurrence?.days.length === 0) && (
                   <FormHelperText error>Select at least one day</FormHelperText>
                 )}
+              </Grid>
+            )}
+
+            {/* Monthly Day Selection */}
+            {recurrence?.type === 'monthly' && (
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Day of month</InputLabel>
+                  <Select
+                    value={recurrence?.day_of_month || 1}
+                    onChange={(e) => updateRecurrence('day_of_month', e.target.value)}
+                    label="Day of month"
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                      <MenuItem key={day} value={day}>
+                        {day}
+                      </MenuItem>
+                    ))}
+                    <MenuItem value="last">Last day of month</MenuItem>
+                  </Select>
+                </FormControl>
               </Grid>
             )}
 
@@ -350,7 +432,9 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
                   ))}
                 </Stack>
               ) : (
-                <Typography variant="caption">Click preview to see dates</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  No occurrences to preview. Check your recurrence settings.
+                </Typography>
               )}
             </Alert>
           </Collapse>

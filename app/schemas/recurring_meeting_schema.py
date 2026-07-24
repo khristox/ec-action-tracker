@@ -34,6 +34,9 @@ class RecurringMeetingBase(BaseModel):
     agenda: Optional[str] = None
     additional_info: Optional[Dict[str, Any]] = None
     status_id: UUID
+    visibility: Optional[str] = Field(default="open", description="'open' or 'department'")
+    restricted_department_id: Optional[UUID] = Field(None, description="Department ID if visibility is 'department'")
+
 
 
 class RecurringMeetingCreate(RecurringMeetingBase):
@@ -67,7 +70,8 @@ class RecurringMeetingUpdate(BaseModel):
     agenda: Optional[str] = None
     additional_info: Optional[Dict[str, Any]] = None
     status_id: Optional[UUID] = None
-
+    visibility: Optional[str] = None
+    restricted_department_id: Optional[UUID] = None
 
 # ==================== Response Schemas ====================
 
@@ -132,7 +136,11 @@ class RecurringMeetingResponse(BaseModel):
     recurrence_type: Optional[AttributeBrief] = None
     status: Optional[AttributeBrief] = None
     occurrences: List[RecurringMeetingOccurrenceResponse] = []
+    visibility: Optional[str] = None
+    restricted_department_id: Optional[UUID] = None
     
+    last_occurrence_date: Optional[datetime] = None
+        
     class Config:
         from_attributes = True
 

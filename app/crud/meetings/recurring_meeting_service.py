@@ -281,6 +281,8 @@ class RecurringMeetingService:
                 agenda=meeting_data.agenda,
                 additional_info=meeting_data.additional_info,
                 status_id=meeting_data.status_id,
+                visibility=meeting_data.visibility,
+                restricted_department_id=meeting_data.restricted_department_id,
                 created_by_id=user_id,
                 created_at=now,
                 updated_at=now

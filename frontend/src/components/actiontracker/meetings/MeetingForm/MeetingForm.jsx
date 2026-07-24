@@ -432,6 +432,7 @@ const MeetingForm = () => {
                     isEditMode={isEditMode}
                     isMobile={isMobile}
                     mappingsLoading={mappingsLoading}
+                    startDate={formData?.meeting_date} 
                   />
                 </Box>
               </Fade>

@@ -745,7 +745,7 @@ export const MeetingCard = ({
           </Tooltip>
 
           {/* Add Action Button - HIDDEN instead of disabled */}
-          {canAddActions && (
+          { (
             <Tooltip title="Add Action Item" placement="top">
               <IconButton
                 size={iconSize}

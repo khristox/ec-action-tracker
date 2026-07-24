@@ -17,7 +17,8 @@ import {
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 
-const quillModules = (isMobile) => ({
+// Define modules outside component to prevent re-creation
+const createQuillModules = (isMobile) => ({
   toolbar: isMobile
     ? [
         ['bold', 'italic', 'underline'],
@@ -31,16 +32,21 @@ const quillModules = (isMobile) => ({
         ['link', 'clean'],
         [{ 'align': [] }],
       ],
+  clipboard: {
+    // Prevent unwanted format conversion
+    matchVisual: false,
+  },
 });
 
+// Use ONLY built-in formats - remove 'bullet' from here
 const quillFormats = [
   'header',
   'bold',
   'italic',
   'underline',
   'strike',
-  'list',
-  'bullet',
+  'list',        // ← 'list' handles both ordered and bullet lists
+  // 'bullet',   // ← REMOVE THIS - causes the warning
   'link',
   'align',
 ];
@@ -48,6 +54,9 @@ const quillFormats = [
 export const AgendaStep = ({ formData, handleAgendaChange, isMobile }) => {
   const theme = useTheme();
   const isLight = theme.palette.mode === 'light';
+
+  // Memoize modules to prevent re-creation
+  const modules = React.useMemo(() => createQuillModules(isMobile), [isMobile]);
 
   return (
     <Box sx={{ 
@@ -161,7 +170,7 @@ export const AgendaStep = ({ formData, handleAgendaChange, isMobile }) => {
               theme="snow"
               value={formData.agenda || ''}
               onChange={handleAgendaChange}
-              modules={quillModules(isMobile)}
+              modules={modules}
               formats={quillFormats}
               style={{
                 display: 'flex',

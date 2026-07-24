@@ -221,14 +221,13 @@ const loadRecurringMeetings = useCallback(async () => {
   try {
     setLoadingRecurring(true);
     
-    // ✅ Use the correct API method
     const response = await meetingsAPI.getRecurring({
       limit: 50,
       sort_by: 'meeting_date',
       sort_order: 'desc'
     });
     
-    setRecurringMeetings(response.data.items || []);
+    setRecurringMeetings(response.data.data || []);  // ← Change .items to .data
   } catch (err) {
     console.error('Error loading recurring meetings:', err);
     setSnackbar({ 

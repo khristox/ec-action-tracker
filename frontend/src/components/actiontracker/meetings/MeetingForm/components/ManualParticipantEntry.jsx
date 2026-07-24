@@ -1,4 +1,5 @@
 // src/components/meetings/MeetingForm/components/ManualParticipantEntry.jsx
+
 import React, { useState } from 'react';
 import {
   Stack,
@@ -7,18 +8,19 @@ import {
   Card,
   CardContent,
   Typography,
-  IconButton,
   InputAdornment,
-  Alert
+  Alert,
+  Chip
 } from '@mui/material';
 import {
-  PersonAdd as PersonAdd,
-  Close as Close,
+  PersonAdd as PersonAddIcon,
+  Close as CloseIcon,
   Email as EmailIcon,
   Phone as PhoneIcon,
   Work as WorkIcon,
   Title as TitleIcon,
-  Badge as BadgeIcon
+  Badge as BadgeIcon,
+  Business as BusinessIcon
 } from '@mui/icons-material';
 
 export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
@@ -27,7 +29,7 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
     email: '',
     telephone: '',
     title: '',
-    organization: ''
+    organization: 'EC' // Pre-filled but editable free text
   });
   
   const [errors, setErrors] = useState({});
@@ -107,13 +109,13 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
       created_at: new Date().toISOString()
     });
     
-    // Reset form
+    // Reset form but keep organization pre-filled
     setFormData({
       name: '',
       email: '',
       telephone: '',
       title: '',
-      organization: ''
+      organization: 'Residential Apartment' // Keep pre-filled
     });
     setErrors({});
     setTouched({});
@@ -125,7 +127,7 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
       email: '',
       telephone: '',
       title: '',
-      organization: ''
+      organization: 'Residential Apartment' // Keep pre-filled
     });
     setErrors({});
     setTouched({});
@@ -226,18 +228,30 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
         }}
       />
 
+      {/* Organization - Free Text Field */}
       <TextField
         fullWidth
         label="Organization"
         name="organization"
         value={formData.organization}
         onChange={handleChange}
-        placeholder="Company or organization name"
+        placeholder="e.g., Residential Apartment, Company Name, etc."
+        helperText="Enter any organization name (optional)"
         slotProps={{
           input: {
             startAdornment: (
               <InputAdornment position="start">
-                <WorkIcon color="action" />
+                <BusinessIcon color="action" />
+              </InputAdornment>
+            ),
+            endAdornment: formData.organization && (
+              <InputAdornment position="end">
+                <Chip 
+                  label="Free text" 
+                  size="small" 
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: '0.6rem' }}
+                />
               </InputAdornment>
             )
           }
@@ -249,9 +263,10 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
           variant="contained"
           onClick={handleAdd}
           disabled={!isFormValid}
-          startIcon={<PersonAdd />}
+          startIcon={<PersonAddIcon />}
           fullWidth
           size="large"
+          sx={{ borderRadius: 2 }}
         >
           Add Participant
         </Button>
@@ -260,9 +275,10 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
           <Button
             variant="outlined"
             onClick={onCancel}
-            startIcon={<Close />}
+            startIcon={<CloseIcon />}
             fullWidth
             size="large"
+            sx={{ borderRadius: 2 }}
           >
             Cancel
           </Button>
@@ -318,3 +334,5 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
     </Stack>
   );
 };
+
+export default React.memo(ManualParticipantEntry);

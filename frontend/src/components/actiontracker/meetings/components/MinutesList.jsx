@@ -598,7 +598,7 @@ const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
           <DialogTitle sx={{ pb: 1 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
               <Typography variant="h6" fontWeight={700}>
-                Update Progress ss
+                Update Progress
               </Typography>
               <IconButton onClick={() => setShowProgressDialog(false)} size="small">
                 <Close />

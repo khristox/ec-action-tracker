@@ -1,5 +1,5 @@
 // src/components/meetings/MeetingForm/utils.js
-import { addDays, addWeeks, addMonths } from 'date-fns';
+import { addDays, addWeeks, addMonths, startOfDay, isAfter } from 'date-fns';
 import { WEEK_DAYS, ADDRESS_LEVELS, BUILDING_LEVELS } from './constants.js';
 
 export const hexAlpha = (color, opacity) => {
@@ -106,4 +106,107 @@ export const formatRecurrenceSummary = (recurrence) => {
     return `Every ${interval} month(s) on day ${recurrence.day_of_month || 1}`;
   }
   return `Every ${interval} ${type}`;
+};
+
+/**
+ * Generate preview occurrences for a recurring meeting
+ * @param {Object} recurrence - The recurrence configuration
+ * @param {Date|string} startDate - The start date of the first occurrence
+ * @param {number} count - Number of occurrences to generate (default: 5)
+ * @returns {Array<Date>} Array of occurrence dates
+ */
+export const generatePreviewOccurrences = (recurrence, startDate, count = 5) => {
+  if (!recurrence || !recurrence.enabled) {
+    return [];
+  }
+
+  const start = new Date(startDate);
+  const occurrences = [start];
+  let currentDate = start;
+
+  for (let i = 1; i < count; i++) {
+    const nextDate = calculateNextOccurrence(recurrence, currentDate);
+    if (!nextDate) break;
+    occurrences.push(nextDate);
+    currentDate = nextDate;
+  }
+
+  return occurrences;
+};
+
+/**
+ * Generate all occurrences within a date range
+ * @param {Object} recurrence - The recurrence configuration
+ * @param {Date|string} startDate - The start date
+ * @param {Date|string} endDate - The end date (exclusive)
+ * @param {number} maxOccurrences - Maximum number of occurrences to generate (default: 100)
+ * @returns {Array<Date>} Array of occurrence dates within the range
+ */
+export const generateOccurrencesInRange = (recurrence, startDate, endDate, maxOccurrences = 100) => {
+  if (!recurrence || !recurrence.enabled) {
+    return [];
+  }
+
+  const start = startOfDay(new Date(startDate));
+  const end = startOfDay(new Date(endDate));
+  const occurrences = [];
+  let currentDate = start;
+
+  while (occurrences.length < maxOccurrences) {
+    if (isAfter(currentDate, end)) break;
+    occurrences.push(currentDate);
+    const nextDate = calculateNextOccurrence(recurrence, currentDate);
+    if (!nextDate) break;
+    currentDate = nextDate;
+  }
+
+  return occurrences;
+};
+
+/**
+ * Get the next N occurrences after a given date
+ * @param {Object} recurrence - The recurrence configuration
+ * @param {Date|string} fromDate - The date to start from
+ * @param {number} count - Number of occurrences to generate
+ * @returns {Array<Date>} Array of occurrence dates
+ */
+export const getNextOccurrences = (recurrence, fromDate, count = 5) => {
+  if (!recurrence || !recurrence.enabled) {
+    return [];
+  }
+
+  const from = new Date(fromDate);
+  const occurrences = [];
+  let currentDate = from;
+
+  for (let i = 0; i < count; i++) {
+    const nextDate = calculateNextOccurrence(recurrence, currentDate);
+    if (!nextDate) break;
+    occurrences.push(nextDate);
+    currentDate = nextDate;
+  }
+
+  return occurrences;
+};
+
+/**
+ * Get the nth occurrence after a given date
+ * @param {Object} recurrence - The recurrence configuration
+ * @param {Date|string} fromDate - The date to start from
+ * @param {number} n - The index of the occurrence (1-based)
+ * @returns {Date|null} The nth occurrence date or null
+ */
+export const getNthOccurrence = (recurrence, fromDate, n = 1) => {
+  if (!recurrence || !recurrence.enabled || n < 1) {
+    return null;
+  }
+
+  let currentDate = new Date(fromDate);
+  for (let i = 0; i < n; i++) {
+    const nextDate = calculateNextOccurrence(recurrence, currentDate);
+    if (!nextDate) return null;
+    currentDate = nextDate;
+  }
+
+  return currentDate;
 };

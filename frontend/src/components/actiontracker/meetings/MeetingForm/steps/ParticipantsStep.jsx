@@ -1,42 +1,31 @@
 // src/components/meetings/MeetingForm/steps/ParticipantsStep.jsx
+
 import React, { useState } from 'react';
 import {
   Stack, Card, CardContent, Box, Typography, Button, List, Divider,
-  FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  FormControl, InputLabel, Select, MenuItem, Alert,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Paper, Chip, useTheme, alpha, IconButton, Tooltip
 } from '@mui/material';
 import { 
-  PersonAdd as PersonAdd, 
+  PersonAdd as PersonAddIcon, 
   EditNote as SecretaryIcon,
   People as PeopleIcon,
   Person as PersonIcon,
-  ListAlt as ListIcon
+  ListAlt as ListIcon,
+  Close as CloseIcon,
+  Add as AddIcon,
+  Group as GroupIcon
 } from '@mui/icons-material';
 import { ExistingUsersSelector } from '../components/ExistingUsersSelector';
 import { ManualParticipantEntry } from '../components/ManualParticipantEntry';
 import { ParticipantListsSelector } from '../components/ParticipantListsSelector';
 import { ParticipantItem } from '../components/ParticipantItem';
 
-// Updated tab configuration with short, meaningful names
 const PARTICIPANT_TABS = [
-  { 
-    value: 'existing', 
-    label: 'Users', 
-    icon: <PeopleIcon />, 
-    description: 'Add existing system users'
-  },
-  { 
-    value: 'manual', 
-    label: 'Manual', 
-    icon: <PersonIcon />, 
-    description: 'Add external participants'
-  },
-  { 
-    value: 'lists', 
-    label: 'Groups', 
-    icon: <ListIcon />, 
-    description: 'Add from saved participant lists'
-  }
+  { value: 'existing', label: 'Users', icon: <PeopleIcon /> },
+  { value: 'manual', label: 'Manual', icon: <PersonIcon /> },
+  { value: 'lists', label: 'Groups', icon: <ListIcon /> }
 ];
 
 export const ParticipantsStep = ({
@@ -50,89 +39,118 @@ export const ParticipantsStep = ({
   handleAddFromList,
   handleRemoveParticipant,
   handleSetChairperson,
-  apiLoading
+  apiLoading,
+  isMobile
 }) => {
+  const theme = useTheme();
+  const isLight = theme.palette.mode === 'light';
   const [participantTab, setParticipantTab] = useState('existing');
-  const [showAddParticipantDialog, setShowAddParticipantDialog] = useState(false);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+
+  // Get secretary name
+  const secretaryName = formData.secretary_name || '';
 
   return (
-    <Stack spacing={3}>
-      {/* Main Participants Card */}
-      <Card variant="outlined">
-        <CardContent>
-          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-            <Tabs
-              value={participantTab}
-              onChange={(_, val) => setParticipantTab(val)}
-              variant="fullWidth"
-              sx={{
-                '& .MuiTab-root': {
-                  minHeight: 48,
-                  textTransform: 'none',
-                  fontWeight: 600,
-                  fontSize: '0.875rem'
-                }
-              }}
-            >
-              {PARTICIPANT_TABS.map(tab => (
-                <Tab
-                  key={tab.value}
-                  value={tab.value}
-                  label={tab.label}
-                  icon={tab.icon}
-                  iconPosition="start"
-                />
-              ))}
-            </Tabs>
-          </Box>
-
-          {participantTab === 'existing' && (
-            <ExistingUsersSelector
-              onAddUser={handleAddExistingUser}
-              existingParticipants={meetingParticipants}
-              selectedUserIds={selectedUserIds}
-            />
-          )}
-
-          {participantTab === 'manual' && (
-            <ManualParticipantEntry
-              onAddParticipant={handleAddManualParticipant}
-            />
-          )}
-
-          {participantTab === 'lists' && (
-            <ParticipantListsSelector
-              onAddFromList={handleAddFromList}
-              selectedParticipantIds={selectedParticipantIds}
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Added Participants List */}
-      <Card variant="outlined">
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
-            <Typography variant="subtitle1" fontWeight="bold">
-              👤 Participants ({meetingParticipants.length})
+    <Stack spacing={2} sx={{ height: '100%' }}>
+      {/* Combined Card: Participant List + Secretary */}
+      <Card 
+        variant="outlined" 
+        sx={{ 
+          flex: 1,
+          display: 'flex', 
+          flexDirection: 'column',
+          minHeight: 0,
+          borderRadius: 2,
+          overflow: 'hidden'
+        }}
+      >
+        {/* Header with Add Button */}
+        <Box sx={{ 
+          p: { xs: 1.5, sm: 2 },
+          borderBottom: 1,
+          borderColor: 'divider',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexShrink: 0,
+          bgcolor: isLight ? alpha(theme.palette.primary.main, 0.02) : 'transparent'
+        }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <GroupIcon color="primary" sx={{ fontSize: 20 }} />
+            <Typography variant="subtitle1" fontWeight={600}>
+              Participants
             </Typography>
-            <Button
+            <Chip 
+              label={`${meetingParticipants.length}`} 
+              size="small" 
+              color="primary" 
               variant="outlined"
-              startIcon={<PersonAdd />}
-              onClick={() => setShowAddParticipantDialog(true)}
-              disabled={apiLoading}
-              size="small"
-            >
-              Add More
-            </Button>
-          </Box>
+              sx={{ height: 20, '& .MuiChip-label': { px: 1, fontSize: '0.7rem' } }}
+            />
+          </Stack>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setShowAddDialog(true)}
+            disabled={apiLoading}
+            sx={{ 
+              borderRadius: 2,
+              textTransform: 'none',
+              fontWeight: 600,
+              px: 2,
+              py: 0.5,
+              minHeight: 32,
+              bgcolor: 'primary.main',
+              '&:hover': { bgcolor: 'primary.dark' }
+            }}
+          >
+            Add
+          </Button>
+        </Box>
 
+        {/* Participants List - Scrollable */}
+        <Box sx={{ 
+          flex: 1,
+          overflow: 'auto',
+          p: { xs: 1, sm: 1.5 },
+          minHeight: 100,
+          '&::-webkit-scrollbar': {
+            width: 4,
+          },
+          '&::-webkit-scrollbar-track': {
+            background: 'transparent',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            background: isLight ? '#d0d5dd' : 'rgba(255,255,255,0.2)',
+            borderRadius: 2,
+          },
+        }}>
           {meetingParticipants.length === 0 ? (
-            <Alert severity="info" variant="outlined" sx={{ borderRadius: 2 }}>
-              No participants added. Use <strong>Users</strong>, <strong>Manual</strong>, or <strong>Groups</strong> to add.
-            </Alert>
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              py: 4,
+              color: 'text.secondary'
+            }}>
+              <PeopleIcon sx={{ fontSize: 40, opacity: 0.3, mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                No participants added yet
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<PersonAddIcon />}
+                onClick={() => setShowAddDialog(true)}
+                sx={{ mt: 1, borderRadius: 2 }}
+              >
+                Add your first participant
+              </Button>
+            </Box>
           ) : (
-            <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+            <List sx={{ py: 0 }}>
               {meetingParticipants.map((p, index) => (
                 <React.Fragment key={p.id}>
                   <ParticipantItem
@@ -140,114 +158,220 @@ export const ParticipantsStep = ({
                     onRemove={handleRemoveParticipant}
                     onMakeChairperson={handleSetChairperson}
                     isChairperson={p.is_chairperson}
-                    isSecretary={p.name === formData.secretary_name}
+                    isSecretary={p.name === secretaryName}
                     showActions={!apiLoading}
+                    isMobile={isMobile}
                   />
-                  {index < meetingParticipants.length - 1 && <Divider component="li" />}
+                  {index < meetingParticipants.length - 1 && (
+                    <Divider sx={{ my: 0.5 }} />
+                  )}
                 </React.Fragment>
               ))}
             </List>
           )}
-        </CardContent>
-      </Card>
+        </Box>
 
-      {/* Secretary Selection */}
-      <Card variant="outlined" sx={{ borderLeft: 6, borderColor: 'secondary.main' }}>
-        <CardContent>
-          <Stack direction="row" spacing={1} alignItems="center" mb={2}>
-            <SecretaryIcon color="secondary" />
-            <Typography variant="subtitle1" fontWeight="bold">Secretary</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {meetingParticipants.length === 0 ? '(No participants available)' : ''}
+        {/* Secretary Selection - Compact Footer */}
+        <Box sx={{ 
+          p: { xs: 1, sm: 1.5 },
+          borderTop: 1,
+          borderColor: 'divider',
+          bgcolor: isLight ? alpha(theme.palette.secondary.main, 0.03) : alpha(theme.palette.secondary.main, 0.05),
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          flexWrap: 'wrap'
+        }}>
+          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexShrink: 0 }}>
+            <SecretaryIcon color="secondary" sx={{ fontSize: 18 }} />
+            <Typography variant="caption" fontWeight={600} color="text.secondary">
+              Secretary:
             </Typography>
           </Stack>
-          <FormControl fullWidth>
-            <InputLabel>Select Secretary</InputLabel>
+          
+          <FormControl size="small" sx={{ 
+            minWidth: { xs: '100%', sm: 180, md: 220 },
+            flex: { xs: '1 1 100%', sm: '0 1 auto' }
+          }}>
             <Select
               name="secretary_name"
-              value={formData.secretary_name || ''}
+              value={secretaryName}
               onChange={handleChange}
-              label="Select Secretary"
+              displayEmpty
               disabled={apiLoading || meetingParticipants.length === 0}
+              sx={{ 
+                borderRadius: 2,
+                height: 32,
+                fontSize: '0.8rem',
+                bgcolor: isLight ? 'white' : 'transparent',
+                '& .MuiSelect-select': { py: 0.5 }
+              }}
             >
-              <MenuItem value=""><em>None Selected</em></MenuItem>
+              <MenuItem value="" sx={{ fontSize: '0.8rem' }}>
+                <em>Not assigned</em>
+              </MenuItem>
               {meetingParticipants.map(p => (
-                <MenuItem key={p.id} value={p.name}>{p.name}</MenuItem>
+                <MenuItem key={p.id} value={p.name} sx={{ fontSize: '0.8rem' }}>
+                  {p.name}
+                </MenuItem>
               ))}
             </Select>
           </FormControl>
-        </CardContent>
+          
+          {meetingParticipants.length === 0 && (
+            <Typography variant="caption" color="text.disabled" sx={{ flex: 1 }}>
+              Add participants first
+            </Typography>
+          )}
+          
+          {secretaryName && (
+            <Chip 
+              label={secretaryName}
+              size="small"
+              color="secondary"
+              onDelete={() => handleChange({ target: { name: 'secretary_name', value: '' } })}
+              sx={{ height: 24 }}
+            />
+          )}
+        </Box>
       </Card>
 
       {/* Add Participant Dialog */}
       <Dialog 
-        open={showAddParticipantDialog} 
-        onClose={() => setShowAddParticipantDialog(false)} 
-        maxWidth="md" 
+        open={showAddDialog} 
+        onClose={() => setShowAddDialog(false)} 
+        maxWidth="sm" 
         fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            maxHeight: '85vh'
+          }
+        }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
+        <DialogTitle sx={{ 
+          pb: 1,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: 1,
+          borderColor: 'divider'
+        }}>
           <Stack direction="row" alignItems="center" spacing={1}>
-            <PersonAdd color="primary" />
-            <Typography variant="h6" fontWeight={700}>Add Participant</Typography>
+            <PersonAddIcon color="primary" />
+            <Typography variant="h6" fontWeight={700}>
+              Add Participant
+            </Typography>
+            <Chip 
+              label={`${meetingParticipants.length} added`} 
+              size="small" 
+              variant="outlined"
+              sx={{ ml: 1 }}
+            />
           </Stack>
+          <IconButton 
+            size="small" 
+            onClick={() => setShowAddDialog(false)}
+            sx={{ border: 1, borderColor: 'divider', borderRadius: 2 }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
         </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            <Tabs
-              value={participantTab}
-              onChange={(_, val) => setParticipantTab(val)}
-              variant="fullWidth"
-              sx={{ mb: 2 }}
-            >
+        
+        <DialogContent sx={{ p: 0 }}>
+          <Box sx={{ p: 2 }}>
+            {/* Compact Tabs */}
+            <Box sx={{ 
+              display: 'flex', 
+              gap: 0.5, 
+              mb: 2,
+              bgcolor: isLight ? alpha(theme.palette.primary.main, 0.04) : alpha(theme.palette.primary.main, 0.08),
+              borderRadius: 2,
+              p: 0.5
+            }}>
               {PARTICIPANT_TABS.map(tab => (
-                <Tab
+                <Button
                   key={tab.value}
-                  value={tab.value}
-                  label={tab.label}
-                  icon={tab.icon}
-                  iconPosition="start"
-                />
+                  variant={participantTab === tab.value ? 'contained' : 'text'}
+                  startIcon={tab.icon}
+                  onClick={() => setParticipantTab(tab.value)}
+                  size="small"
+                  sx={{ 
+                    flex: 1,
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    borderRadius: 1.5,
+                    py: 0.75,
+                    ...(participantTab === tab.value ? {
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    } : {
+                      color: 'text.secondary',
+                      '&:hover': { bgcolor: 'transparent' }
+                    })
+                  }}
+                >
+                  {tab.label}
+                </Button>
               ))}
-            </Tabs>
+            </Box>
 
-            {participantTab === 'existing' && (
-              <ExistingUsersSelector
-                onAddUser={(user) => {
-                  handleAddExistingUser(user);
-                  setShowAddParticipantDialog(false);
-                }}
-                existingParticipants={meetingParticipants}
-                selectedUserIds={selectedUserIds}
-              />
-            )}
+            {/* Tab Content */}
+            <Box sx={{ maxHeight: 400, overflowY: 'auto' }}>
+              {participantTab === 'existing' && (
+                <ExistingUsersSelector
+                  onAddUser={(user) => {
+                    handleAddExistingUser(user);
+                    // Don't close dialog to allow adding more
+                  }}
+                  existingParticipants={meetingParticipants}
+                  selectedUserIds={selectedUserIds}
+                />
+              )}
 
-            {participantTab === 'manual' && (
-              <ManualParticipantEntry
-                onAddParticipant={(participant) => {
-                  handleAddManualParticipant(participant);
-                  setShowAddParticipantDialog(false);
-                }}
-              />
-            )}
+              {participantTab === 'manual' && (
+                <ManualParticipantEntry
+                  onAddParticipant={(participant) => {
+                    handleAddManualParticipant(participant);
+                    // Don't close dialog to allow adding more
+                  }}
+                />
+              )}
 
-            {participantTab === 'lists' && (
-              <ParticipantListsSelector
-                onAddFromList={(participants) => {
-                  handleAddFromList(participants);
-                  setShowAddParticipantDialog(false);
-                }}
-                selectedParticipantIds={selectedParticipantIds}
-              />
-            )}
+              {participantTab === 'lists' && (
+                <ParticipantListsSelector
+                  onAddFromList={(participants) => {
+                    handleAddFromList(participants);
+                    // Don't close dialog to allow adding more
+                  }}
+                  selectedParticipantIds={selectedParticipantIds}
+                />
+              )}
+            </Box>
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowAddParticipantDialog(false)}>Close</Button>
+        
+        <DialogActions sx={{ 
+          p: 2, 
+          borderTop: 1, 
+          borderColor: 'divider',
+          justifyContent: 'space-between'
+        }}>
+          <Typography variant="caption" color="text.secondary">
+            {meetingParticipants.length} participant{meetingParticipants.length !== 1 ? 's' : ''} added
+          </Typography>
+          <Button 
+            onClick={() => setShowAddDialog(false)} 
+            variant="contained"
+            sx={{ borderRadius: 2, textTransform: 'none' }}
+          >
+            Done
+          </Button>
         </DialogActions>
       </Dialog>
     </Stack>
   );
 };
 
-export default ParticipantsStep;
+export default React.memo(ParticipantsStep);

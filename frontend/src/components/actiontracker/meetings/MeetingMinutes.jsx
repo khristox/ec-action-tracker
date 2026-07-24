@@ -78,6 +78,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const previousMinutesStringRef = useRef('');
 
   // ==================== LOCAL STATE ====================
+  // ✅ FIX: Initialize minutes as empty array
   const [minutes, setMinutes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -86,7 +87,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const [selectedMinute, setSelectedMinute] = useState(null);
   const [expandedMinutes, setExpandedMinutes] = useState([]);
   const [successMessage, setSuccessMessage] = useState('');
-  // ✅ Add key to force remount of EditMinuteDialog
   const [editDialogKey, setEditDialogKey] = useState(0);
 
   const canEdit = meetingStatus !== 'cancelled' && meetingStatus !== 'ended' && meetingStatus !== 'closed';
@@ -106,13 +106,31 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
       
       if (isMountedRef.current) {
-        const minutesData = response.data?.items || response.data || [];
+        // ✅ FIX: Ensure we always set an array
+        let minutesData = [];
+        
+        // Handle different response formats
+        if (response.data) {
+          if (Array.isArray(response.data)) {
+            minutesData = response.data;
+          } else if (response.data.items && Array.isArray(response.data.items)) {
+            minutesData = response.data.items;
+          } else if (response.data.results && Array.isArray(response.data.results)) {
+            minutesData = response.data.results;
+          } else if (typeof response.data === 'object') {
+            // If it's a single object, wrap it in an array
+            minutesData = [response.data];
+          }
+        }
+        
         setMinutes(minutesData);
       }
     } catch (err) {
       if (isMountedRef.current) {
         console.error('Error fetching minutes:', err);
         setError(err.message || 'Failed to load minutes');
+        // ✅ FIX: Set minutes to empty array on error
+        setMinutes([]);
       }
     } finally {
       if (isMountedRef.current) {
@@ -137,14 +155,17 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     return () => {
       isMountedRef.current = false;
     };
-  }, [meetingId]);
+  }, [meetingId, fetchMinutes]);
 
   useEffect(() => {
+    // ✅ FIX: Safely update minutes from Redux state
     if (minutesList && isMountedRef.current) {
-      const currentString = JSON.stringify(minutesList);
+      // Ensure minutesList is an array
+      const newMinutes = Array.isArray(minutesList) ? minutesList : [];
+      const currentString = JSON.stringify(newMinutes);
       if (currentString !== previousMinutesStringRef.current) {
         previousMinutesStringRef.current = currentString;
-        setMinutes(minutesList);
+        setMinutes(newMinutes);
       }
     }
   }, [minutesList]);
@@ -191,7 +212,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       setSuccessMessage('Minutes updated successfully!');
       setEditDialogOpen(false);
       setSelectedMinute(null);
-      // ✅ Increment key to force remount and reset form state
       setEditDialogKey(prev => prev + 1);
       fetchAttemptedRef.current = false;
       hasFetchedRef.current = false;
@@ -224,17 +244,18 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     );
   };
 
-  // ✅ Handler to close edit dialog and reset form
   const handleCloseEditDialog = () => {
     setEditDialogOpen(false);
     setSelectedMinute(null);
-    // ✅ Increment key when closing to ensure clean state
     setEditDialogKey(prev => prev + 1);
   };
 
   // ==================== RENDER ====================
 
-  if (loading && minutes.length === 0) {
+  // ✅ FIX: Ensure minutes is always an array before using .length
+  const minutesCount = Array.isArray(minutes) ? minutes.length : 0;
+
+  if (loading && minutesCount === 0) {
     return (
       <Box sx={{ textAlign: 'center', py: 4 }}>
         <CircularProgress />
@@ -250,7 +271,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
-          Meeting Minutes({minutes.length})
+          Meeting Minutes ({minutesCount})
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Tooltip title={!canEdit ? "Meeting must be active to add minutes" : "Add new minutes"}>
@@ -317,8 +338,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         </Alert>
       )}
 
-      {/* Minutes List */}
-      {minutes.length === 0 ? (
+      {/* ✅ FIX: Use minutesCount for empty check */}
+      {minutesCount === 0 ? (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <DescriptionIcon sx={{ fontSize: 64, color: isDarkMode ? '#6B7280' : 'action.disabled', mb: 2 }} />
           <Typography variant="body1" sx={{ color: isDarkMode ? '#D1D5DB' : 'text.secondary' }} gutterBottom>
@@ -337,13 +358,14 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         </Box>
       ) : (
         <Stack spacing={2}>
-          {minutes.map((minute) => {
+          {/* ✅ FIX: Use minutes array safely */}
+          {Array.isArray(minutes) && minutes.map((minute) => {
             const isExpanded = expandedMinutes.includes(minute.id);
             const actionCount = minute.actions?.length || 0;
 
             return (
               <Paper
-                key={minute.id}
+                key={minute.id || minute.tempId || Math.random().toString(36)}
                 sx={{
                   borderRadius: 2,
                   overflow: 'hidden',
@@ -395,8 +417,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                         </Box>
                       </Box>
                       {canEdit && (
-                        // ✅ FIX: Use a div with onClick instead of IconButton inside AccordionSummary
-                        // This prevents nested buttons
                         <Box 
                           component="div" 
                           onClick={(e) => e.stopPropagation()} 
@@ -411,7 +431,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                                 setEditDialogOpen(true);
                               }}
                               sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
-                              // ✅ Add this to prevent the button from triggering the accordion
                               component="span"
                             >
                               <EditIcon fontSize="small" />
@@ -425,7 +444,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                                 handleDeleteMinute(minute.id);
                               }}
                               sx={{ color: isDarkMode ? '#F87171' : 'error.main' }}
-                              // ✅ Add this to prevent the button from triggering the accordion
                               component="span"
                             >
                               <DeleteIcon fontSize="small" />
@@ -513,7 +531,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       />
 
       {/* Edit Minutes Dialog */}
-      {/* ✅ Add key prop to force remount and reset form state */}
       {selectedMinute && (
         <EditMinuteDialog
           key={editDialogKey}

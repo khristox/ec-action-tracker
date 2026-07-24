@@ -1,4 +1,6 @@
-// src/components/meetings/MeetingForm/components/RecurrenceSection.jsx
+// src/components/meetings/MeetingForm/components/RecurrenceSection_DEBUG.jsx
+// DEBUG VERSION - Console logs everything to help diagnose the issue
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, CardContent, Stack, Paper, Switch, Typography, Chip, Box, Grid,
@@ -12,15 +14,41 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { format } from 'date-fns';
 import { RECURRENCE_TYPES, WEEK_DAYS, END_OPTIONS } from '../constants';
-import { calculateNextOccurrence, formatRecurrenceSummary } from '../utils';
+import { calculateNextOccurrence, formatRecurrenceSummary, generatePreviewOccurrences } from '../utils';
 
 export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
   const [isRecurring, setIsRecurring] = useState(!!recurrence?.enabled);
   const [showPreview, setShowPreview] = useState(false);
   const [previewDates, setPreviewDates] = useState([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [debugInfo, setDebugInfo] = useState('');
+
+  // DEBUG: Log props on mount
+  useEffect(() => {
+    console.log('[RecurrenceSection] Mounted with props:', {
+      recurrence,
+      startDate,
+      startDateType: typeof startDate,
+      startDateISO: startDate ? new Date(startDate).toISOString() : 'undefined',
+    });
+  }, []);
+
+  // DEBUG: Log when recurrence changes
+  useEffect(() => {
+    console.log('[RecurrenceSection] Recurrence changed:', recurrence);
+  }, [recurrence]);
+
+  // DEBUG: Log when startDate changes
+  useEffect(() => {
+    console.log('[RecurrenceSection] StartDate changed:', {
+      value: startDate,
+      type: typeof startDate,
+      iso: startDate ? new Date(startDate).toISOString() : 'undefined',
+    });
+  }, [startDate]);
 
   const handleRecurringToggle = (checked) => {
+    console.log('[RecurrenceSection] Toggling recurring:', checked);
     setIsRecurring(checked);
     if (checked) {
       const newRecurrence = { 
@@ -33,53 +61,115 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
         end_date: null, 
         max_occurrences: null 
       };
+      console.log('[RecurrenceSection] Setting new recurrence:', newRecurrence);
       setRecurrence(newRecurrence);
     } else { 
+      console.log('[RecurrenceSection] Disabling recurrence');
       setRecurrence(null);
     }
   };
 
   const updateRecurrence = (field, value) => { 
+    console.log('[RecurrenceSection] Updating recurrence field:', { field, value });
     setRecurrence(prev => ({ ...prev, [field]: value }));
   };
 
   const calculatePreviewDates = useCallback(() => {
-    if (!recurrence?.enabled || !startDate) return;
-    
-    setLoadingPreview(true);
-    const dates = [];
-    let currentDate = new Date(startDate);
-    const maxOccurrences = Math.min(recurrence.max_occurrences || 10, 20);
-    const endDate = recurrence.end_date ? new Date(recurrence.end_date) : null;
-    
-    for (let i = 0; i < maxOccurrences; i++) {
-      const nextDate = calculateNextOccurrence(recurrence, currentDate);
-      if (!nextDate) break;
-      if (endDate && nextDate > endDate) break;
-      dates.push(nextDate);
-      currentDate = nextDate;
+    console.log('[calculatePreviewDates] Starting preview calculation', {
+      recurrenceEnabled: recurrence?.enabled,
+      startDateProvided: !!startDate,
+      startDate: startDate ? new Date(startDate).toISOString() : 'MISSING',
+      recurrenceType: recurrence?.type,
+      recurrenceDays: recurrence?.days,
+    });
+
+    // CRITICAL CHECK: Is startDate defined?
+    if (!startDate) {
+      const message = 'CRITICAL: startDate is undefined! Preview cannot work without it.';
+      console.error('[calculatePreviewDates]', message);
+      setDebugInfo(message);
+      return;
+    }
+
+    if (!recurrence?.enabled) {
+      console.warn('[calculatePreviewDates] Recurrence not enabled');
+      return;
     }
     
-    setPreviewDates(dates);
-    setLoadingPreview(false);
+    setLoadingPreview(true);
+    try {
+      const dates = generatePreviewOccurrences(recurrence, new Date(startDate), 5);
+      console.log('[calculatePreviewDates] Generated dates:', dates);
+      setPreviewDates(dates);
+      setDebugInfo(`✓ Generated ${dates.length} occurrences`);
+    } catch (error) {
+      console.error('[calculatePreviewDates] Error:', error);
+      setDebugInfo(`✗ Error: ${error.message}`);
+      setPreviewDates([]);
+    } finally {
+      setLoadingPreview(false);
+    }
   }, [recurrence, startDate]);
 
   useEffect(() => {
+    console.log('[calculatePreviewDates effect] Dependencies changed:', {
+      showPreview,
+      recurrenceEnabled: recurrence?.enabled,
+      startDateProvided: !!startDate,
+    });
+
     if (showPreview && recurrence?.enabled && startDate) {
       calculatePreviewDates();
     }
   }, [showPreview, recurrence, startDate, calculatePreviewDates]);
 
-  const toggleDay = (day) => {
-    const currentDays = recurrence?.days || [];
-    updateRecurrence('days', currentDays.includes(day) 
-      ? currentDays.filter(d => d !== day) 
-      : [...currentDays, day]);
-  };
+const toggleDay = (day) => {
+  const currentDays = recurrence?.days || [];
+  const isWeekly = recurrence?.type === 'weekly' || recurrence?.type === 'biweekly';
+  
+  // If the day is already selected, deselect it (allow turning off)
+  if (currentDays.includes(day)) {
+    updateRecurrence('days', currentDays.filter(d => d !== day));
+    return;
+  }
+  
+  // For weekly/biweekly, only allow one day at a time
+  if (isWeekly) {
+    // Replace with just the selected day
+    updateRecurrence('days', [day]);
+  } else {
+    // For other types (if any), allow multiple
+    updateRecurrence('days', [...currentDays, day]);
+  }
+};
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 2 }}>
       <CardContent>
+        {/* DEBUG INFO BOX */}
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="caption" component="div">
+            <strong>DEBUG INFO:</strong>
+          </Typography>
+          <Typography variant="caption" component="div">
+            startDate: {startDate ? new Date(startDate).toISOString() : '❌ UNDEFINED (THIS IS THE PROBLEM!)'}
+          </Typography>
+          <Typography variant="caption" component="div">
+            recurrence.enabled: {recurrence?.enabled ? '✓' : '✗'}
+          </Typography>
+          <Typography variant="caption" component="div">
+            recurrence.type: {recurrence?.type}
+          </Typography>
+          <Typography variant="caption" component="div">
+            selected days: {recurrence?.days?.join(', ') || 'none'}
+          </Typography>
+          {debugInfo && (
+            <Typography variant="caption" component="div" sx={{ mt: 1, color: 'inherit' }}>
+              {debugInfo}
+            </Typography>
+          )}
+        </Alert>
+
         <Stack spacing={3}>
           <Paper variant="outlined" sx={{ p: 2, borderColor: isRecurring ? 'primary.main' : 'divider' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
@@ -180,9 +270,6 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                     {(!recurrence?.days || recurrence?.days.length === 0) && (
                       <FormHelperText error>Please select at least one day</FormHelperText>
                     )}
-                    {recurrence?.type === 'biweekly' && (
-                      <FormHelperText>Meeting will occur every {recurrence.interval * 2} weeks</FormHelperText>
-                    )}
                   </Grid>
                 )}
 
@@ -246,7 +333,10 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                 <Button 
                   variant="outlined" 
                   startIcon={<PreviewIcon />} 
-                  onClick={() => setShowPreview(!showPreview)} 
+                  onClick={() => {
+                    console.log('[PreviewButton] Clicked, toggling showPreview');
+                    setShowPreview(!showPreview);
+                  }} 
                   size="small"
                 >
                   {showPreview ? 'Hide Preview' : 'Preview Occurrences'}
@@ -284,10 +374,12 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                       ))}
                     </Stack>
                   ) : (
-                    <Typography variant="body2">No occurrences to preview</Typography>
+                    <Typography variant="body2">
+                      {startDate ? 'No occurrences to preview' : '❌ Cannot preview: Meeting start date not set'}
+                    </Typography>
                   )}
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                    Based on start date: {startDate ? format(new Date(startDate), 'MMM d, yyyy') : 'Not set'}
+                    Based on start date: {startDate ? format(new Date(startDate), 'MMM d, yyyy') : '❌ NOT SET'}
                   </Typography>
                 </Alert>
               )}
@@ -306,3 +398,5 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
     </Card>
   );
 };
+
+export default RecurrenceSection;

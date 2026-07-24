@@ -699,7 +699,8 @@ export const useMeetingForm = () => {
       chairperson_name: chairpersonParticipant?.name || null,
       organization_id: restrictedDepartmentId || null,
       visibility: visibility,
-      restricted_department_id: visibility === VISIBILITY.DEPARTMENT ? restrictedDepartmentId : null,
+      //restricted_department_id: visibility === VISIBILITY.DEPARTMENT ? restrictedDepartmentId : null,
+      restricted_department_id: restrictedDepartmentId || null,  
       custom_participants: cleanParticipants,
     };
 

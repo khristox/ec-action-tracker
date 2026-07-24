@@ -384,7 +384,7 @@ async def get_available_users(
     return [
         UserResponse(
             id=user.id,
-            email=user.email,
+            email=user.email if user.id == current_user.id else 'xxxx',
             username=user.username,
             first_name=user.first_name, last_name=user.last_name, middle_name=user.middle_name,
             phone=user.phone if user.id == current_user.id else 'xxxx',

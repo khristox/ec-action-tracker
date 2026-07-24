@@ -565,6 +565,7 @@ async def get_action_history(
         # Check permission (view history)
         await check_action_permission(action, current_user, require_ownership=False)
 
+
         print('Ch..')
         # Get history
         history = await meeting_action.get_status_history(db, action_id, skip, limit)

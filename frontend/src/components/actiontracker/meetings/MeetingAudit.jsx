@@ -1,5 +1,6 @@
 // src/components/actiontracker/meetings/MeetingAudit.jsx
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Paper,
   Typography,
@@ -33,10 +34,11 @@ import {
   AccordionSummary,
   AccordionDetails,
   alpha,
-  useTheme
+  useTheme,
+  Fade
 } from '@mui/material';
 import {
-  Info as   InfoIcon,
+  Info as InfoIcon,
   History as HistoryIcon,
   Search as SearchIcon,
   FilterList as FilterListIcon,
@@ -62,7 +64,8 @@ import {
   ContentCopy as ContentCopyIcon,
   Check as CheckIcon,
   RemoveCircle as RemoveCircleIcon,
-  AddCircle as AddCircleIcon
+  AddCircle as AddCircleIcon,
+  Construction as ConstructionIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import api from '../../../services/api';
@@ -89,6 +92,7 @@ const isJsonString = (str) => {
 // Component to display field changes
 const FieldChange = ({ field, oldValue, newValue }) => {
   const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   const [expanded, setExpanded] = useState(false);
 
   const formattedOld = formatValue(oldValue);
@@ -97,28 +101,60 @@ const FieldChange = ({ field, oldValue, newValue }) => {
   const isNewJson = typeof newValue === 'object' || isJsonString(formattedNew);
 
   return (
-    <Accordion expanded={expanded} onChange={() => setExpanded(!expanded)} sx={{ mb: 1 }}>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+    <Accordion 
+      expanded={expanded} 
+      onChange={() => setExpanded(!expanded)} 
+      sx={{ 
+        mb: 1,
+        bgcolor: isDark ? 'rgba(255,255,255,0.02)' : 'transparent',
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : alpha(theme.palette.divider, 0.1)}`,
+        borderRadius: 2,
+        '&:before': { display: 'none' },
+      }}
+    >
+      <AccordionSummary 
+        expandIcon={<ExpandMoreIcon sx={{ color: isDark ? '#9CA3AF' : 'text.secondary' }} />}
+        sx={{
+          '&:hover': {
+            bgcolor: isDark ? 'rgba(255,255,255,0.04)' : alpha(theme.palette.primary.main, 0.02),
+          },
+          borderRadius: 2,
+        }}
+      >
         <Stack direction="row" alignItems="center" spacing={1}>
-          <DifferenceIcon fontSize="small" color="primary" />
-          <Typography variant="subtitle2" fontWeight={600}>
+          <DifferenceIcon fontSize="small" sx={{ color: isDark ? '#818CF8' : 'primary.main' }} />
+          <Typography variant="subtitle2" fontWeight={600} sx={{ color: isDark ? '#E5E7EB' : 'text.primary' }}>
             {field}
           </Typography>
           <Chip 
             label={`${formattedOld !== formattedNew ? 'Changed' : 'No Change'}`} 
             size="small" 
             color={formattedOld !== formattedNew ? 'warning' : 'default'}
-            sx={{ ml: 1 }}
+            sx={{ 
+              ml: 1,
+              ...(isDark && {
+                '& .MuiChip-label': { color: '#D1D5DB' },
+              })
+            }}
           />
         </Stack>
       </AccordionSummary>
       <AccordionDetails>
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, md: 6 }}>
-            <Paper variant="outlined" sx={{ p: 2, bgcolor: alpha(theme.palette.error.main, 0.04), height: '100%' }}>
+            <Paper 
+              variant="outlined" 
+              sx={{ 
+                p: 2, 
+                bgcolor: isDark ? alpha('#EF4444', 0.06) : alpha(theme.palette.error.main, 0.04),
+                borderColor: isDark ? alpha('#EF4444', 0.15) : alpha(theme.palette.error.main, 0.1),
+                height: '100%',
+                borderRadius: 2,
+              }}
+            >
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                <RemoveCircleIcon fontSize="small" color="error" />
-                <Typography variant="caption" color="error" fontWeight={600}>
+                <RemoveCircleIcon fontSize="small" sx={{ color: isDark ? '#F87171' : 'error.main' }} />
+                <Typography variant="caption" sx={{ color: isDark ? '#F87171' : 'error.main' }} fontWeight={600}>
                   Old Value
                 </Typography>
               </Stack>
@@ -132,26 +168,37 @@ const FieldChange = ({ field, oldValue, newValue }) => {
                     fontSize: '0.75rem',
                     m: 0,
                     p: 1,
-                    bgcolor: 'background.paper',
+                    bgcolor: isDark ? 'rgba(0,0,0,0.3)' : 'background.paper',
                     borderRadius: 1,
                     maxHeight: 300,
                     overflow: 'auto',
+                    color: isDark ? '#D1D5DB' : 'text.primary',
+                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'divider'}`,
                   }}
                 >
                   {formattedOld}
                 </Box>
               ) : (
-                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                <Typography variant="body2" sx={{ wordBreak: 'break-all', color: isDark ? '#D1D5DB' : 'text.primary' }}>
                   {formattedOld}
                 </Typography>
               )}
             </Paper>
           </Grid>
           <Grid size={{ xs: 12, md: 6 }}>
-            <Paper variant="outlined" sx={{ p: 2, bgcolor: alpha(theme.palette.success.main, 0.04), height: '100%' }}>
+            <Paper 
+              variant="outlined" 
+              sx={{ 
+                p: 2, 
+                bgcolor: isDark ? alpha('#10B981', 0.06) : alpha(theme.palette.success.main, 0.04),
+                borderColor: isDark ? alpha('#10B981', 0.15) : alpha(theme.palette.success.main, 0.1),
+                height: '100%',
+                borderRadius: 2,
+              }}
+            >
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                <AddCircleIcon fontSize="small" color="success" />
-                <Typography variant="caption" color="success.main" fontWeight={600}>
+                <AddCircleIcon fontSize="small" sx={{ color: isDark ? '#34D399' : 'success.main' }} />
+                <Typography variant="caption" sx={{ color: isDark ? '#34D399' : 'success.main' }} fontWeight={600}>
                   New Value
                 </Typography>
               </Stack>
@@ -165,16 +212,18 @@ const FieldChange = ({ field, oldValue, newValue }) => {
                     fontSize: '0.75rem',
                     m: 0,
                     p: 1,
-                    bgcolor: 'background.paper',
+                    bgcolor: isDark ? 'rgba(0,0,0,0.3)' : 'background.paper',
                     borderRadius: 1,
                     maxHeight: 300,
                     overflow: 'auto',
+                    color: isDark ? '#D1D5DB' : 'text.primary',
+                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'divider'}`,
                   }}
                 >
                   {formattedNew}
                 </Box>
               ) : (
-                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                <Typography variant="body2" sx={{ wordBreak: 'break-all', color: isDark ? '#D1D5DB' : 'text.primary' }}>
                   {formattedNew}
                 </Typography>
               )}
@@ -189,7 +238,7 @@ const FieldChange = ({ field, oldValue, newValue }) => {
 // Component to display JSON diff
 const JsonDiffViewer = ({ oldData, newData }) => {
   const theme = useTheme();
-  const [viewMode, setViewMode] = useState('diff');
+  const isDark = theme.palette.mode === 'dark';
 
   const getDifferences = (oldObj, newObj, path = '') => {
     const differences = [];
@@ -222,7 +271,18 @@ const JsonDiffViewer = ({ oldData, newData }) => {
 
   if (differences.length === 0) {
     return (
-      <Alert severity="info" icon={<InfoIcon />}>
+      <Alert 
+        severity="info" 
+        icon={<InfoIcon />}
+        sx={{
+          bgcolor: isDark ? alpha('#3B82F6', 0.08) : undefined,
+          color: isDark ? '#93C5FD' : undefined,
+          '& .MuiAlert-icon': {
+            color: isDark ? '#60A5FA' : undefined,
+          },
+          borderRadius: 2,
+        }}
+      >
         No changes detected
       </Alert>
     );
@@ -230,7 +290,18 @@ const JsonDiffViewer = ({ oldData, newData }) => {
 
   return (
     <Box>
-      <Alert severity="info" sx={{ mb: 2 }}>
+      <Alert 
+        severity="info" 
+        sx={{ 
+          mb: 2,
+          bgcolor: isDark ? alpha('#3B82F6', 0.08) : undefined,
+          color: isDark ? '#93C5FD' : undefined,
+          '& .MuiAlert-icon': {
+            color: isDark ? '#60A5FA' : undefined,
+          },
+          borderRadius: 2,
+        }}
+      >
         Found {differences.length} field change{differences.length !== 1 ? 's' : ''}
       </Alert>
       {differences.map((diff, idx) => (
@@ -330,9 +401,11 @@ const formatTimestamp = (timestamp) => {
 
 const MeetingAudit = ({ meetingId }) => {
   const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [featureAvailable, setFeatureAvailable] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState('');
   const [filterUser, setFilterUser] = useState('');
@@ -349,15 +422,12 @@ const MeetingAudit = ({ meetingId }) => {
 
   const itemsPerPage = 20;
 
-  useEffect(() => {
-    fetchAuditLogs();
-    fetchFilterOptions();
-  }, [meetingId, page, searchTerm, filterAction, filterUser]);
-
-  const fetchAuditLogs = async () => {
+  const fetchAuditLogs = useCallback(async () => {
     if (!meetingId) return;
     
     setLoading(true);
+    setError(null);
+
     try {
       const params = {
         skip: (page - 1) * itemsPerPage,
@@ -372,27 +442,43 @@ const MeetingAudit = ({ meetingId }) => {
       setAuditLogs(data);
       setTotalPages(response.data?.pages || Math.ceil((response.data?.total || 0) / itemsPerPage) || 1);
       setTotalItems(response.data?.total || data.length);
+      setFeatureAvailable(true);
     } catch (err) {
-      console.error('Error fetching audit logs:', err);
-      setError(err.response?.data?.detail || 'Failed to load audit logs');
+      if (err.response?.status === 404) {
+        setFeatureAvailable(false);
+        setError(null);
+        setAuditLogs([]);
+      } else {
+        console.error('Error fetching audit logs:', err);
+        setError(err.response?.data?.detail || 'Failed to load audit logs');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [meetingId, page, searchTerm, filterAction, filterUser]);
 
-  const fetchFilterOptions = async () => {
+  const fetchFilterOptions = useCallback(async () => {
     try {
       const response = await api.get(`/action-tracker/meetings/${meetingId}/audit-logs/filters`);
       const data = response.data || {};
       setUsers(data.users || []);
       setActions(data.actions || []);
     } catch (err) {
-      console.error('Error fetching filter options:', err);
+      if (err.response?.status !== 404) {
+        console.debug('Filter options not available:', err.message);
+      }
     }
-  };
+  }, [meetingId]);
+
+  useEffect(() => {
+    fetchAuditLogs();
+    fetchFilterOptions();
+  }, [fetchAuditLogs, fetchFilterOptions]);
 
   const handleRefresh = () => {
+    setFeatureAvailable(true);
     fetchAuditLogs();
+    fetchFilterOptions();
   };
 
   const handleSearchChange = (event) => {
@@ -459,19 +545,104 @@ const MeetingAudit = ({ meetingId }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Show "Coming Soon" when feature is not available (404)
+  if (!featureAvailable && !loading) {
+    return (
+      <Fade in timeout={400}>
+        <Paper 
+          sx={{ 
+            p: { xs: 4, sm: 6 }, 
+            textAlign: 'center', 
+            borderRadius: 3,
+            border: `1px dashed ${isDark ? 'rgba(255,255,255,0.1)' : theme.palette.divider}`,
+            bgcolor: isDark ? alpha(theme.palette.background.paper, 0.5) : alpha(theme.palette.background.paper, 0.8),
+          }}
+        >
+          <ConstructionIcon 
+            sx={{ 
+              fontSize: 64, 
+              color: isDark ? '#FCD34D' : theme.palette.warning.main,
+              opacity: 0.6,
+              mb: 2
+            }} 
+          />
+          <Typography variant="h5" gutterBottom fontWeight={600} sx={{ color: isDark ? '#F3F4F6' : 'text.primary' }}>
+            Audit Logs Coming Soon
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 450, mx: 'auto', mb: 3 }}>
+            The audit logs feature is currently under development. 
+            You'll be able to see all security and activity logs for this meeting here soon.
+          </Typography>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            size="small"
+            sx={{ 
+              borderRadius: 2,
+              borderColor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
+              color: isDark ? '#D1D5DB' : undefined,
+              '&:hover': {
+                borderColor: isDark ? 'rgba(255,255,255,0.3)' : undefined,
+                bgcolor: isDark ? 'rgba(255,255,255,0.05)' : undefined,
+              }
+            }}
+          >
+            Check Again
+          </Button>
+        </Paper>
+      </Fade>
+    );
+  }
+
   if (loading && auditLogs.length === 0) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-        <CircularProgress />
+        <CircularProgress sx={{ color: isDark ? '#818CF8' : 'primary.main' }} />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Alert severity="error" sx={{ borderRadius: 2 }}>
+      <Alert 
+        severity="error" 
+        sx={{ 
+          borderRadius: 2,
+          bgcolor: isDark ? alpha('#EF4444', 0.08) : undefined,
+          color: isDark ? '#FCA5A5' : undefined,
+          '& .MuiAlert-icon': {
+            color: isDark ? '#F87171' : undefined,
+          },
+        }}
+        action={
+          <Button color="inherit" size="small" onClick={handleRefresh}>
+            Retry
+          </Button>
+        }
+      >
         {error}
       </Alert>
+    );
+  }
+
+  if (auditLogs.length === 0) {
+    return (
+      <Paper sx={{ 
+        p: 6, 
+        textAlign: 'center', 
+        borderRadius: 3,
+        bgcolor: isDark ? alpha(theme.palette.background.paper, 0.5) : undefined,
+        border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : theme.palette.divider}`,
+      }}>
+        <HistoryIcon sx={{ fontSize: 64, color: isDark ? '#4B5563' : '#cbd5e1', mb: 2 }} />
+        <Typography variant="h6" color="text.secondary" gutterBottom>
+          No Audit Logs Found
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          No activities have been logged for this meeting yet.
+        </Typography>
+      </Paper>
     );
   }
 
@@ -481,11 +652,19 @@ const MeetingAudit = ({ meetingId }) => {
         {/* Header with filters */}
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" spacing={2}>
           <Stack direction="row" alignItems="center" spacing={1}>
-            <HistoryIcon color="primary" />
-            <Typography variant="h6" fontWeight={700}>
+            <HistoryIcon sx={{ color: isDark ? '#818CF8' : 'primary.main' }} />
+            <Typography variant="h6" fontWeight={700} sx={{ color: isDark ? '#F3F4F6' : 'text.primary' }}>
               Audit Logs
             </Typography>
-            <Chip label={`${totalItems} entries`} size="small" variant="outlined" />
+            <Chip 
+              label={`${totalItems} entries`} 
+              size="small" 
+              variant="outlined"
+              sx={{
+                color: isDark ? '#D1D5DB' : undefined,
+                borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+              }}
+            />
           </Stack>
           
           <Stack direction="row" spacing={1}>
@@ -494,27 +673,59 @@ const MeetingAudit = ({ meetingId }) => {
               placeholder="Search logs..."
               value={searchTerm}
               onChange={handleSearchChange}
-              sx={{ width: 250 }}
+              sx={{ 
+                width: 250,
+                '& .MuiOutlinedInput-root': {
+                  color: isDark ? '#D1D5DB' : undefined,
+                  '& fieldset': {
+                    borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+                  },
+                  '&:hover fieldset': {
+                    borderColor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: isDark ? '#818CF8' : undefined,
+                  },
+                },
+                '& .MuiInputLabel-root': {
+                  color: isDark ? '#9CA3AF' : undefined,
+                },
+                '& .MuiInputAdornment-root': {
+                  color: isDark ? '#9CA3AF' : undefined,
+                },
+              }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
+                    <SearchIcon fontSize="small" sx={{ color: isDark ? '#9CA3AF' : undefined }} />
                   </InputAdornment>
                 ),
               }}
             />
             <Tooltip title="Filter">
-              <IconButton onClick={handleFilterMenuOpen} size="small">
+              <IconButton 
+                onClick={handleFilterMenuOpen} 
+                size="small"
+                sx={{ color: isDark ? '#D1D5DB' : undefined }}
+              >
                 <FilterListIcon />
               </IconButton>
             </Tooltip>
             <Tooltip title="Export CSV">
-              <IconButton onClick={handleExportCSV} size="small">
+              <IconButton 
+                onClick={handleExportCSV} 
+                size="small"
+                sx={{ color: isDark ? '#D1D5DB' : undefined }}
+              >
                 <DownloadIcon />
               </IconButton>
             </Tooltip>
             <Tooltip title="Refresh">
-              <IconButton onClick={handleRefresh} size="small">
+              <IconButton 
+                onClick={handleRefresh} 
+                size="small"
+                sx={{ color: isDark ? '#D1D5DB' : undefined }}
+              >
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
@@ -531,6 +742,10 @@ const MeetingAudit = ({ meetingId }) => {
                 size="small"
                 color="primary"
                 variant="outlined"
+                sx={{
+                  color: isDark ? '#D1D5DB' : undefined,
+                  borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+                }}
               />
             )}
             {filterUser && (
@@ -540,6 +755,10 @@ const MeetingAudit = ({ meetingId }) => {
                 size="small"
                 color="primary"
                 variant="outlined"
+                sx={{
+                  color: isDark ? '#D1D5DB' : undefined,
+                  borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+                }}
               />
             )}
             {searchTerm && (
@@ -549,9 +768,24 @@ const MeetingAudit = ({ meetingId }) => {
                 size="small"
                 color="primary"
                 variant="outlined"
+                sx={{
+                  color: isDark ? '#D1D5DB' : undefined,
+                  borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+                }}
               />
             )}
-            <Button size="small" onClick={handleClearFilters}>Clear All</Button>
+            <Button 
+              size="small" 
+              onClick={handleClearFilters}
+              sx={{ 
+                color: isDark ? '#D1D5DB' : undefined,
+                '&:hover': {
+                  bgcolor: isDark ? 'rgba(255,255,255,0.05)' : undefined,
+                }
+              }}
+            >
+              Clear All
+            </Button>
           </Stack>
         )}
 
@@ -560,17 +794,35 @@ const MeetingAudit = ({ meetingId }) => {
           anchorEl={anchorEl}
           open={Boolean(anchorEl)}
           onClose={handleFilterMenuClose}
-          PaperProps={{ sx: { minWidth: 200, maxHeight: 400 } }}
+          PaperProps={{ 
+            sx: { 
+              minWidth: 200, 
+              maxHeight: 400,
+              bgcolor: isDark ? '#1F2937' : undefined,
+              border: isDark ? '1px solid rgba(255,255,255,0.06)' : undefined,
+            }
+          }}
         >
           <MenuItem disabled sx={{ opacity: 1, fontWeight: 600 }}>
-            <Typography variant="subtitle2">Filter by Action</Typography>
+            <Typography variant="subtitle2" sx={{ color: isDark ? '#F3F4F6' : 'text.primary' }}>
+              Filter by Action
+            </Typography>
           </MenuItem>
-          <Divider />
+          <Divider sx={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined }} />
           {actions.map((action) => (
             <MenuItem 
               key={action} 
               onClick={() => handleFilterActionChange(action)}
               selected={filterAction === action}
+              sx={{
+                color: isDark ? '#D1D5DB' : undefined,
+                '&.Mui-selected': {
+                  bgcolor: isDark ? 'rgba(129, 140, 248, 0.15)' : undefined,
+                },
+                '&:hover': {
+                  bgcolor: isDark ? 'rgba(255,255,255,0.05)' : undefined,
+                },
+              }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 {getActionIcon(action)}
@@ -579,20 +831,39 @@ const MeetingAudit = ({ meetingId }) => {
             </MenuItem>
           ))}
           
-          <Divider sx={{ my: 1 }} />
+          <Divider sx={{ my: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined }} />
           
           <MenuItem disabled sx={{ opacity: 1, fontWeight: 600 }}>
-            <Typography variant="subtitle2">Filter by User</Typography>
+            <Typography variant="subtitle2" sx={{ color: isDark ? '#F3F4F6' : 'text.primary' }}>
+              Filter by User
+            </Typography>
           </MenuItem>
-          <Divider />
+          <Divider sx={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined }} />
           {users.map((user) => (
             <MenuItem 
               key={user.id} 
               onClick={() => handleFilterUserChange(user.id)}
               selected={filterUser === user.id}
+              sx={{
+                color: isDark ? '#D1D5DB' : undefined,
+                '&.Mui-selected': {
+                  bgcolor: isDark ? 'rgba(129, 140, 248, 0.15)' : undefined,
+                },
+                '&:hover': {
+                  bgcolor: isDark ? 'rgba(255,255,255,0.05)' : undefined,
+                },
+              }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem' }}>
+                <Avatar 
+                  sx={{ 
+                    width: 24, 
+                    height: 24, 
+                    fontSize: '0.75rem',
+                    bgcolor: isDark ? '#4B5563' : undefined,
+                    color: isDark ? '#D1D5DB' : undefined,
+                  }}
+                >
                   {user.name?.[0] || user.email?.[0] || 'U'}
                 </Avatar>
                 <Typography variant="body2">{user.name || user.email}</Typography>
@@ -602,100 +873,144 @@ const MeetingAudit = ({ meetingId }) => {
         </Menu>
 
         {/* Audit Logs Table */}
-        {auditLogs.length === 0 ? (
-          <Paper sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
-            <HistoryIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No Audit Logs Found
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              No activities have been logged for this meeting yet.
-            </Typography>
-          </Paper>
-        ) : (
-          <>
-            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-              <Table>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-                    <TableCell sx={{ fontWeight: 700 }}>Timestamp</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>User</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Action</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Entity</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="center">Details</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {auditLogs.map((log) => (
-                    <TableRow key={log.id} hover>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                        <Tooltip title={formatTimestamp(log.timestamp)}>
-                          <Typography variant="body2">
-                            {formatTimestamp(log.timestamp)}
-                          </Typography>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: '#6366f1' }}>
-                            {log.username?.[0] || log.user_email?.[0] || 'U'}
-                          </Avatar>
-                          <Typography variant="body2">
-                            {log.username || log.user_email || 'System'}
-                          </Typography>
-                        </Stack>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          size="small"
-                          label={log.action}
-                          color={getActionColor(log.action)}
-                          icon={getActionIcon(log.action)}
-                          sx={{ height: 26, fontWeight: 500 }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {log.table_name?.replace(/_/g, ' ') || 'Meeting'}
-                        </Typography>
-                        {log.record_id && (
-                          <Typography variant="caption" color="text.secondary">
-                            ID: {log.record_id.substring(0, 12)}...
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ maxWidth: 300 }}>
-                          {log.changes_summary || 'No description'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Tooltip title="View Details">
-                          <IconButton size="small" onClick={() => handleViewDetails(log)}>
-                            <VisibilityIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+        <TableContainer 
+          component={Paper} 
+          variant="outlined" 
+          sx={{ 
+            borderRadius: 2,
+            borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined,
+            bgcolor: isDark ? 'transparent' : undefined,
+          }}
+        >
+          <Table>
+            <TableHead>
+              <TableRow sx={{ 
+                bgcolor: isDark ? 'rgba(255,255,255,0.03)' : '#f1f5f9',
+                '& .MuiTableCell-root': {
+                  color: isDark ? '#D1D5DB' : undefined,
+                  borderBottom: isDark ? '1px solid rgba(255,255,255,0.06)' : undefined,
+                }
+              }}>
+                <TableCell sx={{ fontWeight: 700 }}>Timestamp</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>User</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Action</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Entity</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">Details</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {auditLogs.map((log) => (
+                <TableRow 
+                  key={log.id} 
+                  hover
+                  sx={{
+                    '&:hover': {
+                      bgcolor: isDark ? 'rgba(255,255,255,0.02)' : undefined,
+                    },
+                    '& .MuiTableCell-root': {
+                      borderBottom: isDark ? '1px solid rgba(255,255,255,0.04)' : undefined,
+                      color: isDark ? '#D1D5DB' : undefined,
+                    }
+                  }}
+                >
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    <Tooltip title={formatTimestamp(log.timestamp)}>
+                      <Typography variant="body2">
+                        {formatTimestamp(log.timestamp)}
+                      </Typography>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Avatar 
+                        sx={{ 
+                          width: 28, 
+                          height: 28, 
+                          fontSize: '0.75rem', 
+                          bgcolor: isDark ? '#4B5563' : '#6366f1',
+                          color: isDark ? '#D1D5DB' : '#fff',
+                        }}
+                      >
+                        {log.username?.[0] || log.user_email?.[0] || 'U'}
+                      </Avatar>
+                      <Typography variant="body2">
+                        {log.username || log.user_email || 'System'}
+                      </Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={log.action}
+                      color={getActionColor(log.action)}
+                      icon={getActionIcon(log.action)}
+                      sx={{ 
+                        height: 26, 
+                        fontWeight: 500,
+                        ...(isDark && {
+                          '& .MuiChip-label': { color: '#D1D5DB' },
+                          '& .MuiChip-icon': { color: '#D1D5DB' },
+                        })
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" color="text.secondary">
+                      {log.table_name?.replace(/_/g, ' ') || 'Meeting'}
+                    </Typography>
+                    {log.record_id && (
+                      <Typography variant="caption" color="text.secondary">
+                        ID: {log.record_id.substring(0, 12)}...
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" sx={{ maxWidth: 300 }}>
+                      {log.changes_summary || 'No description'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Tooltip title="View Details">
+                      <IconButton 
+                        size="small" 
+                        onClick={() => handleViewDetails(log)}
+                        sx={{ color: isDark ? '#9CA3AF' : undefined }}
+                      >
+                        <VisibilityIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-                <Pagination
-                  count={totalPages}
-                  page={page}
-                  onChange={(e, value) => setPage(value)}
-                  color="primary"
-                  size="large"
-                />
-              </Box>
-            )}
-          </>
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+            <Pagination
+              count={totalPages}
+              page={page}
+              onChange={(e, value) => setPage(value)}
+              color="primary"
+              size="large"
+              sx={{
+                '& .MuiPaginationItem-root': {
+                  color: isDark ? '#D1D5DB' : undefined,
+                  borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+                },
+                '& .MuiPaginationItem-root.Mui-selected': {
+                  bgcolor: isDark ? 'rgba(129, 140, 248, 0.2)' : undefined,
+                  color: isDark ? '#818CF8' : undefined,
+                },
+                '& .MuiPaginationItem-root:hover': {
+                  bgcolor: isDark ? 'rgba(255,255,255,0.05)' : undefined,
+                },
+              }}
+            />
+          </Box>
         )}
       </Stack>
 
@@ -705,8 +1020,15 @@ const MeetingAudit = ({ meetingId }) => {
         onClose={() => setShowDetailsDialog(false)} 
         maxWidth="lg" 
         fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: isDark ? '#1F2937' : undefined,
+            borderRadius: 3,
+            border: isDark ? '1px solid rgba(255,255,255,0.06)' : undefined,
+          }
+        }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
+        <DialogTitle sx={{ pb: 1, color: isDark ? '#F3F4F6' : undefined }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Stack direction="row" spacing={1.5} alignItems="center">
               <Chip
@@ -714,27 +1036,52 @@ const MeetingAudit = ({ meetingId }) => {
                 label={selectedLog?.action}
                 color={getActionColor(selectedLog?.action)}
                 icon={getActionIcon(selectedLog?.action)}
+                sx={{
+                  ...(isDark && {
+                    '& .MuiChip-label': { color: '#D1D5DB' },
+                    '& .MuiChip-icon': { color: '#D1D5DB' },
+                  })
+                }}
               />
               <Typography variant="h6" fontWeight={700}>
                 Audit Log Details
               </Typography>
             </Stack>
-            <IconButton onClick={() => setShowDetailsDialog(false)} size="small">
+            <IconButton 
+              onClick={() => setShowDetailsDialog(false)} 
+              size="small"
+              sx={{ color: isDark ? '#9CA3AF' : undefined }}
+            >
               <Close />
             </IconButton>
           </Stack>
         </DialogTitle>
-        <Divider />
+        <Divider sx={{ borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined }} />
         <DialogContent>
           {selectedLog && (
             <Stack spacing={2} sx={{ mt: 1 }}>
               {/* Tab navigation */}
-              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ 
+                borderBottom: 1, 
+                borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'divider',
+              }}>
                 <Stack direction="row" spacing={2}>
                   <Button 
                     variant={detailsTab === 0 ? 'contained' : 'text'}
                     onClick={() => setDetailsTab(0)}
                     startIcon={<InfoIcon />}
+                    sx={{
+                      ...(detailsTab === 0 && {
+                        bgcolor: isDark ? '#818CF8' : undefined,
+                        '&:hover': {
+                          bgcolor: isDark ? '#6366F1' : undefined,
+                        },
+                      }),
+                      ...(detailsTab !== 0 && {
+                        color: isDark ? '#D1D5DB' : undefined,
+                      }),
+                      borderRadius: 2,
+                    }}
                   >
                     Overview
                   </Button>
@@ -742,6 +1089,18 @@ const MeetingAudit = ({ meetingId }) => {
                     variant={detailsTab === 1 ? 'contained' : 'text'}
                     onClick={() => setDetailsTab(1)}
                     startIcon={<DifferenceIcon />}
+                    sx={{
+                      ...(detailsTab === 1 && {
+                        bgcolor: isDark ? '#818CF8' : undefined,
+                        '&:hover': {
+                          bgcolor: isDark ? '#6366F1' : undefined,
+                        },
+                      }),
+                      ...(detailsTab !== 1 && {
+                        color: isDark ? '#D1D5DB' : undefined,
+                      }),
+                      borderRadius: 2,
+                    }}
                   >
                     Changes
                   </Button>
@@ -749,6 +1108,18 @@ const MeetingAudit = ({ meetingId }) => {
                     variant={detailsTab === 2 ? 'contained' : 'text'}
                     onClick={() => setDetailsTab(2)}
                     startIcon={<CodeIcon />}
+                    sx={{
+                      ...(detailsTab === 2 && {
+                        bgcolor: isDark ? '#818CF8' : undefined,
+                        '&:hover': {
+                          bgcolor: isDark ? '#6366F1' : undefined,
+                        },
+                      }),
+                      ...(detailsTab !== 2 && {
+                        color: isDark ? '#D1D5DB' : undefined,
+                      }),
+                      borderRadius: 2,
+                    }}
                   >
                     Raw Data
                   </Button>
@@ -757,23 +1128,31 @@ const MeetingAudit = ({ meetingId }) => {
 
               {/* Overview Tab */}
               {detailsTab === 0 && (
-                <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc' }}>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 3, 
+                    bgcolor: isDark ? 'rgba(255,255,255,0.02)' : '#f8fafc',
+                    borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined,
+                    borderRadius: 2,
+                  }}
+                >
                   <Grid container spacing={3}>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">Timestamp</Typography>
-                      <Typography variant="body1" fontWeight={500}>
+                      <Typography variant="body1" fontWeight={500} sx={{ color: isDark ? '#E5E7EB' : 'text.primary' }}>
                         {formatTimestamp(selectedLog.timestamp)}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">User</Typography>
-                      <Typography variant="body1" fontWeight={500}>
+                      <Typography variant="body1" fontWeight={500} sx={{ color: isDark ? '#E5E7EB' : 'text.primary' }}>
                         {selectedLog.username || selectedLog.user_email || 'System'}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">IP Address</Typography>
-                      <Typography variant="body2" fontFamily="monospace">
+                      <Typography variant="body2" fontFamily="monospace" sx={{ color: isDark ? '#D1D5DB' : 'text.primary' }}>
                         {selectedLog.ip_address || 'N/A'}
                       </Typography>
                     </Grid>
@@ -783,23 +1162,32 @@ const MeetingAudit = ({ meetingId }) => {
                         label={selectedLog.status || 'SUCCESS'} 
                         size="small" 
                         color={selectedLog.status === 'FAILURE' ? 'error' : 'success'}
+                        sx={{
+                          ...(isDark && {
+                            '& .MuiChip-label': { color: '#D1D5DB' },
+                          })
+                        }}
                       />
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">Table</Typography>
-                      <Typography variant="body2" sx={{ textTransform: 'capitalize' }}>
+                      <Typography variant="body2" sx={{ textTransform: 'capitalize', color: isDark ? '#D1D5DB' : 'text.primary' }}>
                         {selectedLog.table_name?.replace(/_/g, ' ') || 'Meeting'}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">Record ID</Typography>
                       <Stack direction="row" alignItems="center" spacing={1}>
-                        <Typography variant="body2" fontFamily="monospace">
+                        <Typography variant="body2" fontFamily="monospace" sx={{ color: isDark ? '#D1D5DB' : 'text.primary' }}>
                           {selectedLog.record_id || 'N/A'}
                         </Typography>
                         {selectedLog.record_id && (
                           <Tooltip title={copied ? "Copied!" : "Copy ID"}>
-                            <IconButton size="small" onClick={() => handleCopyJson(selectedLog.record_id)}>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleCopyJson(selectedLog.record_id)}
+                              sx={{ color: isDark ? '#9CA3AF' : undefined }}
+                            >
                               {copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
                             </IconButton>
                           </Tooltip>
@@ -809,7 +1197,7 @@ const MeetingAudit = ({ meetingId }) => {
                     {selectedLog.endpoint && (
                       <Grid size={{ xs: 12 }}>
                         <Typography variant="caption" color="text.secondary">Endpoint</Typography>
-                        <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all' }}>
+                        <Typography variant="body2" fontFamily="monospace" sx={{ wordBreak: 'break-all', color: isDark ? '#D1D5DB' : 'text.primary' }}>
                           {selectedLog.endpoint}
                         </Typography>
                       </Grid>
@@ -817,7 +1205,18 @@ const MeetingAudit = ({ meetingId }) => {
                     {selectedLog.changes_summary && (
                       <Grid size={{ xs: 12 }}>
                         <Typography variant="caption" color="text.secondary">Summary</Typography>
-                        <Alert severity="info" sx={{ mt: 0.5 }}>
+                        <Alert 
+                          severity="info" 
+                          sx={{ 
+                            mt: 0.5,
+                            bgcolor: isDark ? alpha('#3B82F6', 0.08) : undefined,
+                            color: isDark ? '#93C5FD' : undefined,
+                            '& .MuiAlert-icon': {
+                              color: isDark ? '#60A5FA' : undefined,
+                            },
+                            borderRadius: 2,
+                          }}
+                        >
                           {selectedLog.changes_summary}
                         </Alert>
                       </Grid>
@@ -836,7 +1235,14 @@ const MeetingAudit = ({ meetingId }) => {
 
               {/* Changes Tab */}
               {detailsTab === 1 && (
-                <Paper variant="outlined" sx={{ p: 3 }}>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 3,
+                    borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined,
+                    borderRadius: 2,
+                  }}
+                >
                   <JsonDiffViewer 
                     oldData={selectedLog.old_values || selectedLog.old_data || {}}
                     newData={selectedLog.new_values || selectedLog.new_data || {}}
@@ -846,13 +1252,28 @@ const MeetingAudit = ({ meetingId }) => {
 
               {/* Raw Data Tab */}
               {detailsTab === 2 && (
-                <Paper variant="outlined" sx={{ p: 3 }}>
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    p: 3,
+                    borderColor: isDark ? 'rgba(255,255,255,0.06)' : undefined,
+                    borderRadius: 2,
+                  }}
+                >
                   <Stack direction="row" justifyContent="flex-end" sx={{ mb: 2 }}>
                     <Button
                       size="small"
                       variant="outlined"
                       onClick={() => handleCopyJson(selectedLog)}
                       startIcon={copied ? <CheckIcon /> : <ContentCopyIcon />}
+                      sx={{
+                        borderColor: isDark ? 'rgba(255,255,255,0.12)' : undefined,
+                        color: isDark ? '#D1D5DB' : undefined,
+                        '&:hover': {
+                          borderColor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
+                          bgcolor: isDark ? 'rgba(255,255,255,0.05)' : undefined,
+                        },
+                      }}
                     >
                       {copied ? 'Copied!' : 'Copy Full JSON'}
                     </Button>
@@ -866,11 +1287,12 @@ const MeetingAudit = ({ meetingId }) => {
                       fontSize: '0.75rem',
                       m: 0,
                       p: 2,
-                      bgcolor: '#1e1e1e',
-                      color: '#d4d4d4',
+                      bgcolor: isDark ? '#111827' : '#1e1e1e',
+                      color: isDark ? '#D1D5DB' : '#d4d4d4',
                       borderRadius: 2,
                       maxHeight: 500,
                       overflow: 'auto',
+                      border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'transparent'}`,
                     }}
                   >
                     {JSON.stringify({
@@ -900,8 +1322,17 @@ const MeetingAudit = ({ meetingId }) => {
             </Stack>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowDetailsDialog(false)} variant="contained">
+        <DialogActions sx={{ borderTop: isDark ? '1px solid rgba(255,255,255,0.06)' : undefined }}>
+          <Button 
+            onClick={() => setShowDetailsDialog(false)} 
+            variant="contained"
+            sx={{
+              bgcolor: isDark ? '#818CF8' : undefined,
+              '&:hover': {
+                bgcolor: isDark ? '#6366F1' : undefined,
+              },
+            }}
+          >
             Close
           </Button>
         </DialogActions>

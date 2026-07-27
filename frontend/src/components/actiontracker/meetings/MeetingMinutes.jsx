@@ -61,6 +61,114 @@ const getPlainTextPreview = (html, maxLength = 150) => {
   return plainText.substring(0, maxLength) + '...';
 };
 
+// ==================== RTF RENDERER COMPONENT ====================
+
+const RichTextRenderer = ({ content, isDarkMode }) => {
+  if (!content) return null;
+  
+  // Clean up content - remove any outer <p> tags that might cause extra spacing
+  const cleanedContent = content.trim();
+  
+  return (
+    <Box
+      sx={{
+        '&': {
+          color: isDarkMode ? '#D1D5DB' : 'text.primary',
+        },
+        '& p': {
+          margin: '0 0 0.5rem 0',
+          lineHeight: 1.6,
+        },
+        '& p:last-child': {
+          marginBottom: 0,
+        },
+        '& ul, & ol': {
+          margin: '0.5rem 0',
+          paddingLeft: '1.5rem',
+        },
+        '& li': {
+          marginBottom: '0.25rem',
+        },
+        '& li:last-child': {
+          marginBottom: 0,
+        },
+        '& strong': {
+          fontWeight: 700,
+          color: isDarkMode ? '#FFFFFF' : undefined,
+        },
+        '& em, & i': {
+          fontStyle: 'italic',
+        },
+        '& u': {
+          textDecoration: 'underline',
+        },
+        '& h1, & h2, & h3, & h4, & h5, & h6': {
+          margin: '0.75rem 0 0.5rem 0',
+          fontWeight: 600,
+          color: isDarkMode ? '#FFFFFF' : undefined,
+        },
+        '& h1:first-child, & h2:first-child, & h3:first-child, & h4:first-child, & h5:first-child, & h6:first-child': {
+          marginTop: 0,
+        },
+        '& a': {
+          color: isDarkMode ? '#818CF8' : '#6366F1',
+          textDecoration: 'underline',
+          '&:hover': {
+            color: isDarkMode ? '#A78BFA' : '#4F46E5',
+          },
+        },
+        '& blockquote': {
+          borderLeft: `4px solid ${isDarkMode ? '#6B7280' : '#E5E7EB'}`,
+          padding: '0.5rem 1rem',
+          margin: '0.5rem 0',
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02),
+          borderRadius: '4px',
+        },
+        '& code': {
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.06),
+          padding: '0.125rem 0.375rem',
+          borderRadius: '4px',
+          fontFamily: 'monospace',
+          fontSize: '0.9em',
+        },
+        '& pre': {
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.04),
+          padding: '0.75rem',
+          borderRadius: '4px',
+          overflowX: 'auto',
+          fontFamily: 'monospace',
+          fontSize: '0.9em',
+          margin: '0.5rem 0',
+        },
+        '& table': {
+          borderCollapse: 'collapse',
+          width: '100%',
+          margin: '0.5rem 0',
+        },
+        '& th, & td': {
+          border: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+          padding: '0.5rem',
+          textAlign: 'left',
+        },
+        '& th': {
+          backgroundColor: isDarkMode ? '#1F2937' : '#F9FAFB',
+          fontWeight: 600,
+        },
+        '& img': {
+          maxWidth: '100%',
+          height: 'auto',
+          borderRadius: '4px',
+        },
+        // Ensure safe rendering of HTML content
+        wordBreak: 'break-word',
+        overflowWrap: 'break-word',
+      }}
+      // Use dangerouslySetInnerHTML to render the rich text content
+      dangerouslySetInnerHTML={{ __html: cleanedContent }}
+    />
+  );
+};
+
 // ==================== MAIN COMPONENT ====================
 
 const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
@@ -78,7 +186,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   const previousMinutesStringRef = useRef('');
 
   // ==================== LOCAL STATE ====================
-  // ✅ FIX: Initialize minutes as empty array
   const [minutes, setMinutes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -106,10 +213,8 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
       
       if (isMountedRef.current) {
-        // ✅ FIX: Ensure we always set an array
         let minutesData = [];
         
-        // Handle different response formats
         if (response.data) {
           if (Array.isArray(response.data)) {
             minutesData = response.data;
@@ -118,7 +223,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
           } else if (response.data.results && Array.isArray(response.data.results)) {
             minutesData = response.data.results;
           } else if (typeof response.data === 'object') {
-            // If it's a single object, wrap it in an array
             minutesData = [response.data];
           }
         }
@@ -129,7 +233,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
       if (isMountedRef.current) {
         console.error('Error fetching minutes:', err);
         setError(err.message || 'Failed to load minutes');
-        // ✅ FIX: Set minutes to empty array on error
         setMinutes([]);
       }
     } finally {
@@ -158,9 +261,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
   }, [meetingId, fetchMinutes]);
 
   useEffect(() => {
-    // ✅ FIX: Safely update minutes from Redux state
     if (minutesList && isMountedRef.current) {
-      // Ensure minutesList is an array
       const newMinutes = Array.isArray(minutesList) ? minutesList : [];
       const currentString = JSON.stringify(newMinutes);
       if (currentString !== previousMinutesStringRef.current) {
@@ -252,7 +353,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== RENDER ====================
 
-  // ✅ FIX: Ensure minutes is always an array before using .length
   const minutesCount = Array.isArray(minutes) ? minutes.length : 0;
 
   if (loading && minutesCount === 0) {
@@ -338,7 +438,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         </Alert>
       )}
 
-      {/* ✅ FIX: Use minutesCount for empty check */}
       {minutesCount === 0 ? (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           <DescriptionIcon sx={{ fontSize: 64, color: isDarkMode ? '#6B7280' : 'action.disabled', mb: 2 }} />
@@ -358,7 +457,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
         </Box>
       ) : (
         <Stack spacing={2}>
-          {/* ✅ FIX: Use minutes array safely */}
           {Array.isArray(minutes) && minutes.map((minute) => {
             const isExpanded = expandedMinutes.includes(minute.id);
             const actionCount = minute.actions?.length || 0;
@@ -455,47 +553,53 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                   </AccordionSummary>
                   <AccordionDetails sx={{ px: 3, pb: 3, pt: 1 }}>
                     <Divider sx={{ mb: 2, borderColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#E5E7EB' }} />
-                    <Stack spacing={2}>
+                    <Stack spacing={3}>
                       {minute.discussion && (
                         <Box>
-                          <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.secondary' }}>
-                            Discussion
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              mt: 0.5,
-                              color: isDarkMode ? '#D1D5DB' : 'text.primary',
-                              whiteSpace: 'pre-wrap',
+                          <Typography 
+                            variant="caption" 
+                            fontWeight={600} 
+                            sx={{ 
+                              color: isDarkMode ? '#D1D5DB' : 'text.secondary',
+                              display: 'block',
+                              mb: 1,
                             }}
                           >
-                            {minute.discussion}
+                            Discussion
                           </Typography>
+                          <RichTextRenderer content={minute.discussion} isDarkMode={isDarkMode} />
                         </Box>
                       )}
                       {minute.decisions && (
                         <Box>
-                          <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.secondary' }}>
-                            Decisions
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              mt: 0.5,
-                              color: isDarkMode ? '#D1D5DB' : 'text.primary',
-                              whiteSpace: 'pre-wrap',
+                          <Typography 
+                            variant="caption" 
+                            fontWeight={600} 
+                            sx={{ 
+                              color: isDarkMode ? '#D1D5DB' : 'text.secondary',
+                              display: 'block',
+                              mb: 1,
                             }}
                           >
-                            {minute.decisions}
+                            Decisions
                           </Typography>
+                          <RichTextRenderer content={minute.decisions} isDarkMode={isDarkMode} />
                         </Box>
                       )}
                       {actionCount > 0 && (
                         <Box>
-                          <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.secondary' }}>
+                          <Typography 
+                            variant="caption" 
+                            fontWeight={600} 
+                            sx={{ 
+                              color: isDarkMode ? '#D1D5DB' : 'text.secondary',
+                              display: 'block',
+                              mb: 1,
+                            }}
+                          >
                             Actions ({actionCount})
                           </Typography>
-                          <Box sx={{ mt: 1 }}>
+                          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                             {minute.actions.map((action) => (
                               <Chip
                                 key={action.id}
@@ -503,8 +607,6 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
                                 size="small"
                                 variant="outlined"
                                 sx={{
-                                  mr: 1,
-                                  mb: 1,
                                   borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : '#E5E7EB',
                                   color: isDarkMode ? '#D1D5DB' : 'text.primary',
                                 }}

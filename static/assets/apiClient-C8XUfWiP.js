@@ -1,2 +1,0 @@
-import{n as e}from"./utils-vendor-DRjr6NWJ.js";var t=e.create({baseURL:`/api/v1`,headers:{"Content-Type":`application/json`}});t.interceptors.request.use(e=>{let t=localStorage.getItem(`access_token`);return t&&(e.headers.Authorization=`Bearer ${t}`),e},e=>Promise.reject(e)),t.interceptors.response.use(e=>e,e=>e.config?.url?.includes(`/profile-picture/base64`)&&e.response?.status===404?Promise.resolve({data:{has_picture:!1,profile_picture:null},status:200,config:e.config,headers:{}}):Promise.reject(e));export{t};
-//# sourceMappingURL=apiClient-C8XUfWiP.js.map

@@ -5,28 +5,84 @@ import {
   Box, Typography, Button, Paper, Stack, Chip, IconButton,
   Grid, Divider, CircularProgress, Alert, Snackbar,
   Tooltip, Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, useTheme, useMediaQuery, alpha, Skeleton, Breadcrumbs,
-  Link, Dialog, DialogTitle, DialogContent, DialogContentText,
+  TableRow, useTheme, useMediaQuery, alpha, Skeleton,
+  Dialog, DialogTitle, DialogContent, DialogContentText,
   DialogActions, Menu, MenuItem, ListItemIcon, Card, CardContent,
   ButtonGroup, SpeedDial, SpeedDialAction, SpeedDialIcon,
   useScrollTrigger, Fade, TextField, InputAdornment, ToggleButton, ToggleButtonGroup,
-  CardHeader, Avatar, Pagination,
+  Avatar, Pagination, LinearProgress, Tabs, Tab, Collapse,
+  Container,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon, Edit as Edit, Delete as Delete, Add as Add,
+  ArrowBack as ArrowBackIcon, Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon,
   Repeat as RepeatIcon, EventNote as EventNoteIcon, Today as TodayIcon,
   Schedule as ScheduleIcon, LocationOn as LocationIcon, Refresh as RefreshIcon,
   MoreVert as MoreVertIcon, Download as DownloadIcon, CalendarToday as CalendarTodayIcon,
   CheckCircle as CheckCircleIcon, Warning as WarningIcon, Business as BusinessIcon,
   MeetingRoom as MeetingRoomIcon, Videocam as VideocamIcon, ContentCopy as ContentCopyIcon,
   Search as SearchIcon, Clear as ClearIcon, ViewModule as ViewModuleIcon,
-  ViewList as ViewListIcon, FilterList as FilterListIcon,
+  ViewList as ViewListIcon, FilterList as FilterListIcon, CalendarMonth as CalendarMonthIcon,
+  Timeline as TimelineIcon, Check as CheckIcon,
+  Close as CloseIcon, Circle as CircleIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  KeyboardArrowUp as KeyboardArrowUpIcon,
+  BarChart as BarChartIcon,
 } from '@mui/icons-material';
 import api from '../../../services/api';
 import { COLORS } from './styles/colors';
 import { formatDate, formatTime, getRecurrenceDescription } from './utils/helpers';
 
-const ROWS_PER_PAGE_OPTIONS = [10, 25, 50];
+// Mini stat pill component - compact for mobile
+const TopStatPill = ({ label, value, icon, color }) => (
+  <Stack 
+    direction="row" 
+    alignItems="center" 
+    spacing={1} 
+    sx={{ 
+      px: 1.5, 
+      py: 0.8, 
+      borderRadius: 2, 
+      bgcolor: alpha(color, 0.08),
+      border: '1px solid',
+      borderColor: alpha(color, 0.15),
+      flex: '1 1 auto',
+      minWidth: { xs: 'calc(50% - 4px)', sm: 'auto' },
+      maxWidth: { xs: 'calc(50% - 4px)', sm: 'none' },
+    }}
+  >
+    <Box sx={{ color, display: 'flex', alignItems: 'center' }}>{icon}</Box>
+    <Box sx={{ minWidth: 0 }}>
+      <Typography 
+        variant="caption" 
+        color="text.secondary" 
+        fontWeight={600} 
+        display="block" 
+        sx={{ 
+          lineHeight: 1, 
+          fontSize: { xs: '0.55rem', sm: '0.6rem' }, 
+          textTransform: 'uppercase',
+          letterSpacing: 0.3,
+        }}
+      >
+        {label}
+      </Typography>
+      <Typography 
+        variant="body2" 
+        fontWeight={800} 
+        sx={{ 
+          color: 'text.primary', 
+          lineHeight: 1.2, 
+          fontSize: { xs: '0.75rem', sm: '0.85rem' },
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {value}
+      </Typography>
+    </Box>
+  </Stack>
+);
 
 const RecurringMeetingDetail = () => {
   const { id } = useParams();
@@ -34,8 +90,8 @@ const RecurringMeetingDetail = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
 
-  // Prevent double-init loops on rapid mounts
   const isInitialBootRef = useRef(true);
 
   // Core data states
@@ -46,6 +102,12 @@ const RecurringMeetingDetail = () => {
   const [occurrencesLoading, setOccurrencesLoading] = useState(false);
   const [error, setError] = useState(null);
   const [locationDetails, setLocationDetails] = useState(null);
+
+  // Main Tab Navigation state ('details' vs 'occurrences')
+  const [activeTab, setActiveTab] = useState('details');
+
+  // Stats visibility state for mobile view
+  const [statsExpanded, setStatsExpanded] = useState(true);
 
   // Actions states
   const [generating, setGenerating] = useState(false);
@@ -82,6 +144,12 @@ const RecurringMeetingDetail = () => {
   );
   const totalPages = Math.ceil(totalCount / rowsPerPage);
 
+  const mostRecentOccurrence = useMemo(() => {
+    if (!occurrences || occurrences.length === 0) return null;
+    const sorted = [...occurrences].sort((a, b) => new Date(b.scheduled_date) - new Date(a.scheduled_date));
+    return sorted[0];
+  }, [occurrences]);
+
   const getLocationIcon = useCallback((locationText) => {
     if (!locationText) return <LocationIcon sx={{ fontSize: 18, color: COLORS.danger }} />;
     const t = locationText.toLowerCase();
@@ -102,7 +170,6 @@ const RecurringMeetingDetail = () => {
     return 'Online meeting';
   }, [locationDetails]);
 
-  // Unified, loop-safe extraction routine
   const fetchOccurrences = useCallback(async (opts = {}) => {
     const currentPage   = opts.page        ?? page;
     const currentLimit  = opts.rowsPerPage ?? rowsPerPage;
@@ -150,35 +217,23 @@ const RecurringMeetingDetail = () => {
     }
   }, [id]);
 
-  // Core orchestrator: Unified execution path to completely strip recursive loops
   useEffect(() => {
     if (!id) return;
-    
     const bootstrapWorkspace = async () => {
       setLoading(true);
       await fetchRecurringMeetingDetails();
-      // Directly assign params to pass data without waiting on reactive local state cycles
-      await fetchOccurrences({
-        page: 1,
-        rowsPerPage,
-        searchTerm,
-        filterStatus,
-        sortOrder
-      });
+      await fetchOccurrences({ page: 1, rowsPerPage, searchTerm, filterStatus, sortOrder });
       setLoading(false);
       isInitialBootRef.current = false;
     };
-
     bootstrapWorkspace();
   }, [id]);
 
-  // Active runtime filter/pagination shifts tracking (bypasses initial load block)
   useEffect(() => {
     if (loading || isInitialBootRef.current) return;
     fetchOccurrences();
   }, [page, rowsPerPage, filterStatus, sortOrder]);
 
-  // Debounced execution track for active search queries
   useEffect(() => {
     if (loading || isInitialBootRef.current) return;
     const delayTimer = setTimeout(() => {
@@ -191,11 +246,6 @@ const RecurringMeetingDetail = () => {
   const handlePageChange = (_, newPage) => {
     setPage(newPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleRowsPerPageChange = (newRows) => {
-    setRowsPerPage(newRows);
-    setPage(1);
   };
 
   const handleSearchChange = (e) => setSearchTerm(e.target.value);
@@ -283,55 +333,20 @@ const RecurringMeetingDetail = () => {
     handleMenuClose();
   }, []);
 
-  const renderOccurrenceCard = (occurrence, index) => {
-    const isPast = new Date(occurrence.scheduled_date) < new Date();
-    const globalIndex = (page - 1) * rowsPerPage + index;
-    return (
-      <Card key={occurrence.id} sx={{ mb: 2, opacity: isPast ? 0.7 : 1, borderRadius: 3, transition: 'transform 0.2s, box-shadow 0.2s', '&:hover': { transform: 'translateY(-4px)', boxShadow: theme.shadows[8] } }}>
-        <CardHeader
-          avatar={<Avatar sx={{ bgcolor: alpha(COLORS.info, 0.1), color: COLORS.info }}><EventNoteIcon /></Avatar>}
-          title={<Typography variant="subtitle1" fontWeight={700}>Occurrence #{globalIndex + 1}</Typography>}
-          subheader={<Typography variant="caption" color="text.secondary">{formatDate(occurrence.scheduled_date)}</Typography>}
-          action={
-            <Stack direction="row" spacing={0.5}>
-              <IconButton size="small" onClick={() => navigate(`/meetings/${occurrence.id}`)}><EventNoteIcon fontSize="small" /></IconButton>
-              <IconButton size="small" onClick={() => navigate(`/meetings/${occurrence.id}/edit`)}><Edit fontSize="small" /></IconButton>
-            </Stack>
-          }
-        />
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}><ScheduleIcon sx={{ fontSize: 16, color: 'text.secondary' }} /><Typography variant="body2">{formatTime(occurrence.start_time)}</Typography></Stack>
-            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>{getLocationIcon(occurrence.location_text)}<Typography variant="body2" color="text.secondary">{occurrence.location_text || recurringMeeting?.location_text || 'Online'}</Typography></Stack>
-            <Chip label={occurrence.status || 'Scheduled'} size="small" sx={{ width: 'fit-content', bgcolor: alpha(COLORS.info, 0.1), color: COLORS.info, fontWeight: 500 }} />
-          </Stack>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const statCards = [
-    { value: totalGenerated, label: 'Total Generated', color: COLORS.primary },
-    { value: totalCount,     label: 'Total Occurrences', color: COLORS.success },
-    { value: upcomingCount,  label: 'Upcoming',          color: COLORS.info    },
-    { value: pastCount,      label: 'Past',              color: COLORS.warning },
-  ];
-
   if (loading) {
     return (
-      <Box sx={{ p: isMobile ? 2 : 3, maxWidth: 1400, mx: 'auto' }}>
-        <Skeleton variant="rectangular" height={60} sx={{ mb: 3, borderRadius: 2 }} />
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={5} lg={4}><Skeleton variant="rectangular" height={400} sx={{ borderRadius: 3 }} /></Grid>
-          <Grid item xs={12} md={7} lg={8}><Skeleton variant="rectangular" height={400} sx={{ borderRadius: 3 }} /></Grid>
-        </Grid>
+      <Box sx={{ p: isMobile ? 2 : 4, maxWidth: 1600, mx: 'auto' }}>
+        <Stack spacing={2}>
+          <Skeleton variant="rectangular" height={80} sx={{ borderRadius: 3 }} />
+          <Skeleton variant="rectangular" height={500} sx={{ borderRadius: 3 }} />
+        </Stack>
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
+      <Box sx={{ p: 4, maxWidth: 1600, mx: 'auto' }}>
         <Alert severity="error" action={<Button color="inherit" size="small" onClick={fetchRecurringMeetingDetails}>Retry</Button>} sx={{ mb: 2 }}>{error}</Alert>
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/meetings')} variant="outlined">Back to Meetings</Button>
       </Box>
@@ -340,264 +355,876 @@ const RecurringMeetingDetail = () => {
 
   if (!recurringMeeting) {
     return (
-      <Box sx={{ p: 3 }}><Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => navigate('/meetings')}>Go to Meetings</Button>}>Recurring meeting not found</Alert></Box>
+      <Box sx={{ p: 4, maxWidth: 1600, mx: 'auto' }}><Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => navigate('/meetings')}>Go to Meetings</Button>}>Recurring meeting not found</Alert></Box>
     );
   }
 
   return (
-    <Box sx={{ p: isMobile ? 2 : 3, maxWidth: 1400, mx: 'auto' }}>
-      {!isMobile && (
-        <Breadcrumbs sx={{ mb: 2 }}>
-          <Link color="inherit" onClick={() => navigate('/meetings')} sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}><EventNoteIcon sx={{ fontSize: 16 }} /> Meetings</Link>
-          <Typography color="text.primary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><RepeatIcon sx={{ fontSize: 16 }} /> {recurringMeeting.title}</Typography>
-        </Breadcrumbs>
-      )}
+    <Box sx={{ 
+      p: isMobile ? 1 : 2, 
+      maxWidth: 1600, 
+      mx: 'auto', 
+      pb: 10,
+      width: '100%',
+      overflowX: 'hidden',
+    }}>
+      {/* Unified Top Row Header & Stats Bar */}
+      <Paper elevation={0} sx={{ 
+        p: isMobile ? 1.5 : 2.5, 
+        borderRadius: 3, 
+        mb: 3,
+        background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.04)} 0%, ${alpha(theme.palette.primary.main, 0.01)} 100%)`,
+        border: '1px solid',
+        borderColor: 'divider',
+        width: '100%',
+      }}>
+        <Stack spacing={1.5}>
+          {/* Top Line: Back Button, Title, Chips & Mobile Menu Trigger */}
+          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+              <IconButton 
+                onClick={() => navigate('/meetings')} 
+                size={isMobile ? 'small' : 'medium'}
+                sx={{ 
+                  bgcolor: 'background.paper',
+                  boxShadow: 1,
+                  flexShrink: 0,
+                  p: isMobile ? 0.8 : 1,
+                  '&:hover': { bgcolor: 'background.paper', boxShadow: 2 }
+                }}
+              >
+                <ArrowBackIcon fontSize={isMobile ? 'small' : 'medium'} />
+              </IconButton>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography 
+                  variant={isMobile ? 'subtitle1' : 'h5'} 
+                  fontWeight={800} 
+                  noWrap
+                  sx={{ fontSize: isMobile ? '0.95rem' : '1.5rem' }}
+                >
+                  {recurringMeeting.title}
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                  <Chip 
+                    label="Recurring" 
+                    size="small" 
+                    icon={<RepeatIcon sx={{ fontSize: 11 }} />} 
+                    sx={{ 
+                      bgcolor: alpha(COLORS.recurring, 0.1), 
+                      color: COLORS.recurring, 
+                      fontWeight: 600,
+                      borderRadius: 1.5,
+                      height: 20,
+                      fontSize: '0.6rem',
+                      '& .MuiChip-label': { px: 0.8 },
+                    }} 
+                  />
+                  <Chip 
+                    label={recurringMeeting.status === 'active' ? 'Active' : 'Inactive'} 
+                    size="small" 
+                    icon={recurringMeeting.status === 'active' ? <CheckCircleIcon sx={{ fontSize: 11 }} /> : <WarningIcon sx={{ fontSize: 11 }} />} 
+                    sx={{ 
+                      bgcolor: recurringMeeting.status === 'active' ? alpha(COLORS.success, 0.1) : alpha(COLORS.warning, 0.1), 
+                      color: recurringMeeting.status === 'active' ? COLORS.success : COLORS.warning, 
+                      fontWeight: 600,
+                      borderRadius: 1.5,
+                      height: 20,
+                      fontSize: '0.6rem',
+                      '& .MuiChip-label': { px: 0.8 },
+                    }} 
+                  />
+                  {!isMobile && (
+                    <>
+                      <Chip 
+                        label={`${totalGenerated} generated`} 
+                        size="small" 
+                        variant="outlined" 
+                        sx={{ 
+                          borderRadius: 1.5,
+                          height: 20,
+                          fontSize: '0.6rem',
+                          '& .MuiChip-label': { px: 0.8 },
+                        }} 
+                      />
+                      <Chip 
+                        label={`${totalCount} total`} 
+                        size="small" 
+                        variant="outlined" 
+                        color="info" 
+                        sx={{ 
+                          borderRadius: 1.5,
+                          height: 20,
+                          fontSize: '0.6rem',
+                          '& .MuiChip-label': { px: 0.8 },
+                        }} 
+                      />
+                    </>
+                  )}
+                </Stack>
+              </Box>
+            </Stack>
 
-      <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 2, mb: 3 }}>
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-          <IconButton onClick={() => navigate('/meetings')} sx={{ bgcolor: alpha(COLORS.primary, 0.1), '&:hover': { bgcolor: alpha(COLORS.primary, 0.2) } }}><ArrowBackIcon /></IconButton>
-          <Box>
-            <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={800}>{recurringMeeting.title}</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
-              <Chip label="Recurring Series" size="small" icon={<RepeatIcon sx={{ fontSize: 14 }} />} sx={{ bgcolor: alpha(COLORS.recurring, 0.15), color: COLORS.recurring, fontWeight: 600 }} />
-              <Chip label={recurringMeeting.status === 'active' ? 'Active' : 'Inactive'} size="small" icon={recurringMeeting.status === 'active' ? <CheckCircleIcon sx={{ fontSize: 14 }} /> : <WarningIcon sx={{ fontSize: 14 }} />} sx={{ bgcolor: recurringMeeting.status === 'active' ? alpha(COLORS.success, 0.15) : alpha(COLORS.warning, 0.15), color: recurringMeeting.status === 'active' ? COLORS.success : COLORS.warning, fontWeight: 600 }} />
-              <Chip label={`${totalGenerated} generated`} size="small" variant="outlined" />
-              <Chip label={`${totalCount} total`} size="small" variant="outlined" color="info" />
-            </Box>
-          </Box>
-        </Stack>
+            {/* Desktop Action Buttons */}
+            {!isMobile ? (
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+                <ButtonGroup 
+                  variant="contained" 
+                  size="small" 
+                  sx={{ 
+                    boxShadow: 'none', 
+                    borderRadius: 2, 
+                    overflow: 'hidden',
+                    bgcolor: 'primary.main',
+                    '& .MuiButton-root': {
+                      borderColor: 'primary.dark',
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      fontSize: '0.75rem',
+                      px: 1.5,
+                      py: 0.5,
+                    }
+                  }}
+                >
+                  <Button 
+                    onClick={handleGenerateNext} 
+                    disabled={generating} 
+                    startIcon={generating ? <CircularProgress size={14} color="inherit" /> : <AddIcon />}
+                  >
+                    Generate
+                  </Button>
+                  <Button onClick={() => handleGenerateMultiple(5)} disabled={generating} sx={{ minWidth: 32, px: 1 }}>5</Button>
+                  <Button onClick={() => handleGenerateMultiple(10)} disabled={generating} sx={{ minWidth: 32, px: 1 }}>10</Button>
+                </ButtonGroup>
 
-        {!isMobile && (
-          <Stack direction="row" spacing={1.5} sx={{ flexShrink: 0 }}>
-            <ButtonGroup variant="outlined" size="medium">
-              <Button onClick={handleGenerateNext} disabled={generating} startIcon={generating ? <CircularProgress size={16} /> : <Add />} sx={{ textTransform: 'none', fontWeight: 600 }}>Generate Next</Button>
-              <Button onClick={() => handleGenerateMultiple(5)} disabled={generating} sx={{ minWidth: 'auto', px: 2 }}>5</Button>
-              <Button onClick={() => handleGenerateMultiple(10)} disabled={generating} sx={{ minWidth: 'auto', px: 2 }}>10</Button>
-            </ButtonGroup>
-            <Button variant="outlined" onClick={handleExport} disabled={exporting} startIcon={<DownloadIcon />} sx={{ textTransform: 'none', fontWeight: 600 }}>Export</Button>
-            <Button variant="outlined" onClick={() => navigate(`/recurring-meetings/${id}/edit`)} startIcon={<Edit />} sx={{ textTransform: 'none', fontWeight: 600 }}>Edit</Button>
-            <Button variant="contained" color="error" onClick={() => setDeleteDialogOpen(true)} startIcon={<Delete />} sx={{ textTransform: 'none', fontWeight: 600 }}>Delete</Button>
+                <IconButton onClick={handleExport} size="small" disabled={exporting} sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 0.8 }}>
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+                <IconButton onClick={() => navigate(`/recurring-meetings/${id}/edit`)} size="small" sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 0.8 }}>
+                  <EditIcon fontSize="small" />
+                </IconButton>
+                <IconButton onClick={() => setDeleteDialogOpen(true)} size="small" sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 0.8, color: COLORS.danger }}>
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Stack>
+            ) : (
+              <IconButton onClick={handleMenuOpen} size="small" sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 0.8 }}>
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            )}
           </Stack>
-        )}
 
-        {isMobile && (
-          <>
-            <IconButton onClick={handleMenuOpen}><MoreVertIcon /></IconButton>
-            <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose}>
-              <MenuItem onClick={handleGenerateNext} disabled={generating}><ListItemIcon><Add fontSize="small" /></ListItemIcon>Generate Next</MenuItem>
-              <MenuItem onClick={() => handleGenerateMultiple(5)} disabled={generating}><ListItemIcon><CalendarTodayIcon fontSize="small" /></ListItemIcon>Generate 5</MenuItem>
-              <MenuItem onClick={() => handleGenerateMultiple(10)} disabled={generating}><ListItemIcon><CalendarTodayIcon fontSize="small" /></ListItemIcon>Generate 10</MenuItem>
-              <Divider />
-              <MenuItem onClick={handleExport} disabled={exporting}><ListItemIcon><DownloadIcon fontSize="small" /></ListItemIcon>Export Data</MenuItem>
-              <MenuItem onClick={handleCopyLink}><ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>Copy Link</MenuItem>
-              <Divider />
-              <MenuItem onClick={() => navigate(`/recurring-meetings/${id}/edit`)}><ListItemIcon><Edit fontSize="small" /></ListItemIcon>Edit Series</MenuItem>
-              <MenuItem onClick={() => setDeleteDialogOpen(true)} sx={{ color: COLORS.danger }}><ListItemIcon><Delete fontSize="small" sx={{ color: COLORS.danger }} /></ListItemIcon>Delete Series</MenuItem>
-            </Menu>
-          </>
-        )}
-      </Box>
-
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        {statCards.map(({ value, label, color }) => (
-          <Grid key={label} item xs={6} sm={3}>
-            <Card sx={{ bgcolor: alpha(color, 0.05), borderRadius: 3 }}>
-              <CardContent sx={{ textAlign: 'center', p: 2.5, '&:last-child': { pb: 2.5 } }}>
-                <Typography variant="h3" fontWeight={800} sx={{ color }}>{value}</Typography>
-                <Typography variant="body2" color="text.secondary" fontWeight={500}>{label}</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={5} lg={4}>
-          <Paper sx={{ p: 3, borderRadius: 3, position: { md: 'sticky' }, top: 20 }}>
-            <Typography variant="h6" fontWeight={700} mb={2} sx={{ color: COLORS.primary }}>Series Details</Typography>
-            <Stack spacing={2.5}>
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>Description</Typography>
-                <Typography variant="body2" sx={{ mt: 0.5 }}>{recurringMeeting.description || 'No description provided'}</Typography>
-              </Box>
-              <Divider />
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>Recurrence Pattern</Typography>
-                <Chip label={getRecurrenceDescription(recurringMeeting)} icon={<RepeatIcon sx={{ fontSize: 14 }} />} sx={{ mt: 1, bgcolor: alpha(COLORS.recurring, 0.1), fontWeight: 500 }} />
-              </Box>
-              <Divider />
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>Next Occurrence</Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1 }}>
-                  <TodayIcon sx={{ fontSize: 20, color: COLORS.info }} />
-                  <Typography variant="body1" fontWeight={600}>{recurringMeeting.next_occurrence_date ? formatDate(recurringMeeting.next_occurrence_date) : 'Not scheduled'}</Typography>
-                </Stack>
-              </Box>
-              <Divider />
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>Time</Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1 }}>
-                  <ScheduleIcon sx={{ fontSize: 20, color: COLORS.info }} />
-                  <Typography variant="body1">{recurringMeeting.start_time ? `${formatTime(recurringMeeting.start_time)} – ${formatTime(recurringMeeting.end_time)}` : 'Time not set'}</Typography>
-                </Stack>
-              </Box>
-              <Divider />
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>Location</Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1 }}>{getLocationIcon(recurringMeeting.location_text)}<Typography variant="body1">{getLocationDisplay(recurringMeeting)}</Typography></Stack>
-              </Box>
-              <Divider />
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>Progress</Typography>
-                <Box sx={{ mt: 1 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                    <Typography variant="body2" color="text.secondary">Generation Progress</Typography>
-                    <Typography variant="body2" fontWeight={600} color="primary">{completionRate}%</Typography>
-                  </Box>
-                  <Box sx={{ height: 10, bgcolor: alpha(COLORS.primary, 0.1), borderRadius: 5, overflow: 'hidden' }}>
-                    <Box sx={{ width: `${completionRate}%`, height: '100%', bgcolor: completionRate === 100 ? COLORS.success : COLORS.primary, borderRadius: 5, transition: 'width 0.3s ease' }} />
+          {/* Stat Pills Section - Responsive grid for mobile */}
+          {isMobile ? (
+            <Box sx={{ pt: 0.5, width: '100%' }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                size="small"
+                onClick={() => setStatsExpanded(prev => !prev)}
+                startIcon={<BarChartIcon fontSize="small" />}
+                endIcon={statsExpanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                sx={{
+                  textTransform: 'none',
+                  borderColor: 'divider',
+                  bgcolor: 'background.paper',
+                  color: 'text.primary',
+                  fontWeight: 600,
+                  borderRadius: 2,
+                  justifyContent: 'space-between',
+                  px: 2,
+                  py: 0.8,
+                  fontSize: '0.75rem',
+                }}
+              >
+                {statsExpanded ? 'Hide Statistics' : `View Statistics (${totalGenerated} Generated)`}
+              </Button>
+              <Collapse in={statsExpanded}>
+                <Box sx={{ pt: 1.5 }}>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    <TopStatPill label="Generated" value={`${totalGenerated} (${completionRate}%)`} icon={<RepeatIcon sx={{ fontSize: 13 }} />} color={COLORS.primary} />
+                    <TopStatPill label="Occurrences" value={totalCount} icon={<EventNoteIcon sx={{ fontSize: 13 }} />} color={COLORS.success} />
+                    <TopStatPill label="Upcoming" value={upcomingCount} icon={<CalendarTodayIcon sx={{ fontSize: 13 }} />} color={COLORS.info} />
+                    <TopStatPill label="Past" value={pastCount} icon={<TimelineIcon sx={{ fontSize: 13 }} />} color={COLORS.warning} />
                   </Box>
                 </Box>
+              </Collapse>
+            </Box>
+          ) : (
+            <Box sx={{ pt: 0.5 }}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                <TopStatPill label="Generated" value={`${totalGenerated} (${completionRate}%)`} icon={<RepeatIcon sx={{ fontSize: 13 }} />} color={COLORS.primary} />
+                <TopStatPill label="Occurrences" value={totalCount} icon={<EventNoteIcon sx={{ fontSize: 13 }} />} color={COLORS.success} />
+                <TopStatPill label="Upcoming" value={upcomingCount} icon={<CalendarTodayIcon sx={{ fontSize: 13 }} />} color={COLORS.info} />
+                <TopStatPill label="Past" value={pastCount} icon={<TimelineIcon sx={{ fontSize: 13 }} />} color={COLORS.warning} />
               </Box>
-            </Stack>
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12} md={7} lg={8}>
-          <Paper sx={{ p: 3, borderRadius: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-              <Typography variant="h6" fontWeight={700} sx={{ color: COLORS.primary }}>Generated Occurrences{totalCount > 0 && <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>({totalCount} total)</Typography>}</Typography>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <ToggleButtonGroup value={viewMode} exclusive onChange={handleViewModeChange} size="small">
-                  <ToggleButton value="table"><ViewListIcon fontSize="small" /></ToggleButton>
-                  <ToggleButton value="card"><ViewModuleIcon fontSize="small" /></ToggleButton>
-                </ToggleButtonGroup>
-                <IconButton onClick={() => fetchOccurrences()} size="small" disabled={occurrencesLoading}><RefreshIcon fontSize="small" /></IconButton>
-              </Stack>
             </Box>
+          )}
+        </Stack>
+      </Paper>
 
-            <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, mb: 3 }}>
-              <TextField
-                placeholder="Search by title, date, or location..." value={searchTerm} onChange={handleSearchChange} size="small" fullWidth
-                slotProps={{
-                  input: {
+      {/* Mobile Action Menu */}
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={handleMenuClose}
+        PaperProps={{ sx: { borderRadius: 2, minWidth: 180, mt: 1 } }}
+      >
+        <MenuItem onClick={() => { handleMenuClose(); handleGenerateNext(); }}>
+          <ListItemIcon><AddIcon fontSize="small" color="primary" /></ListItemIcon>
+          Generate Next
+        </MenuItem>
+        <MenuItem onClick={() => { handleMenuClose(); handleGenerateMultiple(5); }}>
+          <ListItemIcon><CalendarTodayIcon fontSize="small" color="primary" /></ListItemIcon>
+          Generate 5
+        </MenuItem>
+        <MenuItem onClick={handleExport}>
+          <ListItemIcon><DownloadIcon fontSize="small" /></ListItemIcon>
+          Export Data
+        </MenuItem>
+        <MenuItem onClick={() => { handleMenuClose(); navigate(`/recurring-meetings/${id}/edit`); }}>
+          <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
+          Edit Series
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { handleMenuClose(); setDeleteDialogOpen(true); }} sx={{ color: COLORS.danger }}>
+          <ListItemIcon><DeleteIcon fontSize="small" sx={{ color: COLORS.danger }} /></ListItemIcon>
+          Delete Series
+        </MenuItem>
+      </Menu>
+
+      {/* Main Content Tabs Container */}
+      <Paper elevation={0} sx={{ 
+        borderRadius: 3, 
+        border: '1px solid', 
+        borderColor: 'divider', 
+        overflow: 'hidden',
+        width: '100%',
+      }}>
+        <Box sx={{ 
+          borderBottom: 1, 
+          borderColor: 'divider', 
+          px: isMobile ? 1 : 3, 
+          pt: 0.5, 
+          bgcolor: alpha(theme.palette.background.default, 0.5),
+          overflowX: 'auto',
+        }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={(e, val) => setActiveTab(val)}
+            variant={isMobile ? 'fullWidth' : 'standard'}
+            sx={{ 
+              '& .MuiTab-root': { 
+                textTransform: 'none', 
+                fontWeight: 600, 
+                fontSize: isMobile ? '0.75rem' : '0.95rem', 
+                minHeight: isMobile ? 40 : 48,
+                minWidth: isMobile ? 'auto' : undefined,
+                px: isMobile ? 1.5 : 3,
+              },
+              '& .MuiTabs-indicator': { height: 3, borderRadius: '3px 3px 0 0' },
+            }}
+          >
+            <Tab 
+              label="Details" 
+              value="details" 
+              icon={<RepeatIcon fontSize={isMobile ? 'small' : 'medium'} />} 
+              iconPosition="start" 
+            />
+            <Tab 
+              label={`History (${totalCount})`} 
+              value="occurrences" 
+              icon={<EventNoteIcon fontSize={isMobile ? 'small' : 'medium'} />} 
+              iconPosition="start" 
+            />
+          </Tabs>
+        </Box>
+
+        {/* TAB 1: Series Details & Metrics Overview Screen */}
+        {activeTab === 'details' && (
+          <Box sx={{ p: isMobile ? 1.5 : 4 }}>
+            <Grid container spacing={isMobile ? 2 : 4}>
+              {/* Core Information & Schedule */}
+              <Grid item xs={12} lg={6}>
+                <Stack spacing={isMobile ? 2 : 3}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                      Description
+                    </Typography>
+                    <Typography variant="body1" sx={{ mt: 0.5, color: 'text.primary', fontSize: isMobile ? '0.9rem' : '1rem' }}>
+                      {recurringMeeting.description || 'No description provided'}
+                    </Typography>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                      Recurrence Pattern
+                    </Typography>
+                    <Box sx={{ mt: 1 }}>
+                      <Chip 
+                        label={getRecurrenceDescription(recurringMeeting)} 
+                        icon={<RepeatIcon sx={{ fontSize: 14 }} />}
+                        sx={{ 
+                          bgcolor: alpha(COLORS.recurring, 0.08), 
+                          fontWeight: 500, 
+                          borderRadius: 2, 
+                          height: isMobile ? 28 : 32,
+                          fontSize: isMobile ? '0.75rem' : '0.875rem',
+                          '& .MuiChip-label': { px: 1.5 },
+                        }} 
+                      />
+                    </Box>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ mb: 1.5, display: 'block', fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                      Time & Location Setup
+                    </Typography>
+                    <Stack spacing={1.5}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <ScheduleIcon sx={{ fontSize: isMobile ? 18 : 20, color: 'text.secondary' }} />
+                        <Typography variant="body2" sx={{ fontSize: isMobile ? '0.85rem' : '0.875rem' }}>
+                          {recurringMeeting.start_time ? `${formatTime(recurringMeeting.start_time)} – ${formatTime(recurringMeeting.end_time)}` : 'Time not set'}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        {getLocationIcon(recurringMeeting.location_text)}
+                        <Typography variant="body2" sx={{ fontSize: isMobile ? '0.85rem' : '0.875rem' }}>
+                          {getLocationDisplay(recurringMeeting)}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                      Generation Progress
+                    </Typography>
+                    <Box sx={{ mt: 1.5 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
+                          {totalCount} of {totalGenerated} generated
+                        </Typography>
+                        <Typography variant="body2" fontWeight={600} color="primary" sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
+                          {completionRate}%
+                        </Typography>
+                      </Box>
+                      <LinearProgress 
+                        variant="determinate" 
+                        value={completionRate} 
+                        sx={{ 
+                          height: isMobile ? 6 : 8, 
+                          borderRadius: 4, 
+                          bgcolor: alpha(COLORS.primary, 0.1),
+                          '& .MuiLinearProgress-bar': { borderRadius: 4, bgcolor: completionRate === 100 ? COLORS.success : COLORS.primary }
+                        }} 
+                      />
+                    </Box>
+                  </Box>
+
+                  {/* Mobile Generate Button */}
+                  {isMobile && (
+                    <Button 
+                      fullWidth 
+                      variant="contained" 
+                      startIcon={<AddIcon />}
+                      onClick={handleGenerateNext}
+                      disabled={generating}
+                      sx={{ 
+                        borderRadius: 2, 
+                        textTransform: 'none', 
+                        fontWeight: 600, 
+                        py: 1.2,
+                        mt: 1,
+                      }}
+                    >
+                      {generating ? <CircularProgress size={20} /> : 'Generate Next Occurrence'}
+                    </Button>
+                  )}
+                </Stack>
+              </Grid>
+
+              {/* Next and Most Recent Occurrences */}
+              <Grid item xs={12} lg={6}>
+                <Stack spacing={isMobile ? 2 : 3}>
+                  <Card variant="outlined" sx={{ borderRadius: 3, p: isMobile ? 2 : 2.5, bgcolor: alpha(COLORS.info, 0.02) }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                      Next Scheduled Occurrence
+                    </Typography>
+                    <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Avatar sx={{ bgcolor: alpha(COLORS.info, 0.1), color: COLORS.info, width: isMobile ? 36 : 44, height: isMobile ? 36 : 44 }}>
+                        <CalendarTodayIcon sx={{ fontSize: isMobile ? 18 : 24 }} />
+                      </Avatar>
+                      <Box>
+                        <Typography variant="subtitle1" fontWeight={700} sx={{ fontSize: isMobile ? '0.9rem' : '1rem' }}>
+                          {recurringMeeting.next_occurrence_date ? formatDate(recurringMeeting.next_occurrence_date) : 'Not scheduled'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                          {recurringMeeting.next_occurrence_date ? 'Upcoming active session' : 'Generate an occurrence to schedule'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Card>
+
+                  <Card variant="outlined" sx={{ borderRadius: 3, p: isMobile ? 2 : 2.5, bgcolor: alpha(COLORS.success, 0.02) }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                      Most Recent Occurrence
+                    </Typography>
+                    {mostRecentOccurrence ? (
+                      <Box 
+                        sx={{ mt: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                        onClick={() => navigate(`/meetings/${mostRecentOccurrence.id}`)}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                          <Avatar sx={{ bgcolor: alpha(COLORS.success, 0.1), color: COLORS.success, width: isMobile ? 36 : 44, height: isMobile ? 36 : 44 }}>
+                            <CheckCircleIcon sx={{ fontSize: isMobile ? 18 : 24 }} />
+                          </Avatar>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="subtitle1" fontWeight={700} sx={{ fontSize: isMobile ? '0.9rem' : '1rem' }}>
+                              {formatDate(mostRecentOccurrence.scheduled_date)}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.6rem' : '0.75rem', display: 'block' }}>
+                              Status: {mostRecentOccurrence.status || 'Completed/Scheduled'}
+                            </Typography>
+                          </Box>
+                        </Box>
+                        <Button size="small" variant="text" sx={{ textTransform: 'none', fontSize: isMobile ? '0.7rem' : '0.875rem' }}>
+                          View →
+                        </Button>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontSize: isMobile ? '0.85rem' : '0.875rem' }}>
+                        No generated occurrences found yet.
+                      </Typography>
+                    )}
+                  </Card>
+
+                  {/* Desktop Generate Button */}
+                  {!isMobile && (
+                    <Box sx={{ pt: 2 }}>
+                      <Button 
+                        fullWidth 
+                        variant="contained" 
+                        startIcon={<AddIcon />}
+                        onClick={handleGenerateNext}
+                        disabled={generating}
+                        sx={{ 
+                          borderRadius: 2, 
+                          textTransform: 'none', 
+                          fontWeight: 600, 
+                          py: 1.2,
+                          fontSize: '0.875rem',
+                        }}
+                      >
+                        {generating ? <CircularProgress size={20} /> : 'Generate Next Occurrence'}
+                      </Button>
+                    </Box>
+                  )}
+                </Stack>
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+
+        {/* TAB 2: Occurrences History */}
+        {activeTab === 'occurrences' && (
+          <Box sx={{ p: isMobile ? 1.5 : 4 }}>
+            <Box sx={{ mb: 3 }}>
+              <Stack direction={isMobile ? 'column' : 'row'} spacing={isMobile ? 1.5 : 2}>
+                <TextField
+                  placeholder="Search occurrences..."
+                  value={searchTerm}
+                  onChange={handleSearchChange}
+                  size="small"
+                  fullWidth
+                  sx={{ flex: 2 }}
+                  InputProps={{
                     startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" color="action" /></InputAdornment>,
-                    endAdornment: searchTerm ? <InputAdornment position="end"><IconButton size="small" onClick={clearSearch}><ClearIcon fontSize="small" /></IconButton></InputAdornment> : null,
-                  },
-                }}
-                sx={{ flex: 2 }}
-              />
-              <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
-                <ButtonGroup variant="outlined" size="small">
-                  {['all', 'upcoming', 'past'].map(s => (
-                    <Button key={s} onClick={() => handleFilterStatusChange(s)} variant={filterStatus === s ? 'contained' : 'outlined'} sx={{ textTransform: 'none' }}>{s.charAt(0).toUpperCase() + s.slice(1)}</Button>
-                  ))}
-                </ButtonGroup>
-                <IconButton onClick={toggleSortOrder} size="small"><FilterListIcon sx={{ transform: sortOrder === 'desc' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} /></IconButton>
+                    endAdornment: searchTerm ? (
+                      <InputAdornment position="end">
+                        <IconButton size="small" onClick={clearSearch}><ClearIcon fontSize="small" /></IconButton>
+                      </InputAdornment>
+                    ) : null,
+                  }}
+                />
+                <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, flexWrap: 'wrap', gap: 0.5 }}>
+                  <ButtonGroup variant="outlined" size="small" sx={{ borderRadius: 1.5, overflow: 'hidden' }}>
+                    {['all', 'upcoming', 'past'].map(s => (
+                      <Button 
+                        key={s} 
+                        onClick={() => handleFilterStatusChange(s)} 
+                        variant={filterStatus === s ? 'contained' : 'outlined'}
+                        sx={{ 
+                          textTransform: 'none', 
+                          fontWeight: filterStatus === s ? 600 : 400, 
+                          px: isMobile ? 1 : 2, 
+                          fontSize: isMobile ? '0.7rem' : '0.8rem',
+                          py: isMobile ? 0.3 : 0.5,
+                        }}
+                      >
+                        {s.charAt(0).toUpperCase() + s.slice(1)}
+                      </Button>
+                    ))}
+                  </ButtonGroup>
+                  <IconButton onClick={toggleSortOrder} size="small" sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: isMobile ? 0.5 : 0.8 }}>
+                    <FilterListIcon fontSize="small" sx={{ transform: sortOrder === 'desc' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                  </IconButton>
+                  <ToggleButtonGroup value={viewMode} exclusive onChange={handleViewModeChange} size="small" sx={{ '& .MuiToggleButton-root': { border: '1px solid', borderColor: 'divider', px: isMobile ? 0.5 : 1, borderRadius: '8px !important', ml: 0.5, py: isMobile ? 0.3 : 0.5 } }}>
+                    <ToggleButton value="table"><Tooltip title="Table View"><ViewListIcon fontSize="small" /></Tooltip></ToggleButton>
+                    <ToggleButton value="card"><Tooltip title="Card View"><ViewModuleIcon fontSize="small" /></Tooltip></ToggleButton>
+                  </ToggleButtonGroup>
+                </Stack>
               </Stack>
             </Box>
 
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
-              <Typography variant="caption" color="text.secondary">Show:</Typography>
-              {ROWS_PER_PAGE_OPTIONS.map(n => (
-                <Button key={n} size="small" variant={rowsPerPage === n ? 'contained' : 'outlined'} onClick={() => handleRowsPerPageChange(n)} sx={{ minWidth: 40, px: 1, py: 0.25, fontSize: 12 }}>{n}</Button>
-              ))}
-            </Stack>
-
-            {occurrencesLoading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={32} /></Box>}
+            {occurrencesLoading && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress size={40} /></Box>
+            )}
 
             {!occurrencesLoading && occurrences.length === 0 && totalCount === 0 && !searchTerm && filterStatus === 'all' && (
-              <Box sx={{ textAlign: 'center', py: 6 }}>
-                <EventNoteIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>No occurrences generated yet</Typography>
-                <Button variant="contained" startIcon={<Add />} onClick={handleGenerateNext} disabled={generating} size="large">{generating ? <CircularProgress size={24} /> : 'Generate First Occurrence'}</Button>
+              <Box sx={{ textAlign: 'center', py: isMobile ? 4 : 8 }}>
+                <Avatar sx={{ width: isMobile ? 60 : 80, height: isMobile ? 60 : 80, bgcolor: alpha(COLORS.primary, 0.08), color: COLORS.primary, mx: 'auto', mb: 2 }}>
+                  <EventNoteIcon sx={{ fontSize: isMobile ? 30 : 40 }} />
+                </Avatar>
+                <Typography variant="h6" gutterBottom sx={{ fontSize: isMobile ? '1rem' : '1.25rem' }}>No occurrences generated yet</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3, fontSize: isMobile ? '0.85rem' : '0.875rem' }}>
+                  Generate your first occurrence to start tracking this recurring meeting
+                </Typography>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={handleGenerateNext} disabled={generating} size="large" sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}>
+                  {generating ? <CircularProgress size={24} /> : 'Generate First Occurrence'}
+                </Button>
               </Box>
             )}
 
             {!occurrencesLoading && occurrences.length === 0 && (searchTerm || filterStatus !== 'all') && (
-              <Box sx={{ textAlign: 'center', py: 6 }}>
-                <SearchIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>No matching occurrences</Typography>
-                <Button onClick={() => { clearSearch(); setFilterStatus('all'); }} sx={{ mt: 2 }}>Clear Filters</Button>
+              <Box sx={{ textAlign: 'center', py: isMobile ? 4 : 6 }}>
+                <SearchIcon sx={{ fontSize: isMobile ? 48 : 64, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom sx={{ fontSize: isMobile ? '1rem' : '1.25rem' }}>No matching occurrences</Typography>
+                <Button onClick={() => { clearSearch(); setFilterStatus('all'); }} sx={{ mt: 2, fontSize: isMobile ? '0.8rem' : '0.875rem' }}>
+                  Clear Filters
+                </Button>
               </Box>
             )}
 
-            {!occurrencesLoading && occurrences.length > 0 && viewMode === 'table' && (
+            {!occurrencesLoading && occurrences.length > 0 && (
               <>
-                <TableContainer sx={{ overflowX: 'auto' }}>
-                  <Table size={isMobile ? 'small' : 'medium'}>
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: alpha(COLORS.primary, 0.05) }}>
-                        <TableCell sx={{ fontWeight: 700 }}>#</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
-                        {!isTablet && <TableCell sx={{ fontWeight: 700 }}>Time</TableCell>}
-                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                        {!isMobile && <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>}
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
+                {viewMode === 'table' ? (
+                  <>
+                    <TableContainer sx={{ overflowX: 'auto', width: '100%' }}>
+                      <Table size={isMobile ? 'small' : 'medium'}>
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
+                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>#</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Date</TableCell>
+                            {!isTablet && <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Time</TableCell>}
+                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Status</TableCell>
+                            {!isMobile && <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Location</TableCell>}
+                            <TableCell align="right" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Actions</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {occurrences.map((occurrence, index) => {
+                            const globalIndex = (page - 1) * rowsPerPage + index;
+                            const isPast = new Date(occurrence.scheduled_date) < new Date();
+                            return (
+                              <TableRow 
+                                key={occurrence.id} 
+                                hover 
+                                sx={{ 
+                                  opacity: isPast ? 0.6 : 1, 
+                                  cursor: 'pointer',
+                                  '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.04) },
+                                }}
+                                onClick={() => navigate(`/meetings/${occurrence.id}`)}
+                              >
+                                <TableCell>
+                                  <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ fontSize: isMobile ? '0.7rem' : '0.875rem' }}>
+                                    {globalIndex + 1}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Stack direction="row" alignItems="center" spacing={0.5}>
+                                    {isPast ? 
+                                      <CheckCircleIcon sx={{ fontSize: isMobile ? 14 : 16, color: COLORS.success }} /> : 
+                                      <CircleIcon sx={{ fontSize: isMobile ? 14 : 16, color: COLORS.info }} />
+                                    }
+                                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: isMobile ? '0.7rem' : '0.875rem' }}>
+                                      {formatDate(occurrence.scheduled_date)}
+                                    </Typography>
+                                  </Stack>
+                                </TableCell>
+                                {!isTablet && (
+                                  <TableCell>
+                                    <Typography variant="body2" sx={{ fontSize: isMobile ? '0.7rem' : '0.875rem' }}>
+                                      {formatTime(occurrence.start_time)}
+                                    </Typography>
+                                  </TableCell>
+                                )}
+                                <TableCell>
+                                  <Chip 
+                                    label={occurrence.status || 'Scheduled'} 
+                                    size="small" 
+                                    sx={{ 
+                                      bgcolor: alpha(COLORS.info, 0.08), 
+                                      color: COLORS.info, 
+                                      fontWeight: 500, 
+                                      borderRadius: 1.5,
+                                      height: isMobile ? 20 : 24,
+                                      fontSize: isMobile ? '0.6rem' : '0.75rem',
+                                      '& .MuiChip-label': { px: isMobile ? 0.8 : 1 },
+                                    }} 
+                                  />
+                                </TableCell>
+                                {!isMobile && (
+                                  <TableCell>
+                                    <Typography variant="body2" noWrap sx={{ maxWidth: 120, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>
+                                      {occurrence.location_text || recurringMeeting.location_text || 'Online'}
+                                    </Typography>
+                                  </TableCell>
+                                )}
+                                <TableCell align="right">
+                                  <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
+                                    <IconButton 
+                                      size="small" 
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/meetings/${occurrence.id}`); }}
+                                      sx={{ p: isMobile ? 0.5 : 0.8 }}
+                                    >
+                                      <EventNoteIcon fontSize="small" />
+                                    </IconButton>
+                                    <IconButton 
+                                      size="small" 
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/meetings/${occurrence.id}/edit`); }}
+                                      sx={{ p: isMobile ? 0.5 : 0.8 }}
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Stack>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    {totalPages > 1 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                        <Pagination 
+                          count={totalPages} 
+                          page={page} 
+                          onChange={handlePageChange} 
+                          color="primary" 
+                          size={isMobile ? 'small' : 'medium'} 
+                          showFirstButton 
+                          showLastButton
+                          sx={{ '& .MuiPaginationItem-root': { fontSize: isMobile ? '0.7rem' : '0.875rem' } }}
+                        />
+                      </Box>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Grid container spacing={isMobile ? 1 : 2}>
                       {occurrences.map((occurrence, index) => {
                         const globalIndex = (page - 1) * rowsPerPage + index;
                         const isPast = new Date(occurrence.scheduled_date) < new Date();
                         return (
-                          <TableRow key={occurrence.id} hover sx={{ opacity: isPast ? 0.7 : 1, backgroundColor: isPast ? alpha('#000', 0.03) : 'transparent' }}>
-                            <TableCell><Typography variant="body2" fontWeight={600} color="text.secondary">{globalIndex + 1}</Typography></TableCell>
-                            <TableCell><Typography variant="body2" fontWeight={600}>{formatDate(occurrence.scheduled_date)}</Typography></TableCell>
-                            {!isTablet && <TableCell><Typography variant="body2">{formatTime(occurrence.start_time)}</Typography></TableCell>}
-                            <TableCell><Chip label={occurrence.status || 'Scheduled'} size="small" sx={{ bgcolor: alpha(COLORS.info, 0.1), color: COLORS.info, fontWeight: 500 }} /></TableCell>
-                            {!isMobile && <TableCell><Typography variant="body2" noWrap sx={{ maxWidth: 150 }}>{occurrence.location_text || recurringMeeting.location_text || 'Online'}</Typography></TableCell>}
-                            <TableCell align="right">
-                              <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
-                                <IconButton size="small" onClick={() => navigate(`/meetings/${occurrence.id}`)}><EventNoteIcon fontSize="small" /></IconButton>
-                                <IconButton size="small" onClick={() => navigate(`/meetings/${occurrence.id}/edit`)}><Edit fontSize="small" /></IconButton>
-                              </Stack>
-                            </TableCell>
-                          </TableRow>
+                          <Grid item xs={12} sm={6} lg={4} key={occurrence.id}>
+                            <Card 
+                              variant="outlined"
+                              sx={{ 
+                                borderRadius: 3,
+                                transition: 'all 0.2s ease',
+                                '&:hover': { 
+                                  transform: isMobile ? 'none' : 'translateY(-2px)', 
+                                  boxShadow: isMobile ? 'none' : theme.shadows[2], 
+                                  borderColor: 'primary.light' 
+                                },
+                                opacity: isPast ? 0.7 : 1,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => navigate(`/meetings/${occurrence.id}`)}
+                            >
+                              <CardContent sx={{ p: isMobile ? 1.5 : 2.5 }}>
+                                <Stack spacing={isMobile ? 1.5 : 2}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                                    <Box>
+                                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: isMobile ? '0.6rem' : '0.75rem' }}>
+                                        #{globalIndex + 1}
+                                      </Typography>
+                                      <Typography variant="subtitle1" fontWeight={700} sx={{ fontSize: isMobile ? '0.85rem' : '1rem' }}>
+                                        {formatDate(occurrence.scheduled_date)}
+                                      </Typography>
+                                    </Box>
+                                    <Chip 
+                                      label={occurrence.status || 'Scheduled'} 
+                                      size="small" 
+                                      sx={{ 
+                                        bgcolor: alpha(COLORS.info, 0.08), 
+                                        color: COLORS.info, 
+                                        fontWeight: 500, 
+                                        borderRadius: 1.5,
+                                        height: isMobile ? 20 : 24,
+                                        fontSize: isMobile ? '0.55rem' : '0.75rem',
+                                        '& .MuiChip-label': { px: isMobile ? 0.6 : 1 },
+                                      }} 
+                                    />
+                                  </Stack>
+                                  <Divider />
+                                  <Stack spacing={isMobile ? 0.5 : 1}>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                      <ScheduleIcon sx={{ fontSize: isMobile ? 14 : 16, color: 'text.secondary' }} />
+                                      <Typography variant="body2" sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
+                                        {formatTime(occurrence.start_time)}
+                                      </Typography>
+                                    </Stack>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                      {getLocationIcon(occurrence.location_text)}
+                                      <Typography variant="body2" color="text.secondary" noWrap sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
+                                        {occurrence.location_text || recurringMeeting.location_text || 'Online'}
+                                      </Typography>
+                                    </Stack>
+                                  </Stack>
+                                </Stack>
+                              </CardContent>
+                            </Card>
+                          </Grid>
                         );
                       })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                {totalPages > 1 && (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}><Pagination count={totalPages} page={page} onChange={handlePageChange} color="primary" size={isMobile ? 'small' : 'medium'} showFirstButton showLastButton /></Box>
+                    </Grid>
+                    {totalPages > 1 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                        <Pagination 
+                          count={totalPages} 
+                          page={page} 
+                          onChange={handlePageChange} 
+                          color="primary" 
+                          size={isMobile ? 'small' : 'medium'} 
+                          showFirstButton 
+                          showLastButton
+                          sx={{ '& .MuiPaginationItem-root': { fontSize: isMobile ? '0.7rem' : '0.875rem' } }}
+                        />
+                      </Box>
+                    )}
+                  </>
                 )}
               </>
             )}
+          </Box>
+        )}
+      </Paper>
 
-            {!occurrencesLoading && occurrences.length > 0 && viewMode === 'card' && (
-              <>
-                <Box>{occurrences.map((occurrence, index) => renderOccurrenceCard(occurrence, index))}</Box>
-                {totalPages > 1 && (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}><Pagination count={totalPages} page={page} onChange={handlePageChange} color="primary" size={isMobile ? 'small' : 'medium'} showFirstButton showLastButton /></Box>
-                )}
-              </>
-            )}
-          </Paper>
-        </Grid>
-      </Grid>
+      {/* FAB Speed Dial - hidden on mobile to reduce clutter */}
+      {!isMobile && (
+        <Fade in={trigger}>
+          <SpeedDial 
+            ariaLabel="Quick Actions" 
+            sx={{ position: 'fixed', bottom: 72, right: 16 }} 
+            icon={<SpeedDialIcon />} 
+            onClose={() => setSpeedDialOpen(false)} 
+            onOpen={() => setSpeedDialOpen(true)} 
+            open={speedDialOpen}
+          >
+            <SpeedDialAction 
+              icon={<AddIcon />} 
+              tooltipTitle="Generate Next" 
+              onClick={handleGenerateNext} 
+              FabProps={{ sx: { bgcolor: COLORS.primary, '&:hover': { bgcolor: COLORS.primaryDark } } }}
+            />
+            <SpeedDialAction 
+              icon={<CalendarTodayIcon />} 
+              tooltipTitle="Generate 5" 
+              onClick={() => handleGenerateMultiple(5)} 
+            />
+            <SpeedDialAction 
+              icon={<DownloadIcon />} 
+              tooltipTitle="Export" 
+              onClick={handleExport} 
+            />
+            <SpeedDialAction 
+              icon={<EditIcon />} 
+              tooltipTitle="Edit" 
+              onClick={() => navigate(`/recurring-meetings/${id}/edit`)} 
+            />
+            <SpeedDialAction 
+              icon={<DeleteIcon />} 
+              tooltipTitle="Delete" 
+              onClick={() => setDeleteDialogOpen(true)} 
+              FabProps={{ sx: { bgcolor: COLORS.danger, '&:hover': { bgcolor: COLORS.dangerDark } } }}
+            />
+          </SpeedDial>
+        </Fade>
+      )}
 
-      <Fade in={trigger}>
-        <SpeedDial ariaLabel="Quick Actions" sx={{ position: 'fixed', bottom: 16, right: 16 }} icon={<SpeedDialIcon />} onClose={() => setSpeedDialOpen(false)} onOpen={() => setSpeedDialOpen(true)} open={speedDialOpen}>
-          <SpeedDialAction icon={<Add />} tooltipTitle="Generate Next" onClick={handleGenerateNext} />
-          <SpeedDialAction icon={<CalendarTodayIcon />} tooltipTitle="Generate 5" onClick={() => handleGenerateMultiple(5)} />
-          <SpeedDialAction icon={<DownloadIcon />} tooltipTitle="Export" onClick={handleExport} />
-          <SpeedDialAction icon={<Edit />} tooltipTitle="Edit" onClick={() => navigate(`/recurring-meetings/${id}/edit`)} />
-          <SpeedDialAction icon={<Delete />} tooltipTitle="Delete" onClick={() => setDeleteDialogOpen(true)} />
-        </SpeedDial>
-      </Fade>
-
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Recurring Meeting Series?</DialogTitle>
-        <DialogContent><DialogContentText>Are you sure you want to delete <strong>"{recurringMeeting.title}"</strong>? This will also delete all <strong>{totalCount}</strong> generated occurrences. This cannot be undone.</DialogContentText></DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>Cancel</Button>
-          <Button onClick={handleDelete} color="error" disabled={deleting}>{deleting ? 'Deleting…' : 'Delete Series'}</Button>
+      {/* Delete Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} PaperProps={{ sx: { borderRadius: 3, p: 1, maxWidth: isMobile ? '95%' : 'auto' } }}>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Avatar sx={{ bgcolor: alpha(COLORS.danger, 0.1), color: COLORS.danger, width: isMobile ? 32 : 40, height: isMobile ? 32 : 40 }}>
+              <DeleteIcon sx={{ fontSize: isMobile ? 18 : 24 }} />
+            </Avatar>
+            <Typography variant="h6" fontWeight={700} sx={{ fontSize: isMobile ? '1rem' : '1.25rem' }}>Delete Series?</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ fontSize: isMobile ? '0.85rem' : '1rem' }}>
+            Are you sure you want to delete <strong>"{recurringMeeting.title}"</strong>?
+          </DialogContentText>
+          <Box sx={{ mt: 2, p: 2, bgcolor: alpha(COLORS.warning, 0.08), borderRadius: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: isMobile ? '0.8rem' : '0.875rem' }}>
+              This will also delete all <strong>{totalCount}</strong> generated occurrences. This action cannot be undone.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, pt: 0 }}>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting} sx={{ textTransform: 'none', fontSize: isMobile ? '0.8rem' : '0.875rem' }}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleDelete} 
+            color="error" 
+            disabled={deleting} 
+            variant="contained" 
+            sx={{ 
+              textTransform: 'none', 
+              fontWeight: 600, 
+              borderRadius: 2, 
+              bgcolor: COLORS.danger, 
+              '&:hover': { bgcolor: COLORS.dangerDark },
+              fontSize: isMobile ? '0.8rem' : '0.875rem',
+            }}
+          >
+            {deleting ? <CircularProgress size={20} /> : 'Delete Series'}
+          </Button>
         </DialogActions>
       </Dialog>
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}><Alert onClose={handleCloseSnackbar} severity={snackbar.severity} variant="filled">{snackbar.message}</Alert></Snackbar>
+
+      {/* Snackbar */}
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={4000} 
+        onClose={handleCloseSnackbar} 
+        anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
+      >
+        <Alert 
+          onClose={handleCloseSnackbar} 
+          severity={snackbar.severity} 
+          variant="filled" 
+          sx={{ 
+            borderRadius: 2,
+            fontSize: isMobile ? '0.8rem' : '0.875rem',
+            width: isMobile ? '100%' : 'auto',
+          }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
 
-export default RecurringMeetingDetail;
+export default RecurringMeetingDetail;  

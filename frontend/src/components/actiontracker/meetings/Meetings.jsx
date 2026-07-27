@@ -6,7 +6,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   Box, Typography, Button, Paper, Stack, Fab, Tabs, Tab,
   Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
-  CircularProgress, IconButton, Chip, TextField, InputAdornment
+  CircularProgress, IconButton, Chip, TextField, InputAdornment,
+  alpha
 } from '@mui/material';
 import Add from '@mui/icons-material/Add';
 import FilterListIcon from '@mui/icons-material/FilterList';
@@ -47,6 +48,25 @@ const SESSION_KEYS = {
   SCROLL_POSITION: 'meetings_scroll_position_session'
 };
 
+// ==================== DARK MODE COLORS ====================
+const DARK_MODE = {
+  background: '#0F172A',      // Slate 900
+  surface: '#1E293B',          // Slate 800
+  surfaceLighter: '#334155',   // Slate 700
+  text: '#E2E8F0',            // Slate 200
+  textSecondary: '#94A3B8',   // Slate 400
+  textMuted: '#64748B',       // Slate 500
+  border: 'rgba(255,255,255,0.08)',
+  borderLight: 'rgba(255,255,255,0.05)',
+  primary: '#A78BFA',         // Purple 400
+  primaryDark: '#7C3AED',     // Purple 600
+  primaryHover: '#6D28D9',    // Purple 700
+  success: '#34D399',         // Emerald 400
+  successBg: 'rgba(16,185,129,0.1)',
+  error: '#F87171',           // Red 400
+  errorBg: 'rgba(239,68,68,0.1)',
+};
+
 // ==================== MAIN COMPONENT ====================
 const Meetings = () => {
   const theme = useTheme();
@@ -55,7 +75,11 @@ const Meetings = () => {
   const dispatch = useDispatch();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
+  const isDarkMode = theme.palette.mode === 'dark';
   const scrollContainerRef = useRef(null);
+  
+  // Use dark mode colors
+  const dm = isDarkMode ? DARK_MODE : {};
   
   // ==================== REDUX SELECTORS ====================
   const statusOptions = useSelector(selectMeetingStatusOptions);
@@ -133,15 +157,17 @@ const Meetings = () => {
   ].reduce((a, b) => a + b, 0);
 
   // ==================== HELPER FUNCTIONS ====================
-  const getStatusLabel = (statusId) => {
+  const getStatusLabel = useCallback((statusId) => {
+    if (!statusId) return 'Unknown';
     const status = statusOptions.find(s => s.id === statusId);
-    return status ? status.name : 'Unknown';
-  };
+    return status?.name || status?.short_name || 'Unknown';
+  }, [statusOptions]);
 
-  const getStatusColor = (statusId) => {
+  const getStatusColor = useCallback((statusId) => {
+    if (!statusId) return 'default';
     const status = statusOptions.find(s => s.id === statusId);
     return status?.color || 'default';
-  };
+  }, [statusOptions]);
 
   const getGridColumns = useCallback(() => {
     if (isMobile) return '1fr';
@@ -196,7 +222,6 @@ const Meetings = () => {
       if (params.status !== undefined) queryParams.status = params.status;
       else if (statusFilter !== 'all') queryParams.status = statusFilter;
       
-      // ✅ Use deduplicated API call
       const response = await meetingsAPI.getAll(queryParams);
       
       setMeetings(response.data.items || []);
@@ -217,28 +242,28 @@ const Meetings = () => {
     }
   }, [page, rowsPerPage, showUpcoming, showPast, searchTerm, statusFilter]);
 
-const loadRecurringMeetings = useCallback(async () => {
-  try {
-    setLoadingRecurring(true);
-    
-    const response = await meetingsAPI.getRecurring({
-      limit: 50,
-      sort_by: 'meeting_date',
-      sort_order: 'desc'
-    });
-    
-    setRecurringMeetings(response.data.data || []);  // ← Change .items to .data
-  } catch (err) {
-    console.error('Error loading recurring meetings:', err);
-    setSnackbar({ 
-      open: true, 
-      message: 'Failed to load recurring meetings', 
-      severity: 'error' 
-    });
-  } finally {
-    setLoadingRecurring(false);
-  }
-}, []);
+  const loadRecurringMeetings = useCallback(async () => {
+    try {
+      setLoadingRecurring(true);
+      
+      const response = await meetingsAPI.getRecurring({
+        limit: 50,
+        sort_by: 'meeting_date',
+        sort_order: 'desc'
+      });
+      
+      setRecurringMeetings(response.data.data || []);
+    } catch (err) {
+      console.error('Error loading recurring meetings:', err);
+      setSnackbar({ 
+        open: true, 
+        message: 'Failed to load recurring meetings', 
+        severity: 'error' 
+      });
+    } finally {
+      setLoadingRecurring(false);
+    }
+  }, []);
 
   const handleGenerateNextOccurrence = useCallback(async (meeting) => {
     try {
@@ -294,7 +319,6 @@ const loadRecurringMeetings = useCallback(async () => {
     setShowUpcoming(true);
     setShowPast(false);
     setPage(1);
-    // Clear cache when filters are cleared
     meetingsAPI.clearCache();
   };
 
@@ -334,7 +358,6 @@ const loadRecurringMeetings = useCallback(async () => {
       setSnackbar({ open: true, message: 'Action created successfully!', severity: 'success' });
       setAddActionDialogOpen(false);
       setSelectedMeetingForAction(null);
-      // Clear cache and reload
       meetingsAPI.clearCache();
       loadMeetings({ page, limit: rowsPerPage });
       return response.data;
@@ -432,12 +455,10 @@ const loadRecurringMeetings = useCallback(async () => {
     loadRecurringMeetings();
   }, [loadRecurringMeetings]);
 
-  // ✅ Load meetings when filters change - with debounce protection
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       loadMeetings({ page, limit: rowsPerPage });
-    }, 300); // Debounce to prevent rapid successive calls
-    
+    }, 300);
     return () => clearTimeout(timeoutId);
   }, [page, searchTerm, statusFilter, rowsPerPage, showUpcoming, showPast, loadMeetings]);
 
@@ -453,7 +474,7 @@ const loadRecurringMeetings = useCallback(async () => {
       width: '100%', 
       minHeight: '100vh', 
       pb: isMobile ? 10 : 4, 
-      bgcolor: 'background.default',
+      bgcolor: isDarkMode ? DARK_MODE.background : 'background.default',
       pt: isMobile ? 0 : 2
     }}>
       <Box sx={{ p: isMobile ? 1.5 : 3 }} ref={scrollContainerRef}>
@@ -473,17 +494,22 @@ const loadRecurringMeetings = useCallback(async () => {
               variant={isMobile ? "h5" : "h4"} 
               fontWeight={900} 
               sx={{ 
-                background: COLORS.gradient.primary, 
-                backgroundClip: 'text', 
-                WebkitBackgroundClip: 'text', 
-                color: 'transparent',
-                fontSize: isMobile ? '1.5rem' : '2.125rem'
+                color: isDarkMode ? '#FFFFFF' : COLORS.primary,
+                fontSize: isMobile ? '1.5rem' : '2.125rem',
+                letterSpacing: '-0.02em',
+                textShadow: isDarkMode ? '0 0 40px rgba(167,139,250,0.15)' : 'none',
               }}
             >
               Meetings
             </Typography>
             {!isMobile && (
-              <Typography variant="body2" color="text.secondary">
+              <Typography 
+                variant="body2" 
+                sx={{ 
+                  color: isDarkMode ? DARK_MODE.textSecondary : 'text.secondary',
+                  mt: 0.5
+                }}
+              >
                 Manage and track all scheduled sessions
               </Typography>
             )}
@@ -495,7 +521,18 @@ const loadRecurringMeetings = useCallback(async () => {
                 variant="contained" 
                 startIcon={<Add />} 
                 onClick={() => navigate('/meetings/create')} 
-                sx={{ borderRadius: 2.5, px: 3, py: 1.2, fontWeight: 700, textTransform: 'none' }}
+                sx={{ 
+                  borderRadius: 2.5, 
+                  px: 3, 
+                  py: 1.2, 
+                  fontWeight: 700, 
+                  textTransform: 'none',
+                  bgcolor: isDarkMode ? DARK_MODE.primaryDark : undefined,
+                  color: isDarkMode ? '#FFFFFF' : undefined,
+                  '&:hover': { 
+                    bgcolor: isDarkMode ? DARK_MODE.primaryHover : undefined 
+                  }
+                }}
               >
                 New Meeting
               </Button>
@@ -510,23 +547,31 @@ const loadRecurringMeetings = useCallback(async () => {
           mb: isMobile ? 0 : 3,
           borderTopLeftRadius: isMobile ? '8px' : undefined,
           borderTopRightRadius: isMobile ? '8px' : undefined,
-          boxShadow: isMobile ? 'none' : undefined
+          boxShadow: isMobile ? 'none' : (isDarkMode ? '0 4px 20px rgba(0,0,0,0.3)' : undefined),
+          bgcolor: isDarkMode ? DARK_MODE.surface : 'background.paper',
+          border: isDarkMode ? `1px solid ${DARK_MODE.border}` : 'none'
         }}>
           <Tabs 
             value={tabValue} 
             onChange={handleTabChange}
             variant="fullWidth"
             sx={{ 
-              bgcolor: 'background.paper',
+              bgcolor: isDarkMode ? DARK_MODE.surface : 'background.paper',
               '& .MuiTab-root': { 
                 py: isMobile ? 1.5 : 2, 
                 fontWeight: 600,
                 fontSize: isMobile ? '0.75rem' : '0.875rem',
                 minHeight: isMobile ? 44 : 48,
-                textTransform: isMobile ? 'none' : 'uppercase'
+                textTransform: isMobile ? 'none' : 'uppercase',
+                color: isDarkMode ? DARK_MODE.textSecondary : undefined,
+                '&.Mui-selected': { 
+                  color: isDarkMode ? DARK_MODE.primary : COLORS.primary 
+                }
               },
-              '& .Mui-selected': { color: COLORS.primary },
-              '& .MuiTabs-indicator': { bgcolor: COLORS.primary, height: isMobile ? 2 : 3 }
+              '& .MuiTabs-indicator': { 
+                bgcolor: isDarkMode ? DARK_MODE.primary : COLORS.primary, 
+                height: isMobile ? 2 : 3 
+              }
             }}
           >
             <Tab 
@@ -540,8 +585,12 @@ const loadRecurringMeetings = useCallback(async () => {
                       sx={{ 
                         height: 18, 
                         fontSize: '0.65rem',
-                        bgcolor: tabValue === 0 ? COLORS.primary : 'action.hover',
-                        color: tabValue === 0 ? 'white' : 'text.secondary'
+                        bgcolor: tabValue === 0 
+                          ? (isDarkMode ? DARK_MODE.primaryDark : COLORS.primary) 
+                          : (isDarkMode ? 'rgba(255,255,255,0.1)' : 'action.hover'),
+                        color: tabValue === 0 
+                          ? '#FFFFFF' 
+                          : (isDarkMode ? DARK_MODE.textSecondary : 'text.secondary')
                       }} 
                     />
                   )}
@@ -559,8 +608,12 @@ const loadRecurringMeetings = useCallback(async () => {
                       sx={{ 
                         height: 18, 
                         fontSize: '0.65rem',
-                        bgcolor: tabValue === 1 ? COLORS.primary : 'action.hover',
-                        color: tabValue === 1 ? 'white' : 'text.secondary'
+                        bgcolor: tabValue === 1 
+                          ? (isDarkMode ? DARK_MODE.primaryDark : COLORS.primary) 
+                          : (isDarkMode ? 'rgba(255,255,255,0.1)' : 'action.hover'),
+                        color: tabValue === 1 
+                          ? '#FFFFFF' 
+                          : (isDarkMode ? DARK_MODE.textSecondary : 'text.secondary')
                       }} 
                     />
                   )}
@@ -572,17 +625,16 @@ const loadRecurringMeetings = useCallback(async () => {
         
         {/* ==================== REGULAR MEETINGS TAB ==================== */}
         <TabPanel value={tabValue} index={0}>
-          {/* Filters - same as before */}
           <Paper elevation={0} sx={{ 
             p: isMobile ? 1 : 2.5, 
             mb: isMobile ? 2 : 4, 
             borderRadius: isMobile ? 2 : 3, 
-            border: `1px solid ${COLORS.primary}20`, 
-            bgcolor: 'background.paper',
+            border: `1px solid ${isDarkMode ? DARK_MODE.border : `${COLORS.primary}20`}`,
+            bgcolor: isDarkMode ? DARK_MODE.surface : 'background.paper',
             ...(isMobile && { 
               borderRadius: 1,
               border: '1px solid',
-              borderColor: 'divider',
+              borderColor: isDarkMode ? DARK_MODE.border : 'divider',
               boxShadow: 'none'
             })
           }}>
@@ -600,7 +652,7 @@ const loadRecurringMeetings = useCallback(async () => {
                       InputProps={{
                         startAdornment: (
                           <InputAdornment position="start">
-                            <SearchIcon fontSize="small" />
+                            <SearchIcon fontSize="small" sx={{ color: isDarkMode ? DARK_MODE.textSecondary : undefined }} />
                           </InputAdornment>
                         ),
                         endAdornment: searchTerm && (
@@ -610,7 +662,19 @@ const loadRecurringMeetings = useCallback(async () => {
                             </IconButton>
                           </InputAdornment>
                         ),
-                        sx: { borderRadius: 2 }
+                        sx: { 
+                          borderRadius: 2,
+                          color: isDarkMode ? DARK_MODE.text : undefined,
+                          '& .MuiOutlinedInput-notchedOutline': {
+                            borderColor: isDarkMode ? DARK_MODE.border : undefined,
+                          },
+                          '&:hover .MuiOutlinedInput-notchedOutline': {
+                            borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : undefined,
+                          },
+                          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                            borderColor: isDarkMode ? DARK_MODE.primary : undefined,
+                          }
+                        }
                       }}
                     />
                   </Box>
@@ -620,13 +684,13 @@ const loadRecurringMeetings = useCallback(async () => {
                       size="small"
                       sx={{ 
                         border: '1px solid',
-                        borderColor: 'divider',
+                        borderColor: isDarkMode ? DARK_MODE.border : 'divider',
                         borderRadius: 2,
-                        color: 'text.secondary',
+                        color: isDarkMode ? DARK_MODE.textSecondary : 'text.secondary',
                         ...(activeFilterCount > 0 && { 
-                          borderColor: COLORS.primary,
-                          color: COLORS.primary,
-                          bgcolor: `${COLORS.primary}10`
+                          borderColor: isDarkMode ? DARK_MODE.primary : COLORS.primary,
+                          color: isDarkMode ? DARK_MODE.primary : COLORS.primary,
+                          bgcolor: isDarkMode ? alpha(DARK_MODE.primary, 0.1) : `${COLORS.primary}10`
                         })
                       }}
                     >
@@ -640,8 +704,8 @@ const loadRecurringMeetings = useCallback(async () => {
                             fontSize: '0.5rem', 
                             minWidth: 14, 
                             p: 0,
-                            bgcolor: COLORS.primary,
-                            color: 'white',
+                            bgcolor: isDarkMode ? DARK_MODE.primaryDark : COLORS.primary,
+                            color: '#FFFFFF',
                             ml: 0.5,
                             '& .MuiChip-label': { px: 0.5 }
                           }} 
@@ -653,9 +717,9 @@ const loadRecurringMeetings = useCallback(async () => {
                       size="small"
                       sx={{ 
                         border: '1px solid',
-                        borderColor: 'divider',
+                        borderColor: isDarkMode ? DARK_MODE.border : 'divider',
                         borderRadius: 2,
-                        color: 'text.secondary'
+                        color: isDarkMode ? DARK_MODE.textSecondary : 'text.secondary'
                       }}
                     >
                       {viewMode === 'grid' ? <ViewListIcon fontSize="small" /> : <ViewModuleIcon fontSize="small" />}
@@ -670,7 +734,12 @@ const loadRecurringMeetings = useCallback(async () => {
                         label={`Search: ${searchTerm}`}
                         size="small"
                         onDelete={() => handleSearchTermChange('')}
-                        sx={{ height: 22, fontSize: '0.7rem' }}
+                        sx={{ 
+                          height: 22, 
+                          fontSize: '0.7rem',
+                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
+                          color: isDarkMode ? DARK_MODE.text : undefined,
+                        }}
                       />
                     )}
                     {statusFilter !== 'all' && (
@@ -687,7 +756,12 @@ const loadRecurringMeetings = useCallback(async () => {
                         label="Hide Upcoming"
                         size="small"
                         onDelete={() => handleShowUpcomingChange(true)}
-                        sx={{ height: 22, fontSize: '0.7rem' }}
+                        sx={{ 
+                          height: 22, 
+                          fontSize: '0.7rem',
+                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
+                          color: isDarkMode ? DARK_MODE.text : undefined,
+                        }}
                       />
                     )}
                     {showPast && (
@@ -695,7 +769,12 @@ const loadRecurringMeetings = useCallback(async () => {
                         label="Show Past"
                         size="small"
                         onDelete={() => handleShowPastChange(false)}
-                        sx={{ height: 22, fontSize: '0.7rem' }}
+                        sx={{ 
+                          height: 22, 
+                          fontSize: '0.7rem',
+                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
+                          color: isDarkMode ? DARK_MODE.text : undefined,
+                        }}
                       />
                     )}
                     {hasActiveFilters && (
@@ -711,7 +790,6 @@ const loadRecurringMeetings = useCallback(async () => {
                 )}
               </>
             ) : (
-              // Desktop Filters
               <MeetingFilters
                 searchTerm={searchTerm}
                 setSearchTerm={handleSearchTermChange}
@@ -727,6 +805,7 @@ const loadRecurringMeetings = useCallback(async () => {
                 onClearFilters={handleClearFilters}
                 onOpenFilterDrawer={() => setFilterDrawerOpen(true)}
                 isMobile={isMobile}
+                isDarkMode={isDarkMode}
               />
             )}
           </Paper>
@@ -754,13 +833,19 @@ const loadRecurringMeetings = useCallback(async () => {
                       key={i} 
                       variant="rounded" 
                       height={isMobile ? 320 : 380} 
-                      sx={{ borderRadius: 3, width: '100%' }} 
+                      sx={{ 
+                        borderRadius: 3, 
+                        width: '100%',
+                        bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : undefined,
+                      }} 
                     />
                   ))
                 ) : meetings.length === 0 ? (
                   <Box sx={{ textAlign: 'center', py: 8, gridColumn: '1 / -1' }}>
-                    <Typography variant="h6" color="text.secondary">No meetings found</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    <Typography variant="h6" color={isDarkMode ? DARK_MODE.textSecondary : 'text.secondary'}>
+                      No meetings found
+                    </Typography>
+                    <Typography variant="body2" color={isDarkMode ? DARK_MODE.textMuted : 'text.secondary'} sx={{ mt: 1 }}>
                       {hasActiveFilters ? 'Try adjusting your search or filters' : 'Create your first meeting'}
                     </Typography>
                     {hasActiveFilters && (
@@ -769,7 +854,17 @@ const loadRecurringMeetings = useCallback(async () => {
                       </Button>
                     )}
                     {!hasActiveFilters && (
-                      <Button variant="contained" onClick={() => navigate('/meetings/create')} sx={{ mt: 2 }} startIcon={<Add />}>
+                      <Button 
+                        variant="contained" 
+                        onClick={() => navigate('/meetings/create')} 
+                        sx={{ 
+                          mt: 2,
+                          bgcolor: isDarkMode ? DARK_MODE.primaryDark : undefined,
+                          color: isDarkMode ? '#FFFFFF' : undefined,
+                          '&:hover': { bgcolor: isDarkMode ? DARK_MODE.primaryHover : undefined }
+                        }} 
+                        startIcon={<Add />}
+                      >
                         Create Meeting
                       </Button>
                     )}
@@ -780,11 +875,14 @@ const loadRecurringMeetings = useCallback(async () => {
                       key={meeting.id}
                       meeting={meeting} 
                       statusOptions={statusOptions} 
+                      getStatusLabel={getStatusLabel}
+                      getStatusColor={getStatusColor}
                       onView={(id) => navigate(`/meetings/${id}`)} 
                       onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
                       onNotify={handleNotifyClick}
                       onGenerateMeeting={handleGenerateMeeting}
                       onAddAction={handleAddAction}
+                      isDarkMode={isDarkMode}
                     />
                   ))
                 )}
@@ -800,6 +898,21 @@ const loadRecurringMeetings = useCallback(async () => {
                     size={isMobile ? "small" : "medium"}
                     showFirstButton={!isMobile}
                     showLastButton={!isMobile}
+                    sx={{
+                      '& .MuiPaginationItem-root': {
+                        color: isDarkMode ? DARK_MODE.text : undefined,
+                        '&.Mui-selected': {
+                          bgcolor: isDarkMode ? DARK_MODE.primaryDark : undefined,
+                          color: isDarkMode ? '#FFFFFF' : undefined,
+                          '&:hover': {
+                            bgcolor: isDarkMode ? DARK_MODE.primaryHover : undefined,
+                          }
+                        },
+                        '&:hover': {
+                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
+                        }
+                      }
+                    }}
                   />
                 </Box>
               )}
@@ -814,6 +927,7 @@ const loadRecurringMeetings = useCallback(async () => {
                 onView={(id) => navigate(`/meetings/${id}`)}
                 onEdit={(id) => navigate(`/meetings/${id}/edit`)}
                 onNotify={handleNotifyClick}
+                isDarkMode={isDarkMode}
               />
               
               {!loading && totalPages > 1 && (
@@ -826,6 +940,21 @@ const loadRecurringMeetings = useCallback(async () => {
                     size={isMobile ? "small" : "medium"}
                     showFirstButton={!isMobile}
                     showLastButton={!isMobile}
+                    sx={{
+                      '& .MuiPaginationItem-root': {
+                        color: isDarkMode ? DARK_MODE.text : undefined,
+                        '&.Mui-selected': {
+                          bgcolor: isDarkMode ? DARK_MODE.primaryDark : undefined,
+                          color: isDarkMode ? '#FFFFFF' : undefined,
+                          '&:hover': {
+                            bgcolor: isDarkMode ? DARK_MODE.primaryHover : undefined,
+                          }
+                        },
+                        '&:hover': {
+                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
+                        }
+                      }
+                    }}
                   />
                 </Box>
               )}
@@ -837,7 +966,7 @@ const loadRecurringMeetings = useCallback(async () => {
         <TabPanel value={tabValue} index={1}>
           {loadingRecurring ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress />
+              <CircularProgress sx={{ color: isDarkMode ? DARK_MODE.primary : undefined }} />
             </Box>
           ) : (
             <RecurringMeetingsList 
@@ -845,6 +974,7 @@ const loadRecurringMeetings = useCallback(async () => {
               onView={(id) => navigate(`/recurring-meetings/${id}`)}
               onEdit={(id) => navigate(`/recurring-meetings/${id}/edit`)}
               onGenerate={handleGenerateMeeting}
+              isDarkMode={isDarkMode}
             />
           )}
         </TabPanel>
@@ -864,20 +994,27 @@ const loadRecurringMeetings = useCallback(async () => {
           }}
         >
           <Box sx={{ 
-            bgcolor: 'background.paper', 
+            bgcolor: isDarkMode ? DARK_MODE.surface : 'background.paper', 
             px: 1.5, 
             py: 0.5, 
             borderRadius: 2,
             boxShadow: 2,
             fontSize: '0.7rem',
-            color: 'text.secondary',
-            mb: 0.5
+            color: isDarkMode ? DARK_MODE.textSecondary : 'text.secondary',
+            mb: 0.5,
+            border: isDarkMode ? `1px solid ${DARK_MODE.border}` : 'none'
           }}>
             {tabValue === 0 ? 'Create Meeting' : 'Create Series'}
           </Box>
           <Fab 
             color="primary" 
-            sx={{ boxShadow: 3, '&:active': { transform: 'scale(0.95)' } }} 
+            sx={{ 
+              boxShadow: 3, 
+              '&:active': { transform: 'scale(0.95)' },
+              bgcolor: isDarkMode ? DARK_MODE.primaryDark : undefined,
+              color: isDarkMode ? '#FFFFFF' : undefined,
+              '&:hover': { bgcolor: isDarkMode ? DARK_MODE.primaryHover : undefined }
+            }} 
             onClick={() => navigate(tabValue === 0 ? '/meetings/create' : '/recurring-meetings/create')}
           >
             <Add />
@@ -900,6 +1037,7 @@ const loadRecurringMeetings = useCallback(async () => {
         setShowPast={handleShowPastChange}
         onClearFilters={handleClearFilters}
         activeFilterCount={activeFilterCount}
+        isDarkMode={isDarkMode}
       />
       
       {/* ==================== NOTIFICATION DIALOG ==================== */}
@@ -908,7 +1046,8 @@ const loadRecurringMeetings = useCallback(async () => {
         onClose={() => setNotificationDialogOpen(false)} 
         meeting={selectedMeeting} 
         participants={participants} 
-        onSend={handleSendNotifications} 
+        onSend={handleSendNotifications}
+        isDarkMode={isDarkMode}
       />
 
       {/* ==================== ADD ACTION DIALOG ==================== */}
@@ -928,6 +1067,7 @@ const loadRecurringMeetings = useCallback(async () => {
           error={actionError}
           busy={creatingAction}
           onMinutesCreated={handleMinuteCreated}
+          isDarkMode={isDarkMode}
         />
       )}
       
@@ -938,7 +1078,16 @@ const loadRecurringMeetings = useCallback(async () => {
         onClose={() => setSnackbar({ ...snackbar, open: false })} 
         anchorOrigin={{ vertical: 'bottom', horizontal: isMobile ? 'center' : 'right' }}
       >
-        <Alert severity={snackbar.severity} variant="filled">{snackbar.message}</Alert>
+        <Alert 
+          severity={snackbar.severity} 
+          variant="filled"
+          sx={{
+            bgcolor: snackbar.severity === 'success' && isDarkMode ? '#065F46' : undefined,
+            color: snackbar.severity === 'success' && isDarkMode ? '#D1FAE5' : undefined,
+          }}
+        >
+          {snackbar.message}
+        </Alert>
       </Snackbar>
     </Box>
   );

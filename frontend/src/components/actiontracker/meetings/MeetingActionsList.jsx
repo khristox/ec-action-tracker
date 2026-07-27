@@ -21,7 +21,6 @@ import {
   TableRow,
   Avatar,
   Tooltip,
-  LinearProgress,
   Fade,
   Grow,
   Dialog,
@@ -33,9 +32,9 @@ import {
   alpha,
   Card,
   CardContent,
-  Grid,
   useMediaQuery,
   Badge,
+  LinearProgress,
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -53,7 +52,6 @@ import {
   Close as Close,
   Lock as LockIcon,
   Star as StarIcon,
-  StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import {
@@ -129,6 +127,119 @@ const getPriorityConfig = (priority) => {
     default:
       return { label: 'Very Low', stars: 0, color: 'default' };
   }
+};
+
+// ==================== STATUS DISPLAY COMPONENT ====================
+const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
+  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
+  const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
+
+  // If completed, show completed status
+  if (isCompleted) {
+    return (
+      <Chip
+        size="small"
+        label="Completed"
+        color="success"
+        sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600 }}
+      />
+    );
+  }
+
+  // Find the status from options
+  const status = statusOptions.find(s => s.id === action.overall_status_id);
+  
+  let statusLabel = status?.label || status?.name?.replace('Action Status - ', '') || 'Pending';
+  let statusColor = status?.color || '#F59E0B';
+  
+  // If overdue, show overdue status (even if status says something else)
+  if (isOverdue) {
+    return (
+      <Stack direction="row" spacing={0.5} alignItems="center">
+        <Chip
+          size="small"
+          label="Overdue"
+          icon={<WarningIcon sx={{ fontSize: 14 }} />}
+          sx={{ 
+            height: 20, 
+            fontSize: '0.6rem', 
+            fontWeight: 700,
+            bgcolor: alpha('#EF4444', 0.15),
+            color: '#EF4444',
+            '& .MuiChip-icon': { color: '#EF4444', fontSize: 14 }
+          }}
+        />
+        {/* Show original status as secondary chip */}
+        <Chip
+          size="small"
+          label={statusLabel}
+          sx={{ 
+            height: 18, 
+            fontSize: '0.5rem', 
+            fontWeight: 500,
+            bgcolor: alpha(statusColor, 0.1),
+            color: statusColor,
+            opacity: 0.7,
+            '& .MuiChip-label': { px: 0.8 }
+          }}
+        />
+      </Stack>
+    );
+  }
+
+  // Regular status (not overdue, not completed)
+  return (
+    <Chip
+      size="small"
+      label={statusLabel}
+      sx={{ 
+        height: 20, 
+        fontSize: '0.6rem', 
+        fontWeight: 600,
+        bgcolor: alpha(statusColor, 0.12),
+        color: statusColor,
+      }}
+    />
+  );
+};
+
+// ==================== MINIMAL PROGRESS COMPONENT ====================
+const MinimalProgress = ({ percentage }) => {
+  const clamped = Math.min(Math.max(percentage || 0, 0), 100);
+  const isComplete = clamped >= 100;
+  
+  return (
+    <Tooltip title={`${clamped}% complete`} placement="top">
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 60 }}>
+        <LinearProgress
+          variant="determinate"
+          value={clamped}
+          sx={{
+            flex: 1,
+            height: 4,
+            borderRadius: 2,
+            bgcolor: alpha('#6B7280', 0.15),
+            '& .MuiLinearProgress-bar': {
+              borderRadius: 2,
+              bgcolor: isComplete ? '#10B981' : clamped > 50 ? '#3B82F6' : '#F59E0B',
+            }
+          }}
+        />
+        <Typography
+          variant="caption"
+          fontWeight={700}
+          sx={{
+            fontSize: '0.6rem',
+            color: isComplete ? '#10B981' : 'text.secondary',
+            minWidth: 28,
+            textAlign: 'right',
+          }}
+        >
+          {clamped}%
+        </Typography>
+      </Box>
+    </Tooltip>
+  );
 };
 
 // ==================== MAIN COMPONENT ====================
@@ -240,7 +351,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
         if (p.email) return p.email;
         return null;
       }).filter(Boolean);
-      
+
       if (names.length > 0) return names.join(', ');
     }
     if (action.assigned_to?.full_name) return action.assigned_to.full_name;
@@ -587,11 +698,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
         {/* ==================== HEADER ==================== */}
         <Stack
           direction="row"
-          sx={{
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mb: 3
-          }}
+          justifyContent="space-between"
+          alignItems="center"
+          sx={{ mb: 3 }}
         >
           <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
             Action Items ({actions.length})
@@ -697,20 +806,21 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
             </Box>
           </Grow>
         ) : isMobile ? (
-          /* ==================== MOBILE CARD LAYOUT (No Horizontal Scrolling) ==================== */
+          /* ==================== MOBILE CARD LAYOUT ==================== */
           <Stack spacing={2}>
             {actions.map((action, index) => {
               const statusConfig = getStatusConfig(action);
               const implementers = getImplementersList(action);
               const implementerNames = getImplementersNames(action);
               const priorityConfig = getPriorityConfig(action.priority);
+              const progress = action.overall_progress_percentage || 0;
 
               return (
-                <Card 
-                  key={action.id} 
+                <Card
+                  key={action.id}
                   variant="outlined"
-                  sx={{ 
-                    borderRadius: 2, 
+                  sx={{
+                    borderRadius: 2,
                     bgcolor: isDarkMode ? '#1F2937' : 'background.paper',
                     borderColor: isDarkMode ? '#374151' : '#E5E7EB',
                     boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.05)',
@@ -718,15 +828,19 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                 >
                   <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                     {/* Top Row: Index and Status */}
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1.5}>
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="center"
+                      sx={{ mb: 1.5 }}
+                    >
                       <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
                         #{index + 1} • {action.meeting_title || action.minutes?.meeting?.title || 'Meeting Committee'}
                       </Typography>
-                      <Chip
-                        size="small"
-                        label={statusConfig.label}
-                        color={statusConfig.color}
-                        sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600, ...statusConfig.chipSx }}
+                      <ActionStatusChip 
+                        action={action} 
+                        statusOptions={statusOptions} 
+                        isDarkMode={isDarkMode} 
                       />
                     </Stack>
 
@@ -748,19 +862,38 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                     )}
 
                     {/* Details Grid */}
-                    <Grid container spacing={1} sx={{ mb: 1.5, fontSize: '0.75rem' }}>
-                      <Grid item xs={6}>
-                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Date Initiated</Typography>
-                        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>{formatDate(action.date_initiated || action.created_at)}</Typography>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Expected Resolution</Typography>
-                        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>{formatDate(action.due_date)}</Typography>
-                      </Grid>
-                      
-                      {/* Person(s) Implementing with Badge for count > 1 */}
-                      <Grid item xs={12} sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Person(s) field</Typography>
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(2, 1fr)',
+                        gap: 1,
+                        mb: 1.5,
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
+                          Date Initiated
+                        </Typography>
+                        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                          {formatDate(action.date_initiated || action.created_at)}
+                        </Typography>
+                      </Box>
+
+                      <Box>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
+                          Expected Resolution
+                        </Typography>
+                        <Typography variant="body2" fontWeight={500} sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                          {formatDate(action.due_date)}
+                        </Typography>
+                      </Box>
+
+                      {/* Person(s) Implementing with Badge for count > 1 — spans full width */}
+                      <Box sx={{ gridColumn: '1 / -1', mt: 0.5 }}>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
+                          Person(s) field
+                        </Typography>
                         <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.5 }}>
                           <Badge
                             badgeContent={implementers.length > 1 ? implementers.length : null}
@@ -789,20 +922,42 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             {implementerNames}
                           </Typography>
                         </Stack>
-                      </Grid>
+                      </Box>
 
                       {action.remarks && (
-                        <Grid item xs={12} sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>Latest Update</Typography>
-                          <Typography variant="body2" sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>{action.remarks}</Typography>
-                        </Grid>
+                        <Box sx={{ gridColumn: '1 / -1', mt: 0.5 }}>
+                          <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
+                            Latest Update
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                            {action.remarks}
+                          </Typography>
+                        </Box>
                       )}
-                    </Grid>
+
+                      {/* ✅ PROGRESS - Added for mobile view */}
+                      <Box sx={{ gridColumn: '1 / -1', mt: 0.5 }}>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
+                          Progress
+                        </Typography>
+                        <MinimalProgress percentage={progress} />
+                      </Box>
+                    </Box>
 
                     {/* Footer Row: Priority & Actions */}
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" pt={1} borderTop={`1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`}>
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="center"
+                      sx={{
+                        pt: 1,
+                        borderTop: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`
+                      }}
+                    >
                       <Stack direction="row" spacing={0.75} alignItems="center">
-                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>Priority:</Typography>
+                        <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
+                          Priority:
+                        </Typography>
                         {priorityConfig.stars > 0 ? (
                           <Stack direction="row" spacing={0.1}>
                             {[...Array(priorityConfig.stars)].map((_, i) => (
@@ -871,7 +1026,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
             })}
           </Stack>
         ) : (
-          /* ==================== DESKTOP TABLE LAYOUT (With Wrapping) ==================== */
+          /* ==================== DESKTOP TABLE LAYOUT ==================== */
           <TableContainer
             component={Paper}
             variant="outlined"
@@ -894,7 +1049,8 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                   <TableCell width="140" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Latest Update</TableCell>
                   <TableCell width="100" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }}>Date Updated</TableCell>
                   <TableCell width="90" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Priority</TableCell>
-                  <TableCell width="90" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Status</TableCell>
+                  <TableCell width="120" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Status</TableCell>
+                  <TableCell width="100" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Progress</TableCell>
                   <TableCell width="120" sx={{ fontWeight: 700, color: isDarkMode ? '#FFFFFF' : 'inherit' }} align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
@@ -904,39 +1060,40 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                   const implementers = getImplementersList(action);
                   const implementerNames = getImplementersNames(action);
                   const priorityConfig = getPriorityConfig(action.priority);
+                  const progress = action.overall_progress_percentage || 0;
 
                   return (
-                    <TableRow 
-                      key={action.id} 
-                      hover 
+                    <TableRow
+                      key={action.id}
+                      hover
                       sx={{
-                        '&:hover': { 
-                          bgcolor: isDarkMode ? '#FFFFFF0D' : '#00000005' 
+                        '&:hover': {
+                          bgcolor: isDarkMode ? '#FFFFFF0D' : '#00000005'
                         },
                       }}
                     >
-                      <TableCell sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', fontSize: '0.75rem', fontWeight: 500, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      <TableCell sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', fontSize: '0.75rem', fontWeight: 500 }}>
                         {index + 1}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.75rem', color: isDarkMode ? '#D1D5DB' : 'text.primary', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
                           {action.issue_challenge || '-'}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary', fontSize: '0.75rem' }}>
                         {formatDate(action.date_initiated || action.created_at)}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                        <Typography variant="body2" fontWeight={500} sx={{ fontSize: '0.75rem', color: isDarkMode ? '#FFFFFF' : 'text.primary', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={500} sx={{ fontSize: '0.75rem', color: isDarkMode ? '#FFFFFF' : 'text.primary' }}>
                           {action.description}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary', fontSize: '0.75rem' }}>
                         {formatDate(action.due_date)}
                       </TableCell>
 
                       {/* Person(s) Implementing with Circular Badge for > 1 */}
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      <TableCell>
                         <Stack direction="row" alignItems="center" spacing={1}>
                           <Badge
                             badgeContent={implementers.length > 1 ? implementers.length : null}
@@ -962,13 +1119,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               {getInitials(implementers[0]?.name)}
                             </Avatar>
                           </Badge>
-                          <Typography 
-                            variant="body2" 
-                            sx={{ 
-                              fontSize: '0.75rem', 
-                              wordBreak: 'break-word', 
-                              whiteSpace: 'normal', 
-                              color: isDarkMode ? '#D1D5DB' : 'text.primary' 
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontSize: '0.75rem',
+                              color: isDarkMode ? '#D1D5DB' : 'text.primary'
                             }}
                           >
                             {implementerNames}
@@ -976,17 +1131,19 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         </Stack>
                       </TableCell>
 
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                        <Typography variant="body2" sx={{ fontSize: '0.75rem', color: isDarkMode ? '#D1D5DB' : 'text.primary', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
                           {action.remarks || '-'}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.75rem', wordBreak: 'break-word', whiteSpace: 'normal', color: isDarkMode ? '#D1D5DB' : 'text.primary' }}>
+                      <TableCell sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary', fontSize: '0.75rem' }}>
                         {formatDate(action.updated_at || action.created_at)}
                       </TableCell>
-                      <TableCell align="center" sx={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      
+                      {/* Priority */}
+                      <TableCell align="center">
                         {priorityConfig.stars > 0 ? (
-                          <Stack direction="row" spacing={0.2} justifyContent="center" flexWrap="wrap">
+                          <Stack direction="row" spacing={0.2} justifyContent="center">
                             {[...Array(priorityConfig.stars)].map((_, i) => (
                               <StarIcon key={i} sx={{ fontSize: 16, color: '#F59E0B' }} />
                             ))}
@@ -997,16 +1154,24 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           </Typography>
                         )}
                       </TableCell>
-                      <TableCell align="center" sx={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                        <Chip
-                          size="small"
-                          label={statusConfig.label}
-                          color={statusConfig.color}
-                          sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600, ...statusConfig.chipSx }}
+                      
+                      {/* Status */}
+                      <TableCell align="center">
+                        <ActionStatusChip 
+                          action={action} 
+                          statusOptions={statusOptions} 
+                          isDarkMode={isDarkMode} 
                         />
                       </TableCell>
-                      <TableCell align="center" sx={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                        <Stack direction="row" spacing={0.2} justifyContent="center" flexWrap="wrap">
+                      
+                      {/* Progress */}
+                      <TableCell align="center">
+                        <MinimalProgress percentage={progress} />
+                      </TableCell>
+                      
+                      {/* Actions */}
+                      <TableCell align="center">
+                        <Stack direction="row" spacing={0.2} justifyContent="center">
                           <Tooltip title="Update Progress">
                             <span>
                               <IconButton
@@ -1114,12 +1279,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
             }
           }}
         >
-          <DialogTitle sx={{ 
-            pb: 1.5, 
-            pt: 2.5, 
-            px: 3, 
-            display: 'flex', 
-            alignItems: 'center', 
+          <DialogTitle sx={{
+            pb: 1.5,
+            pt: 2.5,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
             justifyContent: 'space-between',
             color: isDarkMode ? '#FFFFFF' : 'inherit',
           }}>
@@ -1139,15 +1304,15 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
               embedded={true}
             />
           </DialogContent>
-          <DialogActions sx={{ 
-            p: 2, 
-            px: 3, 
-            gap: 1.5, 
+          <DialogActions sx={{
+            p: 2,
+            px: 3,
+            gap: 1.5,
             borderTop: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
             bgcolor: isDarkMode ? '#1F2937' : '#FAFAFA',
           }}>
-            <Button 
-              onClick={() => setShowProgressDialog(false)} 
+            <Button
+              onClick={() => setShowProgressDialog(false)}
               variant="outlined"
               sx={{
                 borderColor: isDarkMode ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.15)',

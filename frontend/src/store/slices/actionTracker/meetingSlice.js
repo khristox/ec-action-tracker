@@ -501,39 +501,27 @@ export const deleteMeeting = createAsyncThunk(
   }
 );
 
-// Update Meeting Status
+// Update Meeting Status - Fix to use status_id
 export const updateMeetingStatus = createAsyncThunk(
   'meetings/updateMeetingStatus',
-  async ({ id, status, comment }, { rejectWithValue, getState }) => {
+  async ({ id, status_id, comment }, { rejectWithValue, getState }) => {
     try {
-      const state = getState();
-      const meetingStatusOptions = state.meetings.meetingStatusOptions;
+      // Log what we're sending
+      console.log('Updating meeting status with:', { id, status_id, comment });
       
-      let statusValue = status;
+      // Send status_id in the payload (not as query params)
+      const payload = {
+        status_id: status_id  // Send the UUID
+      };
       
-      if (meetingStatusOptions && meetingStatusOptions.length > 0) {
-        const matchedStatus = meetingStatusOptions.find(opt => 
-          opt.value === status || 
-          opt.shortName === status || 
-          opt.short_name === status
-        );
-        if (matchedStatus) {
-          statusValue = matchedStatus.value || matchedStatus.short_name;
-        }
+      if (comment) {
+        payload.status_comment = comment;
       }
       
-      console.log('Updating meeting status:', { id, status: statusValue, comment });
-      
-      // ✅ Send parameters matching backend expectation (query parameters or payload)
+      // Use PATCH with status_id in body
       const response = await api.patch(
-        `/action-tracker/meetings/${id}/status`,
-        null,
-        { 
-          params: { 
-            status: statusValue.toLowerCase(), 
-            comment: comment || '' 
-          } 
-        }
+        `/action-tracker/meetings/${id}`,
+        payload
       );
       
       console.log('Status update response:', response.data);
@@ -541,17 +529,25 @@ export const updateMeetingStatus = createAsyncThunk(
       // Normalize the response
       const normalizedData = normalizeMeetingStatus(response.data);
       
-      // Refresh the meeting data after status update
-      const refreshedMeeting = await api.get(`/action-tracker/meetings/${id}`);
-      const finalData = normalizeMeetingStatus(refreshedMeeting.data);
+      // Also refresh participants if needed
+      try {
+        const participantsResponse = await api.get(`/action-tracker/meetings/${id}/members`);
+        if (participantsResponse.data) {
+          normalizedData.participants = participantsResponse.data;
+        }
+      } catch (err) {
+        console.warn('Could not fetch participants after status update:', err);
+      }
       
-      return finalData;
+      return normalizedData;
     } catch (error) {
       console.error('Update meeting status error:', error);
       return rejectWithValue(handleApiError(error));
     }
   }
 );
+
+
 // Add Meeting Minutes
 export const addMeetingMinutes = createAsyncThunk(
   'meetings/addMeetingMinutes',

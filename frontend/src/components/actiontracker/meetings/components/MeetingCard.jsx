@@ -41,6 +41,10 @@ import {
   ContentCopy as ContentCopyIcon,
   Print as PrintIcon,
   Link as LinkIcon,
+  Business as BusinessIcon,
+  Lock as LockIcon,
+  Public as PublicIcon,
+  Group as GroupIcon,
 } from "@mui/icons-material";
 
 // ============ COLORS ============
@@ -113,6 +117,38 @@ const STATUS_LABEL_MAP = {
   IN_PROGRESS: "In Progress",
   COMPLETED: "Completed",
   UPCOMING: "Upcoming",
+};
+
+// ============ VISIBILITY CONFIGURATION ============
+const VISIBILITY_CONFIG = {
+  open: {
+    label: "Open",
+    icon: <PublicIcon fontSize="small" />,
+    color: "#2e7d32",
+    bgColor: "#e8f5e9",
+    description: "Visible to all users",
+  },
+  department: {
+    label: "🔐",
+    icon: <GroupIcon fontSize="small" />,
+    color: "#ed6c02",
+    bgColor: "#fff3e0",
+    description: "Restricted to department members",
+  },
+  restricted: {
+    label: "Restricted",
+    icon: <LockIcon fontSize="small" />,
+    color: "#d32f2f",
+    bgColor: "#ffebee",
+    description: "Restricted access",
+  },
+  private: {
+    label: "Private",
+    icon: <LockIcon fontSize="small" />,
+    color: "#9c27b0",
+    bgColor: "#f3e5f5",
+    description: "Private meeting",
+  },
 };
 
 // ============ STATUS EXTRACTION HELPER ============
@@ -217,6 +253,89 @@ const StatusChip = React.memo(({ statusInfo }) => {
     />
   );
 });
+
+// ============ VISIBILITY CHIP COMPONENT ============
+const VisibilityChip = React.memo(({ visibility, restrictedDepartmentName }) => {
+  const config = VISIBILITY_CONFIG[visibility] || VISIBILITY_CONFIG.open;
+  
+  // If it's a department-restricted meeting, show the department name
+  const isDepartmentRestricted = visibility === 'department' || visibility === 'restricted';
+  const departmentLabel = isDepartmentRestricted && restrictedDepartmentName 
+    ? `: ${restrictedDepartmentName}` 
+    : '';
+
+  return (
+    <Tooltip title={config.description || ''} placement="top">
+      <Chip
+        icon={config.icon}
+        label={`${config.label}${departmentLabel}`}
+        size="small"
+        sx={{
+          height: 24,
+          fontSize: "0.6rem",
+          fontWeight: 600,
+          bgcolor: config.bgColor,
+          color: config.color,
+          borderColor: alpha(config.color, 0.3),
+          '& .MuiChip-icon': {
+            color: config.color,
+            fontSize: 14,
+          },
+          '& .MuiChip-label': {
+            px: 1,
+          },
+        }}
+      />
+    </Tooltip>
+  );
+});
+VisibilityChip.displayName = 'VisibilityChip';
+
+// ============ DEPARTMENT INFO COMPONENT ============
+const DepartmentInfo = React.memo(({ departmentName, restrictedDepartmentName, visibility }) => {
+  // Only show if there's department information
+  if (!departmentName && !restrictedDepartmentName) {
+    return null;
+  }
+
+  const isRestricted = visibility === 'department' || visibility === 'restricted';
+  const displayName = isRestricted ? restrictedDepartmentName : departmentName;
+
+  if (!displayName) {
+    return null;
+  }
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.5,
+        px: 1,
+        py: 0.5,
+        borderRadius: 1,
+        bgcolor: alpha(COLORS.primary, 0.04),
+        border: `1px solid ${alpha(COLORS.primary, 0.08)}`,
+      }}
+    >
+      <BusinessIcon sx={{ fontSize: 14, color: COLORS.primary }} />
+      <Typography
+        variant="caption"
+        sx={{
+          fontWeight: 500,
+          color: 'text.secondary',
+          fontSize: '0.65rem',
+        }}
+      >
+        {displayName}
+      </Typography>
+      {isRestricted && (
+        <LockIcon sx={{ fontSize: 12, color: COLORS.warning }} />
+      )}
+    </Box>
+  );
+});
+DepartmentInfo.displayName = 'DepartmentInfo';
 
 const InfoItem = React.memo(({ icon, label, value, color = "#0288d1" }) => {
   const safeColor = color || "#0288d1";
@@ -421,6 +540,22 @@ export const MeetingCard = ({
     return allowedStatuses.includes(status);
   }, [statusInfo?.shortName]);
 
+  // Get visibility and department info
+  const visibility = useMemo(
+    () => meeting?.visibility || "open",
+    [meeting?.visibility]
+  );
+
+  const restrictedDepartmentName = useMemo(
+    () => meeting?.restricted_department_name || null,
+    [meeting?.restricted_department_name]
+  );
+
+  const departmentName = useMemo(
+    () => meeting?.department_name || null,
+    [meeting?.department_name]
+  );
+
   // Responsive icon size
   const iconSize = useMemo(() => {
     if (isMobile) return "small";
@@ -581,7 +716,7 @@ export const MeetingCard = ({
           gap: 1.5,
         }}
       >
-        {/* Header */}
+        {/* Header with Status and Visibility Chips */}
         <Stack
           direction="row"
           spacing={1}
@@ -599,6 +734,13 @@ export const MeetingCard = ({
             }}
           >
             <StatusChip statusInfo={statusInfo} />
+            
+            {/* Visibility Chip - Shows department name for restricted meetings */}
+            <VisibilityChip 
+              visibility={visibility} 
+              restrictedDepartmentName={restrictedDepartmentName}
+            />
+            
             {isRecurring && (
               <Chip
                 icon={<Repeat sx={{ fontSize: 14 }} />}
@@ -650,6 +792,15 @@ export const MeetingCard = ({
         >
           {meeting.title || "Untitled Meeting"}
         </Typography>
+
+        {/* Department Info - Shows restricted department or regular department */}
+        {visibility !== 'open' && (
+          <DepartmentInfo 
+            departmentName={departmentName}
+            restrictedDepartmentName={restrictedDepartmentName}
+            visibility={visibility}
+          />
+        )}
 
         {/* Info Grid */}
         <Paper
@@ -744,24 +895,22 @@ export const MeetingCard = ({
             </IconButton>
           </Tooltip>
 
-          {/* Add Action Button - HIDDEN instead of disabled */}
-          { (
-            <Tooltip title="Add Action Item" placement="top">
-              <IconButton
-                size={iconSize}
-                onClick={handleAddActionClick}
-                sx={{
-                  color: "text.secondary",
-                  "&:hover": {
-                    bgcolor: alpha(COLORS.success, 0.1),
-                    color: COLORS.success,
-                  },
-                }}
-              >
-                <AddIcon fontSize={iconSize} />
-              </IconButton>
-            </Tooltip>
-          )}
+          {/* Add Action Button */}
+          <Tooltip title="Add Action Item" placement="top">
+            <IconButton
+              size={iconSize}
+              onClick={handleAddActionClick}
+              sx={{
+                color: "text.secondary",
+                "&:hover": {
+                  bgcolor: alpha(COLORS.success, 0.1),
+                  color: COLORS.success,
+                },
+              }}
+            >
+              <AddIcon fontSize={iconSize} />
+            </IconButton>
+          </Tooltip>
 
           <Tooltip title="Send Notifications" placement="top">
             <IconButton

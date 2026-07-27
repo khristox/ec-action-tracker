@@ -144,8 +144,8 @@ ATTRIBUTES=(
     "ACTION_STATUS_IN_PROGRESS:Action Status - In Progress:IN_PROGRESS:11:#2196F3:play_arrow:Action being worked on"
     "ACTION_STATUS_COMPLETED:Action Status - Completed:COMPLETED:12:#4CAF50:check_circle:Action completed"
     "ACTION_STATUS_OVERDUE:Action Status - Overdue:OVERDUE:13:#F44336:warning:Action past due date"
-    "ACTION_STATUS_BLOCKED:Action Status - Blocked:BLOCKED:14:#9C27B0:block:Action blocked by dependency"
-    "ACTION_STATUS_CANCELLED:Action Status - Cancelled:CANCELLED:15:#757575:cancel:Action cancelled"
+    # "ACTION_STATUS_BLOCKED:Action Status - Blocked:BLOCKED:14:#9C27B0:block:Action blocked by dependency"
+    # "ACTION_STATUS_CANCELLED:Action Status - Cancelled:CANCELLED:15:#757575:cancel:Action cancelled"
 
     "INDIVIDUAL_NOT_STARTED:Individual Status - Not Started:NOT_STARTED:20:#9E9E9E:fiber_new:Haven't started yet"
     "INDIVIDUAL_IN_PROGRESS:Individual Status - In Progress:IN_PROGRESS:21:#2196F3:play_arrow:Actively working on it"

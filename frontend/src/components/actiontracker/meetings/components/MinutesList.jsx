@@ -1,750 +1,838 @@
-// src/components/actiontracker/meetings/MeetingActionsList.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate, useParams } from 'react-router-dom';
+// src/components/actiontracker/meetings/components/MinutesList.jsx
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Paper, Typography, Box, Stack, Button, IconButton,
-  Chip, Alert, CircularProgress, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow,
-  Avatar, Tooltip, LinearProgress, Menu, MenuItem,
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, FormControl, InputLabel, Select, Slider,
-  Grid, Divider, Card, CardContent, Fade, Grow,
-  Autocomplete, Skeleton, Badge
+  Box,
+  Typography,
+  Paper,
+  Stack,
+  Button,
+  IconButton,
+  Chip,
+  Alert,
+  CircularProgress,
+  Tooltip,
+  Divider,
+  useTheme,
+  alpha,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
-import {
-  Edit as Edit,
-  Assignment as AssignmentIcon,
-  Schedule as ScheduleIcon,
-  Person as PersonIcon,
-  CheckCircle as CheckCircleIcon,
-  Pending as PendingIcon,
-  Warning as WarningIcon,
-  Refresh as RefreshIcon,
-  Close as Close,
-  Save as Save,
-  TrendingUp as TrendingUpIcon,
-  PlayCircle as PlayCircleIcon,
-  TaskAlt as TaskAltIcon,
-  Visibility as VisibilityIcon,
-  PersonAdd as PersonAdd,
-  Flag as FlagIcon
-} from '@mui/icons-material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DescriptionIcon from '@mui/icons-material/Description';
+import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import CloseIcon from '@mui/icons-material/Close';
 import { format } from 'date-fns';
-import { updateActionProgress } from '../../../store/slices/actionTracker/actionSlice';
 import api from '../../../services/api';
 
-import EditActionDialog from './EditActionDialog';
-import AssignUserDialog from './AssignUserDialog';
+// ==================== HELPER FUNCTIONS ====================
 
-// ==================== Helper Functions ====================
-
-const formatDate = (dateString) => {
-  if (!dateString) return 'No due date';
+const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown date') => {
+  if (!dateVal) return fallback;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return fallback;
   try {
-    return format(new Date(dateString), 'MMM d, yyyy');
+    return format(d, pattern);
   } catch {
-    return 'Invalid date';
+    return fallback;
   }
 };
 
-const getAssignedToName = (action) => {
-  // Priority 1: Full user object from relationship
-  if (action.assigned_to?.full_name) {
-    return action.assigned_to.full_name;
-  }
-  if (action.assigned_to?.username) {
-    return action.assigned_to.username;
-  }
-  
-  // Priority 2: Direct string field
-  if (typeof action.assigned_to_name === 'string' && action.assigned_to_name && action.assigned_to_name !== 'null') {
-    return action.assigned_to_name;
-  }
-  
-  // Priority 3: Object with name property
-  if (action.assigned_to_name && typeof action.assigned_to_name === 'object') {
-    return action.assigned_to_name.name || action.assigned_to_name.email || null;
-  }
-  
-  // Priority 4: Fallback to assigned_by (who created/assigned)
-  if (action.assigned_by_name && typeof action.assigned_by_name === 'string' && action.assigned_by_name !== 'null') {
-    return `${action.assigned_by_name} (assigned by)`;
-  }
-  
-  // Priority 5: Created by
-  if (action.created_by_name && typeof action.created_by_name === 'string' && action.created_by_name !== 'null') {
-    return `${action.created_by_name} (created)`;
-  }
-  
-  return 'Unassigned';
-};
+// ==================== RTF RENDERER COMPONENT ====================
 
-const getStatusConfig = (action) => {
-  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
-  const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
+const RichTextRenderer = ({ content, isDarkMode }) => {
+  if (!content) return null;
   
-  if (isCompleted) {
-    return { 
-      label: 'Completed', 
-      color: 'success', 
-      icon: <CheckCircleIcon fontSize="small" />, 
-      bgColor: '#D1FAE5', 
-      textColor: '#065F46' 
-    };
-  }
-  if (isOverdue) {
-    return { 
-      label: 'Overdue', 
-      color: 'error', 
-      icon: <WarningIcon fontSize="small" />, 
-      bgColor: '#FEE2E2', 
-      textColor: '#991B1B' 
-    };
-  }
-  if (action.overall_status_name === 'in_progress') {
-    return { 
-      label: 'In Progress', 
-      color: 'info', 
-      icon: <PendingIcon fontSize="small" />, 
-      bgColor: '#DBEAFE', 
-      textColor: '#1E40AF' 
-    };
-  }
-  return { 
-    label: 'Pending', 
-    color: 'warning', 
-    icon: <ScheduleIcon fontSize="small" />, 
-    bgColor: '#FEF3C7', 
-    textColor: '#92400E' 
-  };
-};
-
-const getPriorityConfig = (priority) => {
-  switch(priority) {
-    case 1: return { label: 'High', color: '#EF4444', bgColor: '#FEE2E2' };
-    case 2: return { label: 'Medium', color: '#F59E0B', bgColor: '#FEF3C7' };
-    case 3: return { label: 'Low', color: '#10B981', bgColor: '#D1FAE5' };
-    case 4: return { label: 'Very Low', color: '#6B7280', bgColor: '#F3F4F6' };
-    default: return { label: 'Medium', color: '#F59E0B', bgColor: '#FEF3C7' };
-  }
-};
-
-const PROGRESS_PRESETS = [
-  { value: 0, label: 'Not Started', icon: <ScheduleIcon sx={{ fontSize: 20 }} />, color: '#6B7280' },
-  { value: 25, label: 'Just Started', icon: <PlayCircleIcon sx={{ fontSize: 20 }} />, color: '#3B82F6' },
-  { value: 50, label: 'Halfway There', icon: <TrendingUpIcon sx={{ fontSize: 20 }} />, color: '#F59E0B' },
-  { value: 75, label: 'Almost Done', icon: <PendingIcon sx={{ fontSize: 20 }} />, color: '#8B5CF6' },
-  { value: 100, label: 'Completed', icon: <TaskAltIcon sx={{ fontSize: 20 }} />, color: '#10B981' },
-];
-
-// ==================== Loading Skeleton ====================
-const TableSkeleton = () => (
-  <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-    <Table>
-      <TableHead>
-        <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-          {['Description', 'Assigned To', 'Due Date', 'Status', 'Progress', 'Actions'].map((header) => (
-            <TableCell key={header} sx={{ fontWeight: 700 }}>{header}</TableCell>
-          ))}
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {[1, 2, 3].map((i) => (
-          <TableRow key={i}>
-            <TableCell><Skeleton variant="text" width="100%" /></TableCell>
-            <TableCell>
-              <Skeleton variant="circular" width={28} height={28} />
-              <Skeleton variant="text" width={80} />
-            </TableCell>
-            <TableCell><Skeleton variant="text" width={100} /></TableCell>
-            <TableCell><Skeleton variant="rounded" width={90} height={26} /></TableCell>
-            <TableCell><Skeleton variant="rounded" width={120} height={30} /></TableCell>
-            <TableCell><Skeleton variant="circular" width={28} height={28} /></TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </TableContainer>
-);
-
-// ==================== Action Row Component ====================
-const ActionRow = ({ action, onOpenProgress, onEdit, onAssign, onView }) => {
-  const statusConfig = getStatusConfig(action);
-  const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
-  const assignedToName = getAssignedToName(action);
-  const progress = action.overall_progress_percentage || 0;
-  const progressColor = progress >= 100 ? '#10B981' : progress >= 75 ? '#8B5CF6' : progress >= 50 ? '#F59E0B' : progress >= 25 ? '#3B82F6' : '#6B7280';
-  const priorityConfig = getPriorityConfig(action.priority);
-
+  const cleanedContent = content.trim();
+  
   return (
-    <TableRow hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-      <TableCell>
-        <Stack spacing={0.5}>
-          <Typography variant="body2" fontWeight={500}>
-            {action.description}
-          </Typography>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              size="small"
-              label={priorityConfig.label}
-              sx={{
-                height: 20,
-                fontSize: '0.65rem',
-                bgcolor: priorityConfig.bgColor,
-                color: priorityConfig.color,
-                fontWeight: 500
-              }}
-            />
-            {action.remarks && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <FlagIcon sx={{ fontSize: 12 }} />
-                {action.remarks.length > 50 ? `${action.remarks.substring(0, 50)}...` : action.remarks}
-              </Typography>
-            )}
-          </Stack>
-        </Stack>
-      </TableCell>
-      <TableCell>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Badge
-            overlap="circular"
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            variant="dot"
-            color={assignedToName !== 'Unassigned' ? 'success' : 'warning'}
-          >
-            <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.light', fontSize: '0.75rem' }}>
-              {assignedToName?.[0]?.toUpperCase() || '?'}
-            </Avatar>
-          </Badge>
-          <Typography variant="body2" color={assignedToName === 'Unassigned' ? 'text.secondary' : 'text.primary'}>
-            {assignedToName}
-          </Typography>
-        </Stack>
-      </TableCell>
-      <TableCell>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <ScheduleIcon fontSize="small" color={isOverdue ? 'error' : 'action'} />
-          <Typography variant="body2" color={isOverdue ? 'error' : 'inherit'}>
-            {formatDate(action.due_date)}
-          </Typography>
-        </Stack>
-      </TableCell>
-      <TableCell>
-        <Chip
-          size="small"
-          label={statusConfig.label}
-          color={statusConfig.color}
-          icon={statusConfig.icon}
-          sx={{ 
-            height: 26, 
-            fontWeight: 500,
-            bgcolor: statusConfig.bgColor,
-            color: statusConfig.textColor,
-            '& .MuiChip-icon': { color: statusConfig.textColor }
-          }}
-        />
-      </TableCell>
-      <TableCell sx={{ minWidth: 150 }}>
-        <Stack spacing={0.5}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="caption" fontWeight={500} color={progressColor}>
-              {progress}%
-            </Typography>
-            {progress === 100 && (
-              <CheckCircleIcon sx={{ fontSize: 14, color: '#10B981' }} />
-            )}
-          </Box>
-          <LinearProgress
-            variant="determinate"
-            value={progress}
-            sx={{
-              height: 6,
-              borderRadius: 3,
-              bgcolor: '#e2e8f0',
-              '& .MuiLinearProgress-bar': {
-                bgcolor: progressColor,
-                borderRadius: 3
-              }
-            }}
-          />
-        </Stack>
-      </TableCell>
-      <TableCell align="center">
-        <Stack direction="row" spacing={0.5} justifyContent="center">
-          <Tooltip title="Update Progress">
-            <IconButton size="small" onClick={() => onOpenProgress(action)} color="primary">
-              <TrendingUpIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Edit Action">
-            <IconButton size="small" onClick={() => onEdit(action)} color="secondary">
-              <Edit fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Assign/Reassign User">
-            <IconButton size="small" onClick={() => onAssign(action)} color="success">
-              <PersonAdd fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="View Details">
-            <IconButton size="small" onClick={() => onView(action.id)} color="default">
-              <VisibilityIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </TableCell>
-    </TableRow>
+    <Box
+      sx={{
+        color: isDarkMode ? '#D1D5DB' : 'text.primary',
+        '& p': {
+          margin: '0 0 0.5rem 0',
+          lineHeight: 1.6,
+        },
+        '& p:last-child': {
+          marginBottom: 0,
+        },
+        '& ul, & ol': {
+          margin: '0.5rem 0',
+          paddingLeft: '1.5rem',
+        },
+        '& li': {
+          marginBottom: '0.25rem',
+        },
+        '& li:last-child': {
+          marginBottom: 0,
+        },
+        '& strong': {
+          fontWeight: 700,
+          color: isDarkMode ? '#FFFFFF' : undefined,
+        },
+        '& em, & i': {
+          fontStyle: 'italic',
+        },
+        '& u': {
+          textDecoration: 'underline',
+        },
+        '& h1, & h2, & h3, & h4, & h5, & h6': {
+          margin: '0.75rem 0 0.5rem 0',
+          fontWeight: 600,
+          color: isDarkMode ? '#FFFFFF' : undefined,
+        },
+        '& h1:first-child, & h2:first-child, & h3:first-child, & h4:first-child, & h5:first-child, & h6:first-child': {
+          marginTop: 0,
+        },
+        '& a': {
+          color: isDarkMode ? '#818CF8' : '#6366F1',
+          textDecoration: 'underline',
+          '&:hover': {
+            color: isDarkMode ? '#A78BFA' : '#4F46E5',
+          },
+        },
+        '& blockquote': {
+          borderLeft: `4px solid ${isDarkMode ? '#6B7280' : '#E5E7EB'}`,
+          padding: '0.5rem 1rem',
+          margin: '0.5rem 0',
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02),
+          borderRadius: '4px',
+        },
+        '& code': {
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.06),
+          padding: '0.125rem 0.375rem',
+          borderRadius: '4px',
+          fontFamily: 'monospace',
+          fontSize: '0.9em',
+        },
+        '& pre': {
+          backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.05) : alpha('#000000', 0.04),
+          padding: '0.75rem',
+          borderRadius: '4px',
+          overflowX: 'auto',
+          fontFamily: 'monospace',
+          fontSize: '0.9em',
+          margin: '0.5rem 0',
+        },
+        '& table': {
+          borderCollapse: 'collapse',
+          width: '100%',
+          margin: '0.5rem 0',
+        },
+        '& th, & td': {
+          border: `1px solid ${isDarkMode ? '#374151' : '#E5E7EB'}`,
+          padding: '0.5rem',
+          textAlign: 'left',
+        },
+        '& th': {
+          backgroundColor: isDarkMode ? '#1F2937' : '#F9FAFB',
+          fontWeight: 600,
+        },
+        '& img': {
+          maxWidth: '100%',
+          height: 'auto',
+          borderRadius: '4px',
+        },
+        wordBreak: 'break-word',
+        overflowWrap: 'break-word',
+      }}
+      dangerouslySetInnerHTML={{ __html: cleanedContent }}
+    />
   );
 };
 
-// ==================== Empty State Component ====================
-const EmptyState = ({ onRefresh }) => (
-  <Grow in timeout={500}>
-    <Box sx={{ textAlign: 'center', py: 4 }}>
-      <AssignmentIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
-      <Typography variant="body1" color="text.secondary" gutterBottom>
-        No action items found for this meeting.
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Actions can be added from the Minutes tab by expanding a minute and clicking "Add Action".
-      </Typography>
-      <Button variant="outlined" startIcon={<RefreshIcon />} onClick={onRefresh} sx={{ mt: 1 }}>
-        Refresh
-      </Button>
-    </Box>
-  </Grow>
-);
+// ==================== ADD/EDIT MINUTE DIALOG ====================
 
-// ==================== Main Component ====================
-const MeetingActionsList = ({ meetingId: propMeetingId, onRefresh }) => {
-  const dispatch = useDispatch();
-  const navigate = useNavigate();
-  const { id: urlMeetingId } = useParams();
-  
-  // Use meetingId from props or from URL as fallback
-  const meetingId = propMeetingId || urlMeetingId;
-  
-
-  const { updatingProgress } = useSelector((state) => state.actions || {});
-  
-  const [actions, setActions] = useState([]);
-  const [loading, setLoading] = useState(false);
+const MinuteFormDialog = ({ 
+  open, 
+  onClose, 
+  onSave, 
+  minute = null, 
+  loading = false,
+  isDarkMode = false 
+}) => {
+  const [topic, setTopic] = useState('');
+  const [discussion, setDiscussion] = useState('');
+  const [decisions, setDecisions] = useState('');
   const [error, setError] = useState(null);
-  const [selectedAction, setSelectedAction] = useState(null);
-  const [showProgressDialog, setShowProgressDialog] = useState(false);
-  const [showEditDialog, setShowEditDialog] = useState(false);
-  const [showAssignDialog, setShowAssignDialog] = useState(false);
-  const [progressValue, setProgressValue] = useState(0);
-  const [progressRemarks, setProgressRemarks] = useState('');
-  const [localUpdating, setLocalUpdating] = useState(false);
-  const [statusOptions, setStatusOptions] = useState([]);
-  const [selectedStatusId, setSelectedStatusId] = useState('');
-  const [selectedStatusName, setSelectedStatusName] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fetch status options
-  const fetchStatusOptions = useCallback(async () => {
-    try {
-      const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
-      const attributes = response.data?.items || response.data || [];
-      const actionStatuses = attributes.filter(attr => 
-        attr.code?.startsWith('ACTION_STATUS_') && attr.code !== 'ACTION_STATUS'
-      );
-      setStatusOptions(actionStatuses);
-    } catch (err) {
-      console.error('Failed to fetch status options:', err);
+  useEffect(() => {
+    if (minute) {
+      setTopic(minute.topic || minute.title || '');
+      setDiscussion(minute.discussion || '');
+      setDecisions(minute.decisions || '');
+    } else {
+      setTopic('');
+      setDiscussion('');
+      setDecisions('');
     }
-  }, []);
+    setError(null);
+  }, [minute, open]);
 
-  // Fetch actions
-  const fetchActions = useCallback(async () => {
-    if (!meetingId) {
-      console.error('No meetingId available');
+  const handleSubmit = async () => {
+    if (!topic.trim()) {
+      setError('Topic is required');
       return;
     }
-    
-    setLoading(true);
-    setError(null);
-    
+
     try {
-      
-      let actionsData = [];
-      
-      const minutesResponse = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
-      const minutes = minutesResponse.data?.items || minutesResponse.data || [];
-      
-      minutes.forEach(minute => {
-        if (minute.actions && minute.actions.length > 0) {
-          actionsData.push(...minute.actions);
-        }
-      });
-      
-      // Sort actions: Overdue first, then by due date
-      actionsData.sort((a, b) => {
-        const aOverdue = a.due_date && new Date(a.due_date) < new Date() && !a.completed_at;
-        const bOverdue = b.due_date && new Date(b.due_date) < new Date() && !b.completed_at;
-        if (aOverdue && !bOverdue) return -1;
-        if (!aOverdue && bOverdue) return 1;
-        return new Date(a.due_date) - new Date(b.due_date);
-      });
-      
-      setActions(actionsData);
+      await onSave({ topic, discussion, decisions });
+      onClose();
     } catch (err) {
-      console.error('Error fetching actions:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to load actions');
+      setError(err.message || 'Failed to save minute');
+    }
+  };
+
+  return (
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="md" 
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: isDarkMode ? '#1E293B' : 'background.paper',
+          borderRadius: 2,
+        }
+      }}
+    >
+      <DialogTitle sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        color: isDarkMode ? '#FFFFFF' : 'inherit',
+        borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#E5E7EB'}`,
+        pb: 2
+      }}>
+        <Typography variant="h6" fontWeight={600}>
+          {minute ? 'Edit Minutes' : 'Add Minutes'}
+        </Typography>
+        <IconButton onClick={onClose} size="small">
+          <CloseIcon sx={{ color: isDarkMode ? '#94A3B8' : undefined }} />
+        </IconButton>
+      </DialogTitle>
+      
+      <DialogContent sx={{ pt: 3 }}>
+        <Stack spacing={2.5}>
+          <TextField
+            fullWidth
+            label="Topic"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            required
+            error={!!error && !topic.trim()}
+            helperText={error && !topic.trim() ? 'Topic is required' : ''}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: isDarkMode ? '#E2E8F0' : undefined,
+                '& fieldset': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : undefined,
+                },
+                '&:hover fieldset': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : undefined,
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: isDarkMode ? '#A78BFA' : undefined,
+                }
+              },
+              '& .MuiInputLabel-root': {
+                color: isDarkMode ? '#94A3B8' : undefined,
+              },
+              '& .MuiFormHelperText-root': {
+                color: isDarkMode ? '#94A3B8' : undefined,
+              }
+            }}
+          />
+          
+          <TextField
+            fullWidth
+            label="Discussion"
+            multiline
+            rows={4}
+            value={discussion}
+            onChange={(e) => setDiscussion(e.target.value)}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: isDarkMode ? '#E2E8F0' : undefined,
+                '& fieldset': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : undefined,
+                },
+                '&:hover fieldset': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : undefined,
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: isDarkMode ? '#A78BFA' : undefined,
+                }
+              },
+              '& .MuiInputLabel-root': {
+                color: isDarkMode ? '#94A3B8' : undefined,
+              }
+            }}
+          />
+          
+          <TextField
+            fullWidth
+            label="Decisions"
+            multiline
+            rows={3}
+            value={decisions}
+            onChange={(e) => setDecisions(e.target.value)}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: isDarkMode ? '#E2E8F0' : undefined,
+                '& fieldset': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : undefined,
+                },
+                '&:hover fieldset': {
+                  borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : undefined,
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: isDarkMode ? '#A78BFA' : undefined,
+                }
+              },
+              '& .MuiInputLabel-root': {
+                color: isDarkMode ? '#94A3B8' : undefined,
+              }
+            }}
+          />
+          
+          {error && (
+            <Alert severity="error" sx={{ borderRadius: 2 }}>
+              {error}
+            </Alert>
+          )}
+        </Stack>
+      </DialogContent>
+      
+      <DialogActions sx={{ 
+        p: 2.5, 
+        pt: 1,
+        borderTop: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#E5E7EB'}`,
+        gap: 1
+      }}>
+        <Button onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleSubmit}
+          disabled={loading}
+          sx={{
+            bgcolor: isDarkMode ? '#7C3AED' : undefined,
+            '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : undefined }
+          }}
+        >
+          {loading ? <CircularProgress size={24} /> : (minute ? 'Save Changes' : 'Add Minutes')}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+// ==================== MAIN COMPONENT ====================
+
+const MinutesList = ({ 
+  meetingId, 
+  meetingStatus, 
+  onRefresh,
+  isDarkMode: propIsDarkMode 
+}) => {
+  const theme = useTheme();
+  const isDarkMode = propIsDarkMode ?? (theme.palette.mode === 'dark');
+  
+  const isMountedRef = useRef(true);
+  const fetchAttemptedRef = useRef(false);
+  const hasFetchedRef = useRef(false);
+  
+  const [minutes, setMinutes] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedMinute, setSelectedMinute] = useState(null);
+  const [expandedMinutes, setExpandedMinutes] = useState([]);
+  const [successMessage, setSuccessMessage] = useState('');
+  
+  const canEdit = meetingStatus !== 'cancelled' && meetingStatus !== 'ended' && meetingStatus !== 'closed';
+
+  // ==================== API CALLS ====================
+
+  const fetchMinutes = useCallback(async () => {
+    if (!meetingId || !isMountedRef.current) return;
+    if (fetchAttemptedRef.current) return;
+    fetchAttemptedRef.current = true;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await api.get(`/action-tracker/meetings/${meetingId}/minutes`);
+      
+      if (isMountedRef.current) {
+        let minutesData = [];
+        
+        if (response.data) {
+          if (Array.isArray(response.data)) {
+            minutesData = response.data;
+          } else if (response.data.items && Array.isArray(response.data.items)) {
+            minutesData = response.data.items;
+          } else if (response.data.results && Array.isArray(response.data.results)) {
+            minutesData = response.data.results;
+          } else if (typeof response.data === 'object') {
+            minutesData = [response.data];
+          }
+        }
+        
+        setMinutes(minutesData);
+      }
+    } catch (err) {
+      if (isMountedRef.current) {
+        console.error('Error fetching minutes:', err);
+        setError(err.message || 'Failed to load minutes');
+        setMinutes([]);
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+        setTimeout(() => {
+          fetchAttemptedRef.current = false;
+        }, 500);
+      }
     }
   }, [meetingId]);
 
+  // ==================== EFFECTS ====================
+
   useEffect(() => {
-    if (meetingId) {
-      fetchActions();
-      fetchStatusOptions();
+    isMountedRef.current = true;
+    if (meetingId && !hasFetchedRef.current) {
+      hasFetchedRef.current = true;
+      fetchMinutes();
     }
-  }, [fetchActions, fetchStatusOptions, meetingId, refreshKey]);
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [meetingId, fetchMinutes]);
 
   useEffect(() => {
     if (successMessage) {
-      const timer = setTimeout(() => setSuccessMessage(''), 3000);
+      const timer = setTimeout(() => {
+        if (isMountedRef.current) {
+          setSuccessMessage('');
+        }
+      }, 3000);
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
 
-  const handleRefresh = () => {
-    fetchActions();
+  // ==================== HANDLERS ====================
+
+  const handleRefresh = useCallback(() => {
+    if (!isMountedRef.current) return;
+    fetchAttemptedRef.current = false;
+    hasFetchedRef.current = false;
+    fetchMinutes();
     if (onRefresh) onRefresh();
-    setRefreshKey(prev => prev + 1);
-  };
+  }, [fetchMinutes, onRefresh]);
 
-  const handleViewAction = (actionId) => {
-    navigate(`/actions/${actionId}`);
-  };
-
-  const handleEditAction = (action) => {
-    setSelectedAction(action);
-    setShowEditDialog(true);
-  };
-
-  const handleAssignAction = (action) => {
-    setSelectedAction(action);
-    setShowAssignDialog(true);
-  };
-
-  const handleEditSave = () => {
-    fetchActions();
-    setSuccessMessage('Action updated successfully!');
-  };
-
-  const handleAssignSave = () => {
-    fetchActions();
-    setSuccessMessage('Action assigned successfully!');
-  };
-
-  const handleProgressUpdate = async () => {
-    if (!selectedAction) return;
-    
-    const selectedOption = statusOptions.find(opt => 
-      opt.id === selectedStatusId || 
-      opt.short_name === selectedStatusName ||
-      opt.code === selectedStatusName
-    );
-    
-    const statusIdToUse = selectedOption?.id || selectedStatusId;
-    
-    if (!statusIdToUse) {
-      setError('Please select a status');
-      return;
+  const handleAddMinute = async (data) => {
+    try {
+      const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, data);
+      setSuccessMessage('Minutes added successfully!');
+      setAddDialogOpen(false);
+      fetchAttemptedRef.current = false;
+      hasFetchedRef.current = false;
+      fetchMinutes();
+      return response.data;
+    } catch (err) {
+      throw err;
     }
-    
-    setLocalUpdating(true);
-    setError(null);
+  };
+
+  const handleEditMinute = async (data) => {
+    try {
+      const response = await api.put(`/action-tracker/meetings/${meetingId}/minutes/${selectedMinute.id}`, data);
+      setSuccessMessage('Minutes updated successfully!');
+      setEditDialogOpen(false);
+      setSelectedMinute(null);
+      fetchAttemptedRef.current = false;
+      hasFetchedRef.current = false;
+      fetchMinutes();
+      return response.data;
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleDeleteMinute = async (minuteId) => {
+    if (!window.confirm('Are you sure you want to delete these minutes?')) return;
     
     try {
-      const payload = {
-        progress_percentage: parseInt(progressValue),
-        individual_status_id: statusIdToUse,
-        remarks: progressRemarks.trim() || `Progress updated to ${progressValue}%`
-      };
-      
-      await dispatch(updateActionProgress({ 
-        id: selectedAction.id, 
-        progressData: payload 
-      })).unwrap();
-      
-      setShowProgressDialog(false);
-      setProgressRemarks('');
-      setProgressValue(0);
-      setSelectedStatusId('');
-      setSuccessMessage('Progress updated successfully!');
-      
-      await fetchActions();
-      if (onRefresh) onRefresh();
+      await api.delete(`/action-tracker/meetings/${meetingId}/minutes/${minuteId}`);
+      setSuccessMessage('Minutes deleted successfully!');
+      fetchAttemptedRef.current = false;
+      hasFetchedRef.current = false;
+      fetchMinutes();
     } catch (err) {
-      console.error('Error updating progress:', err);
-      setError(err.message || 'Failed to update progress');
-    } finally {
-      setLocalUpdating(false);
+      setError(err.message || 'Failed to delete minutes');
     }
   };
 
-  const handleOpenProgressDialog = (action) => {
-    setSelectedAction(action);
-    setProgressValue(action.overall_progress_percentage || 0);
-    setProgressRemarks('');
-    setSelectedStatusId(action.overall_status_id || '');
-    setSelectedStatusName(action.overall_status_name || '');
-    setShowProgressDialog(true);
+  const handleToggleExpand = (minuteId) => {
+    setExpandedMinutes(prev =>
+      prev.includes(minuteId)
+        ? prev.filter(id => id !== minuteId)
+        : [...prev, minuteId]
+    );
   };
 
-  const stats = useMemo(() => {
-    const total = actions.length;
-    const completed = actions.filter(a => a.completed_at || a.overall_progress_percentage >= 100).length;
-    const inProgress = actions.filter(a => a.overall_status_name === 'in_progress' && !a.completed_at).length;
-    const overdue = actions.filter(a => a.due_date && new Date(a.due_date) < new Date() && !a.completed_at).length;
-    return { total, completed, inProgress, overdue };
-  }, [actions]);
+  const handleCloseEditDialog = () => {
+    setEditDialogOpen(false);
+    setSelectedMinute(null);
+  };
 
-  const isUpdating = localUpdating || updatingProgress;
+  const minutesCount = Array.isArray(minutes) ? minutes.length : 0;
 
-  if (loading && actions.length === 0) {
-    return <TableSkeleton />;
-  }
+  // ==================== RENDER ====================
 
-  if (actions.length === 0 && !loading) {
-    return <EmptyState onRefresh={handleRefresh} />;
+  if (loading && minutesCount === 0) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 4 }}>
+        <CircularProgress sx={{ color: isDarkMode ? '#A78BFA' : undefined }} />
+        <Typography variant="body2" sx={{ color: isDarkMode ? '#94A3B8' : 'text.secondary', mt: 2 }}>
+          Loading minutes...
+        </Typography>
+      </Box>
+    );
   }
 
   return (
-    <Fade in timeout={500}>
-      <Box>
-        {/* Header with Stats */}
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }} flexWrap="wrap" gap={2}>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Typography variant="h6" fontWeight={700}>
-              Action Items
-            </Typography>
-            <Stack direction="row" spacing={1}>
-              <Chip size="small" label={`Total: ${stats.total}`} variant="outlined" />
-              {stats.completed > 0 && <Chip size="small" label={`Completed: ${stats.completed}`} color="success" variant="outlined" />}
-              {stats.inProgress > 0 && <Chip size="small" label={`In Progress: ${stats.inProgress}`} color="info" variant="outlined" />}
-              {stats.overdue > 0 && <Chip size="small" label={`Overdue: ${stats.overdue}`} color="error" variant="outlined" />}
-            </Stack>
-          </Stack>
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography 
+          variant="h6" 
+          fontWeight={700} 
+          sx={{ 
+            color: isDarkMode ? '#FFFFFF' : 'inherit',
+          }}
+        >
+          Meeting Minutes ({minutesCount})
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title={!canEdit ? "Meeting must be active to add minutes" : "Add new minutes"}>
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setAddDialogOpen(true)}
+                size="small"
+                disabled={!canEdit}
+                sx={{
+                  bgcolor: isDarkMode ? '#7C3AED' : undefined,
+                  '&:hover': { bgcolor: isDarkMode ? '#6D28D9' : undefined }
+                }}
+              >
+                Add Minutes
+              </Button>
+            </span>
+          </Tooltip>
           <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh} size="small" disabled={loading}>
+            <IconButton
+              onClick={handleRefresh}
+              size="small"
+              disabled={loading}
+              sx={{
+                color: isDarkMode ? '#94A3B8' : 'inherit',
+                '&:hover': { backgroundColor: isDarkMode ? alpha('#FFFFFF', 0.08) : alpha('#000000', 0.04) }
+              }}
+            >
               <RefreshIcon />
             </IconButton>
           </Tooltip>
-        </Stack>
-
-        {/* Success Message */}
-        {successMessage && (
-          <Alert 
-            severity="success" 
-            sx={{ mb: 3, borderRadius: 2 }}
-            onClose={() => setSuccessMessage('')}
-          >
-            {successMessage}
-          </Alert>
-        )}
-
-        {/* Error Alert */}
-        {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        )}
-
-        {/* Actions Table */}
-        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, overflowX: 'auto' }}>
-          <Table sx={{ minWidth: 800 }}>
-            <TableHead>
-              <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-                <TableCell sx={{ fontWeight: 700 }}>Description</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Assigned To</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Progress</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {actions.map((action) => (
-                <ActionRow
-                  key={action.id}
-                  action={action}
-                  onOpenProgress={handleOpenProgressDialog}
-                  onEdit={handleEditAction}
-                  onAssign={handleAssignAction}
-                  onView={handleViewAction}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-
-        {/* Progress Update Dialog */}
-        <Dialog 
-          open={showProgressDialog} 
-          onClose={() => setShowProgressDialog(false)} 
-          maxWidth="md" 
-          fullWidth
-          TransitionComponent={Fade}
-          transitionDuration={300}
-        >
-          <DialogTitle sx={{ pb: 1 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h6" fontWeight={700}>
-                Update Progress
-              </Typography>
-              <IconButton onClick={() => setShowProgressDialog(false)} size="small">
-                <Close />
-              </IconButton>
-            </Stack>
-          </DialogTitle>
-          <Divider />
-          <DialogContent sx={{ pt: 2 }}>
-            <Stack spacing={3}>
-              <Card variant="outlined" sx={{ bgcolor: '#f8fafc', borderRadius: 2 }}>
-                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-                  <Stack direction="row" spacing={1.5} alignItems="center">
-                    <AssignmentIcon color="primary" />
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        Current Task
-                      </Typography>
-                      <Typography variant="body2" fontWeight={500}>
-                        {selectedAction?.description}
-                      </Typography>
-                    </Box>
-                  </Stack>
-                </CardContent>
-              </Card>
-
-              <Box>
-                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-                  Progress: {progressValue}%
-                </Typography>
-                <Slider
-                  value={progressValue}
-                  onChange={(e, val) => setProgressValue(val)}
-                  step={5}
-                  marks={PROGRESS_PRESETS.map(p => ({ value: p.value, label: p.label }))}
-                  min={0}
-                  max={100}
-                  valueLabelDisplay="auto"
-                />
-              </Box>
-
-              <Grid container spacing={1}>
-                {PROGRESS_PRESETS.map((preset) => (
-                  <Grid size={{ xs: 12, sm: 2.4 }} key={preset.value}>
-                    <Button
-                      fullWidth
-                      variant={progressValue === preset.value ? 'contained' : 'outlined'}
-                      onClick={() => setProgressValue(preset.value)}
-                      sx={{
-                        py: 1,
-                        borderColor: preset.color,
-                        color: progressValue === preset.value ? '#fff' : preset.color,
-                        bgcolor: progressValue === preset.value ? preset.color : 'transparent',
-                        '&:hover': {
-                          bgcolor: preset.color,
-                          color: '#fff',
-                          opacity: 0.9
-                        }
-                      }}
-                    >
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        {preset.icon}
-                        <Typography variant="caption">{preset.label}</Typography>
-                      </Stack>
-                    </Button>
-                  </Grid>
-                ))}
-              </Grid>
-
-              <Divider />
-
-              {statusOptions.length > 0 && (
-                <FormControl fullWidth>
-                  <InputLabel>Status</InputLabel>
-                  <Select
-                    value={selectedStatusId}
-                    onChange={(e) => setSelectedStatusId(e.target.value)}
-                    label="Status"
-                  >
-                    {statusOptions.map((opt) => (
-                      <MenuItem key={opt.id} value={opt.id}>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          {opt.short_name === 'COMPLETED' && <CheckCircleIcon fontSize="small" color="success" />}
-                          {opt.short_name === 'IN_PROGRESS' && <PendingIcon fontSize="small" color="info" />}
-                          {opt.short_name === 'PENDING' && <ScheduleIcon fontSize="small" color="warning" />}
-                          {opt.short_name === 'OVERDUE' && <WarningIcon fontSize="small" color="error" />}
-                          <Typography variant="body2">
-                            {opt.name?.replace('Action Status - ', '') || opt.short_name}
-                          </Typography>
-                        </Stack>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-
-              <TextField
-                fullWidth
-                label="Remarks (Optional)"
-                multiline
-                rows={3}
-                value={progressRemarks}
-                onChange={(e) => setProgressRemarks(e.target.value)}
-                placeholder="Add any notes about this progress update..."
-              />
-            </Stack>
-          </DialogContent>
-          <DialogActions sx={{ p: 2.5, pt: 0 }}>
-            <Button onClick={() => setShowProgressDialog(false)} disabled={isUpdating}>
-              Cancel
-            </Button>
-            <Button
-              variant="contained"
-              onClick={handleProgressUpdate}
-              disabled={isUpdating || !selectedStatusId}
-              startIcon={isUpdating ? <CircularProgress size={16} /> : <Save />}
-            >
-              {isUpdating ? 'Saving...' : 'Save Progress'}
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Edit Action Dialog */}
-        <EditActionDialog
-          open={showEditDialog}
-          action={selectedAction}
-          onClose={() => {
-            setShowEditDialog(false);
-            setSelectedAction(null);
-          }}
-          onSave={handleEditSave}
-        />
-
-        {/* Assign User Dialog */}
-        <AssignUserDialog
-          open={showAssignDialog}
-          action={selectedAction}
-          meetingId={meetingId}
-          onClose={() => {
-            setShowAssignDialog(false);
-            setSelectedAction(null);
-          }}
-          onAssign={handleAssignSave}
-        />
+        </Box>
       </Box>
-    </Fade>
+
+      {/* Messages */}
+      {successMessage && (
+        <Alert
+          severity="success"
+          sx={{
+            mb: 3,
+            borderRadius: 2,
+            bgcolor: isDarkMode ? alpha('#10B981', 0.1) : undefined,
+            color: isDarkMode ? '#34D399' : undefined,
+            '& .MuiAlert-icon': {
+              color: isDarkMode ? '#34D399' : undefined,
+            }
+          }}
+          onClose={() => setSuccessMessage('')}
+        >
+          {successMessage}
+        </Alert>
+      )}
+
+      {error && (
+        <Alert
+          severity="error"
+          sx={{
+            mb: 3,
+            borderRadius: 2,
+            bgcolor: isDarkMode ? alpha('#EF4444', 0.1) : undefined,
+            color: isDarkMode ? '#F87171' : undefined,
+            '& .MuiAlert-icon': {
+              color: isDarkMode ? '#F87171' : undefined,
+            }
+          }}
+          onClose={() => setError(null)}
+        >
+          {typeof error === 'string' ? error : JSON.stringify(error)}
+        </Alert>
+      )}
+
+      {minutesCount === 0 ? (
+        <Box sx={{ textAlign: 'center', py: 6 }}>
+          <DescriptionIcon sx={{ fontSize: 64, color: isDarkMode ? '#6B7280' : 'action.disabled', mb: 2 }} />
+          <Typography variant="body1" sx={{ color: isDarkMode ? '#94A3B8' : 'text.secondary' }} gutterBottom>
+            No minutes found for this meeting.
+          </Typography>
+          {canEdit && (
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => setAddDialogOpen(true)}
+              sx={{ 
+                mt: 2,
+                borderColor: isDarkMode ? '#7C3AED' : undefined,
+                color: isDarkMode ? '#A78BFA' : undefined,
+                '&:hover': {
+                  borderColor: isDarkMode ? '#6D28D9' : undefined,
+                  backgroundColor: isDarkMode ? alpha('#7C3AED', 0.1) : undefined,
+                }
+              }}
+            >
+              Add First Minutes
+            </Button>
+          )}
+        </Box>
+      ) : (
+        <Stack spacing={2}>
+          {Array.isArray(minutes) && minutes.map((minute, index) => {
+            const isExpanded = expandedMinutes.includes(minute.id);
+            const actionCount = minute.actions?.length || 0;
+
+            return (
+              <Paper
+                key={minute.id || minute.tempId || index}
+                sx={{
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                  border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.08)' : '#E5E7EB'}`,
+                  bgcolor: isDarkMode ? '#1E293B' : 'background.paper',
+                }}
+              >
+                <Accordion
+                  expanded={isExpanded}
+                  onChange={() => handleToggleExpand(minute.id)}
+                  sx={{
+                    bgcolor: 'transparent',
+                    boxShadow: 'none',
+                    '&:before': { display: 'none' },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon sx={{ color: isDarkMode ? '#94A3B8' : 'text.secondary' }} />}
+                    sx={{
+                      px: 3,
+                      py: 1.5,
+                      '&:hover': { bgcolor: isDarkMode ? alpha('#FFFFFF', 0.03) : alpha('#000000', 0.02) },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', width: '100%', alignItems: 'center', gap: 2, pr: 1 }}>
+                      <DescriptionIcon sx={{ color: isDarkMode ? '#818CF8' : '#6366F1' }} />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography 
+                          variant="subtitle1" 
+                          fontWeight={600} 
+                          sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}
+                        >
+                          {minute.topic || minute.title || 'Untitled Minutes'}
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 0.5 }}>
+                          <Typography variant="caption" sx={{ color: isDarkMode ? '#94A3B8' : 'text.secondary' }}>
+                            {safeFormatDate(minute.created_at)}
+                          </Typography>
+                          {actionCount > 0 && (
+                            <Chip
+                              label={`${actionCount} action${actionCount !== 1 ? 's' : ''}`}
+                              size="small"
+                              icon={<AssignmentIcon sx={{ fontSize: 14 }} />}
+                              sx={{
+                                height: 22,
+                                bgcolor: isDarkMode ? alpha('#818CF8', 0.15) : alpha('#6366F1', 0.1),
+                                color: isDarkMode ? '#818CF8' : '#6366F1',
+                                '& .MuiChip-label': { fontSize: '0.65rem' },
+                                '& .MuiChip-icon': { fontSize: 14 },
+                              }}
+                            />
+                          )}
+                        </Box>
+                      </Box>
+                      {canEdit && (
+                        <Box 
+                          component="div" 
+                          onClick={(e) => e.stopPropagation()} 
+                          sx={{ display: 'flex', gap: 0.5 }}
+                        >
+                          <Tooltip title="Edit">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMinute(minute);
+                                setEditDialogOpen(true);
+                              }}
+                              sx={{ 
+                                color: isDarkMode ? '#A78BFA' : 'secondary.main',
+                                '&:hover': {
+                                  backgroundColor: isDarkMode ? alpha('#A78BFA', 0.1) : undefined,
+                                }
+                              }}
+                              component="span"
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMinute(minute.id);
+                              }}
+                              sx={{ 
+                                color: isDarkMode ? '#F87171' : 'error.main',
+                                '&:hover': {
+                                  backgroundColor: isDarkMode ? alpha('#F87171', 0.1) : undefined,
+                                }
+                              }}
+                              component="span"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      )}
+                    </Box>
+                  </AccordionSummary>
+                  <AccordionDetails sx={{ px: 3, pb: 3, pt: 1 }}>
+                    <Divider sx={{ 
+                      mb: 2, 
+                      borderColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#E5E7EB' 
+                    }} />
+                    <Stack spacing={3}>
+                      {minute.discussion && (
+                        <Box>
+                          <Typography 
+                            variant="caption" 
+                            fontWeight={600} 
+                            sx={{ 
+                              color: isDarkMode ? '#94A3B8' : 'text.secondary',
+                              display: 'block',
+                              mb: 1,
+                            }}
+                          >
+                            Discussion
+                          </Typography>
+                          <RichTextRenderer content={minute.discussion} isDarkMode={isDarkMode} />
+                        </Box>
+                      )}
+                      {minute.decisions && (
+                        <Box>
+                          <Typography 
+                            variant="caption" 
+                            fontWeight={600} 
+                            sx={{ 
+                              color: isDarkMode ? '#94A3B8' : 'text.secondary',
+                              display: 'block',
+                              mb: 1,
+                            }}
+                          >
+                            Decisions
+                          </Typography>
+                          <RichTextRenderer content={minute.decisions} isDarkMode={isDarkMode} />
+                        </Box>
+                      )}
+                      {actionCount > 0 && (
+                        <Box>
+                          <Typography 
+                            variant="caption" 
+                            fontWeight={600} 
+                            sx={{ 
+                              color: isDarkMode ? '#94A3B8' : 'text.secondary',
+                              display: 'block',
+                              mb: 1,
+                            }}
+                          >
+                            Actions ({actionCount})
+                          </Typography>
+                          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            {minute.actions.map((action) => (
+                              <Chip
+                                key={action.id}
+                                label={action.description}
+                                size="small"
+                                variant="outlined"
+                                sx={{
+                                  borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : '#E5E7EB',
+                                  color: isDarkMode ? '#E2E8F0' : 'text.primary',
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        </Box>
+                      )}
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+              </Paper>
+            );
+          })}
+        </Stack>
+      )}
+
+      {/* Add Minutes Dialog */}
+      <MinuteFormDialog
+        open={addDialogOpen}
+        onClose={() => setAddDialogOpen(false)}
+        onSave={handleAddMinute}
+        loading={loading}
+        isDarkMode={isDarkMode}
+      />
+
+      {/* Edit Minutes Dialog */}
+      {selectedMinute && (
+        <MinuteFormDialog
+          open={editDialogOpen}
+          onClose={handleCloseEditDialog}
+          onSave={handleEditMinute}
+          minute={selectedMinute}
+          loading={loading}
+          isDarkMode={isDarkMode}
+        />
+      )}
+    </Box>
   );
 };
 
-export default MeetingActionsList;
+export default MinutesList;

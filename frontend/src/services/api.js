@@ -4,6 +4,11 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001/api/v1';
 
+// ✅ Refresh token state management
+let isRefreshing = false;
+let refreshSubscribers = [];
+let refreshPromise = null;
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000, // 30 second timeout
@@ -34,8 +39,20 @@ const isOptionalEndpoint = (url) => {
 // Check if a URL is public (no auth required)
 const isPublicEndpoint = (url) => {
   if (!url) return false;
-  const publicEndpoints = ['/auth/login', '/auth/signup', '/auth/refresh', '/auth/forgot-password'];
+  const publicEndpoints = ['/auth/login', '/auth/signup', '/auth/refresh', '/auth/forgot-password', '/auth/reset-password'];
   return publicEndpoints.some(endpoint => url.includes(endpoint));
+};
+
+// ✅ Helper to process queued requests
+const processQueue = (error, token = null) => {
+  refreshSubscribers.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  refreshSubscribers = [];
 };
 
 // Request interceptor with deduplication and timeout
@@ -113,6 +130,7 @@ api.interceptors.response.use(
     
     // Log error with detail (only in development)
     if (process.env.NODE_ENV === 'development') {
+      console.log(error)
       console.error('API Error:', {
         status: error.response?.status,
         url: error.config?.url,
@@ -122,28 +140,11 @@ api.interceptors.response.use(
       });
     }
 
-    // Handle 401 Unauthorized with token refresh
+    // ✅ IMPROVED: Handle 401 Unauthorized with token refresh
     if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      
-      try {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken) {
-          const response = await axios.post(
-            `${API_BASE_URL}/auth/refresh`,
-            { refresh_token: refreshToken },
-            { timeout: 10000 }
-          );
-          
-          const newToken = response.data.access_token;
-          if (newToken) {
-            localStorage.setItem('access_token', newToken);
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            return api(originalRequest);
-          }
-        }
-      } catch (refreshError) {
-        // Refresh failed - clear tokens and redirect
+      // ✅ Check if it's a refresh token request itself - prevent loops
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        // Refresh token itself failed - clear tokens and redirect
         localStorage.removeItem('access_token');
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
@@ -153,7 +154,86 @@ api.interceptors.response.use(
         if (currentPath !== '/login' && currentPath !== '/signup') {
           window.location.href = '/login';
         }
+        return Promise.reject(error);
+      }
+
+      // ✅ If already refreshing, queue this request
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          refreshSubscribers.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const refreshToken = localStorage.getItem('refresh_token');
+        
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
+
+        // ✅ Create a single refresh promise
+        if (!refreshPromise) {
+          refreshPromise = axios.post(
+            `${API_BASE_URL}/auth/refresh`,
+            { refresh_token: refreshToken },
+            { timeout: 10000 }
+          );
+        }
+
+        const response = await refreshPromise;
+        
+        const newAccessToken = response.data.access_token;
+        const newRefreshToken = response.data.refresh_token;
+
+        if (newAccessToken) {
+          // ✅ Store both tokens
+          localStorage.setItem('access_token', newAccessToken);
+          localStorage.setItem('token', newAccessToken);
+          
+          if (newRefreshToken) {
+            localStorage.setItem('refresh_token', newRefreshToken);
+          }
+
+          // ✅ Update default header
+          api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
+
+          // ✅ Process queued requests
+          processQueue(null, newAccessToken);
+
+          // ✅ Retry the original request
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+          return api(originalRequest);
+        } else {
+          throw new Error('Invalid refresh response - no access token');
+        }
+
+      } catch (refreshError) {
+        // ✅ Clear tokens and process queue with error
+        processQueue(refreshError, null);
+        
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('user');
+        
+        // ✅ Redirect to login
+        const currentPath = window.location.pathname;
+        if (currentPath !== '/login' && currentPath !== '/signup') {
+          window.location.href = '/login';
+        }
+        
         return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+        refreshPromise = null;
       }
     }
 
@@ -237,6 +317,20 @@ export const fetchWithFallback = async (url, fallbackData = { items: [], total: 
     }
     throw error;
   }
+};
+
+// ✅ Helper to manually clear tokens and logout
+export const logout = () => {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('user');
+  
+  // Reset headers
+  delete api.defaults.headers.common['Authorization'];
+  
+  // Redirect to login
+  window.location.href = '/login';
 };
 
 export default api;

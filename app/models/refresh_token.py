@@ -1,6 +1,8 @@
 # app/models/refresh_token.py
 
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index,UniqueConstraint
+from sqlalchemy.orm import relationship
+
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -29,6 +31,11 @@ class RefreshToken(Base):
     ip_address = Column(String(45), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    # ✅ Add a composite unique constraint to prevent multiple active tokens per user (optional)
+    __table_args__ = (
+         UniqueConstraint('user_id', 'is_active', name='uq_user_active_token'),
+    )
     
-    # Relationships
+    #relationships
     user = relationship("User")

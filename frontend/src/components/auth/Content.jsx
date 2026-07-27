@@ -106,7 +106,7 @@ const Content = () => {
       {/* Feature Grid - Compact */}
       <Grid container spacing={1}>
         {features.map((item, idx) => (
-          <Grid item xs={6} key={idx}>
+          <Grid xs={6} key={idx}>
             <Card
               elevation={0}
               sx={{

@@ -452,23 +452,27 @@ class MeetingDocumentUpdate(ORMBase):
     is_active: Optional[bool] = None
 
 
-class MeetingDocumentResponse(MeetingDocumentBase):
+# In app/schemas/action_tracker.py
+
+class MeetingDocumentResponse(BaseModel):
+    """Meeting document response schema"""
     id: UUID
     meeting_id: UUID
-    file_path: str
     file_name: str
+    file_path: Optional[str] = None  # Made optional
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
+    title: Optional[str] = None
     description: Optional[str] = None
-    document_type_id: Optional[UUID] = None 
+    document_type_id: Optional[UUID] = None
     document_type_name: Optional[str] = None
-    version: int = 1
+    version: Optional[int] = 1
     uploaded_by_id: Optional[UUID] = None
     uploaded_by_name: Optional[str] = None
-    uploaded_at: datetime
+    uploaded_at: Optional[datetime] = None
     created_by_id: Optional[UUID] = None
     created_by_name: Optional[str] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None  # Made optional
     updated_by_id: Optional[UUID] = None
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -476,7 +480,13 @@ class MeetingDocumentResponse(MeetingDocumentBase):
     ocr_text: Optional[str] = None
     ocr_processed_at: Optional[datetime] = None
     ocr_language: Optional[str] = None
-
+    file_size_formatted: Optional[str] = None
+    file_extension: Optional[str] = None
+    is_previewable: bool = False
+    file_url: Optional[str] = None
+    display_title: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 # ==================== Meeting Status History Schemas ====================
 

@@ -150,7 +150,8 @@ async def get_my_notifications(
     }
 
 
-@router.get("", operation_id="notifications_list_all")
+@router.get("", include_in_schema=False)
+@router.get("/", operation_id="notifications_list_all")
 async def list_notifications(
     channel: Optional[NotificationChannel] = Query(None),
     status_filter: Optional[NotificationStatus] = Query(None, alias="status"),

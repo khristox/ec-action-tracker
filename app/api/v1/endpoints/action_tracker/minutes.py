@@ -10,6 +10,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session  # ✅ Add this import for sync sessions
 
 from app.api import deps
 from app.crud.meetings.action_tracker import CRUDMeeting, CRUDMeetingMinutes
@@ -83,6 +84,61 @@ async def add_meeting_minutes(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create minutes: {str(e)}"
+        )
+
+
+# ============================================================================
+# MEETING STATUS ENDPOINT
+# ============================================================================
+
+@router.patch("/meetings/{meeting_id}/status")
+async def update_meeting_status(
+    meeting_id: str,
+    status: str,
+    comment: str = "",
+    db: AsyncSession = Depends(deps.get_db),  # ✅ Use AsyncSession consistently
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update the status of a meeting
+    """
+    try:
+        # Find the meeting using async session
+        from sqlalchemy import select
+        stmt = select(Meeting).where(Meeting.id == meeting_id)
+        result = await db.execute(stmt)
+        meeting = result.scalar_one_or_none()
+        
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # Update the status
+        meeting.status = status
+        meeting.comment = comment
+        meeting.updated_at = datetime.utcnow()
+        meeting.updated_by_id = current_user.id
+        
+        await db.commit()
+        await db.refresh(meeting)
+        
+        logger.info(f"Meeting {meeting_id} status updated to {status} by user {current_user.id}")
+        
+        return {
+            "id": meeting.id,
+            "status": meeting.status,
+            "comment": meeting.comment,
+            "updated_at": meeting.updated_at
+        }
+        
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error updating meeting status {meeting_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update meeting status: {str(e)}"
         )
 
 

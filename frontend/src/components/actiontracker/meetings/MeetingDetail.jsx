@@ -1,4 +1,6 @@
 // src/components/meetings/MeetingDetail.jsx
+// Complete file with all fixes for 403 Access Denied handling & simplified No Access view
+
 import React, { useState, useEffect, useCallback, useMemo, memo, useRef, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -9,7 +11,6 @@ import {
   Select, AppBar, Toolbar, useMediaQuery, useTheme, Badge, Snackbar, LinearProgress,
   SpeedDial, SpeedDialAction, SpeedDialIcon, Zoom, ToggleButton, ToggleButtonGroup, alpha
 } from '@mui/material';
-
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -36,7 +37,7 @@ import ViewStreamIcon from '@mui/icons-material/ViewStream';
 import ViewAgendaIcon from '@mui/icons-material/ViewAgenda';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import InfoIcon from '@mui/icons-material/Info';
-
+import LockIcon from '@mui/icons-material/Lock';
 import {
   fetchMeetingById, clearMeetingState, updateMeetingStatus, deleteMeeting,
   fetchActionTrackerAttributes, selectCurrentMeeting, selectMeetingsLoading,
@@ -84,14 +85,70 @@ const STATUS_CONFIG = {
 };
 
 const TABS = [
-  { label: 'Overview',     icon: <InfoIcon />,               value: 0, simple: true, requiresPermission: null },
-  { label: 'Minutes',      icon: <DescriptionIcon />,        value: 1, simple: true, requiresPermission: 'minutes:view' },
-  { label: 'Actions',      icon: <AssignmentIcon />,         value: 2, simple: true, requiresPermission: 'action:view_own' },
-  { label: 'Participants', icon: <PeopleIcon />,             value: 3, simple: true, requiresPermission: 'participant:view' },
-  { label: 'Documents',    icon: <DescriptionIcon />,        value: 4, simple: false, requiresPermission: null },
-  { label: 'History',      icon: <HistoryIcon />,            value: 5, simple: false, requiresPermission: null },
-  { label: 'Audit',        icon: <HistoryIcon />,            value: 6, simple: false, requiresPermission: 'admin:view_audit' },
-  { label: 'Recordings',   icon: <FiberManualRecordIcon />,  value: 7, simple: false, requiresPermission: 'meeting:view_recorder' },
+  { 
+    label: 'Overview',     
+    icon: <InfoIcon />,               
+    value: 0, 
+    simple: true, 
+    requiresPermission: null,
+    minAccessLevel: 'limited'
+  },
+  { 
+    label: 'Minutes',      
+    icon: <DescriptionIcon />,        
+    value: 1, 
+    simple: true, 
+    requiresPermission: 'minutes:view',
+    minAccessLevel: 'full'
+  },
+  { 
+    label: 'Actions',      
+    icon: <AssignmentIcon />,         
+    value: 2, 
+    simple: true, 
+    requiresPermission: 'action:view_own',
+    minAccessLevel: 'limited'
+  },
+  { 
+    label: 'Participants', 
+    icon: <PeopleIcon />,             
+    value: 3, 
+    simple: true, 
+    requiresPermission: 'participant:view',
+    minAccessLevel: 'limited'
+  },
+  { 
+    label: 'Documents',    
+    icon: <DescriptionIcon />,        
+    value: 4, 
+    simple: false, 
+    requiresPermission: null,
+    minAccessLevel: 'full'
+  },
+  { 
+    label: 'History',      
+    icon: <HistoryIcon />,            
+    value: 5, 
+    simple: false, 
+    requiresPermission: null,
+    minAccessLevel: 'full'
+  },
+  { 
+    label: 'Audit',        
+    icon: <HistoryIcon />,            
+    value: 6, 
+    simple: false, 
+    requiresPermission: 'admin:view_audit',
+    minAccessLevel: 'full'
+  },
+  { 
+    label: 'Recordings',   
+    icon: <FiberManualRecordIcon />,  
+    value: 7, 
+    simple: false, 
+    requiresPermission: 'meeting:view_recorder',
+    minAccessLevel: 'full'
+  },
 ];
 
 const normalizeStatus = (status) => {
@@ -176,12 +233,10 @@ const MeetingDetail = () => {
     const saved = localStorage.getItem(`${TAB_STORAGE_KEY_PREFIX}${id}`);
     return saved ? parseInt(saved, 10) : 0;
   });
-
   const [tabOrder, setTabOrder] = useState(() => {
     const saved = localStorage.getItem(`${TAB_ORDER_STORAGE_KEY_PREFIX}${id}`);
     return saved ? JSON.parse(saved) : TABS.map((t) => t.value);
   });
-
   const [draggedTabValue, setDraggedTabValue] = useState(null);
   const [dragOverTabValue, setDragOverTabValue] = useState(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
@@ -198,6 +253,7 @@ const MeetingDetail = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [localError, setLocalError] = useState(null);
   const [showNotFound, setShowNotFound] = useState(false);
+  const [showAccessDenied, setShowAccessDenied] = useState(false);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
@@ -206,12 +262,19 @@ const MeetingDetail = () => {
   const [emailNotifications, setEmailNotifications] = useState([]);
 
   const normalizedMeeting = useMemo(() => currentMeeting ? { ...currentMeeting, status: normalizeStatus(currentMeeting.status) } : null, [currentMeeting]);
+  
+  const accessLevel = useMemo(() => {
+    return normalizedMeeting?.access_level || 'none';
+  }, [normalizedMeeting?.access_level]);
+  
+  const isFullAccess = accessLevel === 'full';
+  const isLimitedAccess = accessLevel === 'limited';
+  const hasAnyAccess = isFullAccess || isLimitedAccess;
+  
   const isOnlineMeeting = useMemo(() => normalizedMeeting?.platform && normalizedMeeting?.platform !== 'physical', [normalizedMeeting]);
   const hasMeetingLink = useMemo(() => normalizedMeeting?.meeting_link, [normalizedMeeting]);
   const participantCount = useMemo(() => participants.length, [participants]);
   const emailSentCount = useMemo(() => emailNotifications.filter((n) => n.status === 'successful').length, [emailNotifications]);
-
-  // ==================== STATUS FUNCTIONS ====================
 
   const getStatusValue = useCallback(() => {
     if (!normalizedMeeting?.status) return '';
@@ -239,7 +302,6 @@ const MeetingDetail = () => {
       return dynamicStatus.color;
     }
     
-    // Map default config statuses to hex fallbacks safely
     const defaultConfigColors = {
       warning: '#F59E0B',
       info: '#3B82F6',
@@ -264,42 +326,126 @@ const MeetingDetail = () => {
   }, [normalizedMeeting, statusOptions]);
 
   // ==================== DATA FETCHING ====================
-
   const fetchMeetingData = useCallback(async () => {
     if (!id || !isMountedRef.current) return;
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
-
+    
+    // Reset states
+    setShowNotFound(false);
+    setShowAccessDenied(false);
+    setLocalError(null);
+    
     try {
-      await dispatch(fetchMeetingById(id));
-      await dispatch(fetchMeetingParticipants(id));
-      const res = await api.get('/notifications', { 
-        params: { meeting_id: id, channel: 'email', limit: 50 }, 
-        signal: abortControllerRef.current.signal 
-      });
-      if (isMountedRef.current) setEmailNotifications(res.data?.items || []);
-      await dispatch(fetchActionTrackerAttributes());
+      console.log('📥 Fetching meeting:', id);
+      
+      let meetingResponse;
+      try {
+        meetingResponse = await dispatch(fetchMeetingById(id)).unwrap();
+        console.log('✅ Meeting fetched:', meetingResponse);
+      } catch (fetchErr) {
+        console.error('❌ Fetch error:', fetchErr);
+        
+        // Check for 403 Access Denied
+        const is403 = 
+          fetchErr?.response?.status === 403 || 
+          fetchErr?.status === 403 || 
+          fetchErr?.message?.toLowerCase()?.includes('access') ||
+          fetchErr?.detail?.toLowerCase()?.includes('access') ||
+          fetchErr?.response?.data?.detail?.toLowerCase()?.includes('access');
+        
+        if (is403) {
+          console.warn('🚫 Access Denied (403)');
+          setShowAccessDenied(true);
+          setInitialLoadComplete(true);
+          return;
+        }
+        
+        // Check for 404 Not Found
+        if (fetchErr?.response?.status === 404 || fetchErr?.status === 404) {
+          setLocalError(`❌ Meeting not found (ID: ${id}). It may have been deleted.`);
+          setShowNotFound(true);
+          setInitialLoadComplete(true);
+          return;
+        }
+        
+        throw fetchErr;
+      }
+      
+      const meetingData = meetingResponse;
+      const accessLevel = meetingData?.access_level || 'none';
+      console.log('📊 Access level:', accessLevel);
+      
+      if (accessLevel === 'none') {
+        console.warn('🚫 No access to meeting');
+        setShowAccessDenied(true);
+        setInitialLoadComplete(true);
+        return;
+      }
+      
+      try {
+        await dispatch(fetchMeetingParticipants(id));
+        console.log('✅ Participants fetched');
+      } catch (participantsErr) {
+        console.warn('⚠️ Failed to fetch participants, continuing...', participantsErr);
+      }
+
+      try {
+        const res = await api.get('/action-tracker/notifications', { 
+          params: { meeting_id: id, channel: 'email', limit: 50 }
+        });
+        
+        if (isMountedRef.current) {
+          setEmailNotifications(res.data?.items || []);
+        }
+      } catch (notificationsErr) {
+        console.warn('⚠️ Failed to fetch notifications, continuing...', notificationsErr);
+      }
+      
+      try {
+        await dispatch(fetchActionTrackerAttributes());
+        console.log('✅ Attributes fetched');
+      } catch (attrsErr) {
+        console.warn('⚠️ Failed to fetch attributes, continuing...', attrsErr);
+      }
+      
       if (isMountedRef.current) { 
         setInitialLoadComplete(true); 
         setLoadingTimeout(false); 
       }
+      
     } catch (err) {
-      if (err.name !== 'AbortError' && err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED') {
-        console.error('Error fetching meeting data:', err);
+      console.error('❌ Error fetching meeting:', err);
+      
+      const is403 = 
+        err?.response?.status === 403 || 
+        err?.status === 403 || 
+        err?.message?.toLowerCase()?.includes('access') ||
+        err?.detail?.toLowerCase()?.includes('access') ||
+        err?.response?.data?.detail?.toLowerCase()?.includes('access');
+      
+      if (is403) {
+        console.warn('🚫 Access Denied (403)');
+        setShowAccessDenied(true);
+      } else if (err?.response?.status === 404 || err?.status === 404) {
+        setLocalError(`❌ Meeting not found (ID: ${id}). It may have been deleted.`);
+        setShowNotFound(true);
+      } else {
+        setLocalError(err?.message || 'Failed to load meeting');
       }
-      if (isMountedRef.current) setInitialLoadComplete(true);
+      
+      if (isMountedRef.current) {
+        setInitialLoadComplete(true);
+      }
     }
   }, [id, dispatch]);
 
   const handleRefresh = useCallback(() => {
-    setShowNotFound(false); 
+    setShowNotFound(false);
+    setShowAccessDenied(false);
     setLoadingTimeout(false); 
     setInitialLoadComplete(false);
     fetchAttemptedRef.current = false; 
     fetchMeetingData();
   }, [fetchMeetingData]);
-
-  // ==================== EFFECTS ====================
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -310,6 +456,7 @@ const MeetingDetail = () => {
     return () => {
       isMountedRef.current = false;
       if (abortControllerRef.current) abortControllerRef.current.abort();
+      setShowAccessDenied(false);
       dispatch(clearMeetingState()); 
       dispatch(clearNotificationError()); 
       dispatch(clearLastNotificationResult());
@@ -329,10 +476,12 @@ const MeetingDetail = () => {
 
   useEffect(() => {
     if (!loading && !currentMeeting && initialLoadComplete && isMountedRef.current) {
-      const timer = setTimeout(() => setShowNotFound(true), 500);
-      return () => clearTimeout(timer);
+      if (!showAccessDenied && !localError) {
+        const timer = setTimeout(() => setShowNotFound(true), 500);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [loading, currentMeeting, initialLoadComplete]);
+  }, [loading, currentMeeting, initialLoadComplete, showAccessDenied, localError]);
 
   useEffect(() => {
     if (lastNotificationResult && isMountedRef.current) {
@@ -367,16 +516,15 @@ const MeetingDetail = () => {
   }, [tabOrder, id]);
 
   // ==================== HANDLERS ====================
-
   const handleBack = useCallback(() => navigate('/meetings'), [navigate]);
   
   const handleEdit = useCallback(() => {
-    if (canUpdateMeeting) {
+    if (canUpdateMeeting && isFullAccess) {
       navigate(`/meetings/${id}/edit`);
     } else {
       setSnackbar({ open: true, message: 'Missing permissions to edit', severity: 'error' });
     }
-  }, [navigate, id, canUpdateMeeting]);
+  }, [navigate, id, canUpdateMeeting, isFullAccess]);
 
   const handleJoinMeeting = useCallback(() => {
     if (isOnlineMeeting && hasMeetingLink) {
@@ -398,12 +546,12 @@ const MeetingDetail = () => {
   }, [id]);
 
   const handleNotifyClick = useCallback(() => {
-    if (canSendNotifications) {
+    if (canSendNotifications && isFullAccess) {
       setNotificationDialogOpen(true);
     } else {
-      setSnackbar({ open: true, message: 'Notification permission error', severity: 'error' });
+      setSnackbar({ open: true, message: 'Limited access users cannot send notifications', severity: 'info' });
     }
-  }, [canSendNotifications]);
+  }, [canSendNotifications, isFullAccess]);
 
   const handleSendNotifications = useCallback((data) => {
     dispatch(sendMeetingNotifications({ meetingId: id, notificationData: data }));
@@ -413,22 +561,105 @@ const MeetingDetail = () => {
     navigate(`/meetings/${id}/notifications`);
   }, [navigate, id]);
 
-  const handleStatusMenuOpen = (e) => setStatusMenuAnchor(e.currentTarget);
-  const handleStatusMenuClose = () => setStatusMenuAnchor(null);
-  const handleMoreMenuOpen = (e) => setMoreMenuAnchor(e.currentTarget);
-  const handleMoreMenuClose = () => setMoreMenuAnchor(null);
+  const handleStatusMenuOpen = useCallback((e) => {
+    if (!isFullAccess) {
+      setSnackbar({ 
+        open: true, 
+        message: 'Limited access users cannot change meeting status', 
+        severity: 'info' 
+      });
+      return;
+    }
+    setStatusMenuAnchor(e.currentTarget);
+  }, [isFullAccess]);
 
-  const handleStatusSelect = (val) => { 
-    setSelectedStatus(val); 
+  const handleStatusMenuClose = useCallback(() => setStatusMenuAnchor(null), []);
+  const handleMoreMenuOpen = useCallback((e) => setMoreMenuAnchor(e.currentTarget), []);
+  const handleMoreMenuClose = useCallback(() => setMoreMenuAnchor(null), []);
+
+  const handleStatusSelect = useCallback((statusValue) => { 
+    let selectedStatusObj = null;
+    
+    if (statusOptions && statusOptions.length > 0) {
+      selectedStatusObj = statusOptions.find(s => 
+        s.value === statusValue || 
+        s.short_name === statusValue ||
+        s.id === statusValue
+      );
+    }
+    
+    if (!selectedStatusObj) {
+      const defaultStatus = Object.keys(STATUS_CONFIG).find(key => key === statusValue);
+      if (defaultStatus) {
+        selectedStatusObj = { 
+          value: defaultStatus, 
+          short_name: defaultStatus,
+          label: STATUS_CONFIG[defaultStatus].label,
+          id: null
+        };
+      }
+    }
+    
+    setSelectedStatus(selectedStatusObj || statusValue); 
     setStatusDialogOpen(true); 
     setStatusMenuAnchor(null); 
-  };
+  }, [statusOptions]);
 
-  const handleStatusUpdate = async () => {
+  const handleStatusUpdate = useCallback(async () => {
     if (!selectedStatus) return;
     setStatusUpdating(true);
     try {
-      await dispatch(updateMeetingStatus({ id, status: selectedStatus, comment: statusComment })).unwrap();
+      let statusId = null;
+      
+      if (selectedStatus && typeof selectedStatus === 'object') {
+        statusId = selectedStatus.id;
+        
+        if (!statusId && (selectedStatus.value || selectedStatus.short_name)) {
+          const match = statusOptions?.find(s => 
+            s.value === selectedStatus.value || 
+            s.short_name === selectedStatus.short_name ||
+            s.short_name === selectedStatus.value
+          );
+          if (match) {
+            statusId = match.id;
+          }
+        }
+      } 
+      else if (typeof selectedStatus === 'string') {
+        const match = statusOptions?.find(s => 
+          s.value === selectedStatus || 
+          s.short_name === selectedStatus
+        );
+        if (match) {
+          statusId = match.id;
+        }
+      }
+      
+      if (!statusId && typeof selectedStatus === 'string') {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(selectedStatus)) {
+          statusId = selectedStatus;
+        }
+      }
+      
+      if (!statusId && normalizedMeeting?.status?.id) {
+        statusId = normalizedMeeting.status.id;
+      }
+      
+      if (statusId) {
+        await dispatch(updateMeetingStatus({ 
+          id, 
+          status_id: statusId,
+          comment: statusComment 
+        })).unwrap();
+      } else {
+        await dispatch(updateMeetingStatus({ 
+          id, 
+          status: typeof selectedStatus === 'object' ? selectedStatus.value || selectedStatus.short_name : selectedStatus,
+          comment: statusComment 
+        })).unwrap();
+      }
+      
       setStatusDialogOpen(false); 
       setSelectedStatus(''); 
       setStatusComment(''); 
@@ -439,17 +670,17 @@ const MeetingDetail = () => {
     } finally { 
       setStatusUpdating(false); 
     }
-  };
+  }, [selectedStatus, statusOptions, normalizedMeeting, statusComment, id, dispatch, handleRefresh]);
 
-  const handleDeleteClick = () => {
-    if (canDeleteMeeting) {
+  const handleDeleteClick = useCallback(() => {
+    if (canDeleteMeeting && isFullAccess) {
       setDeleteDialogOpen(true);
     } else {
       setSnackbar({ open: true, message: 'Missing delete rights', severity: 'error' });
     }
-  };
+  }, [canDeleteMeeting, isFullAccess]);
 
-  const handleDelete = async () => {
+  const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
       await dispatch(deleteMeeting(id)).unwrap(); 
@@ -461,10 +692,10 @@ const MeetingDetail = () => {
     } finally { 
       setDeleting(false); 
     }
-  };
+  }, [id, dispatch, navigate]);
 
   const handlePrintPDF = useCallback(async () => {
-    if (!canExportReports) return;
+    if (!canExportReports || !isFullAccess) return;
     try {
       const token = localStorage.getItem('access_token');
       const res = await fetch(`/api/v1/meetings/${id}/report/pdf`, { 
@@ -479,10 +710,10 @@ const MeetingDetail = () => {
     } catch (err) { 
       setSnackbar({ open: true, message: 'PDF export failed', severity: 'error' }); 
     }
-  }, [id, canExportReports]);
+  }, [id, canExportReports, isFullAccess]);
 
   const handleExportJSON = useCallback(async () => {
-    if (!canExportReports) return;
+    if (!canExportReports || !isFullAccess) return;
     try {
       const token = localStorage.getItem('access_token');
       const res = await fetch(`/api/v1/meetings/${id}/report`, { 
@@ -501,18 +732,16 @@ const MeetingDetail = () => {
     } catch (err) { 
       setSnackbar({ open: true, message: 'JSON export failed', severity: 'error' }); 
     }
-  }, [id, canExportReports]);
+  }, [id, canExportReports, isFullAccess]);
 
-  const handleSpeedDialAction = (act) => {
+  const handleSpeedDialAction = useCallback((act) => {
     if (act === 'edit') handleEdit();
     else if (act === 'notify') handleNotifyClick();
     else if (act === 'share') setShareDialogOpen(true);
     else if (act === 'pdf') handlePrintPDF();
     else if (act === 'delete') handleDeleteClick();
     setSpeedDialOpen(false);
-  };
-
-  // ==================== TAB DRAG AND DROP ====================
+  }, [handleEdit, handleNotifyClick, handlePrintPDF, handleDeleteClick]);
 
   const handleTabDragStart = useCallback((e, val) => {
     if (val === PINNED_TAB_VALUE) { e.preventDefault(); return; }
@@ -549,22 +778,53 @@ const MeetingDetail = () => {
     setIsDraggingTab(false); 
   }, []);
 
-  // ==================== MEMOIZED VALUES ====================
-
   const speedDialActions = useMemo(() => {
     const actions = [];
-    if (canUpdateMeeting) actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit' });
-    if (canSendNotifications) actions.push({ icon: <NotificationsIcon />, name: 'Notify', action: 'notify' });
+    
+    if (canUpdateMeeting && isFullAccess) {
+      actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit' });
+    }
+    
+    if (canSendNotifications && isFullAccess) {
+      actions.push({ icon: <NotificationsIcon />, name: 'Notify', action: 'notify' });
+    }
+    
     actions.push({ icon: <ShareIcon />, name: 'Share', action: 'share' });
-    if (canExportReports) actions.push({ icon: <PictureAsPdfIcon />, name: 'PDF Report', action: 'pdf' });
-    if (canDeleteMeeting) actions.push({ icon: <DeleteIcon />, name: 'Delete', action: 'delete' });
+    
+    if (canExportReports && isFullAccess) {
+      actions.push({ icon: <PictureAsPdfIcon />, name: 'PDF Report', action: 'pdf' });
+    }
+    
+    if (canDeleteMeeting && isFullAccess) {
+      actions.push({ icon: <DeleteIcon />, name: 'Delete', action: 'delete' });
+    }
+    
     return actions;
-  }, [canUpdateMeeting, canSendNotifications, canExportReports, canDeleteMeeting]);
-
+  }, [canUpdateMeeting, canSendNotifications, canExportReports, canDeleteMeeting, isFullAccess]);
+ 
+  // ✅ UPDATE: Show ONLY the Overview tab if user has No Access
   const visibleTabs = useMemo(() => {
-    return TABS.filter(t => isAdmin || !t.requiresPermission || hasPermission(userPermissions, t.requiresPermission));
-  }, [isAdmin, userPermissions]);
+    if (accessLevel === 'none') {
+      return TABS.filter(tab => tab.value === 0);
+    }
 
+    return TABS.filter(tab => {
+      if (isAdmin || !tab.requiresPermission || hasPermission(userPermissions, tab.requiresPermission)) {
+        const { minAccessLevel } = tab;
+        
+        if (minAccessLevel === 'full') {
+          return isFullAccess;
+        } else if (minAccessLevel === 'limited') {
+          return hasAnyAccess;
+        }
+        
+        return true;
+      }
+      
+      return false;
+    });
+  }, [accessLevel, isAdmin, userPermissions, isFullAccess, isLimitedAccess, hasAnyAccess]);
+ 
   const visibleTabsForMode = useMemo(() => {
     return visibleTabs.filter(t => viewMode === 'detailed' || t.simple);
   }, [visibleTabs, viewMode]);
@@ -589,7 +849,6 @@ const MeetingDetail = () => {
   const statusColorHex = getStatusColor();
 
   // ==================== RENDER ====================
-
   if (loading && !currentMeeting && !showNotFound) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6' }}>
@@ -602,15 +861,42 @@ const MeetingDetail = () => {
     );
   }
 
+  // Access Denied screen - shown for explicit 403 HTTP response errors
+  if (showAccessDenied) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6' }}>
+        <Paper sx={{ p: 5, textAlign: 'center', borderRadius: 3, maxWidth: 400 }}>
+          <LockIcon sx={{ fontSize: 48, color: '#EF4444', mb: 2 }} />
+          <Typography variant="h6" fontWeight={700}>Access Denied</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 3 }}>
+            You don't have permission to access this meeting. This may be due to department restrictions or you not being added as a participant.
+          </Typography>
+          <Stack spacing={1.5}>
+            <Button variant="contained" onClick={handleBack} sx={{ bgcolor: '#7C3AED' }}>
+              Back to Dashboard
+            </Button>
+            <Button variant="outlined" onClick={handleRefresh}>
+              Request Access
+            </Button>
+          </Stack>
+        </Paper>
+      </Box>
+    );
+  }
+
+  // Not Found screen - shown for 404 errors
   if (showNotFound && !currentMeeting) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6' }}>
         <Paper sx={{ p: 5, textAlign: 'center', borderRadius: 3, maxWidth: 400 }}>
           <ErrorOutlinedIcon sx={{ fontSize: 48, color: '#EF4444', mb: 2 }} />
-          <Typography variant="h6" fontWeight={700}>Meeting Workspace Not Found</Typography>
-          <Stack spacing={1.5} sx={{ mt: 3 }}>
+          <Typography variant="h6" fontWeight={700}>Meeting Not Found</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 3 }}>
+            The meeting you're looking for doesn't exist or has been deleted.
+          </Typography>
+          <Stack spacing={1.5}>
             <Button variant="contained" onClick={handleBack} sx={{ bgcolor: '#7C3AED' }}>Back to Dashboard</Button>
-            <Button variant="outlined" onClick={handleRefresh}>Retry Connection</Button>
+            <Button variant="outlined" onClick={handleRefresh}>Retry</Button>
           </Stack>
         </Paper>
       </Box>
@@ -619,33 +905,60 @@ const MeetingDetail = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6' }}>
+      {/* ==================== APPBAR ==================== */}
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: isDarkMode ? DARK.surfaceAlt : '#FFFFFF', borderBottom: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}`, color: 'text.primary' }}>
         <Toolbar sx={{ px: 2, minHeight: 56 }}>
           <IconButton onClick={handleBack} edge="start" sx={{ mr: 1 }}><ArrowBackIcon /></IconButton>
           <Typography variant="subtitle1" sx={{ flex: 1, fontWeight: 700 }}>Meeting Workspace</Typography>
+          
+          <Chip
+            label={
+              isFullAccess ? '🔓 Full Access' :
+              isLimitedAccess ? '🔒 Limited Access' :
+              '❌ No Access'
+            }
+            size="small"
+            sx={{
+              mr: 1.5,
+              fontWeight: 600,
+              bgcolor: isFullAccess ? alpha('#2e7d32', 0.1) : isLimitedAccess ? alpha('#ed6c02', 0.1) : alpha('#d32f2f', 0.1),
+              color: isFullAccess ? '#2e7d32' : isLimitedAccess ? '#ed6c02' : '#d32f2f',
+            }}
+          />
           
           <Box sx={{ mr: 1 }}><ViewModeToggle viewMode={viewMode} onChange={setViewMode} /></Box>
           
           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             {!isMobile && (
               <>
-                <Tooltip title="PDF Report">
-                  <IconButton onClick={handlePrintPDF} size="small"><PictureAsPdfIcon sx={{ fontSize: 20 }} /></IconButton>
+                <Tooltip title={isFullAccess ? 'Export PDF' : 'Limited access users cannot export'}>
+                  <Box component="span">
+                    <IconButton onClick={handlePrintPDF} size="small" disabled={!isFullAccess}>
+                      <PictureAsPdfIcon sx={{ fontSize: 20 }} />
+                    </IconButton>
+                  </Box>
                 </Tooltip>
-                <Tooltip title="Sync Settings">
-                  <IconButton onClick={() => setUpdateLinkDialogOpen(true)} size="small"><UpdateIcon sx={{ fontSize: 20 }} /></IconButton>
+
+                <Tooltip title={isFullAccess ? 'Sync Settings' : 'Limited access users cannot sync'}>
+                  <Box component="span">
+                    <IconButton onClick={() => setUpdateLinkDialogOpen(true)} size="small" disabled={!isFullAccess}>
+                      <UpdateIcon sx={{ fontSize: 20 }} />
+                    </IconButton>
+                  </Box>
                 </Tooltip>
               </>
             )}
-            
-            <Tooltip title="Send Notifications">
-              <IconButton onClick={handleNotifyClick} size="small">
-                <Badge badgeContent={participantCount} color="error">
-                  <NotificationsIcon sx={{ fontSize: 20 }} />
-                </Badge>
-              </IconButton>
+
+            <Tooltip title={isFullAccess ? 'Send Notifications' : 'Limited access users cannot send notifications'}>
+              <Box component="span">
+                <IconButton onClick={handleNotifyClick} size="small" disabled={!isFullAccess}>
+                  <Badge badgeContent={participantCount} color="error">
+                    <NotificationsIcon sx={{ fontSize: 20 }} />
+                  </Badge>
+                </IconButton>
+              </Box>
             </Tooltip>
-            
+
             <Tooltip title="Email History">
               <IconButton onClick={handleEmailHistoryOpen} size="small">
                 <Badge badgeContent={emailSentCount} color="success">
@@ -653,33 +966,37 @@ const MeetingDetail = () => {
                 </Badge>
               </IconButton>
             </Tooltip>
-            
+
             <Tooltip title="Refresh">
               <IconButton onClick={handleRefresh} size="small">
                 <RefreshIcon sx={{ fontSize: 20 }} />
               </IconButton>
             </Tooltip>
-            
-            {/* Status Button (Safely passing explicit hex overrides without triggering MUI default validation errors) */}
-            <Button 
-              variant="outlined" 
-              size="small" 
-              startIcon={getStatusIcon()} 
-              onClick={handleStatusMenuOpen} 
-              sx={{ 
-                textTransform: 'none', 
-                ml: 0.5,
-                borderColor: statusColorHex,
-                color: statusColorHex,
-                '&:hover': {
-                  borderColor: statusColorHex,
-                  bgcolor: alpha(statusColorHex, 0.1)
-                }
-              }}
-            >
-              {getStatusDisplay()}
-            </Button>
-            
+
+            <Tooltip title={isFullAccess ? 'Change Status' : 'Limited access users cannot change status'}>
+              <Box component="span">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={getStatusIcon()}
+                  onClick={handleStatusMenuOpen}
+                  disabled={!isFullAccess}
+                  sx={{
+                    textTransform: 'none',
+                    ml: 0.5,
+                    borderColor: statusColorHex,
+                    color: statusColorHex,
+                    '&:hover': {
+                      borderColor: statusColorHex,
+                      bgcolor: alpha(statusColorHex, 0.1),
+                    },
+                  }}
+                >
+                  {getStatusDisplay()}
+                </Button>
+              </Box>
+            </Tooltip>
+
             <Tooltip title="More Options">
               <IconButton onClick={handleMoreMenuOpen} size="small">
                 <MoreVertIcon sx={{ fontSize: 20 }} />
@@ -689,15 +1006,51 @@ const MeetingDetail = () => {
         </Toolbar>
       </AppBar>
 
+      {/* ==================== CONTENT ==================== */}
       <Container maxWidth="xl" sx={{ py: 3 }}>
-        {(error || localError) && (
-          <Alert severity="error" sx={{ mb: 3 }} onClose={() => setLocalError(null)}>
-            {localError || 'Network Sync Error'}
+        {/* ✅ UPDATE: Hide red error banner if user simply has no access */}
+        {(error || localError) && accessLevel !== 'none' && !showAccessDenied && (
+          <Alert 
+            severity="error" 
+            sx={{ mb: 3 }} 
+            onClose={() => setLocalError(null)}
+            action={
+              <Button 
+                color="inherit" 
+                size="small" 
+                onClick={handleRefresh}
+              >
+                Retry
+              </Button>
+            }
+          >
+            <Typography variant="body2" fontWeight={600}>
+              Error Loading Meeting
+            </Typography>
+            <Typography variant="caption">
+              {localError || error || 'Unknown error'}
+            </Typography>
+            {id && (
+              <Typography variant="caption" sx={{ display: 'block', mt: 1, opacity: 0.7 }}>
+                Meeting ID: {id}
+              </Typography>
+            )}
+          </Alert>
+        )}
+       
+        {isLimitedAccess && (
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <Typography variant="body2" fontWeight={600}>
+              📋 You have limited access to this meeting as a participant.
+            </Typography>
+            <Typography variant="caption">
+              You can view the overview and your assigned actions, but cannot access minutes, documents, or meeting history.
+            </Typography>
           </Alert>
         )}
 
         <Box sx={{ mb: 2, p: 2, borderRadius: 3, border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}`, bgcolor: isDarkMode ? DARK.surface : '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h6" fontWeight={800}>{normalizedMeeting?.title || normalizedMeeting?.name}</Typography>
+          <Typography variant="h6" fontWeight={800}>{normalizedMeeting?.title || normalizedMeeting?.name || 'Meeting Details'}</Typography>
           <Chip 
             label={getStatusDisplay()} 
             icon={getStatusIcon()} 
@@ -733,14 +1086,25 @@ const MeetingDetail = () => {
                 ))}
               </Tabs>
             </Box>
-
             <Box sx={{ p: 2.5 }}>
               <TabPanel value={effectiveTabValue} index={0}>
-                <MeetingOverviewTab 
-                  meeting={normalizedMeeting} 
-                  onUpdateLink={() => setUpdateLinkDialogOpen(true)} 
-                  onJoinMeeting={handleJoinMeeting} 
-                />
+                {/* ✅ UPDATE: Display simple "No Access" statement if accessLevel is 'none' */}
+                {accessLevel === 'none' ? (
+                  <Alert severity="warning" icon={<LockIcon />} sx={{ my: 2 }}>
+                    <Typography variant="subtitle2" fontWeight={700}>
+                      Access Denied
+                    </Typography>
+                    <Typography variant="body2">
+                      You do not have access to view this meeting details.
+                    </Typography>
+                  </Alert>
+                ) : (
+                  <MeetingOverviewTab 
+                    meeting={normalizedMeeting} 
+                    onUpdateLink={() => setUpdateLinkDialogOpen(true)} 
+                    onJoinMeeting={handleJoinMeeting} 
+                  />
+                )}
               </TabPanel>
               <TabPanel value={effectiveTabValue} index={1}>
                 <MeetingMinutes 
@@ -756,25 +1120,37 @@ const MeetingDetail = () => {
                   onRefresh={handleRefresh} 
                 />
               </TabPanel>
+
               <TabPanel value={effectiveTabValue} index={3}>
+                {isLimitedAccess && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    You can only view your own participant record.
+                  </Alert>
+                )}
                 <ParticipantsTab 
                   meetingId={id} 
-                  participants={participants} 
+                  participants={
+                    isLimitedAccess 
+                      ? participants.filter(p => p.email === currentUser?.email)
+                      : participants
+                  }
+                  isLimitedAccess={isLimitedAccess}
                   onRefresh={handleRefresh} 
                 />
               </TabPanel>
+
               <TabPanel value={effectiveTabValue} index={4}>
                 <MeetingDocuments meetingId={id} />
               </TabPanel>
               <TabPanel value={effectiveTabValue} index={5}>
                 <MeetingHistory meetingId={id} />
               </TabPanel>
-              {canViewAudit && (
+              {canViewAudit && isFullAccess && (
                 <TabPanel value={effectiveTabValue} index={6}>
                   <MeetingAudit meetingId={id} />
                 </TabPanel>
               )}
-              {hasPermission(userPermissions, 'meeting:view_recorder') && (
+              {hasPermission(userPermissions, 'meeting:view_recorder') && isFullAccess && (
                 <TabPanel value={effectiveTabValue} index={7}>
                   <MeetingRecorder meetingId={id} />
                 </TabPanel>
@@ -811,11 +1187,15 @@ const MeetingDetail = () => {
           <ListItemIcon><ShareIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Share Link</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleStatusMenuOpen}>
-          <ListItemIcon>{getStatusIcon()}</ListItemIcon>
-          <ListItemText>Change Status</ListItemText>
-        </MenuItem>
-        {canDeleteMeeting && (
+        
+        {isFullAccess && (
+          <MenuItem onClick={handleStatusMenuOpen}>
+            <ListItemIcon>{getStatusIcon()}</ListItemIcon>
+            <ListItemText>Change Status</ListItemText>
+          </MenuItem>
+        )}
+        
+        {canDeleteMeeting && isFullAccess && (
           <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
             <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
             <ListItemText>Delete Workspace</ListItemText>
@@ -827,31 +1207,21 @@ const MeetingDetail = () => {
         anchorEl={statusMenuAnchor} 
         open={Boolean(statusMenuAnchor)} 
         onClose={handleStatusMenuClose}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
         {statusOptions && statusOptions.length > 0 ? (
           statusOptions.map((status) => (
             <MenuItem 
               key={status.id || status.value} 
-              onClick={() => handleStatusSelect(status.value)}
-              selected={getStatusValue() === status.value}
-              sx={{
-                '&.Mui-selected': {
-                  bgcolor: alpha(status.color || '#7C3AED', 0.1),
-                }
-              }}
+              onClick={() => handleStatusSelect(status.id || status.value)}
+              selected={getStatusValue() === (status.short_name || status.value)}
             >
               <ListItemIcon>
                 <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: status.color || '#6B7280' }} />
               </ListItemIcon>
               <ListItemText 
                 primary={status.label || status.short_name || status.value}
-                primaryTypographyProps={{
-                  fontWeight: getStatusValue() === status.value ? 600 : 400,
-                }}
               />
-              {getStatusValue() === status.value && (
+              {getStatusValue() === (status.short_name || status.value) && (
                 <CheckCircleIcon sx={{ fontSize: 16, color: status.color || '#7C3AED', ml: 1 }} />
               )}
             </MenuItem>
@@ -864,12 +1234,7 @@ const MeetingDetail = () => {
               selected={getStatusValue() === key}
             >
               <ListItemIcon>{STATUS_CONFIG[key].icon}</ListItemIcon>
-              <ListItemText 
-                primary={STATUS_CONFIG[key].label}
-                primaryTypographyProps={{
-                  fontWeight: getStatusValue() === key ? 600 : 400,
-                }}
-              />
+              <ListItemText primary={STATUS_CONFIG[key].label} />
               {getStatusValue() === key && (
                 <CheckCircleIcon sx={{ fontSize: 16, color: STATUS_CONFIG[key].color, ml: 1 }} />
               )}
@@ -879,44 +1244,48 @@ const MeetingDetail = () => {
       </Menu>
 
       <Dialog open={statusDialogOpen} onClose={() => setStatusDialogOpen(false)} maxWidth="xs" fullWidth>
-              <DialogTitle>
-                <Typography variant="subtitle1" fontWeight={700}>Update Status</Typography>
-              </DialogTitle>
-              <DialogContent>
-                <Stack spacing={2} sx={{ mt: 1 }}>
-                  {/* Show target status preview */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
-                    <Typography variant="body2" color="text.secondary">Target Status:</Typography>
-                    <Chip 
-                      label={selectedStatus ? selectedStatus.replace('_', ' ').toUpperCase() : ''} 
-                      size="small"
-                      color="primary"
-                      sx={{ fontWeight: 600 }}
-                    />
-                  </Box>
-
-                  <TextField 
-                    fullWidth 
-                    label="Reason / Comment" 
-                    multiline 
-                    rows={2} 
-                    value={statusComment} 
-                    onChange={(e) => setStatusComment(e.target.value)} 
-                  />
-                </Stack>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={() => setStatusDialogOpen(false)}>Cancel</Button>
-                <Button 
-                  variant="contained" 
-                  onClick={handleStatusUpdate} 
-                  disabled={statusUpdating} 
-                  sx={{ bgcolor: '#7C3AED' }}
-                >
-                  {statusUpdating ? <CircularProgress size={20} color="inherit" /> : 'Confirm'}
-                </Button>
-              </DialogActions>
-            </Dialog>
+        <DialogTitle>
+          <Typography variant="subtitle1" fontWeight={700}>Update Status</Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+              <Typography variant="body2" color="text.secondary">Target Status:</Typography>
+              <Chip 
+                label={
+                  typeof selectedStatus === 'object' && selectedStatus !== null
+                    ? (selectedStatus.label || selectedStatus.short_name || selectedStatus.value || '').replace('_', ' ').toUpperCase()
+                    : typeof selectedStatus === 'string' && selectedStatus
+                      ? selectedStatus.replace('_', ' ').toUpperCase()
+                      : ''
+                } 
+                size="small"
+                color="primary"
+                sx={{ fontWeight: 600 }}
+              />
+            </Box>
+            <TextField 
+              fullWidth 
+              label="Reason / Comment" 
+              multiline 
+              rows={2} 
+              value={statusComment} 
+              onChange={(e) => setStatusComment(e.target.value)} 
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStatusDialogOpen(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleStatusUpdate} 
+            disabled={statusUpdating} 
+            sx={{ bgcolor: '#7C3AED' }}
+          >
+            {statusUpdating ? <CircularProgress size={20} color="inherit" /> : 'Confirm'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Confirm Deletion</DialogTitle>

@@ -900,19 +900,16 @@ async def get_meeting(
         role = await PermissionChecker.get_user_role(db, meeting_id, current_user.id)
         
         # ✅ Step 4: Build response using utility function
-        response = await build_meeting_response(meeting)
+        response = await build_meeting_response(meeting)  # ✅ AWAIT HERE
         
-        # ✅ Step 5: Convert to dict (this is CRUCIAL)
+        # ✅ Step 5: Convert to dict if needed
         if isinstance(response, dict):
             response_dict = response
         elif hasattr(response, 'model_dump'):
-            # Pydantic v2
             response_dict = response.model_dump(mode='python')
         elif hasattr(response, 'dict'):
-            # Pydantic v1
             response_dict = response.dict()
         else:
-            # Fallback: convert via JSON
             import json
             response_dict = json.loads(response.model_dump_json())
         
@@ -932,8 +929,6 @@ async def get_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch meeting: {str(e)}"
         )
-
-
 
 @router.put("/{meeting_id}", response_model=MeetingResponse)
 async def update_meeting(
@@ -996,7 +991,10 @@ async def update_meeting(
         
         logger.info(f"✅ Meeting {meeting_id} updated by user {current_user.id}")
         
-        response = build_meeting_response(meeting)
+        # ✅ FIX: Await the coroutine first
+        response = await build_meeting_response(meeting)
+        
+        # ✅ Now we can assign to the response
         response["user_permission"] = permission.value
         
         return response
@@ -1010,7 +1008,6 @@ async def update_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update meeting"
         )
-
 
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_meeting(

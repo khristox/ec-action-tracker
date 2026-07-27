@@ -940,45 +940,74 @@ const MeetingDetail = () => {
     <Box sx={{ minHeight: '100vh', bgcolor: isDarkMode ? DARK.bg : '#F3F4F6' }}>
       {/* ==================== APPBAR ==================== */}
       <AppBar position="sticky" elevation={0} sx={{ bgcolor: isDarkMode ? DARK.surfaceAlt : '#FFFFFF', borderBottom: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}`, color: 'text.primary' }}>
-        <Toolbar sx={{ px: 2, minHeight: 56 }}>
-          <IconButton onClick={handleBack} edge="start" sx={{ mr: 1 }}><ArrowBackIcon /></IconButton>
-          <Typography variant="subtitle1" sx={{ flex: 1, fontWeight: 700 }}>Meeting Workspace</Typography>
+        <Toolbar sx={{ px: { xs: 1, sm: 2 }, minHeight: 56, gap: 0.5 }}>
+          <IconButton onClick={handleBack} edge="start" sx={{ mr: 0.5, flexShrink: 0 }}>
+            <ArrowBackIcon />
+          </IconButton>
+
+          {/* Title truncates instead of wrapping/pushing other items off-screen */}
+          <Typography
+            variant="subtitle1"
+            noWrap
+            sx={{ flex: 1, minWidth: 0, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}
+          >
+            {isMobile
+              ? (normalizedMeeting?.title || normalizedMeeting?.name || 'Meeting')
+              : 'Meeting Workspace'}
+          </Typography>
 
           {isDeleted && (
             <Chip
               icon={<DeleteForeverIcon />}
-              label="Deleted"
+              label={isMobile ? undefined : 'Deleted'}
               size="small"
-              sx={{ mr: 1, fontWeight: 700, bgcolor: alpha('#d32f2f', 0.12), color: '#d32f2f' }}
+              sx={{
+                mr: isMobile ? 0.5 : 1,
+                fontWeight: 700,
+                flexShrink: 0,
+                bgcolor: alpha('#d32f2f', 0.12),
+                color: '#d32f2f',
+                ...(isMobile && { '& .MuiChip-label': { display: 'none' }, pl: '4px', pr: '4px' }),
+              }}
             />
           )}
           {!isDeleted && isInactive && (
             <Chip
               icon={<BlockIcon />}
-              label="Inactive"
+              label={isMobile ? undefined : 'Inactive'}
               size="small"
-              sx={{ mr: 1, fontWeight: 700, bgcolor: alpha('#6B7280', 0.15), color: '#6B7280' }}
+              sx={{
+                mr: isMobile ? 0.5 : 1,
+                fontWeight: 700,
+                flexShrink: 0,
+                bgcolor: alpha('#6B7280', 0.15),
+                color: '#6B7280',
+                ...(isMobile && { '& .MuiChip-label': { display: 'none' }, pl: '4px', pr: '4px' }),
+              }}
             />
           )}
-          
-          <Chip
-            label={
-              isFullAccess ? '🔓 Full Access' :
-              isLimitedAccess ? '🔒 Limited Access' :
-              '❌ No Access'
-            }
-            size="small"
-            sx={{
-              mr: 1.5,
-              fontWeight: 600,
-              bgcolor: isFullAccess ? alpha('#2e7d32', 0.1) : isLimitedAccess ? alpha('#ed6c02', 0.1) : alpha('#d32f2f', 0.1),
-              color: isFullAccess ? '#2e7d32' : isLimitedAccess ? '#ed6c02' : '#d32f2f',
-            }}
-          />
-          
-          <Box sx={{ mr: 1 }}><ViewModeToggle viewMode={viewMode} onChange={setViewMode} /></Box>
-          
-          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+
+          {/* Access chip and view-mode toggle only fit comfortably on larger screens */}
+          {!isMobile && (
+            <Chip
+              label={
+                isFullAccess ? '🔓 Full Access' :
+                isLimitedAccess ? '🔒 Limited Access' :
+                '❌ No Access'
+              }
+              size="small"
+              sx={{
+                mr: 1.5,
+                fontWeight: 600,
+                bgcolor: isFullAccess ? alpha('#2e7d32', 0.1) : isLimitedAccess ? alpha('#ed6c02', 0.1) : alpha('#d32f2f', 0.1),
+                color: isFullAccess ? '#2e7d32' : isLimitedAccess ? '#ed6c02' : '#d32f2f',
+              }}
+            />
+          )}
+
+          {!isMobile && <Box sx={{ mr: 1 }}><ViewModeToggle viewMode={viewMode} onChange={setViewMode} /></Box>}
+
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
             {!isMobile && (
               <>
                 <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Export PDF' : 'Limited access users cannot export'}>
@@ -996,56 +1025,65 @@ const MeetingDetail = () => {
                     </IconButton>
                   </Box>
                 </Tooltip>
+
+                <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Send Notifications' : 'Limited access users cannot send notifications'}>
+                  <Box component="span">
+                    <IconButton onClick={handleNotifyClick} size="small" disabled={!isFullAccess || controlsDisabled}>
+                      <Badge badgeContent={participantCount} color="error">
+                        <NotificationsIcon sx={{ fontSize: 20 }} />
+                      </Badge>
+                    </IconButton>
+                  </Box>
+                </Tooltip>
+
+                <Tooltip title="Email History">
+                  <IconButton onClick={handleEmailHistoryOpen} size="small">
+                    <Badge badgeContent={emailSentCount} color="success">
+                      <MarkEmailReadIcon sx={{ fontSize: 20 }} />
+                    </Badge>
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title="Refresh">
+                  <IconButton onClick={handleRefresh} size="small">
+                    <RefreshIcon sx={{ fontSize: 20 }} />
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Change Status' : 'Limited access users cannot change status'}>
+                  <Box component="span">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={getStatusIcon()}
+                      onClick={handleStatusMenuOpen}
+                      disabled={!isFullAccess || controlsDisabled}
+                      sx={{
+                        textTransform: 'none',
+                        ml: 0.5,
+                        borderColor: statusColorHex,
+                        color: statusColorHex,
+                        '&:hover': {
+                          borderColor: statusColorHex,
+                          bgcolor: alpha(statusColorHex, 0.1),
+                        },
+                      }}
+                    >
+                      {getStatusDisplay()}
+                    </Button>
+                  </Box>
+                </Tooltip>
               </>
             )}
 
-            <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Send Notifications' : 'Limited access users cannot send notifications'}>
-              <Box component="span">
-                <IconButton onClick={handleNotifyClick} size="small" disabled={!isFullAccess || controlsDisabled}>
-                  <Badge badgeContent={participantCount} color="error">
-                    <NotificationsIcon sx={{ fontSize: 20 }} />
-                  </Badge>
+            {/* On mobile, refresh stays one tap away; everything else lives in the More menu */}
+            {isMobile && (
+              <Tooltip title="Refresh">
+                <IconButton onClick={handleRefresh} size="small">
+                  <RefreshIcon sx={{ fontSize: 20 }} />
                 </IconButton>
-              </Box>
-            </Tooltip>
-
-            <Tooltip title="Email History">
-              <IconButton onClick={handleEmailHistoryOpen} size="small">
-                <Badge badgeContent={emailSentCount} color="success">
-                  <MarkEmailReadIcon sx={{ fontSize: 20 }} />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="Refresh">
-              <IconButton onClick={handleRefresh} size="small">
-                <RefreshIcon sx={{ fontSize: 20 }} />
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Change Status' : 'Limited access users cannot change status'}>
-              <Box component="span">
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={getStatusIcon()}
-                  onClick={handleStatusMenuOpen}
-                  disabled={!isFullAccess || controlsDisabled}
-                  sx={{
-                    textTransform: 'none',
-                    ml: 0.5,
-                    borderColor: statusColorHex,
-                    color: statusColorHex,
-                    '&:hover': {
-                      borderColor: statusColorHex,
-                      bgcolor: alpha(statusColorHex, 0.1),
-                    },
-                  }}
-                >
-                  {getStatusDisplay()}
-                </Button>
-              </Box>
-            </Tooltip>
+              </Tooltip>
+            )}
 
             <Tooltip title="More Options">
               <IconButton onClick={handleMoreMenuOpen} size="small">
@@ -1254,12 +1292,75 @@ const MeetingDetail = () => {
       )}
 
       <Menu anchorEl={moreMenuAnchor} open={Boolean(moreMenuAnchor)} onClose={handleMoreMenuClose}>
+        {/* Mobile-only items: everything that used to overflow the AppBar now lives here */}
+        {isMobile && [
+          <MenuItem key="access-level" disabled sx={{ opacity: '1 !important' }}>
+            <ListItemText
+              primary={isFullAccess ? '🔓 Full Access' : isLimitedAccess ? '🔒 Limited Access' : '❌ No Access'}
+              primaryTypographyProps={{ fontWeight: 700, fontSize: '0.85rem' }}
+            />
+          </MenuItem>,
+          <Divider key="divider-access" />,
+          <MenuItem
+            key="view-mode"
+            onClick={() => { setViewMode(viewMode === 'simple' ? 'detailed' : 'simple'); handleMoreMenuClose(); }}
+          >
+            <ListItemIcon>
+              {viewMode === 'simple' ? <ViewAgendaIcon fontSize="small" /> : <ViewStreamIcon fontSize="small" />}
+            </ListItemIcon>
+            <ListItemText>{viewMode === 'simple' ? 'Switch to Detailed View' : 'Switch to Simple View'}</ListItemText>
+          </MenuItem>,
+          <MenuItem
+            key="notify"
+            onClick={() => { handleMoreMenuClose(); handleNotifyClick(); }}
+            disabled={!isFullAccess || controlsDisabled}
+          >
+            <ListItemIcon>
+              <Badge badgeContent={participantCount} color="error">
+                <NotificationsIcon fontSize="small" />
+              </Badge>
+            </ListItemIcon>
+            <ListItemText>Send Notifications</ListItemText>
+          </MenuItem>,
+          <MenuItem key="email-history" onClick={() => { handleMoreMenuClose(); handleEmailHistoryOpen(); }}>
+            <ListItemIcon>
+              <Badge badgeContent={emailSentCount} color="success">
+                <MarkEmailReadIcon fontSize="small" />
+              </Badge>
+            </ListItemIcon>
+            <ListItemText>Email History</ListItemText>
+          </MenuItem>,
+          isFullAccess && !controlsDisabled && (
+            <MenuItem key="status" onClick={handleStatusMenuOpen}>
+              <ListItemIcon>{getStatusIcon()}</ListItemIcon>
+              <ListItemText>{`Change Status (${getStatusDisplay()})`}</ListItemText>
+            </MenuItem>
+          ),
+          <MenuItem
+            key="pdf"
+            onClick={() => { handleMoreMenuClose(); handlePrintPDF(); }}
+            disabled={!isFullAccess || controlsDisabled}
+          >
+            <ListItemIcon><PictureAsPdfIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Export PDF</ListItemText>
+          </MenuItem>,
+          <MenuItem
+            key="sync"
+            onClick={() => { handleMoreMenuClose(); setUpdateLinkDialogOpen(true); }}
+            disabled={!isFullAccess || controlsDisabled}
+          >
+            <ListItemIcon><UpdateIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Sync Settings</ListItemText>
+          </MenuItem>,
+          <Divider key="divider-actions" />,
+        ]}
+
         <MenuItem onClick={handleShare}>
           <ListItemIcon><ShareIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Share Link</ListItemText>
         </MenuItem>
         
-        {isFullAccess && !controlsDisabled && (
+        {!isMobile && isFullAccess && !controlsDisabled && (
           <MenuItem onClick={handleStatusMenuOpen}>
             <ListItemIcon>{getStatusIcon()}</ListItemIcon>
             <ListItemText>Change Status</ListItemText>

@@ -12,7 +12,7 @@ import logging
 
 from app.api import deps
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
-from app.models.meetings.action_tracker import ActionImplementer, MeetingAction, ActionComment
+from app.models.meetings.action_tracker import ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment
 from app.models.user import User
 from app.services.implementer_linking import (
     build_implementers,
@@ -694,6 +694,17 @@ async def update_action_progress(
 
         action_obj.updated_by_id = current_user.id
         action_obj.updated_at = now
+
+        # Record this change in the status history table
+        history_entry = ActionStatusHistory(
+            action_id=action_obj.id,
+            individual_status_id=progress_update.individual_status_id,
+            progress_percentage=progress_update.progress_percentage,
+            remarks=progress_update.remarks,
+            created_by_id=current_user.id,
+            updated_by_id=current_user.id,
+        )
+        db.add(history_entry)
 
         await db.commit()
         await db.refresh(action_obj)

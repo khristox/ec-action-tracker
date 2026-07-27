@@ -1125,7 +1125,7 @@ const AuditLogs = () => {
             <Box sx={{ mb: 4 }}>
               <Typography variant="h4" fontWeight={700} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.primary' }}>
                 <SecurityOutlined sx={{ fontSize: 40, color: 'primary.main' }} />
-                Audit Logs
+                Audit Logs:
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Track and monitor all system activities, user actions, and data changes

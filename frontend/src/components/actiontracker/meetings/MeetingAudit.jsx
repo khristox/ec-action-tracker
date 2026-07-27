@@ -89,6 +89,15 @@ const isJsonString = (str) => {
   }
 };
 
+// Helper: pull the entity table name from whichever field the payload provides
+const getEntityLabel = (log) => (log.table_name || log.entity_type || 'meeting');
+
+// Helper: pull the entity/record id from whichever field the payload provides
+const getEntityId = (log) => (log.record_id || log.entity_id || null);
+
+// Helper: pull the human-readable description from whichever field the payload provides
+const getDescription = (log) => (log.changes_summary || log.details || null);
+
 // Component to display field changes
 const FieldChange = ({ field, oldValue, newValue }) => {
   const theme = useTheme();
@@ -957,17 +966,17 @@ const MeetingAudit = ({ meetingId }) => {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" color="text.secondary">
-                      {log.table_name?.replace(/_/g, ' ') || 'Meeting'}
+                      {getEntityLabel(log).replace(/_/g, ' ')}
                     </Typography>
-                    {log.record_id && (
+                    {getEntityId(log) && (
                       <Typography variant="caption" color="text.secondary">
-                        ID: {log.record_id.substring(0, 12)}...
+                        ID: {getEntityId(log).substring(0, 12)}...
                       </Typography>
                     )}
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" sx={{ maxWidth: 300 }}>
-                      {log.changes_summary || 'No description'}
+                      {getDescription(log) || 'No description'}
                     </Typography>
                   </TableCell>
                   <TableCell align="center">
@@ -1147,7 +1156,7 @@ const MeetingAudit = ({ meetingId }) => {
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">User</Typography>
                       <Typography variant="body1" fontWeight={500} sx={{ color: isDark ? '#E5E7EB' : 'text.primary' }}>
-                        {selectedLog.username || selectedLog.user_email || 'System'}
+                        {selectedLog.username || selectedLog.user_email || selectedLog.user_id || 'System'}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
@@ -1172,20 +1181,20 @@ const MeetingAudit = ({ meetingId }) => {
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">Table</Typography>
                       <Typography variant="body2" sx={{ textTransform: 'capitalize', color: isDark ? '#D1D5DB' : 'text.primary' }}>
-                        {selectedLog.table_name?.replace(/_/g, ' ') || 'Meeting'}
+                        {getEntityLabel(selectedLog).replace(/_/g, ' ')}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
                       <Typography variant="caption" color="text.secondary">Record ID</Typography>
                       <Stack direction="row" alignItems="center" spacing={1}>
                         <Typography variant="body2" fontFamily="monospace" sx={{ color: isDark ? '#D1D5DB' : 'text.primary' }}>
-                          {selectedLog.record_id || 'N/A'}
+                          {getEntityId(selectedLog) || 'N/A'}
                         </Typography>
-                        {selectedLog.record_id && (
+                        {getEntityId(selectedLog) && (
                           <Tooltip title={copied ? "Copied!" : "Copy ID"}>
                             <IconButton 
                               size="small" 
-                              onClick={() => handleCopyJson(selectedLog.record_id)}
+                              onClick={() => handleCopyJson(getEntityId(selectedLog))}
                               sx={{ color: isDark ? '#9CA3AF' : undefined }}
                             >
                               {copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
@@ -1202,7 +1211,7 @@ const MeetingAudit = ({ meetingId }) => {
                         </Typography>
                       </Grid>
                     )}
-                    {selectedLog.changes_summary && (
+                    {getDescription(selectedLog) && (
                       <Grid size={{ xs: 12 }}>
                         <Typography variant="caption" color="text.secondary">Summary</Typography>
                         <Alert 
@@ -1217,7 +1226,7 @@ const MeetingAudit = ({ meetingId }) => {
                             borderRadius: 2,
                           }}
                         >
-                          {selectedLog.changes_summary}
+                          {getDescription(selectedLog)}
                         </Alert>
                       </Grid>
                     )}
@@ -1299,8 +1308,8 @@ const MeetingAudit = ({ meetingId }) => {
                       id: selectedLog.id,
                       timestamp: selectedLog.timestamp,
                       action: selectedLog.action,
-                      table_name: selectedLog.table_name,
-                      record_id: selectedLog.record_id,
+                      table_name: getEntityLabel(selectedLog),
+                      record_id: getEntityId(selectedLog),
                       user: {
                         id: selectedLog.user_id,
                         name: selectedLog.username,
@@ -1308,7 +1317,7 @@ const MeetingAudit = ({ meetingId }) => {
                       },
                       old_values: selectedLog.old_values || selectedLog.old_data,
                       new_values: selectedLog.new_values || selectedLog.new_data,
-                      changes_summary: selectedLog.changes_summary,
+                      changes_summary: getDescription(selectedLog),
                       ip_address: selectedLog.ip_address,
                       endpoint: selectedLog.endpoint,
                       user_agent: selectedLog.user_agent,

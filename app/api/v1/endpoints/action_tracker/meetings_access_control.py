@@ -129,7 +129,7 @@ class DepartmentAccessControl:
                 # Unrestricted meetings are visible to everyone
                 if meeting.visibility == 'open':
                     logger.info(f"✅ Meeting visibility is 'open' → LIMITED access for everyone")
-                    return AccessLevel.LIMITED
+                    return AccessLevel.FULL
                 
                 logger.info(f"🚫 User has NO access to unrestricted meeting")
                 return AccessLevel.NONE

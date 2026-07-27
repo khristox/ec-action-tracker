@@ -2,10 +2,10 @@
 
 import React, { useState } from 'react';
 import {
-  Stack, Card, CardContent, Box, Typography, Button, List, Divider,
-  FormControl, InputLabel, Select, MenuItem, Alert,
+  Stack, Card, Box, Typography, Button, List, Divider,
+  FormControl, Select, MenuItem,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Paper, Chip, useTheme, alpha, IconButton, Tooltip
+  Chip, useTheme, alpha, IconButton
 } from '@mui/material';
 import { 
   PersonAdd as PersonAddIcon, 
@@ -15,7 +15,9 @@ import {
   ListAlt as ListIcon,
   Close as CloseIcon,
   Add as AddIcon,
-  Group as GroupIcon
+  Group as GroupIcon,
+  Clear as ClearIcon,
+  Done as DoneIcon
 } from '@mui/icons-material';
 import { ExistingUsersSelector } from '../components/ExistingUsersSelector';
 import { ManualParticipantEntry } from '../components/ManualParticipantEntry';
@@ -47,8 +49,43 @@ export const ParticipantsStep = ({
   const [participantTab, setParticipantTab] = useState('existing');
   const [showAddDialog, setShowAddDialog] = useState(false);
 
+  // Lifted selection state for batch user addition
+  const [selectedUsersToBatch, setSelectedUsersToBatch] = useState([]);
+
   // Get secretary name
   const secretaryName = formData.secretary_name || '';
+
+  // Handler to add batch-selected users from the modal footer
+  const handleBatchAddUsers = () => {
+    if (selectedUsersToBatch.length === 0) return;
+
+    selectedUsersToBatch.forEach((user) => {
+      handleAddExistingUser({
+        id: user.id,
+        name: user.full_name || user.username,
+        email: user.email,
+        telephone: user.phone,
+        title: user.title,
+        organization: user.organization,
+        is_chairperson: false,
+        is_existing: true
+      });
+    });
+
+    // Clear selection after adding
+    setSelectedUsersToBatch([]);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedUsersToBatch([]);
+  };
+
+  const handleCloseDialog = () => {
+    setSelectedUsersToBatch([]);
+    setShowAddDialog(false);
+  };
+
+  const hasUserSelection = participantTab === 'existing' && selectedUsersToBatch.length > 0;
 
   return (
     <Stack spacing={2} sx={{ height: '100%' }}>
@@ -240,13 +277,15 @@ export const ParticipantsStep = ({
       {/* Add Participant Dialog */}
       <Dialog 
         open={showAddDialog} 
-        onClose={() => setShowAddDialog(false)} 
+        onClose={handleCloseDialog} 
         maxWidth="sm" 
         fullWidth
         PaperProps={{
           sx: {
             borderRadius: 3,
-            maxHeight: '85vh'
+            maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column'
           }
         }}
       >
@@ -272,102 +311,131 @@ export const ParticipantsStep = ({
           </Stack>
           <IconButton 
             size="small" 
-            onClick={() => setShowAddDialog(false)}
+            onClick={handleCloseDialog}
             sx={{ border: 1, borderColor: 'divider', borderRadius: 2 }}
           >
             <CloseIcon fontSize="small" />
           </IconButton>
         </DialogTitle>
         
-        <DialogContent sx={{ p: 0 }}>
-          <Box sx={{ p: 2 }}>
-            {/* Compact Tabs */}
-            <Box sx={{ 
-              display: 'flex', 
-              gap: 0.5, 
-              mb: 2,
-              bgcolor: isLight ? alpha(theme.palette.primary.main, 0.04) : alpha(theme.palette.primary.main, 0.08),
-              borderRadius: 2,
-              p: 0.5
-            }}>
-              {PARTICIPANT_TABS.map(tab => (
-                <Button
-                  key={tab.value}
-                  variant={participantTab === tab.value ? 'contained' : 'text'}
-                  startIcon={tab.icon}
-                  onClick={() => setParticipantTab(tab.value)}
-                  size="small"
-                  sx={{ 
-                    flex: 1,
-                    textTransform: 'none',
-                    fontWeight: 600,
-                    fontSize: '0.75rem',
-                    borderRadius: 1.5,
-                    py: 0.75,
-                    ...(participantTab === tab.value ? {
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                    } : {
-                      color: 'text.secondary',
-                      '&:hover': { bgcolor: 'transparent' }
-                    })
-                  }}
-                >
-                  {tab.label}
-                </Button>
-              ))}
-            </Box>
+        <DialogContent sx={{ p: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Compact Tabs */}
+          <Box sx={{ 
+            display: 'flex', 
+            gap: 0.5, 
+            mb: 2,
+            bgcolor: isLight ? alpha(theme.palette.primary.main, 0.04) : alpha(theme.palette.primary.main, 0.08),
+            borderRadius: 2,
+            p: 0.5,
+            flexShrink: 0
+          }}>
+            {PARTICIPANT_TABS.map(tab => (
+              <Button
+                key={tab.value}
+                variant={participantTab === tab.value ? 'contained' : 'text'}
+                startIcon={tab.icon}
+                onClick={() => {
+                  setParticipantTab(tab.value);
+                  setSelectedUsersToBatch([]); // Clear selections on tab switch
+                }}
+                size="small"
+                sx={{ 
+                  flex: 1,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                  borderRadius: 1.5,
+                  py: 0.75,
+                  ...(participantTab === tab.value ? {
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                  } : {
+                    color: 'text.secondary',
+                    '&:hover': { bgcolor: 'transparent' }
+                  })
+                }}
+              >
+                {tab.label}
+              </Button>
+            ))}
+          </Box>
 
-            {/* Tab Content */}
-            <Box sx={{ maxHeight: 400, overflowY: 'auto' }}>
-              {participantTab === 'existing' && (
-                <ExistingUsersSelector
-                  onAddUser={(user) => {
-                    handleAddExistingUser(user);
-                    // Don't close dialog to allow adding more
-                  }}
-                  existingParticipants={meetingParticipants}
-                  selectedUserIds={selectedUserIds}
-                />
-              )}
+          {/* Tab Content */}
+          <Box sx={{ flex: 1, overflow: 'hidden' }}>
+            {participantTab === 'existing' && (
+              <ExistingUsersSelector
+                selectedUserIds={selectedUserIds}
+                selectedUsers={selectedUsersToBatch}
+                onSelectionChange={setSelectedUsersToBatch}
+              />
+            )}
 
-              {participantTab === 'manual' && (
-                <ManualParticipantEntry
-                  onAddParticipant={(participant) => {
-                    handleAddManualParticipant(participant);
-                    // Don't close dialog to allow adding more
-                  }}
-                />
-              )}
+            {participantTab === 'manual' && (
+              <ManualParticipantEntry
+                onAddParticipant={(participant) => {
+                  handleAddManualParticipant(participant);
+                }}
+              />
+            )}
 
-              {participantTab === 'lists' && (
-                <ParticipantListsSelector
-                  onAddFromList={(participants) => {
-                    handleAddFromList(participants);
-                    // Don't close dialog to allow adding more
-                  }}
-                  selectedParticipantIds={selectedParticipantIds}
-                />
-              )}
-            </Box>
+            {participantTab === 'lists' && (
+              <ParticipantListsSelector
+                onAddFromList={(participants) => {
+                  handleAddFromList(participants);
+                }}
+                selectedParticipantIds={selectedParticipantIds}
+              />
+            )}
           </Box>
         </DialogContent>
         
+        {/* Footer: Dynamic swapping between Done and Add [N] Users */}
         <DialogActions sx={{ 
           p: 2, 
           borderTop: 1, 
           borderColor: 'divider',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          alignItems: 'center'
         }}>
           <Typography variant="caption" color="text.secondary">
             {meetingParticipants.length} participant{meetingParticipants.length !== 1 ? 's' : ''} added
           </Typography>
-          <Button 
-            onClick={() => setShowAddDialog(false)} 
-            variant="contained"
-            sx={{ borderRadius: 2, textTransform: 'none' }}
-          >
-            Done
-          </Button>
+
+          <Stack direction="row" spacing={1} alignItems="center">
+            {hasUserSelection ? (
+              <>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  size="small"
+                  onClick={handleClearSelection}
+                  startIcon={<ClearIcon />}
+                  sx={{ borderRadius: 2, textTransform: 'none' }}
+                >
+                  Clear All
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  size="small"
+                  onClick={handleBatchAddUsers}
+                  startIcon={selectedUsersToBatch.length > 1 ? <PeopleIcon /> : <PersonAddIcon />}
+                  sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600, px: 2 }}
+                >
+                  Add {selectedUsersToBatch.length} User{selectedUsersToBatch.length !== 1 ? 's' : ''}
+                </Button>
+              </>
+            ) : (
+              <Button 
+                onClick={handleCloseDialog} 
+                variant="contained"
+                startIcon={<DoneIcon />}
+                size="small"
+                sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600, px: 3 }}
+              >
+                Done
+              </Button>
+            )}
+          </Stack>
         </DialogActions>
       </Dialog>
     </Stack>

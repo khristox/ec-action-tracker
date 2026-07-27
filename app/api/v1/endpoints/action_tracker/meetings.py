@@ -800,13 +800,16 @@ async def create_meeting(
             await db.flush()
             
             # ========== ADD PARTICIPANTS ==========
-            if hasattr(meeting_in, 'participants') and meeting_in.participants:
-                for p in meeting_in.participants:
+            if meeting_in.custom_participants:
+                for p in meeting_in.custom_participants:
                     participant = MeetingParticipant(
                         id=uuid.uuid4(),
                         meeting_id=meeting.id,
                         name=p.name,
                         email=p.email,
+                        telephone=getattr(p, 'telephone', None),
+                        title=getattr(p, 'title', None),
+                        organization=getattr(p, 'organization', None),
                         is_chairperson=getattr(p, 'is_chairperson', False),
                         is_secretary=getattr(p, 'is_secretary', False),
                         created_by_id=current_user.id,

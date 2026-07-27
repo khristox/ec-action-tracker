@@ -185,7 +185,8 @@ const SectionPaper = ({ children, ...props }) => {
   );
 };
 
-// COMPACT FormTextField - reduced spacing
+// FormTextField - size is "small" by default but can be overridden per-usage
+// via the `size` prop, since `{...props}` is spread after the default below.
 const FormTextField = memo(({ 
   icon: Icon, 
   required = false, 
@@ -441,6 +442,7 @@ export const BasicInfoStep = memo(({
               required
               label="Meeting Title *"
               name="title"
+              size="medium"
               value={formData?.title || ''}
               onChange={handleFieldChange('title')}
               onBlur={() => handleFieldTouch('title')}
@@ -477,12 +479,13 @@ export const BasicInfoStep = memo(({
             <FormTextField
               label="Description"
               name="description"
+              size="medium"
               value={formData?.description || ''}
               onChange={handleFieldChange('description')}
               onBlur={() => handleFieldTouch('description')}
               placeholder="Add context..."
               multiline
-              rows={isMobile ? 1 : 2}
+              rows={isMobile ? 3 : 4}
               icon={DescriptionIcon}
               disabled={apiLoading || isSubmitting}
               inputProps={{

@@ -38,6 +38,8 @@ import ViewAgendaIcon from '@mui/icons-material/ViewAgenda';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import InfoIcon from '@mui/icons-material/Info';
 import LockIcon from '@mui/icons-material/Lock';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import BlockIcon from '@mui/icons-material/Block';
 import {
   fetchMeetingById, clearMeetingState, updateMeetingStatus, deleteMeeting,
   fetchActionTrackerAttributes, selectCurrentMeeting, selectMeetingsLoading,
@@ -270,6 +272,11 @@ const MeetingDetail = () => {
   const isFullAccess = accessLevel === 'full';
   const isLimitedAccess = accessLevel === 'limited';
   const hasAnyAccess = isFullAccess || isLimitedAccess;
+
+  // Meeting is soft-deleted or inactive - controls should be locked down
+  const isDeleted = Boolean(normalizedMeeting?.is_deleted);
+  const isInactive = normalizedMeeting?.is_active === false;
+  const controlsDisabled = isDeleted || isInactive;
   
   const isOnlineMeeting = useMemo(() => normalizedMeeting?.platform && normalizedMeeting?.platform !== 'physical', [normalizedMeeting]);
   const hasMeetingLink = useMemo(() => normalizedMeeting?.meeting_link, [normalizedMeeting]);
@@ -519,12 +526,16 @@ const MeetingDetail = () => {
   const handleBack = useCallback(() => navigate('/meetings'), [navigate]);
   
   const handleEdit = useCallback(() => {
+    if (controlsDisabled) {
+      setSnackbar({ open: true, message: isDeleted ? 'This meeting has been deleted' : 'This meeting is inactive', severity: 'info' });
+      return;
+    }
     if (canUpdateMeeting && isFullAccess) {
       navigate(`/meetings/${id}/edit`);
     } else {
       setSnackbar({ open: true, message: 'Missing permissions to edit', severity: 'error' });
     }
-  }, [navigate, id, canUpdateMeeting, isFullAccess]);
+  }, [navigate, id, canUpdateMeeting, isFullAccess, controlsDisabled, isDeleted]);
 
   const handleJoinMeeting = useCallback(() => {
     if (isOnlineMeeting && hasMeetingLink) {
@@ -546,12 +557,16 @@ const MeetingDetail = () => {
   }, [id]);
 
   const handleNotifyClick = useCallback(() => {
+    if (controlsDisabled) {
+      setSnackbar({ open: true, message: isDeleted ? 'This meeting has been deleted' : 'This meeting is inactive', severity: 'info' });
+      return;
+    }
     if (canSendNotifications && isFullAccess) {
       setNotificationDialogOpen(true);
     } else {
       setSnackbar({ open: true, message: 'Limited access users cannot send notifications', severity: 'info' });
     }
-  }, [canSendNotifications, isFullAccess]);
+  }, [canSendNotifications, isFullAccess, controlsDisabled, isDeleted]);
 
   const handleSendNotifications = useCallback((data) => {
     dispatch(sendMeetingNotifications({ meetingId: id, notificationData: data }));
@@ -562,6 +577,10 @@ const MeetingDetail = () => {
   }, [navigate, id]);
 
   const handleStatusMenuOpen = useCallback((e) => {
+    if (controlsDisabled) {
+      setSnackbar({ open: true, message: isDeleted ? 'This meeting has been deleted' : 'This meeting is inactive', severity: 'info' });
+      return;
+    }
     if (!isFullAccess) {
       setSnackbar({ 
         open: true, 
@@ -571,7 +590,7 @@ const MeetingDetail = () => {
       return;
     }
     setStatusMenuAnchor(e.currentTarget);
-  }, [isFullAccess]);
+  }, [isFullAccess, controlsDisabled, isDeleted]);
 
   const handleStatusMenuClose = useCallback(() => setStatusMenuAnchor(null), []);
   const handleMoreMenuOpen = useCallback((e) => setMoreMenuAnchor(e.currentTarget), []);
@@ -673,12 +692,16 @@ const MeetingDetail = () => {
   }, [selectedStatus, statusOptions, normalizedMeeting, statusComment, id, dispatch, handleRefresh]);
 
   const handleDeleteClick = useCallback(() => {
+    if (isDeleted) {
+      setSnackbar({ open: true, message: 'This meeting has already been deleted', severity: 'info' });
+      return;
+    }
     if (canDeleteMeeting && isFullAccess) {
       setDeleteDialogOpen(true);
     } else {
       setSnackbar({ open: true, message: 'Missing delete rights', severity: 'error' });
     }
-  }, [canDeleteMeeting, isFullAccess]);
+  }, [canDeleteMeeting, isFullAccess, isDeleted]);
 
   const handleDelete = useCallback(async () => {
     setDeleting(true);
@@ -695,7 +718,7 @@ const MeetingDetail = () => {
   }, [id, dispatch, navigate]);
 
   const handlePrintPDF = useCallback(async () => {
-    if (!canExportReports || !isFullAccess) return;
+    if (!canExportReports || !isFullAccess || controlsDisabled) return;
     try {
       const token = localStorage.getItem('access_token');
       const res = await fetch(`/api/v1/meetings/${id}/report/pdf`, { 
@@ -710,10 +733,10 @@ const MeetingDetail = () => {
     } catch (err) { 
       setSnackbar({ open: true, message: 'PDF export failed', severity: 'error' }); 
     }
-  }, [id, canExportReports, isFullAccess]);
+  }, [id, canExportReports, isFullAccess, controlsDisabled]);
 
   const handleExportJSON = useCallback(async () => {
-    if (!canExportReports || !isFullAccess) return;
+    if (!canExportReports || !isFullAccess || controlsDisabled) return;
     try {
       const token = localStorage.getItem('access_token');
       const res = await fetch(`/api/v1/meetings/${id}/report`, { 
@@ -732,7 +755,7 @@ const MeetingDetail = () => {
     } catch (err) { 
       setSnackbar({ open: true, message: 'JSON export failed', severity: 'error' }); 
     }
-  }, [id, canExportReports, isFullAccess]);
+  }, [id, canExportReports, isFullAccess, controlsDisabled]);
 
   const handleSpeedDialAction = useCallback((act) => {
     if (act === 'edit') handleEdit();
@@ -780,6 +803,12 @@ const MeetingDetail = () => {
 
   const speedDialActions = useMemo(() => {
     const actions = [];
+
+    if (controlsDisabled) {
+      // Only allow Share when the meeting is deleted/inactive
+      actions.push({ icon: <ShareIcon />, name: 'Share', action: 'share' });
+      return actions;
+    }
     
     if (canUpdateMeeting && isFullAccess) {
       actions.push({ icon: <EditIcon />, name: 'Edit', action: 'edit' });
@@ -800,11 +829,15 @@ const MeetingDetail = () => {
     }
     
     return actions;
-  }, [canUpdateMeeting, canSendNotifications, canExportReports, canDeleteMeeting, isFullAccess]);
+  }, [canUpdateMeeting, canSendNotifications, canExportReports, canDeleteMeeting, isFullAccess, controlsDisabled]);
  
-  // ✅ UPDATE: Show ONLY the Overview tab if user has No Access
+  // Show ONLY the Overview tab if user has No Access, or if the meeting is deleted
   const visibleTabs = useMemo(() => {
     if (accessLevel === 'none') {
+      return TABS.filter(tab => tab.value === 0);
+    }
+
+    if (isDeleted) {
       return TABS.filter(tab => tab.value === 0);
     }
 
@@ -823,7 +856,7 @@ const MeetingDetail = () => {
       
       return false;
     });
-  }, [accessLevel, isAdmin, userPermissions, isFullAccess, isLimitedAccess, hasAnyAccess]);
+  }, [accessLevel, isAdmin, userPermissions, isFullAccess, isLimitedAccess, hasAnyAccess, isDeleted]);
  
   const visibleTabsForMode = useMemo(() => {
     return visibleTabs.filter(t => viewMode === 'detailed' || t.simple);
@@ -910,6 +943,23 @@ const MeetingDetail = () => {
         <Toolbar sx={{ px: 2, minHeight: 56 }}>
           <IconButton onClick={handleBack} edge="start" sx={{ mr: 1 }}><ArrowBackIcon /></IconButton>
           <Typography variant="subtitle1" sx={{ flex: 1, fontWeight: 700 }}>Meeting Workspace</Typography>
+
+          {isDeleted && (
+            <Chip
+              icon={<DeleteForeverIcon />}
+              label="Deleted"
+              size="small"
+              sx={{ mr: 1, fontWeight: 700, bgcolor: alpha('#d32f2f', 0.12), color: '#d32f2f' }}
+            />
+          )}
+          {!isDeleted && isInactive && (
+            <Chip
+              icon={<BlockIcon />}
+              label="Inactive"
+              size="small"
+              sx={{ mr: 1, fontWeight: 700, bgcolor: alpha('#6B7280', 0.15), color: '#6B7280' }}
+            />
+          )}
           
           <Chip
             label={
@@ -931,17 +981,17 @@ const MeetingDetail = () => {
           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             {!isMobile && (
               <>
-                <Tooltip title={isFullAccess ? 'Export PDF' : 'Limited access users cannot export'}>
+                <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Export PDF' : 'Limited access users cannot export'}>
                   <Box component="span">
-                    <IconButton onClick={handlePrintPDF} size="small" disabled={!isFullAccess}>
+                    <IconButton onClick={handlePrintPDF} size="small" disabled={!isFullAccess || controlsDisabled}>
                       <PictureAsPdfIcon sx={{ fontSize: 20 }} />
                     </IconButton>
                   </Box>
                 </Tooltip>
 
-                <Tooltip title={isFullAccess ? 'Sync Settings' : 'Limited access users cannot sync'}>
+                <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Sync Settings' : 'Limited access users cannot sync'}>
                   <Box component="span">
-                    <IconButton onClick={() => setUpdateLinkDialogOpen(true)} size="small" disabled={!isFullAccess}>
+                    <IconButton onClick={() => setUpdateLinkDialogOpen(true)} size="small" disabled={!isFullAccess || controlsDisabled}>
                       <UpdateIcon sx={{ fontSize: 20 }} />
                     </IconButton>
                   </Box>
@@ -949,9 +999,9 @@ const MeetingDetail = () => {
               </>
             )}
 
-            <Tooltip title={isFullAccess ? 'Send Notifications' : 'Limited access users cannot send notifications'}>
+            <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Send Notifications' : 'Limited access users cannot send notifications'}>
               <Box component="span">
-                <IconButton onClick={handleNotifyClick} size="small" disabled={!isFullAccess}>
+                <IconButton onClick={handleNotifyClick} size="small" disabled={!isFullAccess || controlsDisabled}>
                   <Badge badgeContent={participantCount} color="error">
                     <NotificationsIcon sx={{ fontSize: 20 }} />
                   </Badge>
@@ -973,14 +1023,14 @@ const MeetingDetail = () => {
               </IconButton>
             </Tooltip>
 
-            <Tooltip title={isFullAccess ? 'Change Status' : 'Limited access users cannot change status'}>
+            <Tooltip title={controlsDisabled ? (isDeleted ? 'Meeting deleted' : 'Meeting inactive') : isFullAccess ? 'Change Status' : 'Limited access users cannot change status'}>
               <Box component="span">
                 <Button
                   variant="outlined"
                   size="small"
                   startIcon={getStatusIcon()}
                   onClick={handleStatusMenuOpen}
-                  disabled={!isFullAccess}
+                  disabled={!isFullAccess || controlsDisabled}
                   sx={{
                     textTransform: 'none',
                     ml: 0.5,
@@ -1008,7 +1058,6 @@ const MeetingDetail = () => {
 
       {/* ==================== CONTENT ==================== */}
       <Container maxWidth="xl" sx={{ py: 3 }}>
-        {/* ✅ UPDATE: Hide red error banner if user simply has no access */}
         {(error || localError) && accessLevel !== 'none' && !showAccessDenied && (
           <Alert 
             severity="error" 
@@ -1035,6 +1084,28 @@ const MeetingDetail = () => {
                 Meeting ID: {id}
               </Typography>
             )}
+          </Alert>
+        )}
+
+        {isDeleted && (
+          <Alert severity="error" icon={<DeleteForeverIcon />} sx={{ mb: 3 }}>
+            <Typography variant="body2" fontWeight={600}>
+              🗑️ This meeting has been deleted
+            </Typography>
+            <Typography variant="caption">
+              All editing, status, notification, export and sync controls are disabled. Only the Overview tab is available.
+            </Typography>
+          </Alert>
+        )}
+
+        {!isDeleted && isInactive && (
+          <Alert severity="warning" icon={<BlockIcon />} sx={{ mb: 3 }}>
+            <Typography variant="body2" fontWeight={600}>
+              ⏸️ This meeting is inactive
+            </Typography>
+            <Typography variant="caption">
+              Editing, status, notification, export and sync controls are disabled until the meeting is reactivated.
+            </Typography>
           </Alert>
         )}
        
@@ -1088,7 +1159,6 @@ const MeetingDetail = () => {
             </Box>
             <Box sx={{ p: 2.5 }}>
               <TabPanel value={effectiveTabValue} index={0}>
-                {/* ✅ UPDATE: Display simple "No Access" statement if accessLevel is 'none' */}
                 {accessLevel === 'none' ? (
                   <Alert severity="warning" icon={<LockIcon />} sx={{ my: 2 }}>
                     <Typography variant="subtitle2" fontWeight={700}>
@@ -1103,6 +1173,7 @@ const MeetingDetail = () => {
                     meeting={normalizedMeeting} 
                     onUpdateLink={() => setUpdateLinkDialogOpen(true)} 
                     onJoinMeeting={handleJoinMeeting} 
+                    readOnly={controlsDisabled}
                   />
                 )}
               </TabPanel>
@@ -1188,14 +1259,14 @@ const MeetingDetail = () => {
           <ListItemText>Share Link</ListItemText>
         </MenuItem>
         
-        {isFullAccess && (
+        {isFullAccess && !controlsDisabled && (
           <MenuItem onClick={handleStatusMenuOpen}>
             <ListItemIcon>{getStatusIcon()}</ListItemIcon>
             <ListItemText>Change Status</ListItemText>
           </MenuItem>
         )}
         
-        {canDeleteMeeting && isFullAccess && (
+        {canDeleteMeeting && isFullAccess && !isDeleted && (
           <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
             <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
             <ListItemText>Delete Workspace</ListItemText>

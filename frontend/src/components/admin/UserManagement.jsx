@@ -185,7 +185,7 @@ const ImprovedStatCard = ({ label, value, icon, color, isLoading, trend }) => {
   );
 };
 
-// ─── Improved User Form ─────────────────────────────────────────────────────
+// ─── Enhanced User Form with Navigation ──────────────────────────────────────
 const UserForm = ({
   mode,
   formData,
@@ -217,31 +217,24 @@ const UserForm = ({
     setFormData((p) => {
       const newData = { ...p, is_superuser: checked };
       if (checked) {
-        // Find admin role in rolesList
         const adminRole = rolesList?.find((r) => r.code === 'admin');
         if (adminRole && !newData.roles.includes('admin')) {
           newData.roles = [...newData.roles, 'admin'];
         }
       } else {
-        // Remove admin role when unchecking superuser
         newData.roles = newData.roles.filter((r) => r !== 'admin');
       }
       return newData;
     });
   };
 
-  // Handle role selection - prevent deselecting admin if superuser
   const handleRoleChange = (event) => {
     const value = event.target.value;
     const selectedRoles = typeof value === 'string' ? value.split(',') : value;
     
-    // If user is superuser, ensure admin role is always selected
     if (formData.is_superuser) {
       const adminRole = rolesList?.find((r) => r.code === 'admin');
       if (adminRole && !selectedRoles.includes('admin')) {
-        // Admin role was deselected - prevent it
-        // You could show a snackbar or alert here
-        // For now, we'll add it back
         selectedRoles.push('admin');
       }
     }
@@ -252,7 +245,6 @@ const UserForm = ({
     }));
   };
 
-  // Check if admin is auto-selected
   const isAdminAutoSelected = useMemo(() => {
     if (!formData.is_superuser) return false;
     const adminRole = rolesList?.find((r) => r.code === 'admin');
@@ -265,8 +257,102 @@ const UserForm = ({
     { label: 'Permissions', icon: <AssignmentOutlined /> },
   ];
 
+  // Navigation handlers
+  const handleNext = () => {
+    if (activeTab < tabs.length - 1) {
+      setActiveTab(activeTab + 1);
+    }
+  };
+
+  const handlePrevious = () => {
+    if (activeTab > 0) {
+      setActiveTab(activeTab - 1);
+    }
+  };
+
+  // Validate current step before proceeding
+  const canProceed = () => {
+    if (activeTab === 0) {
+      // Personal Info validation
+      if (!formData.email || !formData.username) return false;
+      if (!/\S+@\S+\.\S+/.test(formData.email)) return false;
+      if (formData.username.length < 3) return false;
+      return true;
+    }
+    if (activeTab === 1 && (mode === 'create' || mode === 'reset')) {
+      // Security validation
+      if (!passwordData.password || passwordData.password.length < 8) return false;
+      if (passwordData.password !== passwordData.confirm_password) return false;
+      return true;
+    }
+    return true;
+  };
+
+  // Step indicators
+  const StepIndicator = () => (
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 3 }}>
+      {tabs.map((tab, index) => (
+        <Box key={index} sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box
+            onClick={() => setActiveTab(index)}
+            sx={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              bgcolor: index === activeTab 
+                ? 'primary.main' 
+                : index < activeTab 
+                  ? 'success.main' 
+                  : (theme) => alpha(theme.palette.action.disabled, 0.2),
+              color: index === activeTab || index < activeTab 
+                ? 'white' 
+                : 'text.disabled',
+              transition: 'all 0.2s',
+              '&:hover': {
+                transform: 'scale(1.1)',
+              },
+            }}
+          >
+            {index < activeTab ? <CheckCircleOutlined sx={{ fontSize: 16 }} /> : index + 1}
+          </Box>
+          {index < tabs.length - 1 && (
+            <Box
+              sx={{
+                width: 32,
+                height: 2,
+                bgcolor: index < activeTab 
+                  ? 'success.main' 
+                  : (theme) => alpha(theme.palette.action.disabled, 0.2),
+                mx: 1,
+              }}
+            />
+          )}
+        </Box>
+      ))}
+    </Box>
+  );
+
   return (
     <Box>
+      {/* Step indicator */}
+      <StepIndicator />
+
+      {/* Progress label */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+        <Typography variant="caption" color="text.secondary">
+          Step {activeTab + 1} of {tabs.length}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {tabs[activeTab].label}
+        </Typography>
+      </Box>
+
       {/* Tabs for better organization */}
       <Tabs
         value={activeTab}
@@ -694,6 +780,60 @@ const UserForm = ({
             />
           </Paper>
         </Stack>
+      )}
+
+      {/* Navigation Buttons */}
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          mt: 4,
+          pt: 2,
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          gap: 2,
+        }}
+      >
+        <Button
+          variant="outlined"
+          onClick={handlePrevious}
+          disabled={activeTab === 0}
+          startIcon={<ChevronRightOutlined sx={{ transform: 'rotate(180deg)' }} />}
+          sx={{ borderRadius: 1.5 }}
+        >
+          Previous
+        </Button>
+
+        {activeTab < tabs.length - 1 ? (
+          <Button
+            variant="contained"
+            onClick={handleNext}
+            disabled={!canProceed()}
+            endIcon={<ChevronRightOutlined />}
+            sx={{ borderRadius: 1.5 }}
+          >
+            Next Step
+          </Button>
+        ) : (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CheckCircleOutlined color="success" />
+            <Typography variant="body2" color="success.main" fontWeight={600}>
+              Ready to create
+            </Typography>
+          </Box>
+        )}
+      </Box>
+
+      {/* Show validation hints */}
+      {activeTab === 0 && !canProceed() && (
+        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+          Please fill in all required fields: Email and Username
+        </Typography>
+      )}
+      {activeTab === 1 && (mode === 'create' || mode === 'reset') && !canProceed() && (
+        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+          Please set a valid password (min 8 characters, matching confirmation)
+        </Typography>
       )}
     </Box>
   );
@@ -1644,10 +1784,8 @@ const UserManagement = () => {
     setSelectedUser(user);
     const assignments = userDepartmentsMap[user.id] || [];
     
-    // Start with user's current roles
     let roles = [...(user.roles || [])];
     
-    // If user is superuser, ensure admin role is present
     if (user.is_superuser) {
       const adminRole = rolesList?.find((r) => r.code === 'admin');
       if (adminRole && !roles.includes('admin')) {
@@ -1725,7 +1863,6 @@ const UserManagement = () => {
     setIsSubmitting(true);
     try {
       if (dialogMode === 'create') {
-        // Ensure superusers have admin role
         const submitData = { ...formData };
         if (submitData.is_superuser) {
           const adminRole = rolesList?.find((r) => r.code === 'admin');
@@ -1749,7 +1886,6 @@ const UserManagement = () => {
 
         setSnackbar({ open: true, message: 'User created successfully', severity: 'success' });
       } else if (dialogMode === 'edit') {
-        // Ensure superusers have admin role
         let roles = [...(formData.roles || [])];
         if (formData.is_superuser) {
           const adminRole = rolesList?.find((r) => r.code === 'admin');
@@ -1757,7 +1893,6 @@ const UserManagement = () => {
             roles = [...roles, 'admin'];
           }
         } else {
-          // If not superuser, remove admin role
           roles = roles.filter((r) => r !== 'admin');
         }
         
@@ -2007,7 +2142,6 @@ const UserManagement = () => {
       {/* Improved Stats - Compact Layout */}
       <Box sx={{ mb: 3 }}>
         {isMobile ? (
-          // Scrollable horizontal row for mobile
           <Box
             sx={{
               display: 'flex',
@@ -2025,7 +2159,6 @@ const UserManagement = () => {
             ))}
           </Box>
         ) : (
-          // Grid with improved stats - 5 columns on desktop
           <Box sx={{
             display: 'grid',
             gridTemplateColumns: 'repeat(5, 1fr)',

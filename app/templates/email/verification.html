@@ -1,85 +1,318 @@
 <!DOCTYPE html>
-<html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
     <meta charset="UTF-8">
-    <title>Verify Your Email Address</title>
-    <style>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="x-apple-disable-message-reformatting">
+    <title>Verify Your Email</title>
+    <!--[if !mso]><!-->
+    <style type="text/css">
+        /* ── RESET ── */
+        * {
+            margin: 0;
+            padding: 0;
+            -ms-text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+        table {
+            border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+        }
+        img {
+            border: 0;
+            height: auto;
+            line-height: 100%;
+            outline: none;
+            text-decoration: none;
+            -ms-interpolation-mode: bicubic;
+        }
+        /* ── BODY ── */
         body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 600px;
+            background-color: #f7f9fc;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        /* ── CONTAINER ── */
+        .email-container {
+            max-width: 580px;
             margin: 0 auto;
             padding: 20px;
-            background-color: #f4f4f4;
+            background-color: #f7f9fc;
         }
-        .container {
-            background: white;
-            border-radius: 10px;
-            padding: 30px;
+        .email-wrapper {
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        }
+        /* ── HEADER ── */
+        .email-header {
+            padding: 32px 32px 20px;
+            background: #1a2332;
             text-align: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        .logo h1 {
-            color: #4CAF50;
+        .email-header h1 {
+            color: #ffffff;
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
             margin: 0;
+        }
+        .email-header .subtitle {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
+            margin: 4px 0 0;
+            font-weight: 400;
+        }
+        /* ── BODY ── */
+        .email-body {
+            padding: 32px 32px 24px;
+            color: #2d3748;
+        }
+        .email-body h2 {
+            color: #1a2332;
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0 0 16px;
+        }
+        .email-body p {
+            font-size: 15px;
+            line-height: 1.7;
+            color: #4a5568;
+            margin: 0 0 16px;
+        }
+        .email-body .greeting {
+            font-size: 17px;
+            font-weight: 500;
+            color: #1a2332;
+        }
+        /* ── BUTTON ── */
+        .button-container {
+            text-align: center;
+            margin: 28px 0 24px;
         }
         .button {
             display: inline-block;
-            padding: 12px 24px;
-            background-color: #4CAF50;
-            color: white !important;
+            padding: 13px 36px;
+            background-color: #1a2332;
+            color: #ffffff !important;
+            font-size: 15px;
+            font-weight: 500;
             text-decoration: none;
-            border-radius: 5px;
-            margin: 20px 0;
-            font-weight: bold;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+            -webkit-transition: background-color 0.2s;
+            mso-padding-alt: 0;
+            text-underline-color: #1a2332;
         }
-        .warning {
-            color: #ff9800;
-            font-size: 12px;
-            margin-top: 15px;
+        .button:hover {
+            background-color: #2d3748;
         }
-        .footer {
-            margin-top: 30px;
-            font-size: 12px;
-            color: #777;
-            border-top: 1px solid #eee;
-            padding-top: 20px;
+        /* ── DIVIDER ── */
+        .divider {
+            border: none;
+            border-top: 1px solid #e2e8f0;
+            margin: 24px 0;
         }
-        code {
+        /* ── FALLBACK LINK ── */
+        .fallback-link {
+            background-color: #f7fafc;
+            padding: 14px 16px;
+            border-radius: 6px;
+            margin: 16px 0 20px;
             word-break: break-all;
-            background: #f4f4f4;
-            padding: 10px;
-            display: block;
+            border: 1px solid #e2e8f0;
+        }
+        .fallback-link code {
             font-size: 12px;
+            color: #1a2332;
+            font-family: 'Courier New', monospace;
+            line-height: 1.5;
+        }
+        /* ── INFO BOX ── */
+        .info-box {
+            background-color: #f7fafc;
+            border-left: 3px solid #3182ce;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .info-box p {
+            color: #2d3748;
+            font-size: 13px;
+            margin: 0;
+        }
+        .info-box strong {
+            color: #1a2332;
+        }
+        /* ── FOOTER ── */
+        .email-footer {
+            padding: 20px 32px;
+            background-color: #f7fafc;
+            border-top: 1px solid #edf2f7;
+            text-align: center;
+        }
+        .email-footer p {
+            font-size: 12px;
+            color: #718096;
+            margin: 4px 0;
+            line-height: 1.5;
+        }
+        .email-footer a {
+            color: #1a2332;
+            text-decoration: none;
+        }
+        .email-footer .legal {
+            font-size: 11px;
+            color: #a0aec0;
+        }
+        .email-footer .legal a {
+            color: #a0aec0;
+            text-decoration: underline;
+        }
+        /* ── RESPONSIVE ── */
+        @media only screen and (max-width: 480px) {
+            .email-body {
+                padding: 20px;
+            }
+            .email-header {
+                padding: 24px 20px 16px;
+            }
+            .email-header h1 {
+                font-size: 19px;
+            }
+            .button {
+                display: block;
+                padding: 14px 20px;
+                font-size: 15px;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .email-footer {
+                padding: 16px 20px;
+            }
+            .email-container {
+                padding: 10px;
+            }
+        }
+        /* Outlook-specific fixes */
+        .ExternalClass {
+            width: 100%;
+        }
+        .ExternalClass,
+        .ExternalClass p,
+        .ExternalClass span,
+        .ExternalClass font,
+        .ExternalClass td,
+        .ExternalClass div {
+            line-height: 100%;
         }
     </style>
+    <!--[if mso]>
+    <style type="text/css">
+        .button {
+            padding: 13px 36px !important;
+        }
+    </style>
+    <![endif]-->
+    <!--[if !mso]><!-->
+    <style type="text/css">
+        @media only screen and (max-width: 480px) {
+            .button {
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+        }
+    </style>
+    <!--<![endif]-->
 </head>
 <body>
-    <div class="container">
-        <div class="logo">
-            <h1>{{ project_name }}</h1>
-            <p>{{ project_tagline|default('Your Trusted Platform') }}</p>
-        </div>
-        
-        <h2>Verify Your Email Address</h2>
-        
-        <p>Hello <strong>{{ username }}</strong>,</p>
-        
-        <p>Thank you for registering with <strong>{{ project_name }}</strong>! Please verify your email address by clicking the button below:</p>
-        
-        <a href="{{ verification_url }}" class="button">Verify Email Address</a>
-        
-        <p>Or copy and paste this link into your browser:</p>
-        <code>{{ verification_url }}</code>
-        
-        <p class="warning">This link will expire in <strong>{{ expires_in_hours }} hours</strong>.</p>
-        
-        <div class="footer">
-            <p>If you didn't create an account with <strong>{{ project_name }}</strong>, please ignore this email.</p>
-            <p>Need help? Contact us at <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
-            <p>&copy; {{ year }} {{ project_name }}. All rights reserved.</p>
+    <!--[if (gte mso 9)|(IE)]>
+    <table width="580" align="center" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td>
+    <![endif]-->
+    <div class="email-container">
+        <div class="email-wrapper">
+            
+            <!-- ─── HEADER ─── -->
+            <div class="email-header">
+                <h1>{{ project_name }}</h1>
+                <p class="subtitle">{{ project_tagline|default('Secure &amp; Reliable Platform') }}</p>
+            </div>
+            
+            <!-- ─── BODY ─── -->
+            <div class="email-body">
+                <h2>Verify Your Email Address</h2>
+                
+                <p class="greeting">Hello {{ username }},</p>
+                
+                <p>Thank you for creating an account with <strong>{{ project_name }}</strong>. To complete your registration and ensure the security of your account, please verify your email address.</p>
+                
+                <div class="button-container">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ verification_url }}" style="height: 46px; v-text-anchor: middle; width: 200px;" arcsize="8%" stroke="f" fillcolor="#1a2332">
+                        <w:anchorlock/>
+                        <center style="color: #ffffff; font-family: Arial, sans-serif; font-size: 15px; font-weight: 500;">
+                            Verify Email
+                        </center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-->
+                    <a href="{{ verification_url }}" class="button">
+                        Verify Email Address
+                    </a>
+                    <!--<![endif]-->
+                </div>
+                
+                <p style="font-size: 13px; color: #718096; text-align: center; margin-bottom: 8px;">Or copy and paste this link into your browser:</p>
+                
+                <div class="fallback-link">
+                    <code>{{ verification_url }}</code>
+                </div>
+                
+                <div class="info-box">
+                    <p>⏱️ This link will remain valid for <strong>{{ expires_in_hours }} hours</strong>.</p>
+                </div>
+                
+                <p style="font-size: 13px; color: #718096; margin-top: 20px;">
+                    If you didn't request this verification, please ignore this email. Your account will remain inactive until verified.
+                </p>
+            </div>
+            
+            <!-- ─── DIVIDER ─── -->
+            <hr class="divider">
+            
+            <!-- ─── FOOTER ─── -->
+            <div class="email-footer">
+                <p>
+                    <strong>{{ project_name }}</strong>
+                    {% if organization_name %} &middot; {{ organization_name }}{% endif %}
+                </p>
+                <p>
+                    <a href="mailto:{{ support_email }}">{{ support_email }}</a>
+                </p>
+                <p class="legal">
+                    &copy; {{ year }} {{ project_name }}. All rights reserved.
+                </p>
+                <p class="legal" style="margin-top: 6px; color: #cbd5e0;">
+                    This is an automated message. Please do not reply to this email.
+                </p>
+                <p class="legal" style="margin-top: 4px; font-size: 10px; color: #cbd5e0;">
+                    You received this email because you signed up for {{ project_name }}.
+                </p>
+            </div>
+            
         </div>
     </div>
+    <!--[if (gte mso 9)|(IE)]>
+            </td>
+        </tr>
+    </table>
+    <![endif]-->
 </body>
 </html>

@@ -32,7 +32,6 @@ import {
   FormControlLabel,
   Switch,
   Grid,
-  Collapse,
   useMediaQuery,
   useTheme,
   alpha,
@@ -52,14 +51,13 @@ import {
   Refresh,
   Edit,
   Smartphone,
-  SendOutlined,
   MarkEmailReadOutlined,
+  SendOutlined,
+  VerifiedUserOutlined,
 } from '@mui/icons-material';
 import { register, clearError, resetRegistrationSuccess, resendVerification } from '../../store/slices/authSlice';
 
-// Elegant near-black dark palette (matches the rest of the app's dark theme:
-// a single true-black-adjacent surface family with a faint warm undertone,
-// rather than flat Tailwind-slate grays).
+// ─── CONSTANTS ──────────────────────────────────────────────────────────────
 const DARK = {
   bg: '#0B0B0D',
   surface: '#161618',
@@ -70,21 +68,30 @@ const DARK = {
   textSecondary: '#A3A3AA',
 };
 
+const RESEND_COOLDOWN_SECONDS = 60;
+
+// ─── HELPERS ────────────────────────────────────────────────────────────────
 function SlideTransition(props) {
   return <Slide {...props} direction="up" />;
 }
 
+// ─── MAIN COMPONENT ────────────────────────────────────────────────────────
 const SignUpCard = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const isDarkMode = theme.palette.mode === 'dark';
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { isRegistering, error, fieldErrors: reduxFieldErrors, registrationSuccess, verificationEmailSent } = useSelector((state) => state.auth);
+  const { 
+    isRegistering, 
+    error, 
+    fieldErrors: reduxFieldErrors, 
+    registrationSuccess, 
+    verificationEmailSent 
+  } = useSelector((state) => state.auth);
 
-  // Form state
+  // ─── STATE ──────────────────────────────────────────────────────────────────
   const [activeStep, setActiveStep] = useState(0);
   const [formData, setFormData] = useState({
     email: '',
@@ -98,9 +105,7 @@ const SignUpCard = () => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [localFieldErrors, setLocalFieldErrors] = useState({});
-  const [successSnackbarOpen, setSuccessSnackbarOpen] = useState(false);
   const [waitTimeRemaining, setWaitTimeRemaining] = useState(0);
   const [waitMessage, setWaitMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -108,15 +113,24 @@ const SignUpCard = () => {
   const [resendDisabled, setResendDisabled] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(0);
   const [registeredEmail, setRegisteredEmail] = useState('');
+  const [verificationResendSuccess, setVerificationResendSuccess] = useState(false);
+  const [verificationResendError, setVerificationResendError] = useState('');
   
+  // ─── SNACKBAR STATE ────────────────────────────────────────────────────────
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'error',
+    autoHideDuration: 6000,
+  });
+
   // Name splitting preferences
   const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [nameSplitOrder, setNameSplitOrder] = useState('first-last');
   const [tempFirstName, setTempFirstName] = useState('');
   const [tempLastName, setTempLastName] = useState('');
 
-  // ==================== Dark-mode-aware style helpers ====================
-
+  // ─── STYLES ────────────────────────────────────────────────────────────────
   const textFieldSx = {
     '& .MuiOutlinedInput-root': {
       bgcolor: isDarkMode ? DARK.surfaceLight : 'transparent',
@@ -150,7 +164,7 @@ const SignUpCard = () => {
     border: isDarkMode ? `1px solid ${DARK.border}` : 'none',
   };
 
-  // Generate username from email
+  // ─── UTILITY FUNCTIONS ─────────────────────────────────────────────────────
   const generateUsernameFromEmail = useCallback((email) => {
     if (!email) return '';
     let username = email.split('@')[0];
@@ -162,7 +176,6 @@ const SignUpCard = () => {
     return username;
   }, []);
 
-  // Generate alternative username suggestions
   const generateUsernameSuggestions = useCallback((baseUsername) => {
     const suggestions = [];
     suggestions.push(`${baseUsername}${Math.floor(Math.random() * 1000)}`);
@@ -173,7 +186,6 @@ const SignUpCard = () => {
     return suggestions.slice(0, 5);
   }, []);
 
-  // Split full name into first and last name based on order
   const splitFullName = useCallback((fullName, order = nameSplitOrder) => {
     if (!fullName || !fullName.trim()) {
       return { first_name: '', last_name: '' };
@@ -199,35 +211,6 @@ const SignUpCard = () => {
       return { first_name: firstName, last_name: lastName };
     }
   }, [nameSplitOrder]);
-
-  // Update first and last name when full name changes
-  useEffect(() => {
-    if (formData.full_name && !formData.first_name && !formData.last_name) {
-      const { first_name, last_name } = splitFullName(formData.full_name);
-      setFormData(prev => ({ ...prev, first_name, last_name }));
-    }
-  }, [formData.full_name, formData.first_name, formData.last_name, splitFullName]);
-
-  // Auto-generate username when email changes
-  useEffect(() => {
-    if (formData.email && !formData.username) {
-      const generatedUsername = generateUsernameFromEmail(formData.email);
-      setFormData(prev => ({ ...prev, username: generatedUsername }));
-    }
-  }, [formData.email, formData.username, generateUsernameFromEmail]);
-
-  // Handle resend countdown timer
-  useEffect(() => {
-    let timer;
-    if (resendCountdown > 0) {
-      timer = setInterval(() => {
-        setResendCountdown(prev => prev - 1);
-      }, 1000);
-    } else {
-      setResendDisabled(false);
-    }
-    return () => clearInterval(timer);
-  }, [resendCountdown]);
 
   const getErrorMessage = (error) => {
     if (!error) return '';
@@ -270,9 +253,55 @@ const SignUpCard = () => {
     return fieldErrors;
   };
 
-  const errorMessage = getErrorMessage(error);
-  const responseFieldErrors = getFieldErrorFromResponse(error);
-  const fieldErrors = { ...localFieldErrors, ...reduxFieldErrors, ...responseFieldErrors };
+  const formatWaitTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const getPasswordStrength = () => {
+    const password = formData.password;
+    if (!password) return { score: 0, label: '', color: '' };
+    
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[a-z]/.test(password)) score++;
+    if (/\d/.test(password)) score++;
+    if (/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) score++;
+    
+    if (score <= 2) return { score, label: 'Weak', color: 'error.main' };
+    if (score <= 3) return { score, label: 'Fair', color: 'warning.main' };
+    if (score <= 4) return { score, label: 'Good', color: 'info.main' };
+    return { score, label: 'Strong', color: 'success.main' };
+  };
+
+  // ─── EFFECTS ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (formData.full_name && !formData.first_name && !formData.last_name) {
+      const { first_name, last_name } = splitFullName(formData.full_name);
+      setFormData(prev => ({ ...prev, first_name, last_name }));
+    }
+  }, [formData.full_name, formData.first_name, formData.last_name, splitFullName]);
+
+  useEffect(() => {
+    if (formData.email && !formData.username) {
+      const generatedUsername = generateUsernameFromEmail(formData.email);
+      setFormData(prev => ({ ...prev, username: generatedUsername }));
+    }
+  }, [formData.email, formData.username, generateUsernameFromEmail]);
+
+  useEffect(() => {
+    let timer;
+    if (resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown(prev => prev - 1);
+      }, 1000);
+    } else {
+      setResendDisabled(false);
+    }
+    return () => clearInterval(timer);
+  }, [resendCountdown]);
 
   useEffect(() => {
     let timer;
@@ -292,12 +321,6 @@ const SignUpCard = () => {
   }, [waitTimeRemaining]);
 
   useEffect(() => {
-    if (errorMessage) {
-      setSnackbarOpen(true);
-    }
-  }, [errorMessage]);
-
-  useEffect(() => {
     if (!isRegistering) {
       setIsSubmitting(false);
     }
@@ -305,10 +328,18 @@ const SignUpCard = () => {
 
   useEffect(() => {
     if (registrationSuccess) {
-      setSuccessSnackbarOpen(true);
-      dispatch(clearError());
       setIsSubmitting(false);
+      setRegisteredEmail(formData.email.trim().toLowerCase());
       
+      // Show success snackbar
+      setSnackbar({
+        open: true,
+        message: 'Registration successful! Please verify your email.',
+        severity: 'success',
+        autoHideDuration: 5000,
+      });
+      
+      // Open verification dialog after a short delay
       setTimeout(() => {
         setVerificationDialogOpen(true);
       }, 1500);
@@ -321,6 +352,7 @@ const SignUpCard = () => {
     }
   }, [registrationSuccess, dispatch]);
 
+  // ─── HANDLERS ──────────────────────────────────────────────────────────────
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -330,7 +362,7 @@ const SignUpCard = () => {
       setFormData(prev => ({ ...prev, first_name, last_name }));
     }
     
-    if (fieldErrors[name]) {
+    if (localFieldErrors[name]) {
       setLocalFieldErrors(prev => ({ ...prev, [name]: '' }));
     }
     
@@ -343,7 +375,7 @@ const SignUpCard = () => {
       const suggestions = generateUsernameSuggestions(baseUsername);
       const newUsername = suggestions[0];
       setFormData(prev => ({ ...prev, username: newUsername }));
-      if (fieldErrors.username) {
+      if (localFieldErrors.username) {
         setLocalFieldErrors(prev => ({ ...prev, username: '' }));
       }
     }
@@ -375,23 +407,92 @@ const SignUpCard = () => {
     }
   };
 
+  // ─── RESEND VERIFICATION HANDLER ──────────────────────────────────────────
   const handleResendVerification = async () => {
-    if (resendDisabled) return;
+    // Prevent multiple clicks
+    if (resendDisabled || isSubmitting) return;
     
+    // Get the email to send to
+    const emailToSend = registeredEmail || formData.email;
+    
+    if (!emailToSend) {
+      setSnackbar({
+        open: true,
+        message: 'No email address found. Please try again.',
+        severity: 'error',
+        autoHideDuration: 6000,
+      });
+      return;
+    }
+
+    // Reset states
+    setVerificationResendSuccess(false);
+    setVerificationResendError('');
+    setIsSubmitting(true);
+    setResendDisabled(true);
+    setResendCountdown(RESEND_COOLDOWN_SECONDS);
+
     try {
-      setResendDisabled(true);
-      setResendCountdown(60);
+      console.log('🔄 Sending resend verification for:', emailToSend);
       
-      await dispatch(resendVerification(registeredEmail || formData.email)).unwrap();
+      // Dispatch the action
+      const result = await dispatch(resendVerification(emailToSend)).unwrap();
       
-      setSnackbarOpen(true);
+      console.log('✅ Resend verification result:', result);
+      
+      // Check if the result indicates success
+      if (result && result.success === true) {
+        setVerificationResendSuccess(true);
+        setVerificationResendError('');
+        
+        setSnackbar({
+          open: true,
+          message: '✅ Verification email sent successfully! Please check your inbox and spam folder.',
+          severity: 'success',
+          autoHideDuration: 8000,
+        });
+      } else {
+        // If result doesn't have success: true, treat as error
+        throw new Error(result?.message || 'Failed to send verification email');
+      }
+      
     } catch (err) {
-      console.error('Failed to resend verification:', err);
+      console.error('❌ Failed to resend verification:', err);
+      
+      // Extract error message
+      let errorMessage = 'Failed to resend verification email. Please try again.';
+      
+      if (err?.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err?.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err?.message) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err?.detail) {
+        errorMessage = err.detail;
+      }
+      
+      setVerificationResendSuccess(false);
+      setVerificationResendError(errorMessage);
+      
+      setSnackbar({
+        open: true,
+        message: `❌ ${errorMessage}`,
+        severity: 'error',
+        autoHideDuration: 8000,
+      });
+      
+      // Reset cooldown on error so user can try again immediately
       setResendDisabled(false);
       setResendCountdown(0);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // ─── VALIDATION ────────────────────────────────────────────────────────────
   const validateStep = () => {
     const errors = {};
     
@@ -466,6 +567,7 @@ const SignUpCard = () => {
     setLocalFieldErrors({});
   };
 
+  // ─── SUBMIT HANDLER ────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -487,10 +589,11 @@ const SignUpCard = () => {
     setLocalFieldErrors({});
     setIsSubmitting(true);
     
-    setRegisteredEmail(formData.email.trim().toLowerCase());
+    const emailToRegister = formData.email.trim().toLowerCase();
+    setRegisteredEmail(emailToRegister);
     
     const registrationData = {
-      email: formData.email.trim().toLowerCase(),
+      email: emailToRegister,
       first_name: formData.first_name.trim(),
       last_name: formData.last_name.trim(),
       password: formData.password,
@@ -502,10 +605,19 @@ const SignUpCard = () => {
     }
     
     try {
-     await dispatch(register(registrationData)).unwrap();
+      await dispatch(register(registrationData)).unwrap();
     } catch (err) {
-      console.error('Registration failed:', err);
+      console.error('❌ Registration failed:', err);
       setIsSubmitting(false);
+      
+      // Show error snackbar
+      const errorMsg = getErrorMessage(err);
+      setSnackbar({
+        open: true,
+        message: `❌ ${errorMsg}`,
+        severity: 'error',
+        autoHideDuration: 8000,
+      });
       
       if (err?.detail?.field) {
         setActiveStep(0);
@@ -515,60 +627,33 @@ const SignUpCard = () => {
     }
   };
 
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
-    dispatch(clearError());
-  };
-
-  const handleCloseSuccessSnackbar = () => {
-    setSuccessSnackbarOpen(false);
-  };
-
+  // ─── NAVIGATION ────────────────────────────────────────────────────────────
   const handleCloseVerificationDialog = () => {
     setVerificationDialogOpen(false);
     navigate('/login');
   };
 
-  const steps = ['Personal Information', 'Create Password', 'Review'];
-
-  const hasFieldError = (fieldName) => {
-    return !!fieldErrors[fieldName];
+  const handleCloseSnackbar = () => {
+    setSnackbar(prev => ({ ...prev, open: false }));
+    dispatch(clearError());
   };
 
-  const getFieldError = (fieldName) => {
-    return fieldErrors[fieldName] || '';
-  };
-
-  const getPasswordStrength = () => {
-    const password = formData.password;
-    if (!password) return { score: 0, label: '', color: '' };
-    
-    let score = 0;
-    if (password.length >= 8) score++;
-    if (/[A-Z]/.test(password)) score++;
-    if (/[a-z]/.test(password)) score++;
-    if (/\d/.test(password)) score++;
-    if (/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) score++;
-    
-    if (score <= 2) return { score, label: 'Weak', color: 'error.main' };
-    if (score <= 3) return { score, label: 'Fair', color: 'warning.main' };
-    if (score <= 4) return { score, label: 'Good', color: 'info.main' };
-    return { score, label: 'Strong', color: 'success.main' };
-  };
-
+  // ─── DERIVED STATE ─────────────────────────────────────────────────────────
+  const errorMessage = getErrorMessage(error);
+  const responseFieldErrors = getFieldErrorFromResponse(error);
+  const fieldErrors = { ...localFieldErrors, ...reduxFieldErrors, ...responseFieldErrors };
   const passwordStrength = getPasswordStrength();
-
-  const formatWaitTime = (seconds) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
   const isFormDisabled = isRegistering || registrationSuccess || waitTimeRemaining > 0 || isSubmitting;
 
+  const hasFieldError = (fieldName) => !!fieldErrors[fieldName];
+  const getFieldError = (fieldName) => fieldErrors[fieldName] || '';
+
+  const steps = ['Personal Information', 'Create Password', 'Review'];
+
+  // ─── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Verification Dialog */}
+      {/* ─── VERIFICATION DIALOG ───────────────────────────────────────────── */}
       <Dialog 
         open={verificationDialogOpen} 
         onClose={handleCloseVerificationDialog}
@@ -605,9 +690,12 @@ const SignUpCard = () => {
             Please check your email and click the verification link to activate your account.
             The link will expire in 24 hours.
           </Typography>
-          {verificationEmailSent && (
+          
+          {/* Success message after resend */}
+          {verificationResendSuccess && (
             <Alert 
               severity="success" 
+              icon={<CheckCircleOutlined />}
               sx={{ 
                 mt: 2,
                 ...(isDarkMode && {
@@ -620,27 +708,51 @@ const SignUpCard = () => {
               Verification link sent! Please check your inbox and spam folder.
             </Alert>
           )}
+          
+          {/* Error message after resend */}
+          {verificationResendError && (
+            <Alert 
+              severity="error" 
+              icon={<ErrorOutlined />}
+              sx={{ 
+                mt: 2,
+                ...(isDarkMode && {
+                  bgcolor: alpha('#EF4444', 0.12),
+                  color: '#FCA5A5',
+                  '& .MuiAlert-icon': { color: '#F87171' },
+                }),
+              }}
+            >
+              {verificationResendError}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions sx={{ p: 3, pt: 1, flexDirection: 'column', gap: 2, borderTop: isDarkMode ? `1px solid ${DARK.border}` : 'none' }}>
           <Button 
             variant="contained" 
             fullWidth
             onClick={handleCloseVerificationDialog}
+            startIcon={<VerifiedUserOutlined />}
           >
             Go to Login
           </Button>
-          <Button 
-            variant="text" 
-            fullWidth
-            onClick={handleResendVerification}
-            disabled={resendDisabled}
-          >
-            {resendDisabled ? `Resend available in ${resendCountdown}s` : 'Resend Verification Email'}
-          </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+            <Button 
+              variant="text" 
+              fullWidth
+              onClick={handleResendVerification}
+              disabled={resendDisabled || isSubmitting}
+              startIcon={isSubmitting ? <CircularProgress size={16} /> : <SendOutlined />}
+            >
+              {isSubmitting ? 'Sending...' : 
+               resendDisabled ? `Resend available in ${resendCountdown}s` : 
+               'Resend Verification Email'}
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 
-      {/* Fullscreen Backdrop during registration */}
+      {/* ─── FULLSCREEN BACKDROP ───────────────────────────────────────────── */}
       <Backdrop
         sx={{ 
           color: '#fff', 
@@ -670,7 +782,7 @@ const SignUpCard = () => {
         />
       </Backdrop>
 
-      {/* Name Modification Dialog */}
+      {/* ─── NAME EDIT DIALOG ──────────────────────────────────────────────── */}
       <Dialog 
         open={nameDialogOpen} 
         onClose={() => setNameDialogOpen(false)} 
@@ -745,13 +857,11 @@ const SignUpCard = () => {
         </DialogActions>
       </Dialog>
 
-      {/* ==================== FIXED CARD STYLES ==================== */}
+      {/* ─── MAIN CARD ──────────────────────────────────────────────────────── */}
       <Card
         sx={{
-          // FIX 1: Use responsive width that fills container on mobile
           width: '100%',
           maxWidth: { xs: '100%', sm: 520, md: 550 },
-          // FIX 2: Add margin auto for centering
           mx: 'auto',
           borderRadius: { xs: 3, sm: 4 },
           bgcolor: isDarkMode ? DARK.surface : '#FFFFFF',
@@ -766,12 +876,11 @@ const SignUpCard = () => {
           transition: 'opacity 0.3s ease',
         }}
       >
-        {/* FIX 3: Responsive padding based on screen size */}
         <CardContent sx={{ 
           p: { xs: 2.5, sm: 3.5, md: 4 },
           '&:last-child': { pb: { xs: 2.5, sm: 3.5, md: 4 } }
         }}>
-          {/* Header - FIX 4: Responsive icon and text sizes */}
+          {/* ─── HEADER ──────────────────────────────────────────────────────── */}
           <Box sx={{ textAlign: 'center', mb: { xs: 2.5, sm: 3 } }}>
             <Group sx={{ fontSize: { xs: 40, sm: 48 }, color: 'primary.main', mb: 1 }} />
             <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={700} gutterBottom sx={{ color: isDarkMode ? '#FFFFFF' : undefined }}>
@@ -782,7 +891,7 @@ const SignUpCard = () => {
             </Typography>
           </Box>
 
-          {/* Wait Timer Alert */}
+          {/* ─── WAIT TIMER ──────────────────────────────────────────────────── */}
           {waitTimeRemaining > 0 && waitMessage && (
             <Fade in>
               <Alert 
@@ -814,13 +923,12 @@ const SignUpCard = () => {
             </Fade>
           )}
 
-          {/* Stepper - FIX 5: Hide labels on very small screens if needed */}
+          {/* ─── STEPPER ────────────────────────────────────────────────────── */}
           <Stepper 
             activeStep={activeStep} 
             sx={{ 
               mb: 4, 
               overflowX: 'auto',
-              // Optional: Make stepper scrollable on very small screens
               '& .MuiStepLabel-label': {
                 fontSize: { xs: '0.75rem', sm: '0.875rem' },
                 color: isDarkMode ? DARK.textSecondary : undefined,
@@ -846,8 +954,8 @@ const SignUpCard = () => {
             ))}
           </Stepper>
 
-          {/* Error Alert */}
-          {errorMessage && !snackbarOpen && !waitMessage && (
+          {/* ─── ERROR ALERT ────────────────────────────────────────────────── */}
+          {errorMessage && !snackbar.open && !waitMessage && (
             <Fade in>
               <Alert 
                 severity="error" 
@@ -875,39 +983,11 @@ const SignUpCard = () => {
             </Fade>
           )}
 
-          {/* Success Alert */}
-          {registrationSuccess && (
-            <Alert 
-              severity="success" 
-              icon={<CheckCircleOutlined />} 
-              sx={{
-                mb: 3,
-                ...(isDarkMode && {
-                  bgcolor: alpha('#10B981', 0.12),
-                  color: '#6EE7B7',
-                  '& .MuiAlert-icon': { color: '#34D399' },
-                }),
-              }}
-              action={
-                <Button color="inherit" size="small" onClick={() => setVerificationDialogOpen(true)}>
-                  Verify Now
-                </Button>
-              }
-            >
-              <Typography variant="body2" fontWeight={500}>
-                Registration successful!
-              </Typography>
-              <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                Please verify your email to activate your account.
-              </Typography>
-            </Alert>
-          )}
-
-          {/* Form */}
+          {/* ─── FORM ────────────────────────────────────────────────────────── */}
           <form onSubmit={handleSubmit}>
             {activeStep === 0 && (
               <Box>
-                {/* Email Field */}
+                {/* Email */}
                 <TextField
                   fullWidth
                   label="Email Address"
@@ -930,7 +1010,7 @@ const SignUpCard = () => {
                   }}
                 />
                 
-                {/* Username Field */}
+                {/* Username */}
                 <TextField
                   fullWidth
                   label="Username"
@@ -1001,7 +1081,7 @@ const SignUpCard = () => {
                   </Box>
                 )}
                 
-                {/* Full Name Field with EDIT BUTTON */}
+                {/* Full Name */}
                 <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
                   <TextField
                     fullWidth
@@ -1051,7 +1131,7 @@ const SignUpCard = () => {
                   </Tooltip>
                 </Box>
                 
-                {/* Display split names */}
+                {/* Name Preview */}
                 {(formData.first_name || formData.last_name) && (
                   <Box sx={{ 
                     mt: 2, mb: 2, p: 2, 
@@ -1082,7 +1162,7 @@ const SignUpCard = () => {
                   </Box>
                 )}
                 
-                {/* Phone Field */}
+                {/* Phone */}
                 <TextField
                   fullWidth
                   label="Phone Number (Optional)"
@@ -1108,7 +1188,7 @@ const SignUpCard = () => {
 
             {activeStep === 1 && (
               <Box>
-                {/* Password Field - with show/hide button inside */}
+                {/* Password */}
                 <TextField
                   fullWidth
                   label="Password"
@@ -1144,7 +1224,7 @@ const SignUpCard = () => {
                   }}
                 />
                 
-                {/* Password Strength Indicator */}
+                {/* Password Strength */}
                 {formData.password && !hasFieldError('password') && (
                   <Box sx={{ mt: 1, mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1174,7 +1254,7 @@ const SignUpCard = () => {
                   </Box>
                 )}
                 
-                {/* Confirm Password Field - with show/hide button inside */}
+                {/* Confirm Password */}
                 <TextField
                   fullWidth
                   label="Confirm Password"
@@ -1309,47 +1389,23 @@ const SignUpCard = () => {
         </CardContent>
       </Card>
 
-      {/* Error Snackbar */}
+      {/* ─── SNACKBAR ───────────────────────────────────────────────────────── */}
       <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
+        open={snackbar.open}
+        autoHideDuration={snackbar.autoHideDuration || 6000}
         onClose={handleCloseSnackbar}
         TransitionComponent={SlideTransition}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
         <Alert 
           onClose={handleCloseSnackbar} 
-          severity="error" 
+          severity={snackbar.severity}
           variant="filled"
-          icon={<ErrorOutlined />}
-          sx={{ width: '100%', boxShadow: 3 }}
+          icon={snackbar.severity === 'success' ? <CheckCircleOutlined /> : <ErrorOutlined />}
+          sx={{ width: '100%', boxShadow: 3, maxWidth: 500 }}
         >
           <Typography variant="body2" fontWeight={500}>
-            {errorMessage || 'Registration failed. Please try again.'}
-          </Typography>
-        </Alert>
-      </Snackbar>
-
-      {/* Success Snackbar */}
-      <Snackbar
-        open={successSnackbarOpen}
-        autoHideDuration={3000}
-        onClose={handleCloseSuccessSnackbar}
-        TransitionComponent={SlideTransition}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert 
-          onClose={handleCloseSuccessSnackbar} 
-          severity="success" 
-          variant="filled"
-          icon={<CheckCircleOutlined />}
-          sx={{ width: '100%', boxShadow: 3 }}
-        >
-          <Typography variant="body2" fontWeight={500}>
-            Registration successful!
-          </Typography>
-          <Typography variant="caption" display="block">
-            Please check your email to verify your account.
+            {snackbar.message}
           </Typography>
         </Alert>
       </Snackbar>

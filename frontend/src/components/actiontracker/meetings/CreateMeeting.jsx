@@ -358,7 +358,7 @@ const CreateMeeting = () => {
         meeting_link: formData.meeting_link || null,
         visibility,
         restricted_department_id: isRestricted ? restrictedDepartmentId : null,
-        participants: meetingParticipants.map((p) => ({
+        custom_participants: meetingParticipants.map((p) => ({
           name: p.name,
           email: p.email || null,
           telephone: p.telephone || null,

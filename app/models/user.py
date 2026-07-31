@@ -194,7 +194,7 @@ class User(Base):
         lazy="selectin",
         foreign_keys="UserDepartment.user_id"
     )
-    
+
     departments = relationship(
         "OrganizationNode",
         secondary="user_departments",

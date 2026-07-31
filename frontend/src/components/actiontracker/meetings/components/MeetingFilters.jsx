@@ -5,14 +5,16 @@ import {
   Stack, TextField, InputAdornment, IconButton, 
   FormControl, InputLabel, Select, MenuItem, Button, 
   ToggleButtonGroup, ToggleButton, Box, Chip, 
-  FormControlLabel, Switch, useMediaQuery, useTheme,
-  CircularProgress
+  useMediaQuery, useTheme, CircularProgress
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import GridViewIcon from '@mui/icons-material/GridView';
 import ViewListIcon from '@mui/icons-material/ViewList';
+import EventIcon from '@mui/icons-material/Event';
+import HistoryIcon from '@mui/icons-material/History';
+import DateRangeIcon from '@mui/icons-material/DateRange';
 import { COLORS } from '../styles/colors';
 
 export const MeetingFilters = ({ 
@@ -22,10 +24,8 @@ export const MeetingFilters = ({
   setStatusFilter, 
   statusOptions = [], 
   loading = false, 
-  showUpcoming,
-  setShowUpcoming,
-  showPast,
-  setShowPast,
+  timeframeFilter = 'upcoming', // 'upcoming' | 'past' | 'all'
+  setTimeframeFilter,
   viewMode, 
   setViewMode, 
   onClearFilters, 
@@ -39,26 +39,27 @@ export const MeetingFilters = ({
     setStatusFilter(event.target.value);
   };
 
+  const handleTimeframeChange = (event, newTimeframe) => {
+    if (newTimeframe !== null) {
+      setTimeframeFilter(newTimeframe);
+    }
+  };
+
   const handleClear = () => {
     setSearchTerm('');
     setStatusFilter('all');
-    setShowUpcoming(true);
-    setShowPast(false);
+    setTimeframeFilter('upcoming'); // Reset to default mode
     onClearFilters();
   };
 
-  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
+  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || timeframeFilter !== 'upcoming';
 
-  // Safe helper to find a matching option's label
   const getStatusLabel = (filterValue) => {
     const matchedOption = statusOptions?.find(
       (o) => (o.value || o.short_name || o.id) === filterValue
     );
     return matchedOption ? (matchedOption.label || matchedOption.name || matchedOption.short_name) : filterValue;
   };
-
-  useEffect(() => {
-  }, [statusOptions]);
 
   return (
     <Stack spacing={2}>
@@ -74,7 +75,6 @@ export const MeetingFilters = ({
           placeholder="Search meetings..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          // Fixed: Switched to React 19 / MUI modern slots to prevent DOM attribute bleeding warnings
           slotProps={{
             input: {
               startAdornment: (
@@ -166,31 +166,23 @@ export const MeetingFilters = ({
         spacing={2} 
         sx={{ alignItems: 'center', flexWrap: 'wrap' }} 
       >
-        <FormControlLabel
-          control={
-            <Switch 
-              checked={showUpcoming} 
-              onChange={(e) => setShowUpcoming(e.target.checked)}
-              size="small"
-              color="primary"
-            />
-          }
-          label="Show Upcoming"
-          sx={{ mr: 1 }}
-        />
-        
-        <FormControlLabel
-          control={
-            <Switch 
-              checked={showPast} 
-              onChange={(e) => setShowPast(e.target.checked)}
-              size="small"
-              color="secondary"
-            />
-          }
-          label="Show Past"
-          sx={{ mr: 1 }}
-        />
+        <ToggleButtonGroup
+          value={timeframeFilter}
+          exclusive
+          onChange={handleTimeframeChange}
+          size="small"
+          color="primary"
+        >
+          <ToggleButton value="upcoming">
+            <EventIcon fontSize="small" sx={{ mr: 0.5 }} /> Upcoming
+          </ToggleButton>
+          <ToggleButton value="past">
+            <HistoryIcon fontSize="small" sx={{ mr: 0.5 }} /> Past
+          </ToggleButton>
+          <ToggleButton value="all">
+            <DateRangeIcon fontSize="small" sx={{ mr: 0.5 }} /> All Meetings
+          </ToggleButton>
+        </ToggleButtonGroup>
         
         {hasActiveFilters && !isMobileView && (
           <Button onClick={handleClear} startIcon={<ClearIcon />} size="small" sx={{ ml: 'auto' }}>
@@ -204,7 +196,6 @@ export const MeetingFilters = ({
         <Stack 
           direction="row" 
           sx={{ 
-            justifyContent: 'space-between', 
             alignItems: 'center', 
             flexWrap: 'wrap', 
             gap: 1 
@@ -226,19 +217,11 @@ export const MeetingFilters = ({
               variant="outlined"
             />
           )}
-          {showPast && (
+          {timeframeFilter !== 'upcoming' && (
             <Chip 
-              label="Showing Past Meetings" 
+              label={timeframeFilter === 'past' ? 'Past Meetings Only' : 'All Meetings'} 
               size="small" 
-              onDelete={() => setShowPast(false)}
-              variant="outlined"
-            />
-          )}
-          {!showUpcoming && (
-            <Chip 
-              label="Hidden Upcoming" 
-              size="small" 
-              onDelete={() => setShowUpcoming(true)}
+              onDelete={() => setTimeframeFilter('upcoming')}
               variant="outlined"
             />
           )}

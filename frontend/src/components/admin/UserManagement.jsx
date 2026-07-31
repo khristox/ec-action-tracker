@@ -6,7 +6,7 @@ import {
   Grid, FormControl, InputLabel, Select, MenuItem, Switch,
   FormControlLabel, Alert, Snackbar, CircularProgress, InputAdornment,
   Tooltip, Card, CardContent, Stack, Divider, useTheme, useMediaQuery,
-  Collapse, Badge, alpha, Autocomplete, Fade, Checkbox, ListItemText,
+  Collapse, alpha, Autocomplete, Fade, Checkbox, ListItemText,
   Skeleton, Tab, Tabs
 } from '@mui/material';
 import {
@@ -14,13 +14,14 @@ import {
   LockOpenOutlined, VerifiedUserOutlined, PersonAddOutlined,
   EmailOutlined, PhoneOutlined, ExpandMore, ExpandLess,
   RefreshOutlined, AdminPanelSettingsOutlined, OpenInNewOutlined,
-  ShieldOutlined, PeopleAltOutlined, FilterListOutlined, CloseOutlined,
+  ShieldOutlined, PeopleAltOutlined, CloseOutlined,
   BusinessOutlined, LinkOutlined, LinkOffOutlined, ApartmentOutlined,
-  AccountTreeOutlined, SupervisorAccountOutlined, CheckCircleOutlined,
+  AccountTreeOutlined, CheckCircleOutlined,
   CancelOutlined, TuneOutlined, ChevronRightOutlined, FolderOutlined,
   FolderOpenOutlined, SwapHorizOutlined, CheckBoxOutlined,
   CheckBoxOutlineBlankOutlined, WarningAmberOutlined,
-  PersonOutlineOutlined, KeyOutlined, AssignmentOutlined,
+  PersonOutlineOutlined, KeyOutlined, AssignmentOutlined, ArrowBackOutlined,
+  FilterListOutlined, FilterListOffOutlined
 } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -98,7 +99,6 @@ const buildDeptTree = (departments = []) => {
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
 const DeptPill = ({ assignment, onUnlink, compact = false }) => {
   const cfg = ROLE_PALETTE[assignment.role] || ROLE_PALETTE.member;
   return (
@@ -122,7 +122,6 @@ const DeptPill = ({ assignment, onUnlink, compact = false }) => {
   );
 };
 
-// ─── Improved Compact Stats ──────────────────────────────────────────────────
 const ImprovedStatCard = ({ label, value, icon, color, isLoading, trend }) => {
   const theme = useTheme();
   return (
@@ -150,7 +149,7 @@ const ImprovedStatCard = ({ label, value, icon, color, isLoading, trend }) => {
           width: 40,
           height: 40,
           borderRadius: 1.5,
-          bgcolor: alpha(color || theme.palette.primary.main, 0.1),
+          bgcolor: color ? alpha(color, 0.1) : alpha(theme.palette.primary.main, 0.1),
           color: color || theme.palette.primary.main,
           display: 'flex',
           alignItems: 'center',
@@ -185,7 +184,7 @@ const ImprovedStatCard = ({ label, value, icon, color, isLoading, trend }) => {
   );
 };
 
-// ─── Enhanced User Form with Navigation ──────────────────────────────────────
+// ─── Form Component ─────────────────────────────────────────────────────
 const UserForm = ({
   mode,
   formData,
@@ -196,10 +195,11 @@ const UserForm = ({
   rolesList,
   departments,
   selectedUser,
+  activeTab,
+  setActiveTab
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [activeTab, setActiveTab] = useState(0);
   const [rolesMenuOpen, setRolesMenuOpen] = useState(false);
 
   const getRoleDetails = (roleCode) => {
@@ -212,7 +212,6 @@ const UserForm = ({
     };
   };
 
-  // Auto-select admin role when superuser is checked
   const handleSuperuserToggle = (checked) => {
     setFormData((p) => {
       const newData = { ...p, is_superuser: checked };
@@ -257,103 +256,8 @@ const UserForm = ({
     { label: 'Permissions', icon: <AssignmentOutlined /> },
   ];
 
-  // Navigation handlers
-  const handleNext = () => {
-    if (activeTab < tabs.length - 1) {
-      setActiveTab(activeTab + 1);
-    }
-  };
-
-  const handlePrevious = () => {
-    if (activeTab > 0) {
-      setActiveTab(activeTab - 1);
-    }
-  };
-
-  // Validate current step before proceeding
-  const canProceed = () => {
-    if (activeTab === 0) {
-      // Personal Info validation
-      if (!formData.email || !formData.username) return false;
-      if (!/\S+@\S+\.\S+/.test(formData.email)) return false;
-      if (formData.username.length < 3) return false;
-      return true;
-    }
-    if (activeTab === 1 && (mode === 'create' || mode === 'reset')) {
-      // Security validation
-      if (!passwordData.password || passwordData.password.length < 8) return false;
-      if (passwordData.password !== passwordData.confirm_password) return false;
-      return true;
-    }
-    return true;
-  };
-
-  // Step indicators
-  const StepIndicator = () => (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 3 }}>
-      {tabs.map((tab, index) => (
-        <Box key={index} sx={{ display: 'flex', alignItems: 'center' }}>
-          <Box
-            onClick={() => setActiveTab(index)}
-            sx={{
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              bgcolor: index === activeTab 
-                ? 'primary.main' 
-                : index < activeTab 
-                  ? 'success.main' 
-                  : (theme) => alpha(theme.palette.action.disabled, 0.2),
-              color: index === activeTab || index < activeTab 
-                ? 'white' 
-                : 'text.disabled',
-              transition: 'all 0.2s',
-              '&:hover': {
-                transform: 'scale(1.1)',
-              },
-            }}
-          >
-            {index < activeTab ? <CheckCircleOutlined sx={{ fontSize: 16 }} /> : index + 1}
-          </Box>
-          {index < tabs.length - 1 && (
-            <Box
-              sx={{
-                width: 32,
-                height: 2,
-                bgcolor: index < activeTab 
-                  ? 'success.main' 
-                  : (theme) => alpha(theme.palette.action.disabled, 0.2),
-                mx: 1,
-              }}
-            />
-          )}
-        </Box>
-      ))}
-    </Box>
-  );
-
   return (
     <Box>
-      {/* Step indicator */}
-      <StepIndicator />
-
-      {/* Progress label */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="caption" color="text.secondary">
-          Step {activeTab + 1} of {tabs.length}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {tabs[activeTab].label}
-        </Typography>
-      </Box>
-
-      {/* Tabs for better organization */}
       <Tabs
         value={activeTab}
         onChange={(_, v) => setActiveTab(v)}
@@ -401,7 +305,7 @@ const UserForm = ({
           </Box>
 
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 6 }}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 label="First Name"
                 name="first_name"
@@ -418,7 +322,7 @@ const UserForm = ({
                 }}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 label="Last Name"
                 name="last_name"
@@ -524,6 +428,7 @@ const UserForm = ({
                 type="password"
                 size="small"
                 fullWidth
+                required
                 value={passwordData.password}
                 onChange={(e) => setPasswordData((p) => ({ ...p, password: e.target.value }))}
                 error={!!formErrors.password}
@@ -535,6 +440,7 @@ const UserForm = ({
                 type="password"
                 size="small"
                 fullWidth
+                required
                 value={passwordData.confirm_password}
                 onChange={(e) => setPasswordData((p) => ({ ...p, confirm_password: e.target.value }))}
                 error={!!formErrors.confirm_password}
@@ -545,10 +451,10 @@ const UserForm = ({
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <LockOutlined sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
               <Typography variant="body2" color="text.secondary">
-                Password cannot be changed in edit mode.
+                Password cannot be changed directly in edit mode.
               </Typography>
               <Typography variant="caption" color="text.disabled">
-                Use the "Reset Password" action to change user password.
+                Use the "Reset Password" action button to change a user's password.
               </Typography>
             </Box>
           )}
@@ -558,7 +464,6 @@ const UserForm = ({
       {/* Permissions Tab */}
       {activeTab === 2 && (
         <Stack spacing={3}>
-          {/* Account Status */}
           <Paper
             elevation={0}
             sx={{
@@ -642,7 +547,6 @@ const UserForm = ({
             </Stack>
           </Paper>
 
-          {/* Role Assignment */}
           <Paper
             elevation={0}
             sx={{
@@ -735,7 +639,6 @@ const UserForm = ({
             </FormControl>
           </Paper>
 
-          {/* Department Assignment */}
           <Paper
             elevation={0}
             sx={{
@@ -780,60 +683,6 @@ const UserForm = ({
             />
           </Paper>
         </Stack>
-      )}
-
-      {/* Navigation Buttons */}
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          mt: 4,
-          pt: 2,
-          borderTop: '1px solid',
-          borderColor: 'divider',
-          gap: 2,
-        }}
-      >
-        <Button
-          variant="outlined"
-          onClick={handlePrevious}
-          disabled={activeTab === 0}
-          startIcon={<ChevronRightOutlined sx={{ transform: 'rotate(180deg)' }} />}
-          sx={{ borderRadius: 1.5 }}
-        >
-          Previous
-        </Button>
-
-        {activeTab < tabs.length - 1 ? (
-          <Button
-            variant="contained"
-            onClick={handleNext}
-            disabled={!canProceed()}
-            endIcon={<ChevronRightOutlined />}
-            sx={{ borderRadius: 1.5 }}
-          >
-            Next Step
-          </Button>
-        ) : (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <CheckCircleOutlined color="success" />
-            <Typography variant="body2" color="success.main" fontWeight={600}>
-              Ready to create
-            </Typography>
-          </Box>
-        )}
-      </Box>
-
-      {/* Show validation hints */}
-      {activeTab === 0 && !canProceed() && (
-        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
-          Please fill in all required fields: Email and Username
-        </Typography>
-      )}
-      {activeTab === 1 && (mode === 'create' || mode === 'reset') && !canProceed() && (
-        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
-          Please set a valid password (min 8 characters, matching confirmation)
-        </Typography>
       )}
     </Box>
   );
@@ -1467,14 +1316,15 @@ const UserManagement = () => {
   const [roleFilter, setRoleFilter] = useState('all');
   const [superAdminFilter, setSuperAdminFilter] = useState('all');
   const [departmentFilter, setDepartmentFilter] = useState('all');
+  
+  // State controlling filter menu visibility
   const [showFilters, setShowFilters] = useState(false);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState('create');
   const [selectedUser, setSelectedUser] = useState(null);
   const [detailUser, setDetailUser] = useState(null);
-
-  const [rolesMenuOpen, setRolesMenuOpen] = useState(false);
+  const [formTab, setFormTab] = useState(0);
 
   const [deptDialogOpen, setDeptDialogOpen] = useState(false);
   const [deptDialogUser, setDeptDialogUser] = useState(null);
@@ -1522,7 +1372,7 @@ const UserManagement = () => {
   useEffect(() => { 
     dispatch(fetchRoles()); 
     fetchDepartments(); 
-  }, [dispatch]);
+  }, [dispatch, fetchDepartments]);
 
   const loadUsers = useCallback(() => {
     dispatch(fetchUsers({
@@ -1542,7 +1392,7 @@ const UserManagement = () => {
         if (!userDepartmentsMap[u.id]) fetchUserDepts(u.id); 
       });
     }
-  }, [users]);
+  }, [users, fetchUserDepts, userDepartmentsMap]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -1556,7 +1406,6 @@ const UserManagement = () => {
     setSnackbar({ open: true, message: 'Data refreshed', severity: 'success' });
   };
 
-  // ── Enhanced department save handler ─────────────────────────────────────────
   const handleSaveDepartments = async ({ addEntries, changeEntries, removeIds }) => {
     if (!deptDialogUser) return;
     setSavingDepts(true);
@@ -1578,10 +1427,10 @@ const UserManagement = () => {
 
       await fetchUserDepts(deptDialogUser.id, true);
 
-      const total = addEntries.length + changeEntries.length + removeIds.length;
+      const totalChanges = addEntries.length + changeEntries.length + removeIds.length;
       setSnackbar({
         open: true,
-        message: `Department access updated (${total} change${total !== 1 ? 's' : ''})`,
+        message: `Department access updated (${totalChanges} change${totalChanges !== 1 ? 's' : ''})`,
         severity: 'success',
       });
       setDeptDialogOpen(false);
@@ -1606,7 +1455,6 @@ const UserManagement = () => {
     }
   };
 
-  // ── Row helpers ──────────────────────────────────────────────────────────────
   const getRoleDetails = (roleCode) => {
     const role = rolesList?.find((r) => r.code === roleCode);
     return {
@@ -1615,6 +1463,89 @@ const UserManagement = () => {
              roleCode === 'super_admin' ? 'warning' : 
              roleCode === 'superuser' ? 'warning' : 'primary',
     };
+  };
+
+  // ── Dialog actions ───────────────────────────────────────────────────────────
+  const handleOpenDetail = async (user) => {
+    setDetailUser(user);
+    await fetchUserDepts(user.id);
+  };
+
+  const handleOpenEdit = async (user) => {
+    setDialogMode('edit');
+    setSelectedUser(user);
+    setFormTab(0);
+    const assignments = userDepartmentsMap[user.id] || [];
+    
+    let roles = [...(user.roles || [])];
+    if (user.is_superuser) {
+      const adminRole = rolesList?.find((r) => r.code === 'admin');
+      if (adminRole && !roles.includes('admin')) {
+        roles.push('admin');
+      }
+    }
+    
+    setFormData({
+      email: user.email || '',
+      username: user.username || '',
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      phone: user.phone || '',
+      roles: roles,
+      is_active: user.is_active ?? true,
+      is_verified: user.is_verified ?? false,
+      is_superuser: user.is_superuser || false,
+      department_ids: assignments.map((a) => a.department_id),
+    });
+    setPasswordData({ password: '', confirm_password: '' });
+    setFormErrors({});
+    setDialogOpen(true);
+  };
+
+  const handleOpenDelete = (user) => {
+    setDialogMode('delete');
+    setSelectedUser(user);
+    setPasswordData({ password: '', confirm_password: '' });
+    setFormErrors({});
+    setDialogOpen(true);
+  };
+
+  const handleOpenReset = (user) => {
+    setDialogMode('reset'); 
+    setSelectedUser(user);
+    setFormTab(1);
+    setPasswordData({ password: '', confirm_password: '' });
+    setFormErrors({});
+    setDialogOpen(true);
+  };
+  
+  const handleOpenCreate = () => {
+    setDialogMode('create');
+    setSelectedUser(null);
+    setFormTab(0);
+    setFormData({
+      email: '', username: '', first_name: '', last_name: '', phone: '',
+      roles: [],
+      is_active: true,
+      is_verified: false,
+      is_superuser: false,
+      department_ids: [],
+    });
+    setPasswordData({ password: '', confirm_password: '' });
+    setFormErrors({});
+    setDialogOpen(true);
+  };
+
+  // Check if active filters exist
+  const hasActiveFilters = useMemo(() => {
+    return statusFilter !== 'all' || roleFilter !== 'all' || superAdminFilter !== 'all' || departmentFilter !== 'all';
+  }, [statusFilter, roleFilter, superAdminFilter, departmentFilter]);
+
+  const handleResetFilters = () => {
+    setStatusFilter('all');
+    setRoleFilter('all');
+    setSuperAdminFilter('all');
+    setDepartmentFilter('all');
   };
 
   // ── DataGrid columns ─────────────────────────────────────────────────────────
@@ -1638,7 +1569,6 @@ const UserManagement = () => {
       renderCell: ({ row }) => row ? (
         <Box>
           <Typography variant="body2" fontWeight={600} noWrap>{fullName(row)}</Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>@{row.username}</Typography>
         </Box>
       ) : null,
     },
@@ -1773,75 +1703,6 @@ const UserManagement = () => {
     },
   ], [currentUser, rolesList, userDepartmentsMap, loadingUserDepts]);
 
-  // ── Dialog helpers ───────────────────────────────────────────────────────────
-  const handleOpenDetail = async (user) => {
-    setDetailUser(user);
-    await fetchUserDepts(user.id);
-  };
-
-  const handleOpenEdit = async (user) => {
-    setDialogMode('edit');
-    setSelectedUser(user);
-    const assignments = userDepartmentsMap[user.id] || [];
-    
-    let roles = [...(user.roles || [])];
-    
-    if (user.is_superuser) {
-      const adminRole = rolesList?.find((r) => r.code === 'admin');
-      if (adminRole && !roles.includes('admin')) {
-        roles.push('admin');
-      }
-    }
-    
-    setFormData({
-      email: user.email,
-      username: user.username,
-      first_name: user.first_name || '',
-      last_name: user.last_name || '',
-      phone: user.phone || '',
-      roles: roles,
-      is_active: user.is_active,
-      is_verified: user.is_verified,
-      is_superuser: user.is_superuser || false,
-      department_ids: assignments.map((a) => a.department_id),
-    });
-    setPasswordData({ password: '', confirm_password: '' });
-    setFormErrors({});
-    setDialogOpen(true);
-  };
-
-  const handleOpenDelete = (user) => {
-    setDialogMode('delete');
-    setSelectedUser(user);
-    setPasswordData({ password: '', confirm_password: '' });
-    setFormErrors({});
-    setDialogOpen(true);
-  };
-
-  const handleOpenReset = (user) => {
-    setDialogMode('reset'); 
-    setSelectedUser(user);
-    setPasswordData({ password: '', confirm_password: '' });
-    setFormErrors({});
-    setDialogOpen(true);
-  };
-  
-  const handleOpenCreate = () => {
-    setDialogMode('create');
-    setSelectedUser(null);
-    setFormData({
-      email: '', username: '', first_name: '', last_name: '', phone: '',
-      roles: [],
-      is_active: true,
-      is_verified: false,
-      is_superuser: false,
-      department_ids: [],
-    });
-    setPasswordData({ password: '', confirm_password: '' });
-    setFormErrors({});
-    setDialogOpen(true);
-  };
-
   // ── Form validation / submit ─────────────────────────────────────────────────
   const validate = () => {
     const e = {};
@@ -1851,10 +1712,15 @@ const UserManagement = () => {
       if (!formData.username || formData.username.length < 3) e.username = 'Min 3 chars';
     }
     if (dialogMode === 'create' || dialogMode === 'reset') {
-      if (!passwordData.password || passwordData.password.length < 8) e.password = 'Min 8 chars';
-      if (passwordData.password !== passwordData.confirm_password) e.confirm_password = 'Mismatch';
+      if (!passwordData.password || passwordData.password.length < 8) e.password = 'Min 8 chars required';
+      if (passwordData.password !== passwordData.confirm_password) e.confirm_password = 'Passwords do not match';
     }
+
     setFormErrors(e);
+    
+    if (e.email || e.username) setFormTab(0);
+    else if (e.password || e.confirm_password) setFormTab(1);
+
     return !Object.keys(e).length;
   };
 
@@ -1892,8 +1758,6 @@ const UserManagement = () => {
           if (adminRole && !roles.includes('admin')) {
             roles = [...roles, 'admin'];
           }
-        } else {
-          roles = roles.filter((r) => r !== 'admin');
         }
         
         await dispatch(updateUser({
@@ -1944,7 +1808,7 @@ const UserManagement = () => {
     } catch (err) {
       setSnackbar({ 
         open: true, 
-        message: err.message || `${dialogMode} failed`, 
+        message: err.message || `${dialogMode} action failed`, 
         severity: 'error' 
       });
     } finally {
@@ -1969,10 +1833,9 @@ const UserManagement = () => {
     { label: 'Super Admins', value: stats.superadmins, icon: <ShieldOutlined />, color: theme.palette.error.main },
   ];
 
-  // ── Mobile card ──────────────────────────────────────────────────────────────
+  // ── Mobile Card Render ───────────────────────────────────────────────────────
   const UserCard = ({ user }) => {
     const expanded = expandedUser === user.id;
-    const selected = detailUser?.id === user.id;
     const assignments = userDepartmentsMap[user.id] || [];
     const isLoadingD = loadingUserDepts[user.id];
 
@@ -1982,7 +1845,7 @@ const UserManagement = () => {
           mb: 1.5, 
           borderRadius: 2.5, 
           border: '1.5px solid',
-          borderColor: selected ? 'primary.main' : user.is_superuser
+          borderColor: user.is_superuser
             ? (t) => alpha(t.palette.warning.main, 0.4) : 'divider',
           transition: 'all 0.18s ease',
           '&:hover': {
@@ -2007,16 +1870,16 @@ const UserManagement = () => {
             <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, gap: 0.25 }}>
               <Tooltip title="Manage departments">
                 <IconButton size="small" color="primary"
-                  onClick={() => { setDeptDialogUser(user); setDeptDialogOpen(true); }}>
+                  onClick={(e) => { e.stopPropagation(); setDeptDialogUser(user); setDeptDialogOpen(true); }}>
                   <AccountTreeOutlined fontSize="small" />
                 </IconButton>
               </Tooltip>
               <Tooltip title="View details">
-                <IconButton size="small" color="info" onClick={() => handleOpenDetail(user)}>
+                <IconButton size="small" color="info" onClick={(e) => { e.stopPropagation(); handleOpenDetail(user); }}>
                   <OpenInNewOutlined fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <IconButton size="small" onClick={() => setExpandedUser(expanded ? null : user.id)}>
+              <IconButton size="small" onClick={(e) => { e.stopPropagation(); setExpandedUser(expanded ? null : user.id); }}>
                 {expanded ? <ExpandLess /> : <ExpandMore />}
               </IconButton>
             </Box>
@@ -2081,16 +1944,16 @@ const UserManagement = () => {
           <Divider />
           <Box sx={{ px: 1.5, py: 1, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
             <Button size="small" variant="outlined" startIcon={<EditOutlined />}
-              onClick={() => handleOpenEdit(user)} sx={{ flex: 1, minWidth: 80 }}>
+              onClick={(e) => { e.stopPropagation(); handleOpenEdit(user); }} sx={{ flex: 1, minWidth: 80 }}>
               Edit
             </Button>
             <Button size="small" variant="outlined" startIcon={<LockOutlined />}
-              onClick={() => handleOpenReset(user)} sx={{ flex: 1, minWidth: 80 }}>
+              onClick={(e) => { e.stopPropagation(); handleOpenReset(user); }} sx={{ flex: 1, minWidth: 80 }}>
               Reset PW
             </Button>
             {user.id !== currentUser?.id && !user.is_superuser && (
               <Button size="small" variant="outlined" color="error" startIcon={<DeleteOutlined />}
-                onClick={() => handleOpenDelete(user)} sx={{ flex: 1, minWidth: 80 }}>
+                onClick={(e) => { e.stopPropagation(); handleOpenDelete(user); }} sx={{ flex: 1, minWidth: 80 }}>
                 Delete
               </Button>
             )}
@@ -2101,10 +1964,46 @@ const UserManagement = () => {
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
+
+  // 1. REPLACED VIEWPORT: Render User Detail View full screen when user selected
+  if (detailUser) {
+    return (
+      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3 } }}>
+        <Box sx={{ mb: 2 }}>
+          <Button
+            startIcon={<ArrowBackOutlined />}
+            onClick={() => setDetailUser(null)}
+            variant="outlined"
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            Back to User Management
+          </Button>
+        </Box>
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            p: { xs: 2, sm: 3 }, 
+            borderRadius: 2.5, 
+            border: '1px solid', 
+            borderColor: 'divider',
+            bgcolor: 'background.paper'
+          }}
+        >
+          <UserDetailPanel
+            user={detailUser}
+            onClose={() => setDetailUser(null)}
+            onUpdated={() => { setUserDeptMap({}); loadUsers(); }}
+            departmentAssignments={userDepartmentsMap[detailUser.id] || []}
+          />
+        </Paper>
+      </Container>
+    );
+  }
+
+  // 2. Default Viewport View: Main Table and Overview
   return (
     <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3 } }}>
-
-      {/* Header */}
+      {/* Top Header Row with Controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
         <Box>
           <Typography variant={isMobile ? 'h5' : 'h4'} fontWeight={800} sx={{ letterSpacing: -0.5 }}>
@@ -2114,8 +2013,43 @@ const UserManagement = () => {
             Manage users, roles, permissions, and department assignments
           </Typography>
         </Box>
+        
+        {/* Top Row Action Buttons: Filter Toggle, Refresh, Add User */}
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Tooltip title="Refresh">
+          <Button
+            variant={showFilters ? 'contained' : 'outlined'}
+            color={showFilters ? 'primary' : 'inherit'}
+            size={isMobile ? 'small' : 'medium'}
+            startIcon={showFilters ? <FilterListOffOutlined /> : <FilterListOutlined />}
+            onClick={() => setShowFilters((prev) => !prev)}
+            sx={{ 
+              borderRadius: 1.5, 
+              fontWeight: 600,
+              textTransform: 'none',
+              ...(hasActiveFilters && !showFilters && {
+                borderColor: 'primary.main',
+                color: 'primary.main',
+                bgcolor: (t) => alpha(t.palette.primary.main, 0.08)
+              })
+            }}
+          >
+            {showFilters ? 'Hide Filters' : 'Filters'}
+            {hasActiveFilters && !showFilters && (
+              <Box
+                component="span"
+                sx={{
+                  ml: 1,
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  bgcolor: 'primary.main',
+                  display: 'inline-block'
+                }}
+              />
+            )}
+          </Button>
+
+          <Tooltip title="Refresh data">
             <IconButton
               onClick={handleRefresh}
               disabled={isRefreshing}
@@ -2124,9 +2058,10 @@ const UserManagement = () => {
                 '&:disabled': { opacity: 0.6 }
               }}
             >
-              {isRefreshing ? <CircularProgress size={24} /> : <RefreshOutlined />}
+              {isRefreshing ? <CircularProgress size={20} /> : <RefreshOutlined fontSize="small" />}
             </IconButton>
           </Tooltip>
+
           <Button
             variant="contained"
             size={isMobile ? 'small' : 'medium'}
@@ -2139,7 +2074,7 @@ const UserManagement = () => {
         </Box>
       </Box>
 
-      {/* Improved Stats - Compact Layout */}
+      {/* Improved Stats */}
       <Box sx={{ mb: 3 }}>
         {isMobile ? (
           <Box
@@ -2171,9 +2106,10 @@ const UserManagement = () => {
         )}
       </Box>
 
-      {/* Search + filters */}
+      {/* Dynamic Search & Filter Container */}
       <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        {/* SHOWN ONLY WHEN FILTERS ARE CLOSED */}
+        {!showFilters && (
           <TextField
             fullWidth
             placeholder="Search users by name, email, or username…"
@@ -2195,186 +2131,177 @@ const UserManagement = () => {
               )
             }}
           />
-          <Tooltip title={showFilters ? 'Hide filters' : 'Show filters'}>
-            <IconButton
-              size="small"
-              onClick={() => setShowFilters((v) => !v)}
-              sx={{
-                border: '1px solid', 
-                borderRadius: 1.5, 
-                px: 1.5,
-                borderColor: showFilters ? 'primary.main' : 'divider',
-                color: showFilters ? 'primary.main' : 'text.secondary',
-                bgcolor: showFilters ? (t) => alpha(t.palette.primary.main, 0.06) : 'transparent',
-                transition: 'all 0.2s',
-              }}
-            >
-              <TuneOutlined fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
+        )}
 
-        <Collapse in={showFilters || !isMobile}>
-          <Grid container spacing={1.5} sx={{ mt: 1 }}>
-            {[
-              { label: 'Status', value: statusFilter, set: setStatusFilter,
-                opts: [['all','All statuses'],['active','Active'],['inactive','Inactive']] },
-              { label: 'Role', value: roleFilter, set: setRoleFilter,
-                opts: [['all','All roles'], ...(rolesList||[]).map((r) => [r.code, r.name])] },
-              { label: 'Super admin', value: superAdminFilter, set: setSuperAdminFilter,
-                opts: [['all','All users'],['yes','Super admins'],['no','Standard users']] },
-              { label: 'Department', value: departmentFilter, set: setDepartmentFilter,
-                opts: [['all','All departments'], ...departments.map((d) => [d.id, d.name])] },
-            ].map(({ label, value, set, opts }) => (
-              <Grid key={label} size={{ xs: 12, sm: 6, md: 3 }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>{label}</InputLabel>
-                  <Select 
-                    value={value} 
-                    onChange={(e) => { set(e.target.value); setPage(0); }} 
-                    label={label}
-                  >
-                    {opts.map(([v, l]) => (
-                      <MenuItem key={v} value={v}>{l}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-            ))}
-          </Grid>
-        </Collapse>
-      </Paper>
-
-      {/* Main layout */}
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-
-          {/* Desktop DataGrid */}
-          {!isMobile && (
-            <Paper elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
-              <DataGrid
-                rows={users || []}
-                columns={columns}
-                loading={isLoading}
-                rowCount={total || 0}
-                paginationMode="server"
-                pageSizeOptions={[10, 25, 50]}
-                paginationModel={{ page, pageSize: rowsPerPage }}
-                onPaginationModelChange={(m) => { setPage(m.page); setRowsPerPage(m.pageSize); }}
-                disableRowSelectionOnClick
-                getRowId={(r) => r.id}
-                onRowClick={(p) => handleOpenDetail(p.row)}
-                autoHeight
-                sx={{
-                  border: 'none',
-                  '& .MuiDataGrid-columnHeaders': {
-                    bgcolor: (t) => t.palette.mode === 'dark'
-                      ? alpha(t.palette.common.white, 0.03)
-                      : alpha(t.palette.common.black, 0.02),
-                  },
-                  '& .MuiDataGrid-row': { 
-                    cursor: 'pointer', 
-                    '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.04) } 
-                  },
-                  '& .MuiDataGrid-cell': { borderColor: 'divider', py: 1, alignItems: 'center' },
-                  '& .MuiDataGrid-footerContainer': {
-                    borderTop: '1px solid',
-                    borderColor: 'divider',
-                  }
-                }}
-              />
-            </Paper>
-          )}
-
-          {/* Mobile cards */}
-          {isMobile && (
-            <Box>
-              {isLoading && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-                  <CircularProgress />
-                </Box>
-              )}
-              {!isLoading && !users?.length && (
-                <Paper elevation={0} sx={{ 
-                  p: 4, 
-                  textAlign: 'center', 
-                  borderRadius: 2, 
-                  border: '1px solid', 
-                  borderColor: 'divider' 
-                }}>
-                  <Typography color="text.secondary">No users found</Typography>
-                  {searchTerm && (
-                    <Button 
-                      size="small" 
-                      sx={{ mt: 1 }}
-                      onClick={() => setSearchTerm('')}
-                    >
-                      Clear search
-                    </Button>
-                  )}
-                </Paper>
-              )}
-              {!isLoading && users?.map((u) => <UserCard key={u.id} user={u} />)}
-              {!isLoading && users?.length > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 1.5, alignItems: 'center' }}>
-                  <Button 
-                    variant="outlined" 
-                    size="small" 
-                    onClick={() => setPage((p) => p - 1)} 
-                    disabled={page === 0}
-                  >
-                    Prev
-                  </Button>
-                  <Typography variant="body2" color="text.secondary">
-                    {page + 1} / {Math.ceil(total / rowsPerPage)}
-                  </Typography>
-                  <Button 
-                    variant="outlined" 
-                    size="small" 
-                    onClick={() => setPage((p) => p + 1)} 
-                    disabled={(page + 1) * rowsPerPage >= total}
-                  >
-                    Next
-                  </Button>
-                </Box>
+        {/* SHOWN ONLY WHEN FILTERS ARE OPEN */}
+        {showFilters && (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <TuneOutlined fontSize="small" color="primary" />
+                Filter Records
+              </Typography>
+              {hasActiveFilters && (
+                <Button 
+                  size="small" 
+                  onClick={handleResetFilters}
+                  sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+                >
+                  Clear all filters
+                </Button>
               )}
             </Box>
-          )}
-        </Box>
+            
+            <Grid container spacing={1.5}>
+              {[
+                { 
+                  label: 'Status', 
+                  value: statusFilter, 
+                  set: setStatusFilter,
+                  opts: [['all', 'All statuses'], ['active', 'Active'], ['inactive', 'Inactive']] 
+                },
+                { 
+                  label: 'Role', 
+                  value: roleFilter, 
+                  set: setRoleFilter,
+                  opts: [
+                    ['all', 'All roles'], 
+                    ['none', 'None (Unassigned)'], 
+                    ...(rolesList || []).map((r) => [r.code, r.name])
+                  ] 
+                },
+                { 
+                  label: 'Super admin', 
+                  value: superAdminFilter, 
+                  set: setSuperAdminFilter,
+                  opts: [['all', 'All users'], ['yes', 'Super admins'], ['no', 'Standard users']] 
+                },
+                { 
+                  label: 'Department', 
+                  value: departmentFilter, 
+                  set: setDepartmentFilter,
+                  opts: [
+                    ['all', 'All departments'], 
+                    ['none', 'None (Unassigned)'], 
+                    ...departments.map((d) => [d.id, d.name])
+                  ] 
+                },
+              ].map(({ label, value, set, opts }) => (
+                <Grid item key={label} xs={12} sm={6} md={3}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>{label}</InputLabel>
+                    <Select 
+                      value={value} 
+                      onChange={(e) => { set(e.target.value); setPage(0); }} 
+                      label={label}
+                    >
+                      {opts.map(([v, l]) => (
+                        <MenuItem key={v} value={v}>{l}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        )}
+      </Paper>
 
-        {/* Side detail panel */}
-        {detailUser && (
-          <Box sx={{
-            width: { xs: '100%', md: 370 }, 
-            flexShrink: 0,
-            position: isMobile ? 'fixed' : 'sticky', 
-            top: isMobile ? 0 : 16,
-            zIndex: isMobile ? 1200 : 1,
-            maxHeight: isMobile ? '100vh' : 'calc(100vh - 32px)',
-            overflowY: 'auto',
-          }}>
-            {isMobile && (
-              <Box 
-                onClick={() => setDetailUser(null)}
-                sx={{ 
-                  position: 'fixed', 
-                  inset: 0, 
-                  bgcolor: (t) => alpha(t.palette.common.black, 0.5), 
-                  zIndex: -1 
-                }} 
-              />
-            )}
-            <UserDetailPanel
-              user={detailUser}
-              onClose={() => setDetailUser(null)}
-              onUpdated={() => { setUserDeptMap({}); loadUsers(); }}
-              departmentAssignments={userDepartmentsMap[detailUser.id] || []}
+      {/* Table Data View */}
+      <Box sx={{ width: '100%' }}>
+        {!isMobile && (
+          <Paper elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+            <DataGrid
+              rows={users || []}
+              columns={columns}
+              loading={isLoading}
+              rowCount={total || 0}
+              paginationMode="server"
+              pageSizeOptions={[10, 25, 50]}
+              paginationModel={{ page, pageSize: rowsPerPage }}
+              onPaginationModelChange={(m) => { setPage(m.page); setRowsPerPage(m.pageSize); }}
+              disableRowSelectionOnClick
+              getRowId={(r) => r.id}
+              onRowClick={(p) => handleOpenDetail(p.row)}
+              autoHeight
+              sx={{
+                border: 'none',
+                '& .MuiDataGrid-columnHeaders': {
+                  bgcolor: (t) => t.palette.mode === 'dark'
+                    ? alpha(t.palette.common.white, 0.03)
+                    : alpha(t.palette.common.black, 0.02),
+                },
+                '& .MuiDataGrid-row': { 
+                  cursor: 'pointer', 
+                  '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.04) } 
+                },
+                '& .MuiDataGrid-cell': { borderColor: 'divider', py: 1, alignItems: 'center' },
+                '& .MuiDataGrid-footerContainer': {
+                  borderTop: '1px solid',
+                  borderColor: 'divider',
+                }
+              }}
             />
+          </Paper>
+        )}
+
+        {/* Mobile View */}
+        {isMobile && (
+          <Box>
+            {isLoading && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                <CircularProgress />
+              </Box>
+            )}
+            {!isLoading && !users?.length && (
+              <Paper elevation={0} sx={{ 
+                p: 4, 
+                textAlign: 'center', 
+                borderRadius: 2, 
+                border: '1px solid', 
+                borderColor: 'divider' 
+              }}>
+                <Typography color="text.secondary">No users found</Typography>
+                {searchTerm && (
+                  <Button 
+                    size="small" 
+                    sx={{ mt: 1 }}
+                    onClick={() => setSearchTerm('')}
+                  >
+                    Clear search
+                  </Button>
+                )}
+              </Paper>
+            )}
+            {!isLoading && users?.map((u) => <UserCard key={u.id} user={u} />)}
+            {!isLoading && users?.length > 0 && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 1.5, alignItems: 'center' }}>
+                <Button 
+                  variant="outlined" 
+                  size="small" 
+                  onClick={() => setPage((p) => p - 1)} 
+                  disabled={page === 0}
+                >
+                  Prev
+                </Button>
+                <Typography variant="body2" color="text.secondary">
+                  {page + 1} / {Math.ceil(total / rowsPerPage)}
+                </Typography>
+                <Button 
+                  variant="outlined" 
+                  size="small" 
+                  onClick={() => setPage((p) => p + 1)} 
+                  disabled={(page + 1) * rowsPerPage >= total}
+                >
+                  Next
+                </Button>
+              </Box>
+            )}
           </Box>
         )}
       </Box>
 
-      {/* ── Enhanced Department Hierarchy Dialog ── */}
+      {/* Department Dialog */}
       <DepartmentDialog
         open={deptDialogOpen}
         onClose={() => setDeptDialogOpen(false)}
@@ -2385,7 +2312,7 @@ const UserManagement = () => {
         saving={savingDepts}
       />
 
-      {/* Improved Create / edit / delete / reset dialog */}
+      {/* Create / Edit / Delete / Reset Modal Dialog */}
       <Dialog
         open={dialogOpen}
         onClose={() => !isSubmitting && setDialogOpen(false)}
@@ -2480,6 +2407,8 @@ const UserManagement = () => {
               rolesList={rolesList}
               departments={departments}
               selectedUser={selectedUser}
+              activeTab={formTab}
+              setActiveTab={setFormTab}
             />
           )}
         </DialogContent>
@@ -2527,7 +2456,7 @@ const UserManagement = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Toast */}
+      {/* Snackbar Notifications */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}

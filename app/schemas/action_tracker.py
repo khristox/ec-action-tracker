@@ -231,7 +231,7 @@ class MeetingCreateResponse(ORMBase):
     title: str
     description: Optional[str] = None
     meeting_date: datetime
-    start_time: Optional[datetime] = None
+    start_time: datetime
     end_time: Optional[datetime] = None
     location_text: Optional[str] = None
     agenda: Optional[str] = None

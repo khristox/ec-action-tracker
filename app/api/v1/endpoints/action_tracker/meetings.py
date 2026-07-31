@@ -567,78 +567,60 @@ async def list_meetings(
     current_user: User = Depends(deps.get_current_user),
     page: int = Query(1, ge=1),
     limit: int = Query(12, ge=1, le=100),
+    timeframe: str = Query("all"),  # Default to 'all' to match dashboard total count
     show_past: bool = Query(False),
-    show_upcoming: bool = Query(True),
+    show_upcoming: bool = Query(False),
     status_id: UUID = Query(None),
     search: str = Query(None),
     is_recurring: bool = Query(None),
-    include_recurring: bool = Query(False),
+    include_recurring: bool = Query(True),  # Include recurring by default to match dashboard
     sort_by: str = Query("meeting_date"),
     sort_order: str = Query("desc"),
 ):
     """
     List meetings accessible to user.
-    
-    ✅ NEW: Department-based filtering
-    - Users see unrestricted meetings
-    - Users see restricted meetings if they're in that department
-    - Participants can see restricted meetings (even if not in department)
+    Uses exact same access logic as /stats endpoint.
     """
-    
     try:
         async def fetch_meetings():
             skip = (page - 1) * limit
             today = date.today()
             
-            # Build date filter
+            # ========== DATE / TIMEFRAME FILTER ==========
             date_conditions = []
-            if show_upcoming:
+            if timeframe == "upcoming" or (show_upcoming and not show_past):
                 date_conditions.append(Meeting.meeting_date >= today)
-            if show_past:
+            elif timeframe == "past" or (show_past and not show_upcoming):
                 date_conditions.append(Meeting.meeting_date < today)
-            
-            # ========== DEPARTMENT-BASED ACCESS FILTER ==========
-            # Get all departments user belongs to
-            from app.models.meetings.user_department import UserDepartment
-            
-            user_dept_result = await db.execute(
-                select(UserDepartment.department_id).where(
-                    UserDepartment.user_id == current_user.id,
-                    UserDepartment.status == 'active'
-                )
-            )
-            user_department_ids = [row[0] for row in user_dept_result.fetchall()]
+            # If timeframe == "all", date_conditions remains empty
             
             # BASE CONDITIONS
             base_conditions = [
                 Meeting.is_active == True,
             ]
             
-            # ========== ACCESS FILTER ==========
-            # User can see:
-            # 1. Unrestricted meetings (restricted_department_id IS NULL)
-            # 2. Restricted meetings where they are in the department
-            # 3. Any meeting where they are a participant
-            
+            # ========== UNIFIED ACCESS FILTER (MATCHES DASHBOARD) ==========
+            # Rule 1: Open meetings are public
+            # Rule 2: Restricted/Private meetings - must be Creator or Participant
             access_filter = or_(
-                # Unrestricted meetings
-                Meeting.restricted_department_id.is_(None),
-                # Restricted meetings where user is in the department
-                Meeting.restricted_department_id.in_(user_department_ids) if user_department_ids else False,
-                # Meetings where user is a participant
-                Meeting.participants.any(
-                    and_(
-                        MeetingParticipant.email == current_user.email,
-                        MeetingParticipant.is_active == True
+                Meeting.visibility == "open",
+                and_(
+                    Meeting.visibility != "open",
+                    or_(
+                        Meeting.created_by_id == current_user.id,
+                        Meeting.participants.any(
+                            and_(
+                                MeetingParticipant.email == current_user.email,
+                                MeetingParticipant.is_active == True
+                            )
+                        )
                     )
-                ),
-                # Meetings created by user
-                Meeting.created_by_id == current_user.id
+                )
             )
             
             base_conditions.append(access_filter)
             
-            # Add other filters
+            # ========== OTHER FILTERS ==========
             if is_recurring is not None:
                 base_conditions.append(Meeting.is_recurring == is_recurring)
             elif not include_recurring:
@@ -677,9 +659,7 @@ async def list_meetings(
             ).where(*base_conditions)
             
             # ========== SORTING ==========
-            if sort_by == "meeting_date":
-                order_col = Meeting.meeting_date
-            elif sort_by == "title":
+            if sort_by == "title":
                 order_col = Meeting.title
             elif sort_by == "created_at":
                 order_col = Meeting.created_at
@@ -709,7 +689,7 @@ async def list_meetings(
             total=total,
             page=page,
             size=limit,
-            pages=(total + limit - 1) // limit
+            pages=(total + limit - 1) // limit if total > 0 else 1
         )
         
     except Exception as e:
@@ -718,7 +698,6 @@ async def list_meetings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch meetings"
         )
- 
 
    
 @router.post("/", response_model=MeetingCreateResponse, status_code=status.HTTP_201_CREATED)

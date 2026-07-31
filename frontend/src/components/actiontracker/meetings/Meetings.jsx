@@ -36,8 +36,7 @@ import AddActionDialog from './components/AddActionDialog';
 const STORAGE_KEYS = {
   SELECTED_TAB: 'meetings_selected_tab',
   VIEW_MODE: 'meetings_view_mode',
-  SHOW_UPCOMING: 'meetings_show_upcoming',
-  SHOW_PAST: 'meetings_show_past',
+  TIMEFRAME_FILTER: 'meetings_timeframe_filter',
   STATUS_FILTER: 'meetings_status_filter',
   SEARCH_TERM: 'meetings_search_term',
   CURRENT_PAGE: 'meetings_current_page',
@@ -78,9 +77,6 @@ const Meetings = () => {
   const isDarkMode = theme.palette.mode === 'dark';
   const scrollContainerRef = useRef(null);
   
-  // Use dark mode colors
-  const dm = isDarkMode ? DARK_MODE : {};
-  
   // ==================== REDUX SELECTORS ====================
   const statusOptions = useSelector(selectMeetingStatusOptions);
   
@@ -97,6 +93,10 @@ const Meetings = () => {
   
   const [statusFilter, setStatusFilter] = useState(() => {
     return localStorage.getItem(STORAGE_KEYS.STATUS_FILTER) || 'all';
+  });
+
+  const [timeframeFilter, setTimeframeFilter] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.TIMEFRAME_FILTER) || 'upcoming';
   });
   
   const [page, setPage] = useState(() => {
@@ -126,16 +126,6 @@ const Meetings = () => {
     return saved ? parseInt(saved) : 0;
   });
   
-  const [showUpcoming, setShowUpcoming] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SHOW_UPCOMING);
-    return saved !== null ? saved === 'true' : true;
-  });
-  
-  const [showPast, setShowPast] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SHOW_PAST);
-    return saved !== null ? saved === 'true' : false;
-  });
-  
   const [addActionDialogOpen, setAddActionDialogOpen] = useState(false);
   const [selectedMeetingForAction, setSelectedMeetingForAction] = useState(null);
   const [minutes, setMinutes] = useState([]);
@@ -144,7 +134,7 @@ const Meetings = () => {
   const [creatingAction, setCreatingAction] = useState(false);
 
   // ==================== COMPUTED VALUES ====================
-  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || showPast || !showUpcoming;
+  const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || timeframeFilter !== 'upcoming';
   const totalPages = Math.ceil((pagination.total || 0) / rowsPerPage);
   const regularMeetingsCount = pagination.total ?? meetings.length;
   const recurringMeetingsCount = recurringMeetings.length;
@@ -152,20 +142,19 @@ const Meetings = () => {
   const activeFilterCount = [
     searchTerm ? 1 : 0,
     statusFilter !== 'all' ? 1 : 0,
-    !showUpcoming ? 1 : 0,
-    showPast ? 1 : 0
+    timeframeFilter !== 'upcoming' ? 1 : 0
   ].reduce((a, b) => a + b, 0);
 
   // ==================== HELPER FUNCTIONS ====================
   const getStatusLabel = useCallback((statusId) => {
     if (!statusId) return 'Unknown';
-    const status = statusOptions.find(s => s.id === statusId);
-    return status?.name || status?.short_name || 'Unknown';
+    const status = statusOptions.find(s => s.id === statusId || s.value === statusId || s.short_name === statusId);
+    return status?.name || status?.label || status?.short_name || 'Unknown';
   }, [statusOptions]);
 
   const getStatusColor = useCallback((statusId) => {
     if (!statusId) return 'default';
-    const status = statusOptions.find(s => s.id === statusId);
+    const status = statusOptions.find(s => s.id === statusId || s.value === statusId || s.short_name === statusId);
     return status?.color || 'default';
   }, [statusOptions]);
 
@@ -206,14 +195,17 @@ const Meetings = () => {
   const loadMeetings = useCallback(async (params = {}) => {
     try {
       setLoading(true);
+
+      const currentTimeframe = params.timeframe || timeframeFilter;
       
       const queryParams = {
         page: params.page || page,
         limit: params.limit || rowsPerPage,
         sort_by: 'meeting_date',
         sort_order: 'desc',
-        show_upcoming: params.show_upcoming !== undefined ? params.show_upcoming : showUpcoming,
-        show_past: params.show_past !== undefined ? params.show_past : showPast,
+        timeframe: currentTimeframe,
+        show_upcoming: currentTimeframe === 'upcoming' || currentTimeframe === 'all',
+        show_past: currentTimeframe === 'past' || currentTimeframe === 'all',
       };
       
       if (params.search !== undefined) queryParams.search = params.search;
@@ -240,7 +232,7 @@ const Meetings = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, showUpcoming, showPast, searchTerm, statusFilter]);
+  }, [page, rowsPerPage, timeframeFilter, searchTerm, statusFilter]);
 
   const loadRecurringMeetings = useCallback(async () => {
     try {
@@ -291,13 +283,8 @@ const Meetings = () => {
     setPage(1);
   };
   
-  const handleShowUpcomingChange = (value) => {
-    setShowUpcoming(value);
-    setPage(1);
-  };
-  
-  const handleShowPastChange = (value) => {
-    setShowPast(value);
+  const handleTimeframeFilterChange = (value) => {
+    setTimeframeFilter(value);
     setPage(1);
   };
   
@@ -316,8 +303,7 @@ const Meetings = () => {
   const handleClearFilters = () => {
     setSearchTerm('');
     setStatusFilter('all');
-    setShowUpcoming(true);
-    setShowPast(false);
+    setTimeframeFilter('upcoming');
     setPage(1);
     meetingsAPI.clearCache();
   };
@@ -418,12 +404,8 @@ const Meetings = () => {
   }, [viewMode, saveToLocalStorage]);
   
   useEffect(() => {
-    saveToLocalStorage(STORAGE_KEYS.SHOW_UPCOMING, showUpcoming);
-  }, [showUpcoming, saveToLocalStorage]);
-  
-  useEffect(() => {
-    saveToLocalStorage(STORAGE_KEYS.SHOW_PAST, showPast);
-  }, [showPast, saveToLocalStorage]);
+    saveToLocalStorage(STORAGE_KEYS.TIMEFRAME_FILTER, timeframeFilter);
+  }, [timeframeFilter, saveToLocalStorage]);
   
   useEffect(() => {
     if (statusFilter !== 'all') {
@@ -460,7 +442,7 @@ const Meetings = () => {
       loadMeetings({ page, limit: rowsPerPage });
     }, 300);
     return () => clearTimeout(timeoutId);
-  }, [page, searchTerm, statusFilter, rowsPerPage, showUpcoming, showPast, loadMeetings]);
+  }, [page, searchTerm, statusFilter, rowsPerPage, timeframeFilter, loadMeetings]);
 
   useEffect(() => {
     if (!loading && meetings.length > 0) {
@@ -639,7 +621,6 @@ const Meetings = () => {
             })
           }}>
             {isMobile ? (
-              // Mobile Filters
               <>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Box sx={{ flex: 1, position: 'relative' }}>
@@ -668,12 +649,6 @@ const Meetings = () => {
                           '& .MuiOutlinedInput-notchedOutline': {
                             borderColor: isDarkMode ? DARK_MODE.border : undefined,
                           },
-                          '&:hover .MuiOutlinedInput-notchedOutline': {
-                            borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : undefined,
-                          },
-                          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                            borderColor: isDarkMode ? DARK_MODE.primary : undefined,
-                          }
                         }
                       }}
                     />
@@ -734,12 +709,7 @@ const Meetings = () => {
                         label={`Search: ${searchTerm}`}
                         size="small"
                         onDelete={() => handleSearchTermChange('')}
-                        sx={{ 
-                          height: 22, 
-                          fontSize: '0.7rem',
-                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
-                          color: isDarkMode ? DARK_MODE.text : undefined,
-                        }}
+                        sx={{ height: 22, fontSize: '0.7rem' }}
                       />
                     )}
                     {statusFilter !== 'all' && (
@@ -751,41 +721,21 @@ const Meetings = () => {
                         sx={{ height: 22, fontSize: '0.7rem' }}
                       />
                     )}
-                    {!showUpcoming && (
+                    {timeframeFilter !== 'upcoming' && (
                       <Chip 
-                        label="Hide Upcoming"
+                        label={timeframeFilter === 'past' ? 'Past Meetings' : 'All Meetings'}
                         size="small"
-                        onDelete={() => handleShowUpcomingChange(true)}
-                        sx={{ 
-                          height: 22, 
-                          fontSize: '0.7rem',
-                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
-                          color: isDarkMode ? DARK_MODE.text : undefined,
-                        }}
-                      />
-                    )}
-                    {showPast && (
-                      <Chip 
-                        label="Show Past"
-                        size="small"
-                        onDelete={() => handleShowPastChange(false)}
-                        sx={{ 
-                          height: 22, 
-                          fontSize: '0.7rem',
-                          bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : undefined,
-                          color: isDarkMode ? DARK_MODE.text : undefined,
-                        }}
-                      />
-                    )}
-                    {hasActiveFilters && (
-                      <Chip 
-                        label="Clear All"
-                        size="small"
-                        color="error"
-                        onClick={handleClearFilters}
+                        onDelete={() => handleTimeframeFilterChange('upcoming')}
                         sx={{ height: 22, fontSize: '0.7rem' }}
                       />
                     )}
+                    <Chip 
+                      label="Clear All"
+                      size="small"
+                      color="error"
+                      onClick={handleClearFilters}
+                      sx={{ height: 22, fontSize: '0.7rem' }}
+                    />
                   </Box>
                 )}
               </>
@@ -796,10 +746,8 @@ const Meetings = () => {
                 statusFilter={statusFilter}
                 setStatusFilter={handleStatusFilterChange}
                 statusOptions={statusOptions}
-                showUpcoming={showUpcoming}
-                setShowUpcoming={handleShowUpcomingChange}
-                showPast={showPast}
-                setShowPast={handleShowPastChange}
+                timeframeFilter={timeframeFilter}
+                setTimeframeFilter={handleTimeframeFilterChange}
                 viewMode={viewMode}
                 setViewMode={setViewMode}
                 onClearFilters={handleClearFilters}
@@ -1031,10 +979,8 @@ const Meetings = () => {
         statusOptions={statusOptions}
         searchTerm={searchTerm}
         setSearchTerm={handleSearchTermChange}
-        showUpcoming={showUpcoming}
-        setShowUpcoming={handleShowUpcomingChange}
-        showPast={showPast}
-        setShowPast={handleShowPastChange}
+        timeframeFilter={timeframeFilter}
+        setTimeframeFilter={handleTimeframeFilterChange}
         onClearFilters={handleClearFilters}
         activeFilterCount={activeFilterCount}
         isDarkMode={isDarkMode}

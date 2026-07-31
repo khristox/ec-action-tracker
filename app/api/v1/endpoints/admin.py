@@ -31,26 +31,59 @@ async def get_users(
     limit: int = Query(100, ge=1, le=100),
     active_only: bool = Query(True),
     is_active: Optional[bool] = Query(None),
+    role: Optional[str] = Query(None),
+    is_superuser: Optional[bool] = Query(None),
+    department_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     include_departments: bool = Query(True),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_admin),
 ) -> List[UserResponse]:
-    """Get all users (admin only)"""
+    """Get all users (admin only) with optional filtering"""
     from asyncio.log import logger
 
-    filter_active = is_active if is_active is not None else active_only
+    query = select(User)
 
-    query = select(User).options(selectinload(User.roles))
+    # 1. Active Status Filter
+    if is_active is not None:
+        query = query.where(User.is_active.is_(is_active))
+    elif active_only:
+        query = query.where(User.is_active.is_(True))
 
-    if include_departments:
-        query = query.options(
-            selectinload(User.user_departments).selectinload(UserDepartment.department)
-        )
+    # 2. Superuser Filter
+    if is_superuser is not None:
+        query = query.where(User.is_superuser.is_(is_superuser))
 
-    if filter_active:
-        query = query.where(User.is_active == True)
+    # 3. Role Filter (Ignore 'all')
+    if role and role.lower() != "all":
+        if role.lower() == "none":
+            # Match users with NO roles assigned
+            query = query.where(~User.roles.any())
+        else:
+            # Match users with specific role code
+            query = query.where(User.roles.any(Role.code == role))
 
+    # 4. Department Filter (Ignore 'all')
+    if department_id and department_id.lower() != "all":
+        if department_id.lower() == "none":
+            # Match users with NO active department assignments
+            query = query.where(~User.user_departments.any(UserDepartment.status == "active"))
+        else:
+            try:
+                dept_uuid = uuid.UUID(department_id)
+                query = query.where(
+                    User.user_departments.any(
+                        (UserDepartment.department_id == dept_uuid) & 
+                        (UserDepartment.status == "active")
+                    )
+                )
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid department ID format"
+                )
+
+    # 5. Search Filter
     if search and len(search.strip()) >= 2:
         t = f"%{search.strip()}%"
         query = query.where(or_(
@@ -62,31 +95,49 @@ async def get_users(
             func.concat(User.first_name, ' ', User.last_name).ilike(t)
         ))
 
-    query = query.offset(skip).limit(limit).order_by(User.created_at.desc())
+    # 6. Eager Loading (Eager loads linked tables without affecting WHERE filtering)
+    query = query.options(selectinload(User.roles))
+    if include_departments:
+        query = query.options(
+            selectinload(User.user_departments).selectinload(UserDepartment.department)
+        )
+
+    # Ordering & Pagination
+    query = query.order_by(User.created_at.desc()).offset(skip).limit(limit)
+
+
+    # DEBUG: Print the generated SQL query with bound parameters
+    # compiled_query = query.compile(
+    #     dialect=db.bind.dialect, 
+    #     compile_kwargs={"literal_binds": True}
+    # )
+    # print(f"\n--- [DEBUG SQL QUERY] ---\n{compiled_query}\n-------------------------\n")
+    # logger.info(f"Generated SQL: {compiled_query}")
+    
 
     result = await db.execute(query)
     users = result.scalars().all()
-    
+
     logger.info(f"Admin {current_user.username} fetched {len(users)} users")
 
     return [
         UserResponse(
-            id=str(u.id),  # ✅ Convert UUID to string
+            id=str(u.id),
             email=u.email,
             username=u.username,
-            first_name=u.first_name,
-            last_name=u.last_name,
-            middle_name=u.middle_name,
-            phone=u.phone,
+            first_name=u.first_name or "",
+            last_name=u.last_name or "",
+            middle_name=getattr(u, "middle_name", "") or "",
+            phone=u.phone or "",
             is_active=u.is_active,
             is_verified=u.is_verified,
             is_superuser=u.is_superuser,
-            roles=[r.code for r in u.roles],
+            roles=[r.code for r in u.roles] if u.roles else [],
             created_at=u.created_at,
             updated_at=u.updated_at,
             departments=[
                 DepartmentInfo(
-                    id=str(ud.department.id),  # ✅ Convert UUID to string
+                    id=str(ud.department.id),
                     name=ud.department.name,
                     code=ud.department.department_code,
                     role=ud.role,
@@ -94,11 +145,10 @@ async def get_users(
                 )
                 for ud in u.user_departments
                 if ud.department and ud.status == "active"
-            ] if include_departments else []
+            ] if include_departments and u.user_departments else []
         )
         for u in users
     ]
-
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_by_admin(

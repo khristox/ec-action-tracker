@@ -102,10 +102,10 @@ async def get_dashboard_stats(
 ):
     """
     Get all dashboard statistics using AsyncSession logic.
-    Filters:
-    1. Open meetings
-    2. Restricted meetings where user is the creator AND belongs to the restricted department via their roles
-    3. Meetings where user is listed as a participant
+    Access Controls:
+    1. Open meetings: Accessible to everyone.
+    2. Restricted meetings: Accessible if the user is the creator OR a participant.
+    Filters out soft-deleted/inactive meetings (is_active == False).
     """
     try:
         user_id = current_user.id
@@ -114,69 +114,53 @@ async def get_dashboard_stats(
         target_year = year or now.year
         target_month = month or now.month
 
-        # Extract department IDs from current user's roles
-        # Adjust 'department_id' attribute name on Role if named differently in your schema
-        user_role_dept_ids = [
-            role.department_id for role in current_user.roles if getattr(role, "department_id", None) is not None
-        ]
-
         # -------------------------------------------------------------
-        # BASE ACCESS RULE (1, 2, or 3)
+        # ACCESS CONDITIONS & SOFT DELETE FILTER
         # -------------------------------------------------------------
-        access_conditions = [
-            # 1. Meetings which are open
+        access_filter = or_(
+            # Rule 1: Open meetings are public to all users
             Meeting.visibility == "open",
-            
-            # 3. All meetings where the user is a participant
-            MeetingParticipant.email == user_email
-        ]
 
-        # 2. Meetings restricted AND user belongs to that department under roles AND is creator
-        if user_role_dept_ids:
-            access_conditions.append(
-                and_(
-                    Meeting.restricted_department_id.isnot(None),
-                    Meeting.restricted_department_id.in_(user_role_dept_ids),
-                    Meeting.created_by_id == user_id
+            # Rule 2: Restricted meetings - user must be either Creator or Participant
+            and_(
+                Meeting.visibility != "open",
+                or_(
+                    Meeting.created_by_id == user_id,
+                    Meeting.participants.any(
+                        and_(
+                            MeetingParticipant.email == user_email,
+                            MeetingParticipant.is_active == True
+                        )
+                    )
                 )
             )
+        )
 
-        # Base filter applied across all meeting queries
-        base_access_filter = or_(*access_conditions)
+        # Common base conditions applied to ALL meeting queries
+        base_conditions = [
+            Meeting.is_active == True,  # Exclude soft-deleted/inactive meetings
+            access_filter
+        ]
 
         # 1. TOTAL ACCESSIBLE MEETINGS
-        total_stmt = (
-            select(func.count(Meeting.id.distinct()))
-            .outerjoin(MeetingParticipant, Meeting.id == MeetingParticipant.meeting_id)
-            .where(base_access_filter)
-        )
+        total_stmt = select(func.count(Meeting.id)).where(*base_conditions)
         total_meetings = (await db.execute(total_stmt)).scalar() or 0
 
         # 2. THIS MONTH'S MEETINGS
-        month_stmt = (
-            select(func.count(Meeting.id.distinct()))
-            .outerjoin(MeetingParticipant, Meeting.id == MeetingParticipant.meeting_id)
-            .where(
-                and_(
-                    base_access_filter,
-                    extract('year', Meeting.meeting_date) == target_year,
-                    extract('month', Meeting.meeting_date) == target_month
-                )
-            )
+        month_stmt = select(func.count(Meeting.id)).where(
+            *base_conditions,
+            extract('year', Meeting.meeting_date) == target_year,
+            extract('month', Meeting.meeting_date) == target_month
         )
         meetings_this_month = (await db.execute(month_stmt)).scalar() or 0
 
         # 3. UPCOMING MEETINGS (Next 5)
         upcoming_stmt = (
             select(Meeting)
-            .outerjoin(MeetingParticipant, Meeting.id == MeetingParticipant.meeting_id)
             .where(
-                and_(
-                    base_access_filter,
-                    Meeting.meeting_date >= now
-                )
+                *base_conditions,
+                Meeting.meeting_date >= now
             )
-            .group_by(Meeting.id)
             .order_by(Meeting.meeting_date.asc())
             .limit(5)
         )

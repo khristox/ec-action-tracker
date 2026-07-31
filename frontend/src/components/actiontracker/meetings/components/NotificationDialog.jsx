@@ -1,5 +1,5 @@
 // src/components/meetings/components/NotificationDialog.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -22,7 +22,7 @@ import {
   Divider
 } from '@mui/material';
 import {
-  Close as Close,
+  Close as CloseIcon,
   Notifications as NotificationsIcon,
   Email as EmailIcon,
   WhatsApp as WhatsAppIcon,
@@ -33,67 +33,102 @@ import {
 } from '@mui/icons-material';
 import { COLORS } from '../styles/colors';
 
-export const NotificationDialog = ({ open, onClose, meeting, participants, onSend }) => {
+// Security Constants & Whitelists
+const ALLOWED_CHANNELS = ['email', 'whatsapp', 'sms'];
+const MAX_MESSAGE_LENGTH = 1000;
+
+export const NotificationDialog = ({ open, onClose, meeting, participants = [], onSend }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isDarkMode = theme.palette.mode === 'dark';
-  
+
   const [selectedParticipants, setSelectedParticipants] = useState([]);
   const [notificationType, setNotificationType] = useState(['email']);
   const [customMessage, setCustomMessage] = useState('');
   const [sending, setSending] = useState(false);
-  const [selectAll, setSelectAll] = useState(false);
 
-  // Get theme-based colors
+  // Theme-based colors
   const primaryMain = theme.palette.primary.main || COLORS.primary;
   const primaryDark = theme.palette.primary.dark || COLORS.primaryDark;
   const secondaryMain = theme.palette.secondary?.main || COLORS.secondary;
-  
-  // Dialog background based on mode
+
   const dialogBg = isDarkMode 
     ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
     : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)';
 
-  // Reset form when dialog opens
+  // Sanitize input participant IDs
+  const validParticipantIds = useMemo(() => {
+    if (!Array.isArray(participants)) return [];
+    return participants
+      .map((p) => p?.id)
+      .filter((id) => id !== undefined && id !== null);
+  }, [participants]);
+
+  // Reset form when dialog opens/closes
   useEffect(() => {
-    if (open && participants) {
+    if (open) {
       setSelectedParticipants([]);
       setNotificationType(['email']);
       setCustomMessage('');
-      setSelectAll(false);
     }
-  }, [open, participants]);
+  }, [open]);
 
-  // Handle select all
-  useEffect(() => {
-    if (selectAll && participants) {
-      setSelectedParticipants(participants.map(p => p.id));
-    } else if (!selectAll && participants) {
+  // Derived state for Select All checkbox
+  const isAllSelected = useMemo(() => {
+    return (
+      validParticipantIds.length > 0 &&
+      selectedParticipants.length === validParticipantIds.length
+    );
+  }, [selectedParticipants, validParticipantIds]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
       setSelectedParticipants([]);
+    } else {
+      setSelectedParticipants([...validParticipantIds]);
     }
-  }, [selectAll, participants]);
+  };
 
-  // Update selectAll when selections change
-  useEffect(() => {
-    if (participants && participants.length > 0) {
-      setSelectAll(selectedParticipants.length === participants.length);
-    }
-  }, [selectedParticipants, participants]);
+  const handleToggleParticipant = (id) => {
+    if (!id) return;
+    setSelectedParticipants((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleChannel = (channelId) => {
+    if (!ALLOWED_CHANNELS.includes(channelId)) return; // Whitelist check
+    setNotificationType((prev) =>
+      prev.includes(channelId)
+        ? prev.filter((t) => t !== channelId)
+        : [...prev, channelId]
+    );
+  };
 
   const handleSend = async () => {
+    if (sending || selectedParticipants.length === 0 || notificationType.length === 0) {
+      return;
+    }
+
     setSending(true);
+
     try {
-      await onSend({
+      // 1. Sanitize payload attributes strictly before sending
+      const sanitizedMessage = customMessage.trim().slice(0, MAX_MESSAGE_LENGTH);
+      
+      const sanitizedChannels = notificationType.filter((t) =>
+        ALLOWED_CHANNELS.includes(t)
+      );
+
+      // 2. Strip non-primitive payload references
+      const payload = {
         participant_ids: selectedParticipants,
-        notification_type: notificationType,
-        custom_message: customMessage
-      });
-      // Reset form after successful send
-      setSelectedParticipants([]);
-      setNotificationType(['email']);
-      setCustomMessage('');
-      setSelectAll(false);
-      onClose();
+        notification_type: sanitizedChannels,
+        custom_message: sanitizedMessage
+      };
+
+      await onSend(payload);
+      handleClose();
     } catch (error) {
       console.error('Failed to send notifications:', error);
     } finally {
@@ -102,16 +137,15 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
   };
 
   const handleClose = () => {
-    // Reset form when closing
+    if (sending) return; // Prevent closing mid-in-flight request
     setSelectedParticipants([]);
     setNotificationType(['email']);
     setCustomMessage('');
-    setSelectAll(false);
     onClose();
   };
 
   const getChannelColor = (type) => {
-    switch(type) {
+    switch (type) {
       case 'email': return '#3b82f6';
       case 'whatsapp': return '#25D366';
       case 'sms': return '#f59e0b';
@@ -122,6 +156,8 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
   const formatDateTime = (dateStr, timeStr) => {
     if (!dateStr) return 'Date TBD';
     const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+
     const formattedDate = date.toLocaleDateString('en-GB', { 
       day: '2-digit', 
       month: 'short', 
@@ -130,11 +166,13 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
     
     if (timeStr) {
       const time = new Date(timeStr);
-      const formattedTime = time.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-      return `${formattedDate} at ${formattedTime}`;
+      if (!isNaN(time.getTime())) {
+        const formattedTime = time.toLocaleTimeString([], { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        });
+        return `${formattedDate} at ${formattedTime}`;
+      }
     }
     
     return formattedDate;
@@ -160,7 +198,6 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
         }
       }}
     >
-      {/* Header with Gradient Accent */}
       <DialogTitle sx={{ p: 3, pb: 2, position: 'relative' }}>
         <Box sx={{
           position: 'absolute',
@@ -189,20 +226,20 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
             </Box>
           </Stack>
           <IconButton 
-            onClick={handleClose} 
+            onClick={handleClose}
+            disabled={sending}
             sx={{ 
               bgcolor: alpha(theme.palette.action.active, isDarkMode ? 0.1 : 0.05),
               '&:hover': { bgcolor: alpha(theme.palette.action.active, isDarkMode ? 0.2 : 0.1) }
             }}
           >
-            <Close fontSize="small" />
+            <CloseIcon fontSize="small" />
           </IconButton>
         </Stack>
       </DialogTitle>
       
       <DialogContent sx={{ p: 3 }}>
         <Stack spacing={4}>
-          {/* Meeting Info Summary */}
           {meeting && (
             <Paper 
               variant="outlined" 
@@ -227,7 +264,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
             </Paper>
           )}
 
-          {/* Delivery Methods */}
+          {/* Broadcast Channels */}
           <Box>
             <Typography 
               variant="overline" 
@@ -256,9 +293,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
                     key={type.id}
                     icon={type.icon}
                     label={type.label}
-                    onClick={() => setNotificationType(prev => 
-                      isActive ? prev.filter(t => t !== type.id) : [...prev, type.id]
-                    )}
+                    onClick={() => handleToggleChannel(type.id)}
                     sx={{ 
                       borderRadius: '12px',
                       height: '40px',
@@ -284,7 +319,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
             </Stack>
           </Box>
 
-          {/* Participant List */}
+          {/* Participants */}
           <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
               <Typography 
@@ -298,10 +333,11 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
               >
                 Recipients ({selectedParticipants.length})
               </Typography>
-              {participants && participants.length > 0 && (
+              {validParticipantIds.length > 0 && (
                 <Button
                   size="small"
-                  onClick={() => setSelectAll(!selectAll)}
+                  onClick={handleToggleSelectAll}
+                  disabled={sending}
                   sx={{ 
                     textTransform: 'none', 
                     fontSize: '0.75rem',
@@ -309,7 +345,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
                     color: primaryMain
                   }}
                 >
-                  {selectAll ? 'Deselect All' : 'Select All'}
+                  {isAllSelected ? 'Deselect All' : 'Select All'}
                 </Button>
               )}
             </Box>
@@ -321,74 +357,62 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
                 borderRadius: 3,
                 bgcolor: isDarkMode ? alpha('#0f172a', 0.6) : alpha('#ffffff', 0.6),
                 borderColor: alpha(theme.palette.divider, 0.1),
-                overflow: 'auto',
-                '&::-webkit-scrollbar': {
-                  width: '6px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  background: alpha(theme.palette.divider, 0.1),
-                  borderRadius: '3px',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  background: alpha(theme.palette.divider, 0.3),
-                  borderRadius: '3px',
-                  '&:hover': {
-                    background: alpha(theme.palette.divider, 0.5),
-                  }
-                }
+                overflow: 'auto'
               }}
             >
               {participants?.length > 0 ? (
-                participants.map((p, index) => (
-                  <React.Fragment key={p.id}>
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      sx={{ 
-                        p: 2, 
-                        transition: 'background 0.2s',
-                        '&:hover': { 
-                          bgcolor: alpha(primaryMain, isDarkMode ? 0.1 : 0.05),
-                          cursor: 'pointer'
-                        }
-                      }}
-                      onClick={() => setSelectedParticipants(prev => 
-                        prev.includes(p.id) ? prev.filter(i => i !== p.id) : [...prev, p.id]
-                      )}
-                    >
-                      <Checkbox
-                        checked={selectedParticipants.includes(p.id)}
+                participants.map((p, index) => {
+                  const isSelected = selectedParticipants.includes(p.id);
+                  return (
+                    <React.Fragment key={p.id || index}>
+                      <Stack
+                        direction="row"
+                        alignItems="center"
                         sx={{ 
-                          color: alpha(theme.palette.text.primary, 0.3),
-                          '&.Mui-checked': { color: primaryMain }
+                          p: 2, 
+                          transition: 'background 0.2s',
+                          '&:hover': { 
+                            bgcolor: alpha(primaryMain, isDarkMode ? 0.1 : 0.05),
+                            cursor: 'pointer'
+                          }
                         }}
-                      />
-                      <Avatar sx={{ 
-                        width: 36, 
-                        height: 36, 
-                        fontSize: '0.9rem', 
-                        bgcolor: alpha(primaryMain, isDarkMode ? 0.2 : 0.1), 
-                        color: primaryMain 
-                      }}>
-                        {p.name?.[0] || p.full_name?.[0] || p.email?.[0] || <PersonIcon fontSize="small" />}
-                      </Avatar>
-                      <Box sx={{ ml: 2, flex: 1 }}>
-                        <Typography variant="body2" fontWeight={700} sx={{ color: isDarkMode ? '#e2e8f0' : '#1e293b' }}>
-                          {p.name || p.full_name || p.email?.split('@')[0] || 'Unnamed Participant'}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {p.email || p.phone || 'No contact info'}
-                        </Typography>
-                      </Box>
-                      {selectedParticipants.includes(p.id) && (
-                        <CheckCircleIcon sx={{ fontSize: 18, color: primaryMain }} />
+                        onClick={() => handleToggleParticipant(p.id)}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          disabled={sending}
+                          sx={{ 
+                            color: alpha(theme.palette.text.primary, 0.3),
+                            '&.Mui-checked': { color: primaryMain }
+                          }}
+                        />
+                        <Avatar sx={{ 
+                          width: 36, 
+                          height: 36, 
+                          fontSize: '0.9rem', 
+                          bgcolor: alpha(primaryMain, isDarkMode ? 0.2 : 0.1), 
+                          color: primaryMain 
+                        }}>
+                          {p.name?.[0] || p.full_name?.[0] || p.email?.[0] || <PersonIcon fontSize="small" />}
+                        </Avatar>
+                        <Box sx={{ ml: 2, flex: 1 }}>
+                          <Typography variant="body2" fontWeight={700} sx={{ color: isDarkMode ? '#e2e8f0' : '#1e293b' }}>
+                            {p.name || p.full_name || p.email?.split('@')[0] || 'Unnamed Participant'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {p.email || p.phone || 'No contact info'}
+                          </Typography>
+                        </Box>
+                        {isSelected && (
+                          <CheckCircleIcon sx={{ fontSize: 18, color: primaryMain }} />
+                        )}
+                      </Stack>
+                      {index < participants.length - 1 && (
+                        <Divider sx={{ borderColor: alpha(theme.palette.divider, 0.1) }} />
                       )}
-                    </Stack>
-                    {index < participants.length - 1 && (
-                      <Divider sx={{ borderColor: alpha(theme.palette.divider, 0.1) }} />
-                    )}
-                  </React.Fragment>
-                ))
+                    </React.Fragment>
+                  );
+                })
               ) : (
                 <Box sx={{ p: 4, textAlign: 'center' }}>
                   <NotificationsIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
@@ -400,7 +424,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
             </Paper>
           </Box>
 
-          {/* Custom Message */}
+          {/* Custom Message Field with Length Constraints */}
           <TextField
             fullWidth
             label="Personalized Message (Optional)"
@@ -409,7 +433,9 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
             rows={3}
             variant="outlined"
             value={customMessage}
-            onChange={(e) => setCustomMessage(e.target.value)}
+            disabled={sending}
+            onChange={(e) => setCustomMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))}
+            helperText={`${customMessage.length}/${MAX_MESSAGE_LENGTH} characters`}
             sx={{ 
               '& .MuiOutlinedInput-root': { 
                 borderRadius: 3,
@@ -419,31 +445,17 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
                   bgcolor: isDarkMode ? alpha('#0f172a', 0.6) : alpha('#ffffff', 0.8),
                   borderColor: primaryMain
                 }
-              },
-              '& .MuiInputLabel-root': {
-                color: 'text.secondary',
-                '&.Mui-focused': {
-                  color: primaryMain
-                }
               }
             }}
           />
         </Stack>
       </DialogContent>
       
-      <DialogActions sx={{ 
-        p: 3, 
-        pt: 2,
-        bgcolor: isDarkMode ? alpha('#0f172a', 0.4) : alpha('#f8fafc', 0.6),
-        borderTop: `1px solid ${alpha(theme.palette.divider, 0.1)}`
-      }}>
+      <DialogActions sx={{ p: 3, pt: 2 }}>
         <Button 
           onClick={handleClose} 
-          sx={{ 
-            color: 'text.secondary', 
-            fontWeight: 600,
-            '&:hover': { bgcolor: alpha(theme.palette.action.active, 0.05) }
-          }}
+          disabled={sending}
+          sx={{ color: 'text.secondary', fontWeight: 600 }}
         >
           Cancel
         </Button>
@@ -459,16 +471,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants, onSen
             fontWeight: 700,
             textTransform: 'none',
             fontSize: '0.9rem',
-            background: `linear-gradient(135deg, ${primaryMain}, ${primaryDark})`,
-            '&:hover': {
-              background: `linear-gradient(135deg, ${primaryDark}, ${primaryMain})`,
-              transform: 'translateY(-1px)',
-              boxShadow: `0 8px 20px ${alpha(primaryMain, 0.3)}`
-            },
-            '&:disabled': {
-              background: alpha(theme.palette.action.disabled, 0.3),
-              color: 'text.disabled'
-            }
+            background: `linear-gradient(135deg, ${primaryMain}, ${primaryDark})`
           }}
         >
           {sending ? 'Sending...' : `Send to ${selectedParticipants.length}`}

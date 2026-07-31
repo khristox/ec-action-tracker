@@ -1,6 +1,7 @@
 // src/components/meetings/MeetingForm/MeetingForm.jsx
 
 import React from 'react';
+import { useSelector } from 'react-redux';
 import { 
   Box, Paper, Stepper, Step, StepLabel, Typography, 
   AppBar, Toolbar, IconButton, Button, CircularProgress,
@@ -14,11 +15,13 @@ import {
   NavigateBefore as NavigateBeforeIcon,
   NavigateNext as NavigateNextIcon,
   CheckCircle as CheckCircleIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  Lock as LockIcon
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 
+import { selectUserPermissions, hasPermission } from '../../../../store/slices/authSlice';
 import { useMeetingForm } from './useMeetingForm';
 import { BasicInfoStep } from './steps/BasicInfoStep';
 import { AccessControlStep } from './steps/AccessControlStep';
@@ -54,6 +57,17 @@ const MeetingForm = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isLight = theme.palette.mode === 'light';
   
+  // --- Auth & Permission Check ---
+  const { user } = useSelector((state) => state.auth);
+  const userPermissions = useSelector(selectUserPermissions);
+  
+  const isAdmin = user?.is_superuser || user?.is_admin || false;
+  const canCreateStandard = hasPermission(userPermissions, 'meeting:create');
+  const canCreateRecurring = hasPermission(userPermissions, 'meeting:create_recurring');
+  
+  // Allowed if admin OR has EITHER meeting:create OR meeting:create_recurring
+  const canCreateMeeting = isAdmin || canCreateStandard || canCreateRecurring;
+
   const {
     formData,
     activeStep,
@@ -257,6 +271,29 @@ const MeetingForm = () => {
             </Box>
           )}
 
+          {/* PERMISSION DENIED WARNING BANNER */}
+          {!canCreateMeeting && (
+            <Alert 
+              severity="error" 
+              variant="filled"
+              icon={<LockIcon fontSize="inherit" />}
+              sx={{ 
+                mb: 2, 
+                borderRadius: 2, 
+                fontWeight: 600,
+                boxShadow: '0 4px 12px rgba(211, 47, 47, 0.25)',
+                flexShrink: 0
+              }}
+              action={
+                <Button color="inherit" size="small" onClick={handleCancel}>
+                  Exit
+                </Button>
+              }
+            >
+              Access Denied: You do not have permission to create meetings. Required permission: <strong>meeting:create</strong> or <strong>meeting:create_recurring</strong>.
+            </Alert>
+          )}
+
           {/* Main Form */}
           <Paper sx={{ 
             p: { xs: 1.5, sm: 2, md: 2.5 }, 
@@ -271,6 +308,9 @@ const MeetingForm = () => {
               ? '0 4px 24px rgba(0, 0, 0, 0.06)'
               : '0 4px 24px rgba(0, 0, 0, 0.4)',
             border: isLight ? 'none' : '1px solid rgba(255,255,255,0.05)',
+            // Visual opacity dimming if user does not have permission
+            opacity: !canCreateMeeting ? 0.6 : 1,
+            pointerEvents: !canCreateMeeting ? 'none' : 'auto', 
           }}>
             {/* Stepper */}
             {!isMobile && (
@@ -496,7 +536,8 @@ const MeetingForm = () => {
                   <Button
                     variant="contained"
                     onClick={handleNext}
-                    disabled={apiLoading || !isStepComplete}
+                    /* Disables button if user lacks permission OR step is incomplete */
+                    disabled={apiLoading || !isStepComplete || !canCreateMeeting}
                     size={isMobile ? 'medium' : 'large'}
                     endIcon={<NavigateNextIcon />}
                     sx={{ 
@@ -535,7 +576,8 @@ const MeetingForm = () => {
                   <Button
                     variant="contained"
                     onClick={handleSubmit}
-                    disabled={apiLoading || isSubmitting}
+                    /* Disables button if user lacks permission OR submitting */
+                    disabled={apiLoading || isSubmitting || !canCreateMeeting}
                     size={isMobile ? 'medium' : 'large'}
                     startIcon={<CheckCircleIcon />}
                     sx={{ 

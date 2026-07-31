@@ -1,5 +1,3 @@
-// src/components/actiontracker/meetings/MeetingsList.jsx
-
 import React, { useEffect, useState, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
@@ -39,6 +37,7 @@ import {
   ViewModule as ViewModuleIcon,
 } from '@mui/icons-material';
 import { fetchMeetings } from '../../../store/slices/actionTracker/meetingSlice';
+import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
 import { COLORS } from './styles/colors';
 import AddActionDialog from './components/AddActionDialog';
 import api from '../../../services/api';
@@ -80,6 +79,7 @@ const MeetingCard = ({
   onClick,
   onAddAction,
   canAddActions,
+  canAddActionsPermission,
 }) => {
   const getStatusInfo = () => {
     if (meeting.status && typeof meeting.status === 'object') {
@@ -138,11 +138,19 @@ const MeetingCard = ({
     }
   };
 
+  const isAddActionEnabled = canAddActions && canAddActionsPermission;
+
   const handleAddActionClick = (e) => {
     e.stopPropagation();
-    if (onAddAction) {
+    if (isAddActionEnabled && onAddAction) {
       onAddAction(meeting);
     }
+  };
+
+  const getTooltipText = () => {
+    if (!canAddActionsPermission) return "You don't have permission to create actions";
+    if (!canAddActions) return "Meeting must be in progress to add actions";
+    return "Add Action Item";
   };
 
   return (
@@ -195,17 +203,17 @@ const MeetingCard = ({
                 letterSpacing: '0.3px',
               }}
             />
-            <Tooltip title={canAddActions ? "Add Action Item" : "Meeting must be in progress to add actions"} placement="top">
+            <Tooltip title={getTooltipText()} placement="top">
               <span>
                 <IconButton
                   size="small"
                   onClick={handleAddActionClick}
-                  disabled={!canAddActions}
+                  disabled={!isAddActionEnabled}
                   sx={{
-                    color: canAddActions ? 'text.secondary' : 'action.disabled',
+                    color: isAddActionEnabled ? 'text.secondary' : 'action.disabled',
                     '&:hover': {
-                      bgcolor: canAddActions ? 'rgba(46, 125, 50, 0.1)' : 'transparent',
-                      color: canAddActions ? '#2e7d32' : 'action.disabled',
+                      bgcolor: isAddActionEnabled ? 'rgba(46, 125, 50, 0.1)' : 'transparent',
+                      color: isAddActionEnabled ? '#2e7d32' : 'action.disabled',
                     }
                   }}
                 >
@@ -274,7 +282,14 @@ const MeetingsList = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { meetings, loading, pagination } = useSelector((state) => state.meetings || { meetings: [], loading: false, pagination: {} });
-  
+  const userPermissions = useSelector(selectUserPermissions);
+  const currentUser = useSelector((state) => state.auth.user);
+
+  // Permissions Checks
+  const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
+  const canCreateMeeting = isAdmin || hasPermission(userPermissions, 'meeting:create');
+  const canCreateAction = isAdmin || hasPermission(userPermissions, 'action:create');
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAnchorEl, setFilterAnchorEl] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -310,11 +325,17 @@ const MeetingsList = () => {
     setPage(1);
   }, [searchTerm, statusFilter]);
 
-  const handleCreateMeeting = () => navigate('/meetings/create');
+  const handleCreateMeeting = () => {
+    if (canCreateMeeting) {
+      navigate('/meetings/create');
+    }
+  };
+  
   const handleViewMeeting = (id) => navigate(`/meetings/${id}`);
 
   // ============ ADD ACTION HANDLERS ============
   const handleAddAction = async (meeting) => {
+    if (!canCreateAction) return;
     
     setSelectedMeetingForAction(meeting);
     setAddActionDialogOpen(true);
@@ -324,76 +345,53 @@ const MeetingsList = () => {
     setLoadingMinutes(true);
     try {
       const response = await api.get(`/action-tracker/meetings/${meeting.id}/minutes`);
-      console.log('Minutes response:', response.data);
       const minutesData = response.data?.items || response.data || [];
       setMinutes(Array.isArray(minutesData) ? minutesData : []);
     } catch (err) {
       console.error('Failed to fetch minutes:', err);
-      // Don't show error - just use empty minutes
       setMinutes([]);
     } finally {
       setLoadingMinutes(false);
     }
   };
 
-const handleSaveAction = async (payload) => {
-  console.log('📤 Sending action payload:', JSON.stringify(payload, null, 2));
-  setCreatingAction(true);
-  setActionError(null);
-  
-  try {
-    // Ensure meeting_id is included
-    const actionPayload = {
-      ...payload,
-      meeting_id: selectedMeetingForAction?.id,
-    };
+  const handleSaveAction = async (payload) => {
+    setCreatingAction(true);
+    setActionError(null);
     
-    // Log the actual request
-    console.log('📤 Final payload to send:', JSON.stringify(actionPayload, null, 2));
-    
-    const response = await api.post('/action-tracker/actions/', actionPayload);
-    console.log('✅ Action created successfully:', response.data);
-    
-    // Show success message
-    setSuccessMessage('Action created successfully!');
-    
-    // Close the dialog
-    setAddActionDialogOpen(false);
-    setSelectedMeetingForAction(null);
-    
-    // Refresh the meetings list
-    dispatch(fetchMeetings({
-      page,
-      limit: rowsPerPage,
-      sortBy: 'meeting_date',
-      sortOrder: 'desc',
-      search: searchTerm || undefined,
-      status: statusFilter !== 'all' ? statusFilter : undefined,
-    }));
-    
-    return response.data;
-  } catch (err) {
-    console.error('❌ Error creating action:', err);
-    
-    // Log the full error response
-    if (err.response) {
-      console.error('📥 Error response data:', err.response.data);
-      console.error('📥 Error response status:', err.response.status);
-      console.error('📥 Error response headers:', err.response.headers);
+    try {
+      const actionPayload = {
+        ...payload,
+        meeting_id: selectedMeetingForAction?.id,
+      };
+      
+      const response = await api.post('/action-tracker/actions/', actionPayload);
+      setSuccessMessage('Action created successfully!');
+      
+      setAddActionDialogOpen(false);
+      setSelectedMeetingForAction(null);
+      
+      dispatch(fetchMeetings({
+        page,
+        limit: rowsPerPage,
+        sortBy: 'meeting_date',
+        sortOrder: 'desc',
+        search: searchTerm || undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+      }));
+      
+      return response.data;
+    } catch (err) {
+      console.error('Error creating action:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || err.message || 'Failed to create action';
+      setActionError(errorMessage);
+      throw err;
+    } finally {
+      setCreatingAction(false);
     }
-    
-    const errorMessage = err.response?.data?.detail || err.response?.data?.message || err.message || 'Failed to create action';
-    setActionError(errorMessage);
-    throw err;
-  } finally {
-    setCreatingAction(false);
-  }
-};
-
+  };
 
   const handleMinuteCreated = async (minuteId) => {
-    console.log('Minute created with ID:', minuteId);
-    // Refresh minutes list
     if (selectedMeetingForAction) {
       try {
         const response = await api.get(`/action-tracker/meetings/${selectedMeetingForAction.id}/minutes`);
@@ -409,7 +407,6 @@ const handleSaveAction = async (payload) => {
   const canAddActions = (meeting) => {
     if (!meeting) return false;
     
-    // Check status from various possible locations
     let status = '';
     if (meeting.status && typeof meeting.status === 'object') {
       status = meeting.status.short_name?.toUpperCase() || '';
@@ -417,9 +414,7 @@ const handleSaveAction = async (payload) => {
       status = meeting.status.toUpperCase();
     }
     
-    // Also check status_id if available
     if (!status && meeting.status_id) {
-      // If we have a status_id but no status string, allow it if meeting is not cancelled or ended
       const isCancelled = meeting.is_cancelled || false;
       const isEnded = meeting.is_ended || false;
       return !isCancelled && !isEnded;
@@ -429,7 +424,6 @@ const handleSaveAction = async (payload) => {
     return allowedStatuses.includes(status);
   };
 
-  // Get unique statuses from meetings for filter
   const getAvailableStatuses = () => {
     const statusSet = new Set();
     meetings.forEach(meeting => {
@@ -463,7 +457,6 @@ const handleSaveAction = async (payload) => {
     setStatusFilter('all');
   };
 
-  // ============ RENDER ============
   if (loading && meetings.length === 0) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
@@ -492,20 +485,26 @@ const handleSaveAction = async (payload) => {
               Manage and track all your scheduled meetings
             </Typography>
           </Box>
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />} 
-            onClick={handleCreateMeeting}
-            sx={{ 
-              borderRadius: 2.5,
-              px: 3,
-              py: 1,
-              fontWeight: 600,
-              textTransform: 'none',
-            }}
-          >
-            Create Meeting
-          </Button>
+
+          <Tooltip title={!canCreateMeeting ? "You do not have permission to create meetings" : ""}>
+            <span>
+              <Button 
+                variant="contained" 
+                startIcon={<AddIcon />} 
+                onClick={handleCreateMeeting}
+                disabled={!canCreateMeeting}
+                sx={{ 
+                  borderRadius: 2.5,
+                  px: 3,
+                  py: 1,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                }}
+              >
+                Create Meeting
+              </Button>
+            </span>
+          </Tooltip>
         </Box>
 
         {/* Success Snackbar */}
@@ -669,7 +668,7 @@ const handleSaveAction = async (payload) => {
                 Clear Filters
               </Button>
             ) : (
-              <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateMeeting}>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateMeeting} disabled={!canCreateMeeting}>
                 Create Meeting
               </Button>
             )}
@@ -683,6 +682,7 @@ const handleSaveAction = async (payload) => {
                   onClick={handleViewMeeting}
                   onAddAction={handleAddAction}
                   canAddActions={canAddActions(meeting)}
+                  canAddActionsPermission={canCreateAction}
                 />
               </Grid>
             ))}
@@ -694,8 +694,14 @@ const handleSaveAction = async (payload) => {
                 ? { label: meeting.status.short_name || meeting.status.name || 'Unknown', color: meeting.status.color || STATUS_COLOR_MAP[meeting.status.short_name?.toUpperCase()] || 'default' }
                 : { label: meeting.status || 'Unknown', color: 'default' };
               
-              const canAdd = canAddActions(meeting);
+              const isAddEnabled = canAddActions(meeting) && canCreateAction;
               
+              const getTooltipMsg = () => {
+                if (!canCreateAction) return "You don't have permission to create actions";
+                if (!canAddActions(meeting)) return "Meeting must be in progress";
+                return "Add Action";
+              };
+
               return (
                 <Box
                   key={meeting.id}
@@ -730,7 +736,7 @@ const handleSaveAction = async (payload) => {
                     <Typography variant="caption" color="text.secondary">
                       {meeting.location_text || 'No location'}
                     </Typography>
-                    <Tooltip title={canAdd ? "Add Action" : "Meeting must be in progress"} placement="top">
+                    <Tooltip title={getTooltipMsg()} placement="top">
                       <span>
                         <IconButton
                           size="small"
@@ -738,9 +744,9 @@ const handleSaveAction = async (payload) => {
                             e.stopPropagation();
                             handleAddAction(meeting);
                           }}
-                          disabled={!canAdd}
+                          disabled={!isAddEnabled}
                           sx={{
-                            color: canAdd ? 'text.secondary' : 'action.disabled',
+                            color: isAddEnabled ? 'text.secondary' : 'action.disabled',
                           }}
                         >
                           <AddIcon fontSize="small" />

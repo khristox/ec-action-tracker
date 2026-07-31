@@ -23,15 +23,14 @@ import {
 } from '../../../../store/slices/actionTracker/meetingSlice';
 
 // ============================================================================
-// Constants - IMPORT FROM AccessControlStep
+// Constants
 // ============================================================================
 
-// Define these here to avoid circular imports
 export const VISIBILITY = {
   DEPARTMENT: 'department',
   OPEN: 'open',
 };
-export const DEFAULT_VISIBILITY = VISIBILITY.DEPARTMENT; // 👈 Department Only is default
+export const DEFAULT_VISIBILITY = VISIBILITY.DEPARTMENT;
 
 // ============================================================================
 // Helper Functions
@@ -189,8 +188,8 @@ export const useMeetingForm = () => {
     title: '',
     description: '',
     meeting_date: null,
-    start_time: null,
-    end_time: null,
+    start_time: null,  // ✅ Stored as HH:MM:SS string
+    end_time: null,    // ✅ Stored as HH:MM:SS string
     location_text: '',
     location_id: null,
     location_details: null,
@@ -210,8 +209,8 @@ export const useMeetingForm = () => {
     statuses: {}
   });
   
-  // Visibility & department - FIXED: Default to Department Only
-  const [visibility, setVisibility] = useState(DEFAULT_VISIBILITY); // 👈 THIS IS THE FIX
+  // Visibility & department
+  const [visibility, setVisibility] = useState(DEFAULT_VISIBILITY);
   const [restrictedDepartmentId, setRestrictedDepartmentId] = useState(null);
   const [restrictedDepartmentName, setRestrictedDepartmentName] = useState('');
   const [gpsEnabled, setGpsEnabled] = useState(false);
@@ -357,15 +356,23 @@ export const useMeetingForm = () => {
         .then(async (meeting) => {
           if (meeting && isMounted.current) {
             const meetingDate = parseDateLocal(meeting.meeting_date);
-            const startTime = parseTime(meeting.start_time);
-            const endTime = parseTime(meeting.end_time);
+            // ✅ Parse to HH:MM:SS strings
+            const startTimeObj = parseTime(meeting.start_time);
+            const endTimeObj = parseTime(meeting.end_time);
+            
+            const startTimeStr = startTimeObj 
+              ? `${String(startTimeObj.getHours()).padStart(2, '0')}:${String(startTimeObj.getMinutes()).padStart(2, '0')}:${String(startTimeObj.getSeconds()).padStart(2, '0')}`
+              : null;
+            const endTimeStr = endTimeObj 
+              ? `${String(endTimeObj.getHours()).padStart(2, '0')}:${String(endTimeObj.getMinutes()).padStart(2, '0')}:${String(endTimeObj.getSeconds()).padStart(2, '0')}`
+              : null;
             
             setFormData({
               title: meeting.title || '',
               description: meeting.description || '',
               meeting_date: meetingDate,
-              start_time: startTime,
-              end_time: endTime,
+              start_time: startTimeStr,  // ✅ HH:MM:SS string
+              end_time: endTimeStr,      // ✅ HH:MM:SS string
               location_text: meeting.location_text || '',
               location_id: meeting.location_id || null,
               location_details: meeting.location_id ? { 
@@ -466,6 +473,7 @@ export const useMeetingForm = () => {
     setFormDirty(true);
   }, []);
 
+  // ✅ UPDATED: Store as HH:MM:SS string
   const handleStartTimeChange = useCallback((time) => {
     if (!time) {
       setFormData(prev => ({ ...prev, start_time: null }));
@@ -473,19 +481,30 @@ export const useMeetingForm = () => {
       return;
     }
 
-    const timeObj = parseTime(time);
-    if (!timeObj) {
-      console.warn('Invalid start time received:', time);
+    let timeObj = time;
+    if (typeof time === 'string') {
+      timeObj = parseTime(time);
+    }
+
+    if (!timeObj || !(timeObj instanceof Date)) {
+      console.warn('Invalid start time:', time);
       return;
     }
 
+    // ✅ Store as HH:MM:SS string
+    const hours = String(timeObj.getHours()).padStart(2, '0');
+    const minutes = String(timeObj.getMinutes()).padStart(2, '0');
+    const seconds = String(timeObj.getSeconds()).padStart(2, '0');
+    const timeString = `${hours}:${minutes}:${seconds}`;
+
     setFormData(prev => ({ 
       ...prev, 
-      start_time: timeObj 
+      start_time: timeString
     }));
     setFormDirty(true);
   }, []);
 
+  // ✅ UPDATED: Store as HH:MM:SS string
   const handleEndTimeChange = useCallback((time) => {
     if (!time) {
       setFormData(prev => ({ ...prev, end_time: null }));
@@ -493,15 +512,25 @@ export const useMeetingForm = () => {
       return;
     }
 
-    const timeObj = parseTime(time);
-    if (!timeObj) {
-      console.warn('Invalid end time received:', time);
+    let timeObj = time;
+    if (typeof time === 'string') {
+      timeObj = parseTime(time);
+    }
+
+    if (!timeObj || !(timeObj instanceof Date)) {
+      console.warn('Invalid end time:', time);
       return;
     }
 
+    // ✅ Store as HH:MM:SS string
+    const hours = String(timeObj.getHours()).padStart(2, '0');
+    const minutes = String(timeObj.getMinutes()).padStart(2, '0');
+    const seconds = String(timeObj.getSeconds()).padStart(2, '0');
+    const timeString = `${hours}:${minutes}:${seconds}`;
+
     setFormData(prev => ({ 
       ...prev, 
-      end_time: timeObj 
+      end_time: timeString
     }));
     setFormDirty(true);
   }, []);
@@ -699,7 +728,6 @@ export const useMeetingForm = () => {
       chairperson_name: chairpersonParticipant?.name || null,
       organization_id: restrictedDepartmentId || null,
       visibility: visibility,
-      //restricted_department_id: visibility === VISIBILITY.DEPARTMENT ? restrictedDepartmentId : null,
       restricted_department_id: restrictedDepartmentId || null,  
       custom_participants: cleanParticipants,
     };

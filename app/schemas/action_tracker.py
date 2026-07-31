@@ -3,7 +3,7 @@
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from typing import Optional, List, Any, Dict, Union
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 
 from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesResponse
@@ -111,6 +111,45 @@ class AttributeResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ==================== Helper Parser Function ====================
+
+def _parse_datetime_field(v: Any) -> Optional[datetime]:
+    """Helper to cleanly parse incoming strings/ISO formats to python datetime"""
+    if not v or v == "" or (isinstance(v, str) and "hh:mm" in v.lower()):
+        return None
+
+    if isinstance(v, datetime):
+        return v
+        
+    if isinstance(v, date):
+        return datetime.combine(v, datetime.min.time())
+
+    if isinstance(v, str):
+        v_clean = v.strip()
+        # 1. Parse ISO 8601 string format (e.g. '2026-07-31T09:00:00.000Z')
+        if "T" in v_clean:
+            try:
+                iso_str = v_clean.replace("Z", "+00:00")
+                return datetime.fromisoformat(iso_str)
+            except ValueError:
+                pass
+
+        # 2. Parse standard 12-hour/24-hour time formats (defaults date to today)
+        time_formats = ("%I:%M %p", "%I:%M:%S %p", "%H:%M:%S", "%H:%M", "%Y-%m-%d")
+        for fmt in time_formats:
+            try:
+                parsed_dt = datetime.strptime(v_clean, fmt)
+                # If only time was parsed, attach today's date
+                if fmt not in ("%Y-%m-%d",):
+                    today = date.today()
+                    return datetime.combine(today, parsed_dt.time())
+                return parsed_dt
+            except ValueError:
+                pass
+
+    return None
+
+
 # ==================== Meeting Schemas ====================
 
 class MeetingBase(ORMBase):
@@ -121,17 +160,24 @@ class MeetingBase(ORMBase):
     location_id: Optional[UUID] = None
     location_text: Optional[str] = Field(None, max_length=500)
     gps_coordinates: Optional[str] = Field(None, max_length=100)
+    
+    # DateTime fields configured to handle parsing safely
     meeting_date: datetime
     start_time: datetime
     end_time: Optional[datetime] = None
+
     agenda: Optional[str] = None
     facilitator: Optional[str] = Field(None, max_length=255)
     chairperson_name: Optional[str] = Field(None, max_length=255)
     status_id: Optional[UUID] = None
     
-    # NEW: Department restriction fields (NO organization_id)
     restricted_department_id: Optional[UUID] = Field(None, description="Department ID for restricted access (when visibility is 'department')")
     visibility: MeetingVisibility = Field(MeetingVisibility.OPEN, description="Meeting visibility: open | department | private")
+
+    @field_validator('meeting_date', 'start_time', 'end_time', mode='before')
+    @classmethod
+    def sanitize_datetime_inputs(cls, v: Any) -> Any:
+        return _parse_datetime_field(v)
 
 
 class MeetingCreate(MeetingBase):
@@ -201,6 +247,11 @@ class MeetingUpdate(ORMBase):
     # Department restriction fields (can be updated)
     restricted_department_id: Optional[UUID] = Field(None, description="Department ID for restricted access")
     visibility: Optional[MeetingVisibility] = Field(None, description="Meeting visibility: open | department | private")
+
+    @field_validator('meeting_date', 'start_time', 'end_time', mode='before')
+    @classmethod
+    def sanitize_datetime_inputs(cls, v: Any) -> Any:
+        return _parse_datetime_field(v)
 
     @field_validator('platform', 'meeting_link', 'meeting_id_online', 'passcode', mode='before')
     @classmethod
@@ -289,9 +340,6 @@ class MeetingListResponse(ORMBase):
     visibility: str = "open"
 
 
-# app/schemas/action_tracker.py
-
-
 class MeetingResponse(MeetingBase):
     """Full detail response with nested relationships and department info"""
     id: UUID
@@ -334,11 +382,8 @@ class MeetingResponse(MeetingBase):
     location_name: Optional[str] = None
     status: Optional[AttributeResponse] = None
     
-    # ========== ADD THESE DEPARTMENT FIELDS ==========
-    # Department ID (the department the meeting belongs to)
+    # Department fields
     department_id: Optional[UUID] = Field(None, description="Department ID the meeting belongs to")
-    
-    # Department display fields
     department_name: Optional[str] = Field(None, description="Department name")
     department_path: Optional[str] = Field(None, description="Department path")
     department_code: Optional[str] = Field(None, description="Department code")
@@ -356,6 +401,8 @@ class MeetingResponse(MeetingBase):
     class Config:
         from_attributes = True
         populate_by_name = True
+
+
 class MeetingPaginationResponse(ORMBase):
     items: List[MeetingListResponse]
     total: int
@@ -435,7 +482,6 @@ class MeetingDocumentBase(ORMBase):
 
 
 class MeetingDocumentCreate(BaseModel):
-    """Schema for creating a meeting document"""
     file_name: str
     title: str
     description: Optional[str] = None
@@ -452,14 +498,11 @@ class MeetingDocumentUpdate(ORMBase):
     is_active: Optional[bool] = None
 
 
-# In app/schemas/action_tracker.py
-
 class MeetingDocumentResponse(BaseModel):
-    """Meeting document response schema"""
     id: UUID
     meeting_id: UUID
     file_name: str
-    file_path: Optional[str] = None  # Made optional
+    file_path: Optional[str] = None
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
     title: Optional[str] = None
@@ -472,7 +515,7 @@ class MeetingDocumentResponse(BaseModel):
     uploaded_at: Optional[datetime] = None
     created_by_id: Optional[UUID] = None
     created_by_name: Optional[str] = None
-    created_at: Optional[datetime] = None  # Made optional
+    created_at: Optional[datetime] = None
     updated_by_id: Optional[UUID] = None
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -488,10 +531,10 @@ class MeetingDocumentResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+
 # ==================== Meeting Status History Schemas ====================
 
 class MeetingStatusHistoryResponse(ORMBase):
-    """Response schema for meeting status history"""
     id: UUID
     meeting_id: UUID
     status_id: Optional[UUID] = None
@@ -539,7 +582,6 @@ class ActionSummary(ORMBase):
 
 
 class MyTaskImplementer(ORMBase):
-    """One person implementing a task. May or may not have a system account."""
     id: UUID
     user_id: Optional[UUID] = None
     is_system_user: bool = False
@@ -550,35 +592,29 @@ class MyTaskImplementer(ORMBase):
 
 
 class MyTaskResponse(ORMBase):
-    # ---- identity ----
     id: UUID
     description: str
     title: Optional[str] = None
 
-    # ---- meeting context ----
     meeting_title: str = ""
     meeting_date: Optional[datetime] = None
 
-    # ---- scheduling ----
     due_date: Optional[datetime] = None
     date_initiated: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
-    # ---- classification ----
     priority: int = 2
     type_of_action: Optional[str] = None
     is_key_action: bool = False
     issue_challenge: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
 
-    # ---- progress ----
     overall_progress_percentage: int = 0
     overall_status_name: Optional[str] = None
     overall_status_id: Optional[UUID] = None
     is_overdue: bool = False
 
-    # ---- assignment ----
     assigned_by_name: Optional[str] = None
     assigned_at: Optional[datetime] = None
     assigned_to_display_name: Optional[str] = None
@@ -587,6 +623,7 @@ class MyTaskResponse(ORMBase):
     @property
     def has_implementers(self) -> bool:
         return bool(self.implementers)
+
 
 # ==================== Notification Schemas ====================
 
@@ -597,7 +634,6 @@ class NotificationType(str, Enum):
 
 
 class NotificationRequest(BaseModel):
-    """Request schema for sending meeting notifications"""
     participant_ids: List[UUID] = Field(..., description="List of participant user IDs")
     notification_type: List[str] = Field(default=["email"], description="Types of notifications to send")
     custom_message: Optional[str] = Field(None, description="Optional custom message to include")
@@ -607,7 +643,6 @@ class NotificationRequest(BaseModel):
 
 
 class NotificationResponse(BaseModel):
-    """Response schema for notification sending"""
     success: bool
     total_participants: int
     sent: int
@@ -620,7 +655,6 @@ class NotificationResponse(BaseModel):
 # ==================== Zoom Meeting Schemas ====================
 
 class ZoomMeetingCreate(BaseModel):
-    """Request schema for creating Zoom meeting"""
     topic: str = Field(..., description="Meeting topic")
     start_time: datetime = Field(..., description="Meeting start time")
     duration: int = Field(60, description="Meeting duration in minutes")
@@ -630,7 +664,6 @@ class ZoomMeetingCreate(BaseModel):
 
 
 class ZoomMeetingResponse(BaseModel):
-    """Response schema for Zoom meeting creation"""
     join_url: str
     id: str
     password: Optional[str] = None
@@ -650,7 +683,6 @@ class MeetingPlatform(str, Enum):
 
 
 class MeetingPlatformInfo(BaseModel):
-    """Schema for meeting platform information"""
     platform: str = Field(..., description="Meeting platform type")
     meeting_link: Optional[str] = None
     meeting_id: Optional[str] = None

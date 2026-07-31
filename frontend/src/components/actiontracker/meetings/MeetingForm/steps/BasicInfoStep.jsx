@@ -65,7 +65,7 @@ const VALIDATION_MESSAGES = {
 };
 
 // ============================================================================
-// Helper Functions - UTC Date Handling
+// Helper Functions
 // ============================================================================
 
 const safeParseDate = (value) => {
@@ -90,11 +90,16 @@ const safeParseDate = (value) => {
   return null;
 };
 
+// ✅ Updated to handle both Date objects and HH:MM:SS strings
 const safeParseTime = (value) => {
   if (!value) return null;
+  
+  // If it's already a Date object, return it
   if (value instanceof Date && !isNaN(value.getTime())) {
     return value;
   }
+  
+  // If it's a HH:MM:SS string, parse it to Date
   if (typeof value === 'string') {
     if (/^\d{2}:\d{2}(:\d{2})?$/.test(value)) {
       const [hours, minutes, seconds = '00'] = value.split(':').map(Number);
@@ -115,7 +120,7 @@ const safeParseTime = (value) => {
 };
 
 // ============================================================================
-// Sub-Components - COMPACT versions with minimal padding
+// Sub-Components
 // ============================================================================
 
 const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) => (
@@ -153,7 +158,6 @@ const SectionHeader = memo(({ icon: Icon, title, status, statusText, tooltip }) 
 
 SectionHeader.displayName = 'SectionHeader';
 
-// COMPACT SectionPaper - minimal padding
 const SectionPaper = ({ children, ...props }) => {
   const theme = useTheme();
   const isLight = theme.palette.mode === 'light';
@@ -185,8 +189,6 @@ const SectionPaper = ({ children, ...props }) => {
   );
 };
 
-// FormTextField - size is "small" by default but can be overridden per-usage
-// via the `size` prop, since `{...props}` is spread after the default below.
 const FormTextField = memo(({ 
   icon: Icon, 
   required = false, 
@@ -311,15 +313,45 @@ export const BasicInfoStep = memo(({
     [formData?.meeting_date]
   );
 
-  const startTimePickerValue = useMemo(
-    () => safeParseTime(formData?.start_time),
-    [formData?.start_time]
-  );
+  // ✅ Updated: Parse HH:MM:SS string to Date for TimePicker
+  const startTimePickerValue = useMemo(() => {
+    if (!formData?.start_time) return null;
+    
+    // If it's already a Date, return it
+    if (formData.start_time instanceof Date) {
+      return formData.start_time;
+    }
+    
+    // If it's a HH:MM:SS string, parse it to Date for display
+    if (typeof formData.start_time === 'string') {
+      const [hours, minutes, seconds = '00'] = formData.start_time.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes, seconds, 0);
+      return date;
+    }
+    
+    return null;
+  }, [formData?.start_time]);
 
-  const endTimePickerValue = useMemo(
-    () => safeParseTime(formData?.end_time),
-    [formData?.end_time]
-  );
+  // ✅ Updated: Parse HH:MM:SS string to Date for TimePicker
+  const endTimePickerValue = useMemo(() => {
+    if (!formData?.end_time) return null;
+    
+    // If it's already a Date, return it
+    if (formData.end_time instanceof Date) {
+      return formData.end_time;
+    }
+    
+    // If it's a HH:MM:SS string, parse it to Date for display
+    if (typeof formData.end_time === 'string') {
+      const [hours, minutes, seconds = '00'] = formData.end_time.split(':').map(Number);
+      const date = new Date();
+      date.setHours(hours, minutes, seconds, 0);
+      return date;
+    }
+    
+    return null;
+  }, [formData?.end_time]);
 
   const scheduleDisplay = useMemo(() => {
     if (!isDateFilled || !isStartTimeFilled) return null;
@@ -427,7 +459,7 @@ export const BasicInfoStep = memo(({
   return (
     <Box sx={{ width: '100%' }}>
       <Stack spacing={1.5}>
-        {/* Meeting Details Section - COMPACT */}
+        {/* Meeting Details Section */}
         <SectionPaper>
           <Stack spacing={1}>
             <SectionHeader
@@ -496,7 +528,7 @@ export const BasicInfoStep = memo(({
           </Stack>
         </SectionPaper>
 
-        {/* Schedule Section - COMPACT */}
+        {/* Schedule Section */}
         <SectionPaper>
           <Stack spacing={1}>
             <SectionHeader
@@ -603,7 +635,7 @@ export const BasicInfoStep = memo(({
               </Grid>
             </Grid>
 
-            {/* Schedule Summary - COMPACT */}
+            {/* Schedule Summary */}
             <Box 
               sx={{ 
                 visibility: scheduleDisplay ? 'visible' : 'hidden',
@@ -631,7 +663,7 @@ export const BasicInfoStep = memo(({
               </Alert>
             </Box>
 
-            {/* Time Validation Warning - COMPACT */}
+            {/* Time Validation Warning */}
             {formData?.start_time && formData?.end_time && (
               (() => {
                 const start = safeParseTime(formData.start_time);
@@ -649,7 +681,7 @@ export const BasicInfoStep = memo(({
           </Stack>
         </SectionPaper>
 
-        {/* Validation Summary - COMPACT */}
+        {/* Validation Summary */}
         {!isFormValid && Object.keys(touched).length > 0 && (
           <Alert 
             severity="info" 

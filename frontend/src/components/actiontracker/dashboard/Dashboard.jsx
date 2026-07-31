@@ -51,6 +51,7 @@ import {
 } from 'chart.js';
 import { Bar, Pie, Line, Doughnut } from 'react-chartjs-2';
 import { format, subDays, eachDayOfInterval, isValid, parseISO, isToday, isFuture, differenceInDays } from 'date-fns';
+import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
 import api from '../../../services/api';
 
 // Register ChartJS components
@@ -86,7 +87,6 @@ const safeFormatDate = (dateValue, formatStr = 'MMM dd, yyyy') => {
 
 // Meeting Status (from backend status field)
 const getMeetingStatusConfig = (status) => {
-  // Handle both object and string status
   let statusCode = '';
   let statusShortName = '';
   let statusName = '';
@@ -114,7 +114,6 @@ const getMeetingStatusConfig = (status) => {
     'postponed': { label: 'Postponed', color: '#8b5cf6', bgAlpha: 0.1, icon: <PendingIcon sx={{ fontSize: 12 }} /> }
   };
   
-  // Try to match by code first
   if (configs[statusCode]) return configs[statusCode];
   if (configs[statusShortName]) return configs[statusShortName];
   if (configs[statusName?.toLowerCase()]) return configs[statusName?.toLowerCase()];
@@ -126,8 +125,6 @@ const getMeetingStatusConfig = (status) => {
     icon: <EventIcon sx={{ fontSize: 12 }} />
   };
 };
-
-
 
 // Participant Attendance Status
 const getAttendanceStatusConfig = (status) => {
@@ -226,7 +223,7 @@ const StatCard = ({ title, value, icon, color, loading, trend, subtitle, onClick
   );
 };
 
-// ==================== Meeting Card Component (Enhanced with Statuses) ====================
+// ==================== Meeting Card Component ====================
 const MeetingCard = ({ meeting, onClick }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -236,11 +233,9 @@ const MeetingCard = ({ meeting, onClick }) => {
   const isUpcoming = meetingDate && isFuture(meetingDate);
   const daysUntil = meetingDate ? differenceInDays(meetingDate, new Date()) : null;
   
-  // Get status configurations
   const meetingStatus = getMeetingStatusConfig(meeting.status || meeting.status_code);
   const attendanceStatus = getAttendanceStatusConfig(meeting.attendance_status);
   
-  // Determine if meeting is active/ongoing
   const isActive = meeting.status_code === 'MEETING_STATUS_STARTED' || meeting.status?.code === 'MEETING_STATUS_STARTED';
   
   return (
@@ -262,7 +257,6 @@ const MeetingCard = ({ meeting, onClick }) => {
         }
       }}
     >
-      {/* Active indicator badge */}
       {isActive && (
         <Box sx={{
           position: 'absolute',
@@ -286,7 +280,6 @@ const MeetingCard = ({ meeting, onClick }) => {
       )}
       
       <CardContent sx={{ p: 2 }}>
-        {/* Header with Title and Meeting Status */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
             <Avatar sx={{ 
@@ -301,7 +294,6 @@ const MeetingCard = ({ meeting, onClick }) => {
             </Typography>
           </Box>
           
-          {/* Meeting Status Chip */}
           <Tooltip title={`Meeting Status: ${meetingStatus.label}`}>
             <Chip 
               size="small" 
@@ -319,7 +311,6 @@ const MeetingCard = ({ meeting, onClick }) => {
           </Tooltip>
         </Box>
         
-        {/* Date and Time */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <TodayIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
           <Typography variant="caption" color="text.secondary">
@@ -345,14 +336,12 @@ const MeetingCard = ({ meeting, onClick }) => {
           )}
         </Box>
         
-        {/* Location */}
         {meeting.location && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
             📍 {meeting.location}
           </Typography>
         )}
         
-        {/* Participant Status and Role */}
         <Box sx={{ 
           display: 'flex', 
           justifyContent: 'space-between', 
@@ -373,7 +362,6 @@ const MeetingCard = ({ meeting, onClick }) => {
             </Typography>
           </Box>
           
-          {/* Attendance Status Chip */}
           <Tooltip title={`Attendance: ${attendanceStatus.label}`}>
             <Chip 
               size="small" 
@@ -391,7 +379,6 @@ const MeetingCard = ({ meeting, onClick }) => {
           </Tooltip>
         </Box>
         
-        {/* Expand for more details */}
         <Button 
           size="small" 
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
@@ -470,9 +457,6 @@ const ChartCard = ({ title, children, action, height = 300, loading = false }) =
 
 // ==================== Empty State Component ====================
 const EmptyState = ({ icon: Icon, title, message, action }) => {
-  const theme = useTheme();
-  const isDarkMode = theme.palette.mode === 'dark';
-  
   return (
     <Box sx={{ p: 4, textAlign: 'center' }}>
       <Icon sx={{ fontSize: 48, color: 'text.secondary', mb: 1, opacity: 0.5 }} />
@@ -495,6 +479,15 @@ const Dashboard = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useSelector((state) => state.auth);
   
+  // Permission checks
+  const userPermissions = useSelector(selectUserPermissions);
+  const isAdmin = user?.is_superuser || user?.is_admin || false;
+  
+  const canCreateMeeting = 
+  isAdmin || 
+  hasPermission(userPermissions, 'meeting:create') || 
+  hasPermission(userPermissions, 'meeting:create_recurring');
+
   const [stats, setStats] = useState(null);
   const [pendingTasks, setPendingTasks] = useState([]);
   const [myMeetings, setMyMeetings] = useState({ upcoming: [], weekly_data: null });
@@ -510,7 +503,6 @@ const Dashboard = () => {
   const [chartType, setChartType] = useState('bar');
   const [tabValue, setTabValue] = useState(0);
 
-  // Get chart text color based on theme
   const getChartTextColor = useCallback(() => {
     return isDarkMode ? '#e0e0e0' : '#666666';
   }, [isDarkMode]);
@@ -548,12 +540,10 @@ const Dashboard = () => {
         api.get('/charts/priority-distribution'),
       ]);
 
-      // Process stats
       if (statsRes.status === 'fulfilled' && statsRes.value.data?.success) {
         setStats(statsRes.value.data.data);
       }
       
-      // Process tasks
       if (tasksRes.status === 'fulfilled') {
         const allTasks = tasksRes.value.data?.data || tasksRes.value.data || [];
         if (Array.isArray(allTasks)) {
@@ -562,7 +552,6 @@ const Dashboard = () => {
         }
       }
       
-      // Process meetings
       if (meetingsRes.status === 'fulfilled' && meetingsRes.value.data?.success) {
         setMyMeetings({
           upcoming: meetingsRes.value.data.data?.upcoming_meetings || [],
@@ -570,7 +559,6 @@ const Dashboard = () => {
         });
       }
       
-      // Process charts
       const newChartData = {};
       if (weeklyActivityRes.status === 'fulfilled' && weeklyActivityRes.value.data?.data) {
         newChartData.weeklyActivity = weeklyActivityRes.value.data.data;
@@ -604,7 +592,6 @@ const Dashboard = () => {
     loadDashboardData();
   }, []);
 
-  // Calculate meeting status statistics
   const meetingStatusStats = useMemo(() => {
     const meetings = myMeetings.upcoming;
     const stats = {
@@ -745,7 +732,7 @@ const Dashboard = () => {
         />
       </Box>
 
-      {/* My Upcoming Meetings Section - Enhanced with Statuses */}
+      {/* My Upcoming Meetings Section */}
       <Paper sx={{ borderRadius: 3, mb: 4, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
         <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: isDarkMode ? alpha(theme.palette.primary.main, 0.1) : alpha(theme.palette.primary.main, 0.05) }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
@@ -754,7 +741,6 @@ const Dashboard = () => {
               <Typography variant="h6" fontWeight={800}>My Upcoming Meetings</Typography>
               <Chip label={`${myMeetings.upcoming.length} upcoming`} size="small" color="primary" />
               
-              {/* Meeting Status Summary Chips */}
               <Box sx={{ display: 'flex', gap: 0.5, ml: { xs: 0, sm: 2 } }}>
                 {meetingStatusStats.scheduled > 0 && (
                   <Tooltip title="Scheduled">
@@ -791,11 +777,18 @@ const Dashboard = () => {
             ))}
           </Stack>
         ) : (
-          <EmptyState icon={CalendarIcon} title="No Upcoming Meetings" message="You have no upcoming meetings scheduled." action={
-            <Button variant="contained" size="small" onClick={() => navigate('/meetings/create')} sx={{ mt: 1 }}>
-              Schedule a Meeting
-            </Button>
-          } />
+          <EmptyState 
+            icon={CalendarIcon} 
+            title="No Upcoming Meetings" 
+            message="You have no upcoming meetings scheduled." 
+            action={
+              canCreateMeeting && (
+                <Button variant="contained" size="small" onClick={() => navigate('/meetings/create')} sx={{ mt: 1 }}>
+                  Schedule a Meeting
+                </Button>
+              )
+            } 
+          />
         )}
       </Paper>
 
@@ -809,84 +802,100 @@ const Dashboard = () => {
 
       {/* Analytics Tab */}
       {tabValue === 0 && (
-        <>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
-            <ChartCard title="Weekly Activity" loading={loading} action={
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
+          <ChartCard 
+            title="Weekly Activity" 
+            loading={loading} 
+            action={
               <ToggleButtonGroup size="small" value={chartType} exclusive onChange={(e, val) => val && setChartType(val)}>
                 <ToggleButton value="bar"><BarChartIcon fontSize="small" /></ToggleButton>
                 <ToggleButton value="line"><TimelineIcon fontSize="small" /></ToggleButton>
               </ToggleButtonGroup>
-            } height={300}>
-              {chartType === 'bar' 
-                ? renderChart(chartData.weeklyActivity, Bar, chartOptions, "No weekly activity data")
-                : renderChart(chartData.weeklyActivity, Line, lineChartOptions, "No weekly activity data")}
-            </ChartCard>
+            } 
+            height={300}
+          >
+            {chartType === 'bar' 
+              ? renderChart(chartData.weeklyActivity, Bar, chartOptions, "No activity data for this week")
+              : renderChart(chartData.weeklyActivity, Line, lineChartOptions, "No activity data for this week")
+            }
+          </ChartCard>
 
-            <ChartCard title="Task Status Distribution" loading={loading} height={300}>
-              {renderChart(chartData.statusDistribution, Doughnut, chartOptions, "No status data")}
-            </ChartCard>
-          </Box>
+          <ChartCard title="Status Distribution" loading={loading} height={300}>
+            {renderChart(chartData.statusDistribution, Doughnut, {
+              ...chartOptions,
+              scales: undefined
+            }, "No status data available")}
+          </ChartCard>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, mb: 4 }}>
-            <ChartCard title="Monthly Trend" loading={loading} height={300}>
-              {renderChart(chartData.monthlyTrend, Line, lineChartOptions, "No monthly trend data")}
-            </ChartCard>
+          <ChartCard title="Monthly Trend" loading={loading} height={300}>
+            {renderChart(chartData.monthlyTrend, Line, lineChartOptions, "No trend data available")}
+          </ChartCard>
 
-            <ChartCard title="Priority Distribution" loading={loading} height={300}>
-              {renderChart(chartData.priorityDistribution, Pie, chartOptions, "No priority data")}
-            </ChartCard>
-          </Box>
-        </>
+          <ChartCard title="Priority Distribution" loading={loading} height={300}>
+            {renderChart(chartData.priorityDistribution, Pie, {
+              ...chartOptions,
+              scales: undefined
+            }, "No priority data available")}
+          </ChartCard>
+        </Box>
       )}
 
-      {/* Tasks Tab */}
+      {/* Pending Tasks Tab */}
       {tabValue === 1 && (
-        <Paper sx={{ borderRadius: 3, p: 2, border: '1px solid', borderColor: 'divider' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="subtitle2" fontWeight={800} color="text.secondary" textTransform="uppercase">
-              My Pending Tasks ({pendingTasks.length})
-            </Typography>
-            <Button size="small" onClick={() => navigate('/actions/my-tasks')}>View All</Button>
-          </Box>
-
-          {loading ? (
-            Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} variant="rectangular" height={80} sx={{ mb: 2, borderRadius: 2 }} />)
-          ) : pendingTasks.length > 0 ? (
-            <Stack spacing={2}>
-              {pendingTasks.slice(0, 5).map((task) => {
-                const isOverdue = task.is_overdue && !task.completed_at;
-                const dueDateFormatted = task.due_date ? safeFormatDate(task.due_date) : null;
-                
-                return (
-                  <Card key={task.id} onClick={() => navigate(`/actions/${task.id}`)} sx={{ borderRadius: 2, boxShadow: 'none', border: '1px solid', borderColor: 'divider', cursor: 'pointer', transition: 'all 0.2s', '&:hover': { borderColor: 'primary.main' } }}>
-                    <CardContent sx={{ p: 2 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                        <Typography variant="body2" fontWeight={700} sx={{ flex: 1 }}>
-                          {task.title || task.description}
-                        </Typography>
-                        {isOverdue && <Chip size="small" label="Overdue" color="error" sx={{ height: 20, fontSize: '0.6rem', ml: 1 }} />}
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                        <Chip size="small" label={dueDateFormatted ? `Due: ${dueDateFormatted}` : 'No Due Date'} sx={{ height: 20, fontSize: '0.65rem' }} />
-                        <Typography variant="caption" fontWeight={800} color="primary.main">{task.overall_progress_percentage}%</Typography>
-                      </Box>
-                      <LinearProgress variant="determinate" value={task.overall_progress_percentage} sx={{ height: 4, borderRadius: 2 }} color={isOverdue ? 'error' : 'primary'} />
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </Stack>
+        <Paper sx={{ p: 2, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          {pendingTasks.length > 0 ? (
+            <List disablePadding>
+              {pendingTasks.map((task, idx) => (
+                <React.Fragment key={task.id || idx}>
+                  <ListItem 
+                    button 
+                    onClick={() => navigate(`/actions/my-tasks`)}
+                    sx={{ borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
+                  >
+                    <ListItemText
+                      primary={
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography variant="body2" fontWeight={700}>
+                            {task.title || task.action_item_title || 'Untitled Task'}
+                          </Typography>
+                          {task.is_overdue && (
+                            <Chip label="Overdue" size="small" color="error" sx={{ height: 18, fontSize: '0.6rem' }} />
+                          )}
+                        </Box>
+                      }
+                      secondary={
+                        <Box sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            Due: {task.due_date ? safeFormatDate(task.due_date) : 'No due date'}
+                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                            <LinearProgress 
+                              variant="determinate" 
+                              value={task.overall_progress_percentage || 0} 
+                              sx={{ flex: 1, height: 6, borderRadius: 3 }}
+                            />
+                            <Typography variant="caption" color="text.secondary">
+                              {task.overall_progress_percentage || 0}%
+                            </Typography>
+                          </Box>
+                        </Box>
+                      }
+                    />
+                  </ListItem>
+                  {idx < pendingTasks.length - 1 && <Divider component="li" />}
+                </React.Fragment>
+              ))}
+            </List>
           ) : (
-            <EmptyState icon={CheckCircleIcon} title="All Done!" message="You have no pending tasks. Great job!" />
+            <EmptyState 
+              icon={CheckCircleIcon} 
+              title="All Caught Up!" 
+              message="You have no pending tasks at the moment." 
+            />
           )}
         </Paper>
       )}
 
-      <Box sx={{ height: 40 }} />
-      
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
     </Container>
   );
 };

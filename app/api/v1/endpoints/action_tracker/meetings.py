@@ -21,6 +21,8 @@ from uuid import UUID
 
 from app.api.v1.endpoints.action_tracker.meetings_access_control import AccessLevel, DepartmentAccessControl, check_meeting_access_or_403
 from app.api.v1.endpoints.action_tracker.utils import build_meeting_response
+from app.models.notification import Notification, NotificationChannel, NotificationStatus
+from app.services.notification_service import NotificationService
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, distinct, func, select, or_, desc, asc, cast, String, case
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +39,7 @@ from app.models.user import User
 from app.schemas.action_tracker import (
     MeetingCreateResponse, MeetingMinutesResponse, MeetingPaginationResponse,
     MeetingCreate, MeetingParticipantCreate, MeetingParticipantResponse,
-    MeetingParticipantUpdate, MeetingResponse, MeetingUpdate
+    MeetingParticipantUpdate, MeetingResponse, MeetingUpdate, NotificationRequest
 )
 
 logger = logging.getLogger(__name__)
@@ -808,13 +810,29 @@ async def create_meeting(
         
         logger.info(f"✅ Meeting {meeting.id} created by user {current_user.id}")
         
+    
         return MeetingCreateResponse(
             id=meeting.id,
             title=meeting.title,
             description=meeting.description,
             meeting_date=meeting.meeting_date,
+            start_time=meeting.start_time,      # ✅ ADD THIS
+            end_time=meeting.end_time,          # ✅ ADD THIS
+            location_text=meeting.location_text,
+            agenda=meeting.agenda,
+            facilitator=meeting.facilitator,
+            chairperson_name=meeting.chairperson_name,
+            status_id=meeting.status_id,
             created_by_id=meeting.created_by_id,
+            created_by_name=getattr(meeting, 'created_by_name', None),
             created_at=meeting.created_at,
+            updated_by_id=getattr(meeting, 'updated_by_id', None),
+            updated_by_name=getattr(meeting, 'updated_by_name', None),
+            updated_at=getattr(meeting, 'updated_at', None),
+            is_active=meeting.is_active,
+            department_id=getattr(meeting, 'department_id', None),
+            restricted_department_id=getattr(meeting, 'restricted_department_id', None),
+            visibility=getattr(meeting, 'visibility', 'open'),
             message="Meeting created successfully"
         )
         
@@ -1053,6 +1071,7 @@ async def delete_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete meeting"
         )
+
 
 
 
@@ -1332,6 +1351,308 @@ async def add_participant(
         )
 
 
+@router.post("/{meeting_id}/notifications")
+async def create_meeting_notifications(
+    meeting_id: UUID,
+    request: NotificationRequest,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Create and send meeting invitation notifications.
+    
+    ✅ Flow:
+    1. Send email via NotificationService.send_meeting_invitation
+    2. Only save notification record if email succeeds
+    """
+    try:
+        logger.info(f"Creating notifications for meeting {meeting_id}")
+        
+        # Check access
+        can_access = await AccessControl.can_access_meeting(
+            db, meeting_id, current_user.id, current_user.email,
+            getattr(current_user, 'is_superuser', False)
+        )
+        
+        if not can_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this meeting"
+            )
+        
+        # Get meeting
+        result = await db.execute(
+            select(Meeting).options(
+                selectinload(Meeting.participants)
+            ).where(Meeting.id == meeting_id)
+        )
+        meeting = result.scalar_one_or_none()
+        
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
+        
+        # Get participants
+        participant_ids = request.participant_ids
+        if not participant_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No participants specified"
+            )
+        
+        participants = [p for p in meeting.participants if p.id in participant_ids]
+        
+        if not participants:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No participants found in this meeting"
+            )
+        
+        sent_count = 0
+        failed_participants = []
+        saved_notifications = []
+        
+        # ✅ Process each participant
+        for participant in participants:
+            if not participant.email:
+                logger.warning(f"Participant {participant.id} has no email")
+                failed_participants.append({
+                    "participant_id": str(participant.id),
+                    "name": participant.name,
+                    "reason": "No email address"
+                })
+                continue
+            
+            # ✅ STEP 1: SEND EMAIL using NotificationService
+            try:
+                result = await NotificationService.send_meeting_invitation(
+                    db=db,
+                    meeting=meeting,
+                    participant=participant,
+                    custom_message=request.custom_message,
+                    channel=NotificationChannel.EMAIL,
+                    user_id=current_user.id,
+                )
+                
+                if not result.get("success"):
+                    logger.error(f"❌ Failed to send email to {participant.email}: {result.get('error')}")
+                    failed_participants.append({
+                        "participant_id": str(participant.id),
+                        "name": participant.name,
+                        "email": participant.email,
+                        "reason": result.get("error", "Email notification failed")
+                    })
+                    continue
+                
+                # ✅ Email sent successfully
+                sent_count += 1
+                saved_notifications.append({
+                    "notification_id": result.get("notification_id"),
+                    "participant_id": str(participant.id),
+                    "email": participant.email,
+                    "status": "sent"
+                })
+                
+                logger.info(f"✅ Email sent successfully to {participant.email}")
+                
+            except Exception as email_error:
+                logger.error(f"❌ Error sending email to {participant.email}: {email_error}")
+                failed_participants.append({
+                    "participant_id": str(participant.id),
+                    "name": participant.name,
+                    "email": participant.email,
+                    "reason": f"Email error: {str(email_error)}"
+                })
+                continue
+        
+        logger.info(f"✅ Successfully created {sent_count} notifications")
+        
+        return {
+            "success": sent_count > 0,
+            "total_participants": len(participants),
+            "sent": sent_count,
+            "failed": len(failed_participants),
+            "saved_notifications": saved_notifications,
+            "failed_participants": failed_participants if failed_participants else None,
+            "message": f"Created {sent_count}/{len(participants)} notifications successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as error:
+        await db.rollback()
+        logger.error(f"❌ Error creating notifications: {error}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create notifications: {str(error)}"
+        )
+
+
+     
+@router.delete("/{meeting_id}/participants/{participant_id}")
+async def remove_meeting_participant(
+    meeting_id: UUID,
+    participant_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Remove a participant from a meeting.
+    """
+    try:
+        # Check access
+        can_access = await AccessControl.can_access_meeting(
+            db, meeting_id, current_user.id, current_user.email,
+            getattr(current_user, 'is_superuser', False)
+        )
+        
+        if not can_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this meeting"
+            )
+        
+        # Get meeting
+        result = await db.execute(
+            select(Meeting).where(Meeting.id == meeting_id)
+        )
+        meeting = result.scalar_one_or_none()
+        
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
+        
+        # Get participant
+        result = await db.execute(
+            select(MeetingParticipant).where(
+                MeetingParticipant.id == participant_id,
+                MeetingParticipant.meeting_id == meeting_id
+            )
+        )
+        participant = result.scalar_one_or_none()
+        
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found in this meeting"
+            )
+        
+        # Remove participant
+        await db.delete(participant)
+        await db.commit()
+        
+        logger.info(f"✅ Removed participant {participant_id} from meeting {meeting_id}")
+        
+        return {
+            "success": True,
+            "message": f"Participant {participant.name} removed from meeting",
+            "meeting_id": str(meeting_id),
+            "participant_id": str(participant_id)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as error:
+        await db.rollback()
+        logger.error(f"❌ Error removing participant: {error}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove participant: {str(error)}"
+        )
+    
+
+@router.get("/{meeting_id}/notifications")
+async def get_meeting_notifications(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    status_filter: Optional[str] = Query(None),
+    channel_filter: Optional[str] = Query(None),
+):
+    """
+    Get all notifications for a meeting.
+    
+    ✅ Optional filters by status and channel
+    """
+    try:
+        # Check access
+        can_access = await AccessControl.can_access_meeting(
+            db, meeting_id, current_user.id, current_user.email,
+            getattr(current_user, 'is_superuser', False)
+        )
+        
+        if not can_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this meeting"
+            )
+        
+        # Build query
+        query = select(Notification).where(
+            Notification.meeting_id == meeting_id
+        )
+        
+        # Apply optional filters
+        if status_filter:
+            try:
+                status_enum = NotificationStatus(status_filter)
+                query = query.where(Notification.status == status_enum)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid status. Must be one of: {', '.join([s.value for s in NotificationStatus])}"
+                )
+        
+        if channel_filter:
+            try:
+                channel_enum = NotificationChannel(channel_filter)
+                query = query.where(Notification.channel == channel_enum)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid channel. Must be one of: {', '.join([c.value for c in NotificationChannel])}"
+                )
+        
+        # Get count
+        count_result = await db.execute(
+            select(func.count(Notification.id)).where(
+                Notification.meeting_id == meeting_id
+            )
+        )
+        total = count_result.scalar() or 0
+        
+        # Get paginated results
+        result = await db.execute(
+            query.order_by(desc(Notification.created_at))
+            .offset(skip).limit(limit)
+        )
+        notifications = result.scalars().all()
+        
+        logger.info(f"✅ Retrieved {len(notifications)} notifications for meeting {meeting_id}")
+        
+        return {
+            "items": notifications,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "meeting_id": str(meeting_id)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching notifications: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch notifications"
+        )
+    
 @router.put("/{meeting_id}/members/{member_id}", response_model=MeetingParticipantResponse)
 async def update_participant(
     meeting_id: UUID,

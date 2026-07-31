@@ -1,7 +1,24 @@
 // src/components/meetings/MeetingForm/components/ParticipantItem.jsx
 import React from 'react';
-import { ListItem, ListItemAvatar, ListItemText, Avatar, Stack, Typography, Chip, IconButton, Tooltip, Button } from '@mui/material';
-import { Delete as Delete, Email as EmailIcon, Phone as PhoneIcon, Title as TitleIcon, Work as WorkIcon } from '@mui/icons-material';
+import { 
+  ListItem, 
+  ListItemAvatar, 
+  ListItemText, 
+  Avatar, 
+  Stack, 
+  Typography, 
+  Chip, 
+  IconButton, 
+  Tooltip, 
+  Button 
+} from '@mui/material';
+import { 
+  Delete as DeleteIcon, 
+  Email as EmailIcon, 
+  Phone as PhoneIcon, 
+  Title as TitleIcon, 
+  Work as WorkIcon 
+} from '@mui/icons-material';
 
 export const ParticipantItem = React.memo(({ 
   participant, 
@@ -15,7 +32,7 @@ export const ParticipantItem = React.memo(({
     secondaryAction={showActions && (
       <Tooltip title="Remove participant">
         <IconButton edge="end" onClick={() => onRemove(participant.id)}>
-          <Delete />
+          <DeleteIcon />
         </IconButton>
       </Tooltip>
     )}
@@ -25,7 +42,11 @@ export const ParticipantItem = React.memo(({
         {participant.name?.charAt(0) || 'P'}
       </Avatar>
     </ListItemAvatar>
+    
     <ListItemText
+      // Prevent nesting div in p/span elements by setting component="div"
+      primaryTypographyProps={{ component: 'div' }}
+      secondaryTypographyProps={{ component: 'div' }}
       primary={
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
           <Typography variant="body2" fontWeight={500}>{participant.name}</Typography>
@@ -60,6 +81,7 @@ export const ParticipantItem = React.memo(({
         </Stack>
       }
     />
+    
     {!isChairperson && showActions && (
       <Button size="small" onClick={() => onMakeChairperson(participant.id)}>
         Make Chairperson

@@ -709,18 +709,50 @@ async def create_meeting(
     current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Create meeting.
+    Create meeting with participants.
     
-    ✅ Improved: Better error handling, permission-aware cache invalidation
-    ✅ Auto-assigns 'MEETING_STATUS_PENDING' status if not provided
+    ✅ Improved:
+    - Proper participant validation and creation
+    - Email normalization (strip, lowercase)
+    - Duplicate participant detection
+    - Per-participant error handling
+    - Comprehensive logging
+    - Better error handling and rollback
+    - Cache invalidation
+    - Auto-assigns MEETING_STATUS_PENDING status
+    
+    Request Body Example:
+    {
+        "title": "Team Meeting",
+        "meeting_date": "2026-11-15T00:00:00.000Z",
+        "start_time": "2026-11-15T09:00:00.000Z",
+        "end_time": "2026-11-15T10:30:00.000Z",
+        "location_text": "Conference Room A",
+        "custom_participants": [
+            {
+                "name": "John Doe",
+                "email": "john.doe@example.com",
+                "telephone": "256123456789",
+                "title": "Manager",
+                "organization": "IT Department",
+                "is_chairperson": true,
+                "is_secretary": false
+            }
+        ]
+    }
     """
+    
+    logger.info(f"🎯 Starting meeting creation by user {current_user.id}")
+    logger.info(f"   Title: {meeting_in.title}")
+    logger.info(f"   Participants: {len(meeting_in.custom_participants) if meeting_in.custom_participants else 0}")
     
     try:
         async def create_transaction():
-            # ========== DETERMINE STATUS ID ==========
+            # ========== STEP 1: DETERMINE STATUS ID ==========
+            logger.info("📋 Step 1: Determining meeting status...")
+            
             status_id = meeting_in.status_id
             
-            # If no status provided, find the PENDING status
             if not status_id:
                 try:
                     # Try to find status with code 'MEETING_STATUS_PENDING'
@@ -734,7 +766,7 @@ async def create_meeting(
                     
                     if pending_status:
                         status_id = pending_status.id
-                        logger.info(f"✅ Auto-assigned PENDING status: {pending_status.id}")
+                        logger.info(f"   ✅ Auto-assigned PENDING status: {pending_status.id}")
                     else:
                         # Fallback: try to find by short_name 'pending'
                         status_result = await db.execute(
@@ -746,14 +778,15 @@ async def create_meeting(
                         pending_status = status_result.scalar_one_or_none()
                         if pending_status:
                             status_id = pending_status.id
-                            logger.info(f"✅ Auto-assigned PENDING status by short_name: {pending_status.id}")
+                            logger.info(f"   ✅ Auto-assigned PENDING status by short_name: {pending_status.id}")
                         else:
-                            logger.warning("⚠️ No PENDING status found, leaving status_id as None")
+                            logger.warning("   ⚠️ No PENDING status found, leaving status_id as None")
                 except Exception as e:
-                    logger.error(f"Error finding PENDING status: {e}")
-                    # Continue without status_id
+                    logger.error(f"   ❌ Error finding PENDING status: {e}")
             
-            # ========== CREATE MEETING ==========
+            # ========== STEP 2: CREATE MEETING ==========
+            logger.info("📋 Step 2: Creating meeting record...")
+            
             meeting = Meeting(
                 id=uuid.uuid4(),
                 title=meeting_in.title,
@@ -768,7 +801,7 @@ async def create_meeting(
                 chairperson_name=meeting_in.chairperson_name,
                 visibility=getattr(meeting_in, 'visibility', 'open'),
                 restricted_department_id=getattr(meeting_in, 'restricted_department_id', None),
-                status_id=status_id,  # Use the determined status_id
+                status_id=status_id,
                 is_recurring=getattr(meeting_in, 'is_recurring', False),
                 recurring_meeting_id=getattr(meeting_in, 'recurring_meeting_id', None),
                 occurrence_number=getattr(meeting_in, 'occurrence_number', None),
@@ -780,44 +813,128 @@ async def create_meeting(
             db.add(meeting)
             await db.flush()
             
-            # ========== ADD PARTICIPANTS ==========
+            logger.info(f"   ✅ Meeting created with ID: {meeting.id}")
+            
+            # ========== STEP 3: ADD PARTICIPANTS ==========
+            participant_count = 0
+            failed_participants = []
+            
             if meeting_in.custom_participants:
-                for p in meeting_in.custom_participants:
-                    participant = MeetingParticipant(
-                        id=uuid.uuid4(),
-                        meeting_id=meeting.id,
-                        name=p.name,
-                        email=p.email,
-                        telephone=getattr(p, 'telephone', None),
-                        title=getattr(p, 'title', None),
-                        organization=getattr(p, 'organization', None),
-                        is_chairperson=getattr(p, 'is_chairperson', False),
-                        is_secretary=getattr(p, 'is_secretary', False),
-                        created_by_id=current_user.id,
-                        created_at=datetime.now(),
-                        is_active=True,
-                    )
-                    db.add(participant)
+                logger.info(f"📋 Step 3: Processing {len(meeting_in.custom_participants)} participants...")
+                
+                for idx, p in enumerate(meeting_in.custom_participants):
+                    try:
+                        # Validate participant data
+                        if not p.name or not p.name.strip():
+                            logger.warning(f"   ⚠️ Participant {idx}: Missing name, skipping")
+                            failed_participants.append({
+                                "index": idx,
+                                "email": p.email if hasattr(p, 'email') else 'N/A',
+                                "reason": "Missing name"
+                            })
+                            continue
+                        
+                        if not p.email or not p.email.strip():
+                            logger.warning(f"   ⚠️ Participant {idx} ({p.name}): Missing email, skipping")
+                            failed_participants.append({
+                                "index": idx,
+                                "name": p.name,
+                                "reason": "Missing email"
+                            })
+                            continue
+                        
+                        # Normalize email (strip whitespace and lowercase)
+                        email_normalized = p.email.strip().lower()
+                        
+                        # Check for duplicate emails in this batch
+                        existing = await db.execute(
+                            select(MeetingParticipant).where(
+                                MeetingParticipant.meeting_id == meeting.id,
+                                MeetingParticipant.email == email_normalized,
+                                MeetingParticipant.is_active == True
+                            )
+                        )
+                        if existing.scalar_one_or_none():
+                            logger.warning(f"   ⚠️ Participant {idx}: Duplicate email {email_normalized}, skipping")
+                            failed_participants.append({
+                                "index": idx,
+                                "name": p.name,
+                                "email": email_normalized,
+                                "reason": "Duplicate email"
+                            })
+                            continue
+                        
+                        # Create participant
+                        participant = MeetingParticipant(
+                            id=uuid.uuid4(),
+                            meeting_id=meeting.id,
+                            name=p.name.strip(),
+                            email=email_normalized,
+                            telephone=p.telephone.strip() if hasattr(p, 'telephone') and p.telephone else None,
+                            title=p.title.strip() if hasattr(p, 'title') and p.title else None,
+                            organization=p.organization.strip() if hasattr(p, 'organization') and p.organization else None,
+                            is_chairperson=bool(getattr(p, 'is_chairperson', False)),
+                            is_secretary=bool(getattr(p, 'is_secretary', False)),
+                            attendance_status="pending",
+                            is_active=True,
+                            created_at=datetime.now(),
+                        )
+                        
+                        db.add(participant)
+                        participant_count += 1
+                        
+                        logger.info(f"   ✅ Participant {idx + 1}: {p.name} ({email_normalized})")
+                        if getattr(p, 'is_chairperson', False):
+                            logger.info(f"      - Chairperson: Yes")
+                        if getattr(p, 'is_secretary', False):
+                            logger.info(f"      - Secretary: Yes")
+                        
+                    except Exception as p_error:
+                        logger.error(f"   ❌ Error processing participant {idx}: {p_error}", exc_info=True)
+                        failed_participants.append({
+                            "index": idx,
+                            "name": p.name if hasattr(p, 'name') else 'Unknown',
+                            "error": str(p_error)
+                        })
+                        continue
+                
+                logger.info(f"   ✅ Successfully added {participant_count} participants")
+                if failed_participants:
+                    logger.warning(f"   ⚠️ Failed to add {len(failed_participants)} participants")
+            else:
+                logger.info("📋 Step 3: No participants provided")
+            
+            # ========== STEP 4: COMMIT TRANSACTION ==========
+            logger.info("📋 Step 4: Committing transaction...")
             
             await db.commit()
             await db.refresh(meeting)
-            return meeting
+            
+            logger.info(f"   ✅ Transaction committed successfully")
+            
+            return meeting, participant_count, failed_participants
         
-        meeting = await retry_db_operation(create_transaction)
+        meeting, participant_count, failed_participants = await retry_db_operation(create_transaction)
         
         # ========== INVALIDATE CACHE ==========
+        logger.info("📋 Step 5: Invalidating cache...")
+        
         await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
         
-        logger.info(f"✅ Meeting {meeting.id} created by user {current_user.id}")
+        logger.info(f"✅ Meeting creation completed successfully")
+        logger.info(f"   Meeting ID: {meeting.id}")
+        logger.info(f"   Participants added: {participant_count}")
+        if failed_participants:
+            logger.warning(f"   Failed participants: {len(failed_participants)}")
         
-    
+        # ========== BUILD RESPONSE ==========
         return MeetingCreateResponse(
             id=meeting.id,
             title=meeting.title,
             description=meeting.description,
             meeting_date=meeting.meeting_date,
-            start_time=meeting.start_time,      # ✅ ADD THIS
-            end_time=meeting.end_time,          # ✅ ADD THIS
+            start_time=meeting.start_time,
+            end_time=meeting.end_time,
             location_text=meeting.location_text,
             agenda=meeting.agenda,
             facilitator=meeting.facilitator,
@@ -838,18 +955,29 @@ async def create_meeting(
         
     except SQLAlchemyError as e:
         await db.rollback()
-        logger.error(f"Error creating meeting: {e}", exc_info=True)
+        logger.error(f"❌ Database error creating meeting: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database error"
+            detail="Database error while creating meeting"
         )
+    
+    except ValueError as e:
+        await db.rollback()
+        logger.error(f"❌ Validation error creating meeting: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Validation error: {str(e)}"
+        )
+    
     except Exception as e:
         await db.rollback()
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error(f"❌ Unexpected error creating meeting: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create meeting"
+            detail=f"Failed to create meeting: {str(e)}"
         )
+
+    
     
 @router.get("/{meeting_id}", response_model=dict)
 async def get_meeting(
@@ -935,9 +1063,10 @@ async def update_meeting(
     current_user: User = Depends(deps.get_current_user),
 ):
     """
-    Update meeting.
+    Update meeting details and sync custom participants.
     
     ✅ Requires OWNER permission
+    ✅ Handles participant addition, updates, and soft-deletes
     """
     
     try:
@@ -963,21 +1092,97 @@ async def update_meeting(
                 detail="Meeting not found"
             )
         
-        # Update fields
+        # ========== UPDATE MEETING FIELDS ==========
         meeting.title = meeting_in.title
         meeting.description = meeting_in.description
         meeting.meeting_date = meeting_in.meeting_date
         meeting.start_time = meeting_in.start_time
         meeting.end_time = meeting_in.end_time
         meeting.location_text = meeting_in.location_text
-        meeting.location_id = meeting_in.location_id
+        meeting.location_id = getattr(meeting_in, 'location_id', None)
         meeting.agenda = meeting_in.agenda
-        meeting.facilitator = meeting_in.facilitator
-        meeting.chairperson_name = meeting_in.chairperson_name
+        meeting.facilitator = getattr(meeting_in, 'facilitator', None)
+        meeting.chairperson_name = getattr(meeting_in, 'chairperson_name', None)
         meeting.status_id = meeting_in.status_id
+        meeting.visibility = getattr(meeting_in, 'visibility', meeting.visibility)
         meeting.updated_by_id = current_user.id
         meeting.updated_at = datetime.now()
-        
+
+        # ========== SYNC CUSTOM PARTICIPANTS ==========
+        if meeting_in.custom_participants is not None:
+            # Fetch existing active participants for this meeting
+            existing_p_result = await db.execute(
+                select(MeetingParticipant).where(
+                    MeetingParticipant.meeting_id == meeting_id,
+                    MeetingParticipant.is_active == True
+                )
+            )
+            existing_participants = {
+                p.email.lower(): p for p in existing_p_result.scalars().all()
+            }
+
+            incoming_emails = set()
+
+            for idx, p in enumerate(meeting_in.custom_participants):
+                try:
+                    # Helper to extract value whether p is Dict or Pydantic model
+                    p_name = p.name if hasattr(p, 'name') else p.get('name')
+                    p_email = p.email if hasattr(p, 'email') else p.get('email')
+
+                    if not p_name or not p_email:
+                        logger.warning(f"⚠️ Participant #{idx + 1}: Missing name/email during update, skipping")
+                        continue
+
+                    email_normalized = p_email.strip().lower()
+                    incoming_emails.add(email_normalized)
+
+                    # Extract attributes
+                    telephone = (p.telephone if hasattr(p, 'telephone') else p.get('telephone')) or None
+                    title = (p.title if hasattr(p, 'title') else p.get('title')) or None
+                    org = (p.organization if hasattr(p, 'organization') else p.get('organization')) or None
+                    is_chair = bool(p.is_chairperson if hasattr(p, 'is_chairperson') else p.get('is_chairperson', False))
+                    is_sec = bool(p.is_secretary if hasattr(p, 'is_secretary') else p.get('is_secretary', False))
+
+                    if email_normalized in existing_participants:
+                        # UPDATE existing participant details
+                        p_obj = existing_participants[email_normalized]
+                        p_obj.name = p_name.strip()
+                        p_obj.telephone = telephone.strip() if telephone else None
+                        p_obj.title = title.strip() if title else None
+                        p_obj.organization = org.strip() if org else None
+                        p_obj.is_chairperson = is_chair
+                        p_obj.is_secretary = is_sec
+                        p_obj.updated_at = datetime.now()
+                    else:
+                        # ADD new participant
+                        new_participant = MeetingParticipant(
+                            id=uuid.uuid4(),
+                            meeting_id=meeting.id,
+                            name=p_name.strip(),
+                            email=email_normalized,
+                            telephone=telephone.strip() if telephone else None,
+                            title=title.strip() if title else None,
+                            organization=org.strip() if org else None,
+                            is_chairperson=is_chair,
+                            is_secretary=is_sec,
+                            attendance_status="pending",
+                            created_by_id=current_user.id,
+                            created_at=datetime.now(),
+                            is_active=True,
+                        )
+                        db.add(new_participant)
+
+                except Exception as p_err:
+                    logger.error(f"❌ Error syncing participant #{idx + 1}: {p_err}", exc_info=True)
+                    continue
+
+            # SOFT DELETE participants removed from incoming custom_participants list
+            for email, p_obj in existing_participants.items():
+                if email not in incoming_emails:
+                    p_obj.is_active = False
+                    p_obj.updated_at = datetime.now()
+
+        # ========== COMMIT & REFRESH ==========
         await db.commit()
         await db.refresh(meeting)
         
@@ -988,24 +1193,34 @@ async def update_meeting(
         
         logger.info(f"✅ Meeting {meeting_id} updated by user {current_user.id}")
         
-        # ✅ FIX: Await the coroutine first
         response = await build_meeting_response(meeting)
         
-        # ✅ Now we can assign to the response
-        response["user_permission"] = permission.value
-        
+        # Handle dict vs object response formats smoothly
+        if isinstance(response, dict):
+            response["user_permission"] = permission.value
+        elif hasattr(response, "__dict__"):
+            setattr(response, "user_permission", permission.value)
+
         return response
         
     except HTTPException:
         raise
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"SQLAlchemy error updating meeting {meeting_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service unavailable"
+        )
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error updating meeting: {e}", exc_info=True)
+        logger.error(f"Error updating meeting {meeting_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update meeting"
         )
 
+    
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_meeting(
     meeting_id: UUID,

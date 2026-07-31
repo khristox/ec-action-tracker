@@ -199,7 +199,8 @@ export const ParticipantListsSelector = ({ onAddFromList, selectedParticipantIds
               </Button>
             </>
           ) : (
-            <Box p={2} textAlign="center" color="text.secondary">
+            // FIX HERE: Replaced textAlign="center" with sx={{ textAlign: 'center' }}
+            <Box p={2} sx={{ textAlign: 'center' }} color="text.secondary">
               <Typography variant="body2">
                 No details available for this list
               </Typography>

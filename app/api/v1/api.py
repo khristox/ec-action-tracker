@@ -28,6 +28,8 @@ try:
     from app.api.v1.endpoints.action_tracker.recurring_meeting_routes import router as recurr_meetings
     from app.api.v1.endpoints.action_tracker.organization import router as menus_organisation
     from app.api.v1.endpoints.action_tracker.organization import router_departments as departments
+    from app.api.v1.endpoints.reminders.action_reminders_api import router as action_reminders_router
+
     
     # Import notifications router
     from app.api.v1.endpoints.notifications import router as notifications_router
@@ -100,6 +102,14 @@ api_router.include_router(
     notifications_router,
     prefix="/notifications",
     tags=["notifications"]
+)
+
+
+# Add this block after notifications or before action_tracker
+api_router.include_router(
+    action_reminders_router,
+    prefix="/action-reminders",
+    tags=["action-reminders"]
 )
 
 # Log summary

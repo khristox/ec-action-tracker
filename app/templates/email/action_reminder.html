@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f9fafb;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 32px 24px;
+        }
+        .action-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0 0 8px 0;
+        }
+        .action-description {
+            color: #6b7280;
+            margin: 0 0 20px 0;
+            font-size: 14px;
+        }
+        .details-box {
+            background-color: #f3f4f6;
+            border-left: 4px solid #667eea;
+            padding: 16px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #374151;
+            min-width: 120px;
+        }
+        .detail-value {
+            color: #6b7280;
+            text-align: right;
+            flex: 1;
+        }
+        .priority-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin: 4px 0;
+        }
+        .priority-high {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        .priority-medium {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        .priority-low {
+            background-color: #dbeafe;
+            color: #0c2d6b;
+        }
+        .priority-very-low {
+            background-color: #e5e7eb;
+            color: #374151;
+        }
+        .reminder-count {
+            background-color: #fef3c7;
+            border: 1px solid #fcd34d;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .reminder-count-text {
+            font-size: 16px;
+            font-weight: 600;
+            color: #92400e;
+            margin: 0;
+        }
+        .reminder-count-subtext {
+            font-size: 12px;
+            color: #b45309;
+            margin: 4px 0 0 0;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: #667eea;
+            color: white;
+            padding: 12px 32px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            margin: 24px 0;
+            text-align: center;
+        }
+        .cta-button:hover {
+            background-color: #5568d3;
+        }
+        .implementers-list {
+            margin: 20px 0;
+        }
+        .implementers-label {
+            font-weight: 600;
+            color: #374151;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        .implementer-item {
+            background-color: #f9fafb;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+            font-size: 14px;
+        }
+        .implementer-name {
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0 0 4px 0;
+        }
+        .implementer-email {
+            color: #6b7280;
+            margin: 0;
+        }
+        .footer {
+            background-color: #f9fafb;
+            padding: 24px;
+            text-align: center;
+            border-top: 1px solid #e5e7eb;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .warning-message {
+            background-color: #fef2f2;
+            border-left: 4px solid #dc2626;
+            padding: 12px;
+            margin: 16px 0;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #991b1b;
+        }
+        .divider {
+            border: none;
+            border-top: 1px solid #e5e7eb;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📋 Action Item Reminder</h1>
+            <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Time to review and complete your task</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Greeting -->
+            <p style="margin: 0 0 16px 0;">Hi {{ implementer_name }},</p>
+
+            <!-- Action Details -->
+            <p class="action-title">{{ action_title }}</p>
+            <p class="action-description">{{ action_description }}</p>
+
+            <!-- Reminder Count Banner -->
+            <div class="reminder-count">
+                <p class="reminder-count-text">Reminder {{ reminder_batch_number }}</p>
+                <p class="reminder-count-subtext">You will receive at most 3 reminders</p>
+            </div>
+
+            <!-- Action Details Box -->
+            <div class="details-box">
+                <div class="detail-row">
+                    <span class="detail-label">Priority:</span>
+                    <span class="detail-value"><span class="priority-badge priority-{{ priority_css_class }}">{{ priority_label }}</span></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Due Date:</span>
+                    <span class="detail-value">{{ due_date_formatted }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value">{{ status_display }}</span>
+                </div>
+                {% if progress_percentage > 0 %}
+                <div class="detail-row">
+                    <span class="detail-label">Progress:</span>
+                    <span class="detail-value">{{ progress_percentage }}%</span>
+                </div>
+                {% endif %}
+                {% if issue_challenge %}
+                <div class="divider"></div>
+                <div class="detail-row">
+                    <span class="detail-label">Challenge:</span>
+                </div>
+                <p style="color: #6b7280; font-size: 14px; margin: 8px 0 0 0;">{{ issue_challenge }}</p>
+                {% endif %}
+            </div>
+
+            <!-- All Implementers -->
+            {% if all_implementers|length > 1 %}
+            <div class="implementers-list">
+                <p class="implementers-label">👥 All Task Implementers:</p>
+                {% for impl in all_implementers %}
+                <div class="implementer-item">
+                    <p class="implementer-name">{{ impl.name }}</p>
+                    <p class="implementer-email">{{ impl.email }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Warning if overdue -->
+            {% if is_overdue %}
+            <div class="warning-message">
+                ⚠️ <strong>This action is overdue!</strong> Please prioritize completing this task as soon as possible.
+            </div>
+            {% endif %}
+
+            <!-- Call to Action -->
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{{ action_url }}" class="cta-button">View & Update Action</a>
+            </p>
+
+            <!-- Additional Info -->
+            <p style="font-size: 13px; color: #6b7280; margin-top: 20px;">
+                <strong>What you need to do:</strong>
+            </p>
+            <ul style="font-size: 13px; color: #6b7280; margin: 8px 0 0 0; padding-left: 20px;">
+                <li>Review the task details above</li>
+                <li>Update the progress percentage as you make progress</li>
+                <li>Add comments if you need clarification or support</li>
+                <li>Mark as complete when finished</li>
+            </ul>
+
+            <!-- Remarks if any -->
+            {% if remarks %}
+            <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px; margin-top: 20px; border-radius: 4px;">
+                <p style="margin: 0; font-weight: 600; font-size: 13px; color: #0c2d6b;">📝 Latest Remarks:</p>
+                <p style="margin: 8px 0 0 0; font-size: 13px; color: #0c2d6b;">{{ remarks }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p style="margin: 0;">This is an automated reminder from EC Action Tracker</p>
+            <p style="margin: 8px 0 0 0;">
+                Last updated: {{ last_updated_formatted }}
+            </p>
+            <p style="margin: 8px 0 0 0;">
+                <a href="{{ unsubscribe_url }}">Manage notification preferences</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

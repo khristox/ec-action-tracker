@@ -1,11 +1,25 @@
 """
 Action Tracker - Main Application Entry Point
+
+Handles:
+- FastAPI application setup
+- Async lifespan management (startup/shutdown)
+- Health checks and monitoring
+- CORS configuration
+- Rate limiting
+- Frontend serving
+- API routing
+- Reminder scheduler integration
 """
 import logging
 import os
+import platform
+import sys
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,63 +28,81 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from datetime import datetime
+from sqlalchemy import text
 
-import platform
-import sys
-import asyncio
-
-# 1. LOAD ENVIRONMENT VARIABLES FIRST
+# ==================== LOAD ENVIRONMENT VARIABLES FIRST ====================
 load_dotenv()
 
+# ==================== IMPORT CONFIGURATION ====================
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db.base import async_engine
 from app.api.v1.api import api_router
-from sqlalchemy import text
-
 from app.core.redis_client import init_redis, close_redis, get_redis
 from app.core.limiter import limiter
+from app.core.minio_client import minio_service
+from app.services.reminder_scheduler import reminder_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.core.minio_client import minio_service
-
-# ==================== IMPORT REMINDER SCHEDULER ====================
-from app.services.reminder_scheduler import reminder_scheduler
-
+# ==================== SETUP LOGGING ====================
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# ROOT_PATH — controls all URL prefixes (e.g. /ec in production, empty locally)
+# ==================== CONFIGURATION ====================
 ROOT_PATH = os.getenv("ROOT_PATH", "")
+
 
 # ==================== FRONTEND PATH LOGIC ====================
 
 def get_frontend_path() -> Optional[Path]:
+    """
+    Get the frontend distribution path.
+    
+    Tries:
+    1. FRONTEND_DIST_PATH environment variable
+    2. Fallback to /home/chris/Chr/Apps/ECATMIS/static
+    3. Returns None if not found
+    """
+    # Try environment variable first
     env_path = os.getenv("FRONTEND_DIST_PATH")
     if env_path:
         path = Path(env_path)
         if path.exists() and path.is_dir():
+            logger.info(f"✅ Frontend found at (env): {path}")
             return path
+    
+    # Try fallback path
     fallback = Path("/home/chris/Chr/Apps/ECATMIS/static")
-    print(f"Checking fallback frontend path: {fallback}" )
+    logger.info(f"Checking fallback frontend path: {fallback}")
     if fallback.exists() and fallback.is_dir():
+        logger.info(f"✅ Frontend found at (fallback): {fallback}")
         return fallback
+    
     return None
+
 
 # ==================== HEALTH CHECK FUNCTIONS ====================
 
 async def check_database_health() -> dict:
-    """Check database connectivity and health"""
+    """
+    Check database connectivity and health.
+    
+    Returns dict with:
+    - status: "healthy" or "unhealthy"
+    - type: database type (postgresql, mysql, etc.)
+    - version: database version
+    - connected: boolean
+    """
     try:
         async with async_engine.connect() as conn:
             # Execute a simple query to check database
-            result = await conn.execute(text("SELECT 1"))
             await conn.execute(text("SELECT 1"))
             
-            # Get database version
+            # Get database type
             db_type = str(async_engine.url.drivername)
+            
+            # Get database version
             version_result = await conn.execute(text("SELECT VERSION()"))
             version = version_result.scalar()
             
@@ -81,15 +113,20 @@ async def check_database_health() -> dict:
                 "connected": True
             }
     except Exception as e:
-        logger.error(f"Database health check failed: {e}")
+        logger.error(f"❌ Database health check failed: {e}")
         return {
             "status": "unhealthy",
             "error": str(e),
             "connected": False
         }
 
+
 async def check_system_health() -> dict:
-    """Check system health (CPU, memory, disk)"""
+    """
+    Check system health (CPU, memory, disk).
+    
+    Returns dict with CPU, memory, and disk metrics.
+    """
     import psutil
     
     try:
@@ -99,7 +136,7 @@ async def check_system_health() -> dict:
         # Memory usage
         memory = psutil.virtual_memory()
         
-        # Disk usage for current directory
+        # Disk usage
         disk = psutil.disk_usage('/')
         
         return {
@@ -122,14 +159,19 @@ async def check_system_health() -> dict:
             }
         }
     except Exception as e:
-        logger.warning(f"System health check failed: {e}")
+        logger.warning(f"⚠️ System health check failed: {e}")
         return {
             "status": "unknown",
             "error": str(e)
         }
 
+
 async def check_app_health() -> dict:
-    """Check application health"""
+    """
+    Check application health.
+    
+    Returns application configuration and version info.
+    """
     return {
         "status": "healthy",
         "name": settings.PROJECT_NAME,
@@ -142,10 +184,15 @@ async def check_app_health() -> dict:
 
 
 async def check_redis_health() -> dict:
-    """Check Redis connectivity and health"""
+    """
+    Check Redis connectivity and health.
+    
+    Returns Redis connection status and version info.
+    """
     r = get_redis()
     if r is None:
         return {"status": "unavailable", "connected": False}
+    
     try:
         await r.ping()
         info = await r.info("server")
@@ -155,14 +202,31 @@ async def check_redis_health() -> dict:
             "version": info.get("redis_version", "unknown"),
         }
     except Exception as e:
-        logger.warning(f"Redis health check failed: {e}")
+        logger.warning(f"⚠️ Redis health check failed: {e}")
         return {"status": "unhealthy", "connected": False, "error": str(e)}
 
-# ==================== APP INITIALIZATION ====================
+
+# ==================== APPLICATION LIFESPAN ====================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager - handles startup and shutdown events."""
+    """
+    Application lifespan manager - handles startup and shutdown events.
+    
+    Startup:
+    - Logs startup information
+    - Checks database connectivity
+    - Initializes Redis
+    - Initializes MinIO storage
+    - Starts reminder scheduler
+    
+    Shutdown:
+    - Stops reminder scheduler
+    - Closes Redis connection
+    - Closes database connections
+    - Logs shutdown completion
+    """
+    # ==================== STARTUP ====================
     logger.info("🚀 Action Tracker STARTUP")
     logger.info(f"🔗 ROOT_PATH: '{ROOT_PATH}' (empty = local dev)")
     logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
@@ -185,23 +249,25 @@ async def lifespan(app: FastAPI):
 
     # ==================== START REMINDER SCHEDULER ====================
     # Create a background task for the reminder scheduler
+    # This will run in the background and send action reminders 3x daily
     scheduler_task = asyncio.create_task(reminder_scheduler.start())
     logger.info("✅ Meeting reminder scheduler started in background")
 
     # Store the task so we can cancel it on shutdown
     app.state.scheduler_task = scheduler_task
 
-    yield  # Application runs here
+    yield  # ← Application runs here
 
     # ==================== SHUTDOWN CLEANUP ====================
     logger.info("🛑 Shutting down Action Tracker...")
 
-    # Stop the reminder scheduler
+    # Stop the reminder scheduler gracefully
     if hasattr(app.state, 'scheduler_task'):
         app.state.scheduler_task.cancel()
         try:
             await app.state.scheduler_task
         except asyncio.CancelledError:
+            # Expected when cancelling the task
             pass
         logger.info("✅ Reminder scheduler stopped")
 
@@ -217,13 +283,14 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Action Tracker shutdown complete")
 
 
-# ==================== CREATE FASTAPI APP ====================
+# ==================== CREATE FASTAPI APPLICATION ====================
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
+    description="EC Action Tracker - Meeting Management and Action Tracking System",
     lifespan=lifespan,
-    docs_url=None,    # served manually below
+    docs_url=None,     # Served manually below
     redoc_url=None,
     openapi_url=None,
 )
@@ -231,7 +298,7 @@ app = FastAPI(
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ==================== RATE LIMITER ====================
+# ==================== RATE LIMITER SETUP ====================
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -270,9 +337,11 @@ def get_cors_origins() -> list:
     return origins
 
 
-def setup_cors(app: FastAPI):
+def setup_cors(app: FastAPI) -> list:
     """
     Setup CORS middleware with proper configuration.
+    
+    Logs CORS configuration and checks for security issues in production.
     """
     # Get CORS origins
     cors_origins = get_cors_origins()
@@ -288,7 +357,7 @@ def setup_cors(app: FastAPI):
     logger.info(f"📋 DEBUG: {settings.DEBUG}")
     logger.info("=" * 60)
     
-    # Check for invalid configuration
+    # Check for security issues in production
     if cors_origins == ["*"] and settings.IS_PRODUCTION:
         logger.critical("❌ CRITICAL: Allowing all CORS origins in PRODUCTION!")
         logger.critical("❌ This is a security risk! Please configure specific origins.")
@@ -336,7 +405,7 @@ def setup_cors(app: FastAPI):
     if cors_origins == ["*"]:
         logger.info("✅ CORS configured to allow ALL origins (development mode)")
     else:
-        logger.info(f"✅ CORS configured with {len(cors_origins)} origins: {cors_origins}")
+        logger.info(f"✅ CORS configured with {len(cors_origins)} origins")
     
     return cors_origins
 
@@ -344,12 +413,15 @@ def setup_cors(app: FastAPI):
 # Apply CORS configuration
 CORS_ORIGINS_CONFIGURED = setup_cors(app)
 
-# ==================== CORS DEBUG ENDPOINT ====================
+
+# ==================== DEBUG ENDPOINTS ====================
 
 @app.get("/debug/cors", tags=["Debug"])
 async def debug_cors():
     """
     Debug endpoint to check CORS configuration.
+    
+    Returns current CORS settings and environment info.
     """
     return {
         "cors_origins": CORS_ORIGINS_CONFIGURED,
@@ -362,8 +434,11 @@ async def debug_cors():
         "root_path": ROOT_PATH,
     }
 
+
 # ==================== API ROUTES ====================
+
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
 
 # ==================== HEALTH CHECK ENDPOINTS ====================
 
@@ -371,6 +446,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 async def health_check():
     """
     Basic health check endpoint for load balancers and monitoring.
+    
     Returns 200 if the application is running.
     """
     return {
@@ -381,9 +457,15 @@ async def health_check():
         "reminder_scheduler": "running" if hasattr(app.state, 'scheduler_task') and not app.state.scheduler_task.done() else "stopped"
     }
 
+
 @app.get("/health/detailed", tags=["Health"])
 async def detailed_health_check():
-    import asyncio
+    """
+    Detailed health check endpoint.
+    
+    Returns comprehensive health information for all components.
+    Returns 503 if overall status is unhealthy.
+    """
     db_health, system_health, app_health, redis_health = await asyncio.gather(
         check_database_health(),
         check_system_health(),
@@ -391,13 +473,14 @@ async def detailed_health_check():
         check_redis_health(),
     )
 
+    # Determine overall status
     overall_status = "healthy"
     if db_health["status"] != "healthy" or system_health["status"] not in ["healthy", "degraded"]:
         overall_status = "unhealthy"
     elif system_health["status"] == "degraded" or redis_health["status"] != "healthy":
         overall_status = "degraded"
 
-    # Add scheduler status
+    # Check scheduler status
     scheduler_status = "running" if hasattr(app.state, 'scheduler_task') and not app.state.scheduler_task.done() else "stopped"
 
     response = {
@@ -426,6 +509,7 @@ async def detailed_health_check():
 async def readiness_check():
     """
     Readiness probe for Kubernetes/Docker.
+    
     Checks if the application is ready to accept traffic.
     """
     # Check database connectivity
@@ -439,10 +523,12 @@ async def readiness_check():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+
 @app.get("/health/live", tags=["Health"])
 async def liveness_check():
     """
     Liveness probe for Kubernetes/Docker.
+    
     Checks if the application is still running.
     """
     return {
@@ -450,10 +536,12 @@ async def liveness_check():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+
 @app.get("/health/metrics", tags=["Health"])
 async def metrics():
     """
     Prometheus-style metrics endpoint.
+    
     Returns system metrics for monitoring.
     """
     import psutil
@@ -486,10 +574,16 @@ async def metrics():
     
     return metrics
 
-# ==================== CUSTOM OPENAPI / SWAGGER ====================
+
+# ==================== OPENAPI / SWAGGER ENDPOINTS ====================
 
 @app.get("/openapi.json", include_in_schema=False)
 async def custom_openapi():
+    """
+    Custom OpenAPI schema endpoint.
+    
+    Handles ROOT_PATH patching for token URL in production.
+    """
     if app.openapi_schema:
         return JSONResponse(app.openapi_schema)
     
@@ -503,7 +597,7 @@ async def custom_openapi():
         }],
     )
 
-    # ── Patch tokenUrl in securitySchemes so Swagger Authorize uses correct path ──
+    # Patch tokenUrl in securitySchemes so Swagger Authorize uses correct path
     try:
         schemes = openapi_schema.get("components", {}).get("securitySchemes", {})
         for scheme in schemes.values():
@@ -525,8 +619,12 @@ async def custom_openapi():
 
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui():
+    """
+    Custom Swagger UI endpoint.
+    
+    Provides interactive API documentation.
+    """
     return get_swagger_ui_html(
-        # Use a relative path './' so it works with any ROOT_PATH
         openapi_url="./openapi.json",
         title=settings.PROJECT_NAME + " - Swagger UI",
         swagger_ui_parameters={
@@ -536,40 +634,62 @@ async def custom_swagger_ui():
         },
     )
 
+
 @app.get("/redoc", include_in_schema=False)
 async def custom_redoc():
+    """
+    Custom ReDoc endpoint.
+    
+    Provides read-only API documentation.
+    """
     return get_redoc_html(
         openapi_url="./openapi.json",
         title=settings.PROJECT_NAME + " - ReDoc",
     )
 
+
 # ==================== FRONTEND SERVING ====================
 
 if not settings.DEBUG:
+    """
+    Serve frontend in production (DEBUG=False).
+    
+    Serves static files and SPA routing.
+    """
     frontend_dist = get_frontend_path()
 
     if frontend_dist:
         logger.info(f"🎨 Serving frontend from: {frontend_dist}")
 
+        # Mount assets directory if it exists
         assets_dir = frontend_dist / "assets"
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-        @app.get("/")
+        # Serve index.html
+        @app.get("/", include_in_schema=False)
         async def serve_index():
+            """Serve the frontend index.html file."""
             return FileResponse(frontend_dist / "index.html")
 
-        @app.get("/{path:path}")
+        # SPA routing fallback
+        @app.get("/{path:path}", include_in_schema=False)
         async def serve_spa(path: str):
-            # 1. Clean the path to handle potential leading slashes from some proxies
+            """
+            SPA routing fallback.
+            
+            Serves static files if they exist, otherwise falls back to index.html.
+            """
+            # Clean the path to handle potential leading slashes from proxies
             check_path = path.lstrip("/")
 
-            # 2. Updated exclusion list to be more flexible
+            # Exclude API and special endpoints
             excluded_prefixes = ("api/", "docs", "redoc", "openapi.json", "health", "debug")
             
             if any(check_path.startswith(prefix) for prefix in excluded_prefixes):
                 raise HTTPException(status_code=404)
 
+            # Try to serve the file directly
             file_path = frontend_dist / path
             if file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
@@ -580,8 +700,10 @@ if not settings.DEBUG:
     else:
         logger.error(f"❌ FRONTEND_DIST_PATH: {os.getenv('FRONTEND_DIST_PATH')}")
         logger.error("❌ Frontend directory not found!")
+
 else:
     logger.info("🔧 DEBUG=True: Frontend serving disabled.")
+
 
 # ==================== ENTRY POINT ====================
 

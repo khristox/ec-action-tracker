@@ -761,6 +761,14 @@ class MeetingAction(Base):
     status_history = relationship("ActionStatusHistory", back_populates="action", cascade="all, delete-orphan", lazy="selectin")
     assign_to_meeting = relationship("Meeting", foreign_keys=[assign_to_meeting_id], lazy="selectin")
     
+
+    reminder_count = Column(Integer, default=0, nullable=False)  # 0, 1, 2, or 3
+    last_reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+    last_reminder_sent_by_id = Column(CustomUUID, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    
+    # Relationship for who sent the last reminder
+    last_reminder_sent_by = relationship("User", foreign_keys=[last_reminder_sent_by_id], lazy="selectin")
+
     # NEW: ActionImplementer relationship (replaces persons_implementing JSON)
     implementers = relationship(
         "ActionImplementer",
@@ -952,6 +960,95 @@ class MeetingAction(Base):
     
     def __repr__(self) -> str:
         return f"<MeetingAction id={self.id} description='{self.description[:50]}' priority={self.priority}>"
+
+
+# ==================== PROPERTIES TO ADD ====================
+ 
+    @property
+    def should_send_reminder(self) -> bool:
+        """
+        Determine if a reminder should be sent for this action.
+        Returns True if:
+        - Action is active
+        - Action is not completed
+        - Action status is not "cancelled"
+        - Less than 3 reminders have been sent
+        - Last reminder was sent more than 24 hours ago (or never sent)
+        """
+        from datetime import datetime, timezone, timedelta
+        
+        # Action must be active and not completed
+        if not self.is_active or self.is_completed:
+            return False
+        
+        # Check if status is cancelled (when that attribute is created)
+        # TODO: Update this when cancelled status is added to ActionStatus
+        # if self.overall_status and self.overall_status.code == 'CANCELLED':
+        #     return False
+        
+        # Already sent 3 reminders
+        if self.reminder_count >= 3:
+            return False
+        
+        # If never reminded, send
+        if not self.last_reminder_sent_at:
+            return True
+        
+        # Check if 24+ hours have passed since last reminder
+        now = datetime.now(timezone.utc)
+        time_since_last = now - self.last_reminder_sent_at
+        return time_since_last >= timedelta(hours=24)
+    
+    @property
+    def reminder_batch_number(self) -> str:
+        """Returns the reminder batch as '1/3', '2/3', or '3/3'"""
+        return f"{min(self.reminder_count + 1, 3)}/3"
+    
+    @property
+    def can_send_more_reminders(self) -> bool:
+        """Check if more reminders can be sent"""
+        return self.reminder_count < 3
+    
+    @property
+    def last_reminder_sent_by_name(self) -> Optional[str]:
+        """Get the username of who sent the last reminder"""
+        return self.last_reminder_sent_by.username if self.last_reminder_sent_by else None
+
+
+ 
+# ==================== METHODS TO ADD ====================
+ 
+    def mark_reminder_sent(self, sent_by_user_id: UUID) -> None:
+        """
+        Mark that a reminder was sent for this action.
+        Increments reminder_count and updates last_reminder_sent_at.
+        """
+        from datetime import datetime, timezone
+        
+        self.reminder_count = min(self.reminder_count + 1, 3)
+        self.last_reminder_sent_at = datetime.now(timezone.utc)
+        self.last_reminder_sent_by_id = sent_by_user_id
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def to_dict(self, include_relationships: bool = False) -> dict:
+        """Updated to_dict to include reminder tracking info"""
+        data = {
+            # ... existing fields in to_dict ...
+            "reminder_count": self.reminder_count,
+            "last_reminder_sent_at": self.last_reminder_sent_at.isoformat() if self.last_reminder_sent_at else None,
+            "last_reminder_sent_by_name": self.last_reminder_sent_by_name,
+            "should_send_reminder": self.should_send_reminder,
+            "reminder_batch_number": self.reminder_batch_number,
+            "can_send_more_reminders": self.can_send_more_reminders,
+        }
+        
+        if include_relationships:
+            data.update({
+                # ... existing relationship data ...
+                "last_reminder_sent_by_id": str(self.last_reminder_sent_by_id) if self.last_reminder_sent_by_id else None,
+            })
+        
+        return data
 
 
 class ActionImplementer(Base):

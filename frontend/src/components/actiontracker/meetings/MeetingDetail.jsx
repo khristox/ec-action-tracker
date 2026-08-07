@@ -1244,8 +1244,12 @@ const MeetingDetail = () => {
                       : participants
                   }
                   isLimitedAccess={isLimitedAccess}
-                  onRefresh={handleRefresh} 
-                />
+                  onRefresh={handleRefresh}
+                  meetingStatus={normalizedMeeting?.status?.short_name || normalizedMeeting?.status}  // ← Add this
+                  meetingStartTime={normalizedMeeting?.start_time}  // ← Add this
+                  currentChairpersonId={normalizedMeeting?.chairperson_id}  // ← Add this
+                  currentSecretaryId={normalizedMeeting?.secretary_id}  // ← Add this
+              />
               </TabPanel>
 
               <TabPanel value={effectiveTabValue} index={4}>

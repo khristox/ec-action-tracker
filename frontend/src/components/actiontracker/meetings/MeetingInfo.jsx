@@ -66,7 +66,7 @@ const MeetingInfo = ({ meeting, onNotify, onEdit }) => {
                   <NotificationIcon />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Edit Meeting">
+              <Tooltip title="Edit Meeting:">
                 <IconButton onClick={onEdit} size="small">
                   <Edit />
                 </IconButton>

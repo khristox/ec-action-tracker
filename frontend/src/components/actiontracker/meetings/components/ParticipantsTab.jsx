@@ -922,8 +922,10 @@ const ParticipantsTab = ({
     if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
     setLoading(true);
     try {
-      await api.patch(`/action-tracker/meetings/${meetingId}/participants/${participantId}`, {
-        attendance_status: status, apology_comment: comment,
+      // ✅ Use the correct endpoint: PUT /members/{memberId}
+      await api.put(`/action-tracker/meetings/${meetingId}/members/${participantId}`, {
+        attendance_status: status, 
+        apology_comment: comment,
       });
       setAttendanceStatus(prev => ({ ...prev, [participantId]: status }));
       if (comment) setApologyComments(prev => ({ ...prev, [participantId]: comment }));
@@ -932,9 +934,13 @@ const ParticipantsTab = ({
         status === 'absent' || status === 'absent_with_apology' ? 'warning' : 'success',
       );
       if (typeof onRefresh === 'function') onRefresh();
-    } catch (e) { showSnack(e.response?.data?.detail || 'Failed to update attendance', 'error'); }
+    } catch (e) { 
+      console.error('Attendance update error:', e);
+      showSnack(e.response?.data?.detail || 'Failed to update attendance', 'error'); 
+    }
     finally { setLoading(false); }
   }, [meetingId, isMeetingStarted, canEdit, onRefresh, showSnack]);
+
 
   const handleOpenApologyDialog = useCallback((participant) => {
     if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return; }
@@ -944,15 +950,22 @@ const ParticipantsTab = ({
 
   const handleSubmitApology = useCallback(async (message) => {
     if (!selectedParticipant) return;
+    
+    // First update attendance status
     await handleAttendanceChange(selectedParticipant.id, 'absent_with_apology', message);
+    
+    // Then send notification (optional - can be removed if not needed)
     try {
-      await api.post(`/action-tracker/meetings/${meetingId}/notify-participants`, {
+      await api.post(`/action-tracker/meetings/${meetingId}/notifications`, {
         participant_ids: [selectedParticipant.id],
-        notification_type: ['email'],
         custom_message: `Apology Reason: ${message}`,
       });
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error('Failed to send notification:', e);
+      // Don't throw - notification failure shouldn't block attendance update
+    }
   }, [selectedParticipant, handleAttendanceChange, meetingId]);
+
 
   const handleRemoveParticipant = useCallback(async (participantId) => {
     setLoading(true);

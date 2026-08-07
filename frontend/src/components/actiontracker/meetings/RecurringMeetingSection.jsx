@@ -526,7 +526,7 @@ const MeetingForm = () => {
             <Toolbar sx={{ px: 1.5 }}>
               <IconButton edge="start" onClick={handleCancel}><ArrowBackIcon /></IconButton>
               <Typography variant="h6" sx={{ flex: 1, textAlign: 'center', fontWeight: 700 }}>
-                {isEditMode ? 'Edit Meeting' : 'New Meeting'}
+                {isEditMode ? 'Edit Meeting:' : 'New Meeting'}
               </Typography>
               <IconButton edge="end" onClick={handleCancel}><Close /></IconButton>
             </Toolbar>

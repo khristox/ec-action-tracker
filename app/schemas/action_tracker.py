@@ -6,7 +6,7 @@ from uuid import UUID
 from datetime import datetime, date
 from enum import Enum
 
-from app.schemas.meeting_minutes.meeting_minutes import MeetingMinutesResponse
+from app.schemas.meeting_minutes.meeting_minutes import MeetingActionResponse, MeetingMinutesResponse
 
 
 # ==================== Shared Config ====================
@@ -275,7 +275,13 @@ class MeetingUpdate(ORMBase):
 
 
 # ==================== Meeting Responses ====================
-
+class ActionPaginationResponse(BaseModel):
+    items: List[MeetingActionResponse]
+    total: int
+    skip: int
+    limit: int
+    pages: int
+    
 class MeetingCreateResponse(ORMBase):
     """Flat response returned after POST /meetings"""
     id: UUID

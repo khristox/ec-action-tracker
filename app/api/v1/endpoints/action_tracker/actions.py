@@ -1,5 +1,6 @@
 # app/api/v1/endpoints/action_tracker/actions.py
 
+from operator import or_
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,9 @@ from sqlalchemy.orm import selectinload
 from typing import Any, List, Optional, Dict
 from uuid import UUID
 from datetime import datetime, timezone
+from sqlalchemy import and_, or_, func, desc, asc
+
+
 import logging
 
 from app.api import deps
@@ -24,6 +28,7 @@ from app.services.implementer_linking import (
 from app.schemas.action_tracker import (
     ActionCommentCreate,
     ActionCommentResponse,
+    ActionPaginationResponse,
     ActionProgressUpdate,
     ActionStatusHistoryResponse,
     MyTaskImplementer,
@@ -381,41 +386,101 @@ async def get_overdue_tasks(
 
 # ==================== ACTION COLLECTION ROUTES ====================
 
-@router.get("/", response_model=List[MeetingActionResponse])
+@router.get("/", response_model=ActionPaginationResponse)
 async def get_actions(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, description="Search in description and title"),
+    status: Optional[str] = Query(None, description="pending, in_progress, completed, overdue"),
     status_id: Optional[UUID] = Query(None, description="Filter by status ID"),
     priority: Optional[int] = Query(None, ge=1, le=4, description="Filter by priority (1-4)"),
     assigned_to_id: Optional[UUID] = Query(None, description="Filter by assigned user"),
 ):
     """Get all actions with optional filtering and pagination."""
     try:
-        actions = await meeting_action.get_multi(db, skip=skip, limit=limit)
-
-        # Apply filters
+        # Start with base query
+        query = select(MeetingAction).where(MeetingAction.is_active == True)
+        
+        # Apply search filter
+        if search:
+            search_term = f"%{search}%"
+            query = query.where(
+                or_(
+                    MeetingAction.description.ilike(search_term),
+                    MeetingAction.title.ilike(search_term),
+                    MeetingAction.remarks.ilike(search_term)
+                )
+            )
+        
+        # Apply status string filter
+        if status:
+            if status == "pending":
+                query = query.where(
+                    MeetingAction.completed_at.is_(None),
+                    MeetingAction.overall_progress_percentage == 0
+                )
+            elif status == "in_progress":
+                query = query.where(
+                    MeetingAction.completed_at.is_(None),
+                    MeetingAction.overall_progress_percentage > 0,
+                    MeetingAction.overall_progress_percentage < 100
+                )
+            elif status == "completed":
+                query = query.where(
+                    or_(
+                        MeetingAction.completed_at.is_not(None),
+                        MeetingAction.overall_progress_percentage == 100
+                    )
+                )
+            elif status == "overdue":
+                query = query.where(
+                    MeetingAction.completed_at.is_(None),
+                    MeetingAction.is_overdue == True
+                )
+        
+        # Apply status_id filter
         if status_id:
-            actions = [a for a in actions if a.overall_status_id == status_id]
+            query = query.where(MeetingAction.overall_status_id == status_id)
+        
+        # Apply priority filter
         if priority:
-            actions = [a for a in actions if a.priority == priority]
+            query = query.where(MeetingAction.priority == priority)
+        
+        # Apply assigned_to filter
         if assigned_to_id:
-            actions = [a for a in actions if a.assigned_to_id == assigned_to_id]
-
-        logger.info(f"Retrieved {len(actions)} actions")
-        return actions
-
+            query = query.where(MeetingAction.assigned_to_id == assigned_to_id)
+        
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        count_result = await db.execute(count_query)
+        total = count_result.scalar() or 0
+        
+        # Apply pagination and ordering
+        query = query.offset(skip).limit(limit).order_by(desc(MeetingAction.created_at))
+        
+        result = await db.execute(query)
+        actions = result.scalars().all()
+        
+        logger.info(f"Retrieved {len(actions)} actions (total: {total})")
+        
+        return ActionPaginationResponse(
+            items=actions,
+            total=total,
+            skip=skip,
+            limit=limit,
+            pages=(total + limit - 1) // limit if total > 0 else 1
+        )
+        
     except Exception as e:
-        logger.error(f"Error fetching actions: {str(e)}")
+        logger.error(f"Error fetching actions: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch actions"
         )
 
-
 # ==================== CREATE ACTION (ROOT ENDPOINT) ====================
-
 @router.post("/", response_model=MeetingActionResponse, status_code=status.HTTP_201_CREATED)
 async def create_action(
     *,

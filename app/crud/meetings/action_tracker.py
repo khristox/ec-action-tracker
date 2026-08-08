@@ -1,4 +1,3 @@
-# app/crud/meetings/action_tracker.py
 """
 Action Tracker CRUD Operations
 Complete implementation with all CRUD operations for all entities
@@ -6,17 +5,18 @@ Complete implementation with all CRUD operations for all entities
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Tuple
 from uuid import UUID, uuid4
-from datetime import datetime
-from venv import logger
+from datetime import datetime, timezone
+import logging
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import String, delete, select, and_, or_, func, case, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import String, delete, select, and_, or_, func, case, update, text
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.api.v1.endpoints.action_tracker.audit_logger import log_audit
 from app.crud.base import CRUDBase
@@ -37,7 +37,6 @@ from app.models.user import User
 
 
 from app.schemas.action_tracker import ActionCommentCreate, ActionCommentUpdate, ActionProgressUpdate
-from sqlalchemy import or_
 from app.schemas.action_tracker import MeetingCreate, MeetingUpdate
 
 from app.models.meetings.action_tracker import participant_list_members
@@ -56,6 +55,9 @@ from app.services.implementer_linking import (
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 DEFAULT_SKIP = 0
+OVERDUE_DAYS_THRESHOLD = 30  # Days to consider for overdue notifications
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # BASE CLASS WITH AUDIT MIXIN
@@ -66,7 +68,7 @@ class AuditMixin:
     
     async def _set_audit_fields(self, obj, created_by_id: UUID = None, updated_by_id: UUID = None):
         """Set audit fields on an object"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if created_by_id:
             obj.created_by_id = created_by_id
             obj.created_at = now
@@ -80,14 +82,16 @@ class AuditMixin:
     async def _update_audit_fields(self, obj, updated_by_id: UUID):
         """Update audit fields on an existing object"""
         obj.updated_by_id = updated_by_id
-        obj.updated_at = datetime.now()
+        obj.updated_at = datetime.now(timezone.utc)
         return obj
 
 
 # ============================================================================
 # PARTICIPANT CRUD
 # ============================================================================
+
 class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate], AuditMixin):
+    """CRUD operations for Participant entity"""
     
     async def create(
         self, 
@@ -105,12 +109,13 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             if not obj_data.get('name'):
                 raise ValueError("Name is required for creating a participant")
             
+            # Check for duplicate email
             if obj_data.get('email'):
                 existing = await self.get_by_email(db, obj_data['email'])
                 if existing:
                     raise ValueError(f"Participant with email '{obj_data['email']}' already exists")
-                
-
+            
+            # Remove fields that don't belong to Participant model
             obj_data.pop('attendance_status', None)
             obj_data.pop('is_chairperson', None)
             obj_data.pop('is_secretary', None)
@@ -121,10 +126,16 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             db.add(db_obj)
             await db.commit()
             await db.refresh(db_obj)
+            logger.info(f"Created participant: {db_obj.name} (ID: {db_obj.id})")
             return db_obj
             
+        except IntegrityError as e:
+            await db.rollback()
+            logger.error(f"Integrity error creating participant: {str(e)}")
+            raise ValueError(f"Participant already exists or data conflict: {str(e)}")
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to create participant: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to create participant: {str(e)}")
 
     async def get(self, db: AsyncSession, id: UUID) -> Optional[Participant]:
@@ -160,12 +171,17 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
                         Participant.name.ilike(term),
                         Participant.email.ilike(term),
                         Participant.organization.ilike(term),
+                        Participant.telephone.ilike(term)
                     )
                 )
             
             organization = filters.get("organization")
             if organization:
                 query = query.where(Participant.organization == organization)
+            
+            email = filters.get("email")
+            if email:
+                query = query.where(Participant.email == email)
 
         query = query.order_by(Participant.name).offset(skip).limit(min(limit, MAX_LIMIT))
         result = await db.execute(query)
@@ -181,7 +197,9 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
         if not email:
             return None
         
-        query = select(Participant).where(Participant.email == email)
+        query = select(Participant).where(
+            func.lower(Participant.email) == email.strip().lower()
+        )
         if not include_inactive:
             query = query.where(Participant.is_active == True)
         
@@ -206,6 +224,7 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             else:
                 update_data = obj_in
             
+            # Check email uniqueness
             if 'email' in update_data and update_data['email'] and update_data['email'] != db_obj.email:
                 existing = await self.get_by_email(db, update_data['email'])
                 if existing and existing.id != id:
@@ -219,10 +238,16 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             
             await db.commit()
             await db.refresh(db_obj)
+            logger.info(f"Updated participant: {db_obj.name} (ID: {db_obj.id})")
             return db_obj
             
+        except IntegrityError as e:
+            await db.rollback()
+            logger.error(f"Integrity error updating participant: {str(e)}")
+            raise ValueError(f"Data conflict: {str(e)}")
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to update participant: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to update participant: {str(e)}")
 
     async def soft_delete(
@@ -239,9 +264,11 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
                 await self._update_audit_fields(db_obj, deleted_by_id)
                 await db.commit()
                 await db.refresh(db_obj)
+                logger.info(f"Soft deleted participant: {db_obj.name} (ID: {db_obj.id})")
             return db_obj
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to delete participant: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to delete participant: {str(e)}")
 
     async def search_participants(
@@ -292,7 +319,7 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
             return participants
             
         except Exception as e:
-            print(f"Error searching participants: {str(e)}")
+            logger.error(f"Error searching participants: {str(e)}", exc_info=True)
             return []
 
 
@@ -301,6 +328,7 @@ class CRUDParticipant(CRUDBase[Participant, ParticipantCreate, ParticipantUpdate
 # ============================================================================
 
 class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, ParticipantListUpdate], AuditMixin):
+    """CRUD operations for ParticipantList entity"""
     
     def _participant_to_dict(self, participant: Participant) -> dict:
         """Convert participant ORM to dictionary for API responses"""
@@ -383,7 +411,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             
         except SQLAlchemyError as e:
             await db.rollback()
-            logger.error(f"Database error creating participant list: {e}")
+            logger.error(f"Database error creating participant list: {e}", exc_info=True)
             raise ValueError(f"Failed to create participant list: {str(e)}")
     
     async def get(self, db: AsyncSession, id: UUID, include_participants: bool = True) -> Optional[dict]:
@@ -406,7 +434,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             return self._list_to_dict(db_obj, include_participants=include_participants)
             
         except SQLAlchemyError as e:
-            logger.error(f"Database error fetching list {id}: {e}")
+            logger.error(f"Database error fetching list {id}: {e}", exc_info=True)
             return None
     
     async def get_multi(
@@ -440,7 +468,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             return list_dicts, total
             
         except SQLAlchemyError as e:
-            logger.error(f"Database error fetching lists: {e}")
+            logger.error(f"Database error fetching lists: {e}", exc_info=True)
             return [], 0
     
     async def _get_participants_by_ids(self, db: AsyncSession, participant_ids: List[UUID]) -> List[Participant]:
@@ -454,8 +482,6 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         )
         return result.scalars().all()
 
-    # ==================== ADD MISSING METHODS ====================
-    
     async def add_participants_to_list_batch(
         self,
         db: AsyncSession,
@@ -556,11 +582,14 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         
         # Add search filter
         if search:
+            search_term = f"%{search}%"
             query = query.where(
-                (Participant.name.ilike(f"%{search}%")) |
-                (Participant.email.ilike(f"%{search}%")) |
-                (Participant.organization.ilike(f"%{search}%")) |
-                (Participant.telephone.ilike(f"%{search}%"))
+                or_(
+                    Participant.name.ilike(search_term),
+                    Participant.email.ilike(search_term),
+                    Participant.organization.ilike(search_term),
+                    Participant.telephone.ilike(search_term)
+                )
             )
         
         # Get total count
@@ -629,10 +658,13 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
         
         # Add search filter
         if search:
+            search_term = f"%{search}%"
             query = query.where(
-                (Participant.name.ilike(f"%{search}%")) |
-                (Participant.email.ilike(f"%{search}%")) |
-                (Participant.organization.ilike(f"%{search}%"))
+                or_(
+                    Participant.name.ilike(search_term),
+                    Participant.email.ilike(search_term),
+                    Participant.organization.ilike(search_term)
+                )
             )
         
         # Get total count
@@ -683,7 +715,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             update(ParticipantList)
             .where(ParticipantList.id == list_id)
             .values(
-                updated_at=datetime.now(),
+                updated_at=datetime.now(timezone.utc),
                 updated_by_id=updated_by_id
             )
         )
@@ -706,7 +738,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             .where(ParticipantList.id == id)
             .values(
                 is_active=False,
-                updated_at=datetime.now(),
+                updated_at=datetime.now(timezone.utc),
                 updated_by_id=updated_by_id
             )
         )
@@ -792,7 +824,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             return items, total
             
         except SQLAlchemyError as e:
-            logger.error(f"Database error fetching accessible lists: {e}")
+            logger.error(f"Database error fetching accessible lists: {e}", exc_info=True)
             return [], 0
         
 
@@ -864,7 +896,7 @@ class CRUDParticipantList(CRUDBase[ParticipantList, ParticipantListCreate, Parti
             }
             
         except SQLAlchemyError as e:
-            logger.error(f"Database error fetching list with participants: {e}")
+            logger.error(f"Database error fetching list with participants: {e}", exc_info=True)
             return None
 
 
@@ -899,7 +931,7 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
                 visibility=meeting_data.get('visibility', 'open'),
                 restricted_department_id=meeting_data.get('restricted_department_id'),
                 created_by_id=user_id,
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
                 is_active=True
             )
             
@@ -918,17 +950,19 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
                     is_chairperson=participant_data.get('is_chairperson', False),
                     is_secretary=participant_data.get('is_secretary', False),
                     created_by_id=user_id,
-                    created_at=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
                     is_active=True
                 )
                 db.add(participant)
             
             await db.commit()
             await db.refresh(meeting)
+            logger.info(f"Created meeting: {meeting.title} (ID: {meeting.id})")
             return meeting
             
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to create meeting: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to create meeting: {str(e)}")
     
     async def get_meeting_with_details(self, db: AsyncSession, meeting_id: UUID) -> Optional[Meeting]:
@@ -987,9 +1021,11 @@ class CRUDMeeting(CRUDBase[Meeting, None, None], AuditMixin):
                 await self._update_audit_fields(db_obj, deleted_by_id)
                 await db.commit()
                 await db.refresh(db_obj)
+                logger.info(f"Soft deleted meeting: {db_obj.title} (ID: {db_obj.id})")
             return db_obj
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to delete meeting: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to delete meeting: {str(e)}")
 
 
@@ -1037,8 +1073,8 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
                 "uploaded_by_id": user_id,
                 "created_by_id": user_id,
                 "updated_by_id": user_id,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now(),
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
                 "is_active": True,
                 "version": 1
             }
@@ -1050,13 +1086,14 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
             await db.commit()
             await db.refresh(db_obj)
             
+            logger.info(f"Uploaded document: {file.filename} to meeting {meeting_id}")
             return db_obj
             
         except Exception as e:
             await db.rollback()
             if object_name:
                 minio_service.delete_object(object_name)
-            logger.error(f"Failed to upload document: {str(e)}")
+            logger.error(f"Failed to upload document: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to upload document: {str(e)}")
     
     async def get(self, db: AsyncSession, id: UUID) -> Optional[MeetingDocument]:
@@ -1086,7 +1123,7 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
             )
             return result.scalars().all()
         except Exception as e:
-            logger.error(f"Error fetching documents: {str(e)}")
+            logger.error(f"Error fetching documents: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
     
     async def delete(self, db: AsyncSession, id: UUID, user_id: UUID, soft_delete: bool = True) -> Optional[MeetingDocument]:
@@ -1105,14 +1142,16 @@ class CRUDMeetingDocument(CRUDBase[MeetingDocument, None, None], AuditMixin):
                 await db.delete(db_obj)
             
             await db.commit()
+            logger.info(f"Deleted document: {db_obj.file_name} (ID: {db_obj.id})")
             return db_obj
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to delete document: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to delete document: {str(e)}")
 
 
 # ============================================================================
-# MEETING ACTION CRUD - COMPLETE REWRITE WITH persons_implementing SUPPORT
+# MEETING ACTION CRUD
 # ============================================================================
 
 class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActionUpdate], AuditMixin):
@@ -1122,6 +1161,8 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     
     def _normalize_person_data(self, person_data: Any) -> Dict[str, Any]:
         """Normalize person data to a dictionary"""
+        if hasattr(person_data, 'model_dump'):
+            return person_data.model_dump()
         if hasattr(person_data, 'dict'):
             return person_data.dict()
         if isinstance(person_data, dict):
@@ -1141,13 +1182,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         return person_dict.get('phone') or person_dict.get('telephone')
     
     def _get_person_user_id(self, person_dict: Dict[str, Any]) -> Optional[UUID]:
-        """Extract user_id from person dictionary and safely cast to UUID if present.
-
-        The ActionImplementer table stores the FK as `user_id`.
-        The frontend sends the value under `user_id` (preferred) and also
-        mirrors it to `assigned_to_id` for backward compatibility.
-        We accept all three possible field names so nothing is silently dropped.
-        """
+        """Extract user_id from person dictionary and safely cast to UUID if present."""
         raw_id = (
             person_dict.get('user_id') or
             person_dict.get('assigned_to_id') or
@@ -1160,17 +1195,8 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 return None
         return raw_id
 
-
-    async def _resolve_person_user_id(self, db, person_dict) -> Optional[UUID]:
-        """
-        Validate the client-supplied id against the users table.
-
-        The picker hands us meeting_participants.id values, which are NOT
-        user ids. An unvalidated id here is what caused
-        fk_action_implementers_user violations. Unknown id -> fall back to
-        matching on email -> otherwise NULL (external person, which is a
-        perfectly valid state).
-        """
+    async def _resolve_person_user_id(self, db: AsyncSession, person_dict: Dict[str, Any]) -> Optional[UUID]:
+        """Validate the client-supplied id against the users table."""
         return await resolve_implementer_user_id(
             db,
             user_id=self._get_person_user_id(person_dict),
@@ -1222,19 +1248,19 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 assigned_to_id=assigned_to_id,
                 assigned_to_name=assigned_to_name,
                 assigned_by_id=assigned_by_id,
-                assigned_at=datetime.now(),
+                assigned_at=datetime.now(timezone.utc),
                 due_date=action_data.get('due_date'),
                 priority=action_data.get('priority', 2),
                 remarks=action_data.get('remarks'),
                 title=action_data.get('title'),
                 issue_challenge=action_data.get('issue_challenge'),
                 type_of_action=action_data.get('type_of_action'),
-                date_initiated=action_data.get('date_initiated') or datetime.now(),
+                date_initiated=action_data.get('date_initiated') or datetime.now(timezone.utc),
                 is_key_action=action_data.get('is_key_action', False),
                 tags=action_data.get('tags', []),
                 assign_to_meeting_id=action_data.get('assign_to_meeting_id'),
                 created_by_id=assigned_by_id,
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
                 is_active=True
             )
             
@@ -1250,8 +1276,6 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 for idx, person_data in enumerate(persons_implementing):
                     person_dict = self._normalize_person_data(person_data)
                     
-                    resolved_user_id = await self._resolve_person_user_id(db, person_dict)
-
                     user_id, name, email, phone = await resolve_person_identity(
                         db,
                         raw_id=self._get_person_user_id(person_dict),
@@ -1268,7 +1292,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                         email=email,
                         phone=phone,
                         sort_order=idx,
-                        linked_at=datetime.now() if user_id else None,
+                        linked_at=datetime.now(timezone.utc) if user_id else None,
                     )
                     db.add(implementer)
                     logger.info(f"Added implementer: {implementer.name} (sort_order: {idx})")
@@ -1349,161 +1373,258 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
         return result.scalars().all()
     
     async def get_actions_assigned_to_user(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        user_email: Optional[str] = None,
-        user_phone: Optional[str] = None,
-        skip: int = 0,
-        limit: int = 100,
-        search: Optional[str] = None,
-        status: Optional[str] = None,
-        priority: Optional[int] = None,
-        is_overdue: Optional[bool] = None,
-        include_completed: bool = False,
-    ) -> List[MeetingAction]:
-        """Get actions assigned to user - checks both legacy fields and implementers"""
-        from sqlalchemy import or_, and_, func
-        from sqlalchemy.sql import case
-        
-        query = select(MeetingAction).options(
-            selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
-            selectinload(MeetingAction.assigned_to),
-            selectinload(MeetingAction.assigned_by),
-            selectinload(MeetingAction.implementers)
-        )
-        
-        # Build conditions for matching assignments
-        conditions = []
-        
-        # 1. Direct assignment (legacy)
-        if user_id:
-            conditions.append(MeetingAction.assigned_to_id == user_id)
-        
+            self,
+            db: AsyncSession,
+            user_id: UUID,
+            user_email: Optional[str] = None,
+            user_phone: Optional[str] = None,
+            skip: int = 0,
+            limit: int = 100,
+            search: Optional[str] = None,
+            status: Optional[str] = None,
+            priority: Optional[int] = None,
+            is_overdue: Optional[bool] = None,
+            include_completed: bool = False,
+        ) -> List[MeetingAction]:
+            """Get actions assigned to a user."""
+            from sqlalchemy import or_, and_, func, String
+            from sqlalchemy.sql import case
 
-        # 3. Check implementers table — this is now the primary source
-        implementer_conditions = []
-
-        # Already linked to my account
-        if user_id:
-            implementer_conditions.append(ActionImplementer.user_id == user_id)
-
-        # Not yet linked, but assigned to my email address
-        if user_email:
-            implementer_conditions.append(
-                and_(
-                    ActionImplementer.user_id.is_(None),
-                    func.lower(ActionImplementer.email) == user_email.strip().lower(),
-                )
+            query = select(MeetingAction).options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by),
+                selectinload(MeetingAction.implementers)
             )
 
-        # Not yet linked, but assigned to my phone
-        if user_phone:
-            normalized_phone = normalize_phone(user_phone)
-            if normalized_phone:
+            conditions = []
+
+            # 1. Direct assignment
+            if user_id:
+                conditions.append(MeetingAction.assigned_to_id == user_id)
+
+            # 2. JSON/JSONB fields cast to String for text matching
+            if user_email:
+                email_str = user_email.strip().lower()
+                conditions.append(
+                    func.cast(MeetingAction.assigned_to_name, String).ilike(f"%{email_str}%")
+                )
+
+            if user_id:
+                user_id_str = str(user_id)
+                conditions.append(
+                    func.cast(MeetingAction.assigned_to_name, String).ilike(f"%{user_id_str}%")
+                )
+
+            if user_phone:
+                normalized_phone = normalize_phone(user_phone)
+                if normalized_phone:
+                    conditions.append(
+                        func.cast(MeetingAction.assigned_to_name, String).ilike(f"%{normalized_phone}%")
+                    )
+
+            # 3. Implementers table
+            implementer_conditions = []
+            if user_id:
+                implementer_conditions.append(ActionImplementer.user_id == user_id)
+            if user_email:
                 implementer_conditions.append(
                     and_(
                         ActionImplementer.user_id.is_(None),
-                        ActionImplementer.phone == normalized_phone,
+                        func.lower(ActionImplementer.email) == user_email.strip().lower(),
                     )
                 )
+            if user_phone:
+                normalized_phone = normalize_phone(user_phone)
+                if normalized_phone:
+                    implementer_conditions.append(
+                        and_(
+                            ActionImplementer.user_id.is_(None),
+                            ActionImplementer.phone == normalized_phone,
+                        )
+                    )
 
-        if implementer_conditions:
-            implementer_subquery = select(ActionImplementer.action_id).where(
-                or_(*implementer_conditions)
-            )
-            conditions.append(MeetingAction.id.in_(implementer_subquery))
-        
-        # Apply OR condition
-        if conditions:
-            query = query.where(or_(*conditions))
-        else:
-            # If no conditions, return empty (shouldn't happen)
-            return []
-        
-        # Only active actions
-        query = query.where(MeetingAction.is_active == True)
-        
-        # Filter by completion status
-        if not include_completed:
-            query = query.where(MeetingAction.completed_at.is_(None))
-        
-        # Search filter
-        if search and search.strip():
-            term = f"%{search.strip()}%"
-            query = query.where(
-                or_(
-                    MeetingAction.description.like(term),
-                    MeetingAction.title.like(term),
-                    MeetingAction.issue_challenge.like(term)
+            if implementer_conditions:
+                implementer_subquery = select(ActionImplementer.action_id).where(
+                    or_(*implementer_conditions)
                 )
+                conditions.append(MeetingAction.id.in_(implementer_subquery))
+
+            if not conditions:
+                return []
+
+            query = query.where(or_(*conditions))
+            query = query.where(MeetingAction.is_active == True)
+
+            if not include_completed:
+                query = query.where(MeetingAction.completed_at.is_(None))
+
+            # Search filter
+            if search and search.strip():
+                term = f"%{search.strip()}%"
+                query = query.where(
+                    or_(
+                        MeetingAction.description.ilike(term),
+                        MeetingAction.title.ilike(term),
+                        MeetingAction.issue_challenge.ilike(term)
+                    )
+                )
+            
+            # Status filter
+            if status:
+                query = query.where(MeetingAction.overall_status_name == status)
+            
+            # Priority filter
+            if priority is not None:
+                query = query.where(MeetingAction.priority == priority)
+            
+            # Overdue filter
+            if is_overdue is True:
+                query = query.where(
+                    and_(
+                        MeetingAction.due_date.is_not(None),
+                        MeetingAction.due_date < datetime.now(timezone.utc),
+                        MeetingAction.completed_at.is_(None)
+                    )
+                )
+            
+            # Sort by due date (NULLs last), then creation date
+            query = query.order_by(
+                case(
+                    (MeetingAction.due_date.is_(None), 1),
+                    else_=0
+                ),
+                MeetingAction.due_date.asc(),
+                MeetingAction.created_at.desc()
+            ).offset(skip).limit(min(limit, MAX_LIMIT))
+            
+            result = await db.execute(query)
+            actions = result.scalars().all()
+            
+            logger.info(f"Found {len(actions)} actions assigned to user {user_id}")
+            return actions
+
+
+    async def get_overdue_actions_for_user(
+            self,
+            db: AsyncSession,
+            user_id: UUID,
+            user_email: Optional[str] = None,
+            user_phone: Optional[str] = None,
+            skip: int = 0,
+            limit: int = 100,
+        ) -> List[MeetingAction]:
+            """Get overdue actions assigned to a user."""
+            from sqlalchemy import or_, and_, func, String
+            from sqlalchemy.sql import case
+            
+            now = datetime.now(timezone.utc)
+            
+            query = select(MeetingAction).options(
+                selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assigned_to),
+                selectinload(MeetingAction.assigned_by),
+                selectinload(MeetingAction.implementers),
+                selectinload(MeetingAction.overall_status)
             )
-        
-        # Status filter
-        if status:
-            query = query.where(MeetingAction.overall_status_name == status)
-        
-        # Priority filter
-        if priority is not None:
-            query = query.where(MeetingAction.priority == priority)
-        
-        # Overdue filter
-        if is_overdue is True:
+            
+            user_conditions = []
+            
+            if user_id:
+                user_conditions.append(MeetingAction.assigned_to_id == user_id)
+            
+            if user_email:
+                email_str = user_email.strip().lower()
+                user_conditions.append(
+                    func.cast(MeetingAction.assigned_to_name, String).ilike(f"%{email_str}%")
+                )
+            
+            if user_id:
+                user_id_str = str(user_id)
+                user_conditions.append(
+                    func.cast(MeetingAction.assigned_to_name, String).ilike(f"%{user_id_str}%")
+                )
+            
+            if user_phone:
+                normalized_phone = normalize_phone(user_phone)
+                if normalized_phone:
+                    user_conditions.append(
+                        func.cast(MeetingAction.assigned_to_name, String).ilike(f"%{normalized_phone}%")
+                    )
+            
+            implementer_conditions = []
+            if user_id:
+                implementer_conditions.append(ActionImplementer.user_id == user_id)
+            if user_email:
+                implementer_conditions.append(
+                    and_(
+                        ActionImplementer.user_id.is_(None),
+                        func.lower(ActionImplementer.email) == user_email.strip().lower(),
+                    )
+                )
+            if user_phone:
+                normalized_phone = normalize_phone(user_phone)
+                if normalized_phone:
+                    implementer_conditions.append(
+                        and_(
+                            ActionImplementer.user_id.is_(None),
+                            ActionImplementer.phone == normalized_phone,
+                        )
+                    )
+            
+            if implementer_conditions:
+                implementer_subquery = select(ActionImplementer.action_id).where(
+                    or_(*implementer_conditions)
+                )
+                user_conditions.append(MeetingAction.id.in_(implementer_subquery))
+            
+            if not user_conditions:
+                return []
+            
             query = query.where(
                 and_(
+                    or_(*user_conditions),
+                    MeetingAction.is_active == True,
+                    MeetingAction.completed_at.is_(None),
                     MeetingAction.due_date.is_not(None),
-                    MeetingAction.due_date < datetime.now(),
-                    MeetingAction.completed_at.is_(None)
+                    MeetingAction.due_date < now
                 )
             )
-        
-        # Sort safely: use string comparison or separate out NULLs without type clashes
-        query = query.order_by(
-            case(
-                (MeetingAction.due_date.is_(None), 1),
-                else_=0
-            ),
-            MeetingAction.due_date.asc(),
-            MeetingAction.created_at.desc()
-        ).offset(skip).limit(min(limit, MAX_LIMIT))
-        
-        result = await db.execute(query)
-        return result.scalars().all()
+            
+            query = query.order_by(
+                MeetingAction.due_date.asc(),
+                MeetingAction.priority.asc(),
+                MeetingAction.created_at.desc()
+            ).offset(skip).limit(min(limit, MAX_LIMIT))
+            
+            result = await db.execute(query)
+            actions = result.scalars().all()
+            
+            logger.info(f"Found {len(actions)} overdue actions for user {user_id}")
+            return actions
+
+
+
+
     
-    async def get_overdue_actions_for_user(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        skip: int = 0,
+    async def get_my_tasks(
+        self, 
+        db: AsyncSession, 
+        user_id: UUID, 
+        user_email: Optional[str] = None,
+        user_phone: Optional[str] = None,
+        skip: int = 0, 
         limit: int = 100
     ) -> List[MeetingAction]:
-        """Get overdue actions assigned to a user"""
-        from sqlalchemy import and_
-        
-        now = datetime.now()
-        
-        query = select(MeetingAction).options(
-            selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
-            selectinload(MeetingAction.assigned_to),
-            selectinload(MeetingAction.assigned_by),
-            selectinload(MeetingAction.implementers)
-        ).where(
-            MeetingAction.assigned_to_id == user_id,
-            MeetingAction.is_active == True,
-            MeetingAction.completed_at.is_(None),
-            MeetingAction.due_date.is_not(None),
-            MeetingAction.due_date < now
-        ).order_by(
-            MeetingAction.due_date.asc(),
-            MeetingAction.priority.asc()
-        ).offset(skip).limit(min(limit, 100))
-        
-        result = await db.execute(query)
-        return result.scalars().all()
-    
-    async def get_my_tasks(self, db: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 100):
         """Alias for get_actions_assigned_to_user"""
-        return await self.get_actions_assigned_to_user(db, user_id, skip, limit)
+        return await self.get_actions_assigned_to_user(
+            db=db,
+            user_id=user_id,
+            user_email=user_email,
+            user_phone=user_phone,
+            skip=skip,
+            limit=limit
+        )
     
     # ==================== UPDATE ====================
     
@@ -1530,7 +1651,6 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 for idx, person_data in enumerate(persons_implementing):
                     person_dict = self._normalize_person_data(person_data)
 
-
                     user_id, name, email, phone = await resolve_person_identity(
                         db,
                         raw_id=self._get_person_user_id(person_dict),
@@ -1547,9 +1667,8 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                         email=email,
                         phone=phone,
                         sort_order=idx,
-                        linked_at=datetime.now() if user_id else None,
+                        linked_at=datetime.now(timezone.utc) if user_id else None,
                     )
-
                     
                     db.add(implementer)
                     logger.info(f"Updated implementer: {implementer.name} (sort_order: {idx})")
@@ -1595,7 +1714,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                     setattr(action, field, update_data[field])
             
             # Update audit fields
-            action.updated_at = datetime.now()
+            action.updated_at = datetime.now(timezone.utc)
             action.updated_by_id = updated_by_id
             
             await db.commit()
@@ -1640,11 +1759,11 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             if progress_update.progress_percentage >= 100:
                 if not action.completed_at:
-                    action.completed_at = datetime.now()
+                    action.completed_at = datetime.now(timezone.utc)
             elif action.completed_at:
                 action.completed_at = None
             
-            action.updated_at = datetime.now()
+            action.updated_at = datetime.now(timezone.utc)
             action.updated_by_id = user_id
             
             status_history = ActionStatusHistory(
@@ -1653,7 +1772,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 progress_percentage=progress_update.progress_percentage,
                 remarks=progress_update.remarks or f"Progress updated from {old_progress}% to {progress_update.progress_percentage}%",
                 created_by_id=user_id,
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
                 is_active=True
             )
             
@@ -1661,10 +1780,12 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.commit()
             await db.refresh(action)
             
+            logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}%")
             return action
             
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to update progress: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to update progress: {str(e)}")
     
     async def assign_action(
@@ -1709,9 +1830,9 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 }
             
             # Update assignment metadata
-            action.assigned_at = datetime.now()
+            action.assigned_at = datetime.now(timezone.utc)
             action.assigned_by_id = assigned_by_id
-            action.updated_at = datetime.now()
+            action.updated_at = datetime.now(timezone.utc)
             action.updated_by_id = assigned_by_id
             
             # ==================== UPDATE IMPLEMENTERS ====================
@@ -1719,7 +1840,6 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.execute(
                 delete(ActionImplementer).where(ActionImplementer.action_id == action_id)
             )
-
             
             # Create a single implementer for the assigned user
             implementer = ActionImplementer(
@@ -1772,7 +1892,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 comment=comment_in.comment,
                 attachment_url=comment_in.attachment_url,
                 created_by_id=user_id,
-                created_at=datetime.now(),
+                created_at=datetime.now(timezone.utc),
                 is_active=True
             )
             
@@ -1781,9 +1901,11 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             await db.refresh(comment)
             await db.refresh(comment, attribute_names=["created_by"])
             
+            logger.info(f"Added comment to action {action_id}")
             return comment
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to add comment: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to add comment: {str(e)}")
     
     async def get_comments(
@@ -1808,6 +1930,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             )
             return result.scalars().all()
         except Exception as e:
+            logger.error(f"Failed to fetch comments: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to fetch comments: {str(e)}")
     
     # ==================== HISTORY ====================
@@ -1833,56 +1956,60 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             )
             return result.scalars().all()
         except Exception as e:
+            logger.error(f"Failed to fetch status history: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to fetch status history: {str(e)}")
     
     # ==================== DELETE ====================
     
     async def soft_delete(self, db: AsyncSession, action_id: UUID, user_id: UUID) -> bool:
-            """Soft delete an action"""
-            try:
-                action = await self.get(db, action_id)
-                if not action:
-                    return False
-                
-                # Check permission
-                if action.created_by_id != user_id:
-                    user_result = await db.execute(
-                        select(User).where(User.id == user_id)
-                    )
-                    user = user_result.scalar_one_or_none()
-                    is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
-                    if not is_admin:
-                        raise ValueError("Only the task creator or admin can delete this action")
-                
-                action.is_active = False
-                action.updated_at = datetime.now()
-                action.updated_by_id = user_id
-                
-                # Soft delete comments
-                comments_result = await db.execute(
-                    select(ActionComment).where(ActionComment.action_id == action_id)
-                )
-                for comment in comments_result.scalars().all():
-                    comment.is_active = False
-                    comment.updated_at = datetime.now()
-                    comment.updated_by_id = user_id
-                
-                # Soft delete implementers safely using ORM objects
-                implementers_result = await db.execute(
-                    select(ActionImplementer).where(ActionImplementer.action_id == action_id)
-                )
-                for implementer in implementers_result.scalars().all():
-                    implementer.is_active = False
-                    implementer.updated_at = datetime.now()
-                    implementer.updated_by_id = user_id
-                
-                await db.commit()
-                return True
-                
-            except Exception as e:
-                await db.rollback()
-                raise ValueError(f"Failed to delete action: {str(e)}")
+        """Soft delete an action"""
+        try:
+            action = await self.get(db, action_id)
+            if not action:
+                return False
             
+            # Check permission
+            if action.created_by_id != user_id:
+                user_result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
+                if not is_admin:
+                    raise ValueError("Only the task creator or admin can delete this action")
+            
+            action.is_active = False
+            action.updated_at = datetime.now(timezone.utc)
+            action.updated_by_id = user_id
+            
+            # Soft delete comments
+            comments_result = await db.execute(
+                select(ActionComment).where(ActionComment.action_id == action_id)
+            )
+            for comment in comments_result.scalars().all():
+                comment.is_active = False
+                comment.updated_at = datetime.now(timezone.utc)
+                comment.updated_by_id = user_id
+            
+            # Soft delete implementers safely using ORM objects
+            implementers_result = await db.execute(
+                select(ActionImplementer).where(ActionImplementer.action_id == action_id)
+            )
+            for implementer in implementers_result.scalars().all():
+                implementer.is_active = False
+                implementer.updated_at = datetime.now(timezone.utc)
+                implementer.updated_by_id = user_id
+            
+            await db.commit()
+            logger.info(f"Soft deleted action {action_id}")
+            return True
+            
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Failed to delete action: {str(e)}", exc_info=True)
+            raise ValueError(f"Failed to delete action: {str(e)}")
+
+
 # ============================================================================
 # MEETING MINUTES CRUD
 # ============================================================================
@@ -1898,7 +2025,7 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         user_id: UUID
     ) -> MeetingMinutes:
         """Create a default minute for a meeting"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         default_minute = MeetingMinutes(
             meeting_id=meeting_id,
             topic=f"Action Item - {now.strftime('%Y-%m-%d %H:%M')}",
@@ -1913,6 +2040,7 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         db.add(default_minute)
         await db.commit()
         await db.refresh(default_minute)
+        logger.info(f"Created default minute for meeting {meeting_id}")
         return default_minute
     
     async def get_minutes_by_meeting(
@@ -2022,7 +2150,7 @@ class CRUDMeetingParticipant(AuditMixin):
             return result.scalars().all()
             
         except Exception as e:
-            logger.error(f"Error fetching participants for meeting {meeting_id}: {str(e)}")
+            logger.error(f"Error fetching participants for meeting {meeting_id}: {str(e)}", exc_info=True)
             return []
 
     async def soft_delete(
@@ -2045,9 +2173,11 @@ class CRUDMeetingParticipant(AuditMixin):
                 await self._update_audit_fields(db_obj, deleted_by_id)
                 await db.commit()
                 await db.refresh(db_obj)
+                logger.info(f"Soft deleted meeting participant {participant_id}")
             return db_obj
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to delete meeting participant: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to delete meeting participant: {str(e)}")
     
     async def update_attendance(
@@ -2074,15 +2204,17 @@ class CRUDMeetingParticipant(AuditMixin):
             participant.attendance_status = attendance_status
             if apology_comment is not None:
                 participant.apology_comment = apology_comment
-            participant.updated_at = datetime.now()
+            participant.updated_at = datetime.now(timezone.utc)
             participant.updated_by_id = user_id
             
             await db.commit()
             await db.refresh(participant)
+            logger.info(f"Updated attendance for participant {participant_id} to {attendance_status}")
             return participant
             
         except Exception as e:
             await db.rollback()
+            logger.error(f"Failed to update attendance: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to update attendance: {str(e)}")
 
 

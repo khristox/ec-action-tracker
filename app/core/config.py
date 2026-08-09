@@ -1,19 +1,99 @@
 # app/core/config.py
+
 import os
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, List, Union, Any
 from pydantic import AnyHttpUrl, Field, field_validator, ValidationInfo, SecretStr
 from enum import Enum
 import json
 import logging
-from pathlib import Path
+from dotenv import load_dotenv  # Add this import
 
+# Configure logger
 logger = logging.getLogger(__name__)
+
+# ============================================
+# HELPER FUNCTIONS - MUST BE DEFINED FIRST
+# ============================================
 
 def is_running_in_docker() -> bool:
     """Detect if running inside Docker container"""
     return os.path.exists('/.dockerenv') or os.getenv('IN_DOCKER', 'false').lower() == 'true'
 
+def load_env_file():
+    """Force load .env file from the correct location"""
+    # Try multiple locations
+    env_paths = [
+        Path(__file__).resolve().parent.parent / ".env",  # app/../.env
+        Path.cwd() / ".env",  # Current working directory
+        Path("/app/.env"),  # Docker path
+        Path("/home/chris/Chr/Apps/ECATMIS/.env"),  # Your explicit path
+    ]
+    
+    for env_path in env_paths:
+        if env_path.exists():
+            logger.info(f"✅ Loading .env from: {env_path}")
+            load_dotenv(dotenv_path=env_path, override=True)
+            
+            # Verify critical variables are loaded
+            email_host = os.getenv('EMAIL_HOST')
+            if email_host:
+                logger.info(f"✅ EMAIL_HOST loaded: {email_host}")
+            else:
+                logger.warning(f"⚠️ EMAIL_HOST not found in {env_path}")
+            
+            return env_path
+    
+    logger.error("❌ No .env file found in any location!")
+    return None
+
+def debug_env_location():
+    """Debug function to find where .env is being loaded from"""
+    current_file = Path(__file__).resolve()
+    logger.info(f"🔍 Current file: {current_file}")
+    logger.info(f"🔍 Current file parent: {current_file.parent}")
+    logger.info(f"🔍 Current file parent.parent: {current_file.parent.parent}")
+    
+    # Check multiple possible .env locations
+    possible_paths = [
+        current_file.parent.parent / ".env",  # app/../.env
+        Path.cwd() / ".env",  # Current working directory
+        Path("/app/.env"),  # Docker path
+        Path.home() / ".env",  # Home directory
+        Path("/home/chris/Chr/Apps/ECATMIS/.env"),  # Your specific path
+    ]
+    
+    for path in possible_paths:
+        exists = path.exists()
+        logger.info(f"   {path}: {'✅ EXISTS' if exists else '❌ MISSING'}")
+        if exists:
+            # Read first few lines to verify content
+            try:
+                with open(path, 'r') as f:
+                    lines = f.readlines()[:10]
+                    for line in lines:
+                        if line.startswith('EMAIL_HOST') or line.startswith('EMAIL_PORT'):
+                            logger.info(f"      {line.strip()}")
+            except Exception as e:
+                logger.error(f"      Error reading file: {e}")
+    
+    # Check if environment variables are set
+    logger.info("🔍 Environment variables:")
+    for key in ['EMAIL_HOST', 'EMAIL_PORT', 'EMAIL_USER', 'EMAIL_USE_SSL']:
+        value = os.getenv(key)
+        if value:
+            logger.info(f"   {key}={value}")
+        else:
+            logger.info(f"   {key}=NOT SET")
+
+# Force load .env BEFORE creating Settings instance
+debug_env_location()
+loaded_env_path = load_env_file()
+
+# ============================================
+# ENUM CLASSES
+# ============================================
 
 class Environment(str, Enum):
     DEVELOPMENT = "development"
@@ -21,6 +101,9 @@ class Environment(str, Enum):
     PRODUCTION = "production"
     TESTING = "testing"
 
+# ============================================
+# SETTINGS CLASS
+# ============================================
 
 class Settings(BaseSettings):
     # ========== APP SETTINGS ==========
@@ -74,176 +157,66 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[Path] = None
     
-    # ========== EMAIL SETTINGS (NO HARDCODED DEFAULTS) ==========
-    # ⚠️ ALL MUST BE SET IN .env FILE
-    EMAIL_HOST: str = Field(
-        default="",
-        description="SMTP server host (e.g., smtp.gmail.com, mail.example.com)"
-    )
-    EMAIL_PORT: int = Field(
-        default=0,
-        ge=1,
-        le=65535,
-        description="SMTP server port (25, 465, 587)"
-    )
-    EMAIL_USER: str = Field(
-        default="",
-        description="SMTP username/email address"
-    )
-    EMAIL_PASSWORD: SecretStr = Field(
-        default="",
-        description="SMTP password (MUST be in .env, never in code!)"
-    )
-    EMAIL_REJECT_UNAUTH: bool = Field(
-        default=False,
-        description="Reject unauthenticated emails"
-    )
-    EMAIL_USE_TLS: bool = Field(
-        default=False,
-        description="Use TLS for SMTP (typically port 587)"
-    )
-    EMAIL_USE_SSL: bool = Field(
-        default=False,
-        description="Use SSL for SMTP (typically port 465)"
-    )
-    EMAIL_FROM: str = Field(
-        default="",
-        description="Default from email address"
-    )
-    EMAIL_FROM_NAME: str = Field(
-        default="Action Tracker",
-        description="Default from name in email header"
-    )
-    EMAIL_TIMEOUT: int = Field(
-        default=30,
-        ge=5,
-        le=300,
-        description="Email sending timeout in seconds"
-    )
+    # ========== EMAIL SETTINGS ==========
+    EMAIL_HOST: str = Field(default="")
+    EMAIL_PORT: int = Field(default=0, ge=1, le=65535)
+    EMAIL_USER: str = Field(default="")
+    EMAIL_PASSWORD: SecretStr = Field(default="")
+    EMAIL_REJECT_UNAUTH: bool = Field(default=False)
+    EMAIL_USE_TLS: bool = Field(default=False)
+    EMAIL_USE_SSL: bool = Field(default=False)
+    EMAIL_FROM: str = Field(default="")
+    EMAIL_FROM_NAME: str = Field(default="Action Tracker")
+    EMAIL_TIMEOUT: int = Field(default=30, ge=5, le=300)
     
     # ========== EMAIL VERIFICATION SETTINGS ==========
-    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = Field(
-        default=24,
-        ge=1,
-        le=72,
-        description="Email verification token expiration in hours"
-    )
-    PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = Field(
-        default=24,
-        ge=1,
-        le=72,
-        description="Password reset token expiration in hours"
-    )
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = Field(default=24, ge=1, le=72)
+    PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = Field(default=24, ge=1, le=72)
     
     # ========== FRONTEND SETTINGS ==========
-    FRONTEND_URL: str = Field(
-        default="http://localhost:3000",
-        description="Frontend application URL"
-    )
-    FRONTEND_DIST_PATH: str = Field(
-        default="/app/static",
-        description="Frontend dist path (Docker: /app/static, Local: absolute path)"
-    )
-    BASE_URL: str = Field(
-        default="http://127.0.0.1:8000",
-        description="Base URL for API"
-    )
+    FRONTEND_URL: str = Field(default="http://localhost:3000")
+    FRONTEND_DIST_PATH: str = Field(default="/app/static")
+    BASE_URL: str = Field(default="http://127.0.0.1:8000")
     
     # ========== REDIS SETTINGS ==========
-    REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL"
-    )
+    REDIS_URL: str = Field(default="redis://localhost:6379/0")
     REDIS_MAX_CONNECTIONS: int = 20
     
     # ========== ORGANIZATION SETTINGS ==========
-    ORGANIZATION_NAME: str = Field(
-        default="The Electoral Commission Uganda",
-        description="Organization name"
-    )
-    SUPPORT_EMAIL: str = Field(
-        default="",
-        description="Support email address"
-    )
+    ORGANIZATION_NAME: str = Field(default="The Electoral Commission Uganda")
+    SUPPORT_EMAIL: str = Field(default="")
     
     # ========== LOGO SETTINGS ==========
-    LOGO_URL: Optional[str] = Field(
-        default=None,
-        description="Logo URL (can be absolute URL or relative path)"
-    )
-    FOOTER_LOGO_URL: Optional[str] = Field(
-        default=None,
-        description="Footer logo URL"
-    )
-    LOGO_ALT_TEXT: str = Field(
-        default="Logo",
-        description="Logo alt text"
-    )
-    LOGO_USE_BASE64: bool = Field(
-        default=True,
-        description="Use base64 encoding for logos"
-    )
-    LOGO_LOCAL_PATH: str = Field(
-        default="/static/logo.jpg",
-        description="Local path to logo file"
-    )
+    LOGO_URL: Optional[str] = Field(default=None)
+    FOOTER_LOGO_URL: Optional[str] = Field(default=None)
+    LOGO_ALT_TEXT: str = Field(default="Logo")
+    LOGO_USE_BASE64: bool = Field(default=True)
+    LOGO_LOCAL_PATH: str = Field(default="/static/logo.jpg")
     
     # ========== DOCKER SETTINGS ==========
-    IN_DOCKER: bool = Field(
-        default=False,
-        description="Set to true when running in Docker"
-    )
+    IN_DOCKER: bool = Field(default=False)
     
     # ========== HEALTH CHECK SETTINGS ==========
-    HEALTH_CHECK_ENABLED: bool = Field(
-        default=True,
-        description="Enable health check endpoint"
-    )
+    HEALTH_CHECK_ENABLED: bool = Field(default=True)
     
     # ========== MINIO SETTINGS ==========
-    MINIO_ENDPOINT: str = Field(
-        default="localhost:9000",
-        description="MinIO endpoint"
-    )
-    MINIO_ACCESS_KEY: str = Field(
-        default="minioadmin",
-        description="MinIO access key"
-    )
-    MINIO_SECRET_KEY: str = Field(
-        default="minioadmin",
-        description="MinIO secret key"
-    )
-    MINIO_BUCKET_NAME: str = Field(
-        default="meeting-documents",
-        description="MinIO bucket name"
-    )
-    MINIO_SECURE: bool = Field(
-        default=False,
-        description="Use HTTPS for MinIO"
-    )
-    MINIO_API_CORS_ALLOW_ORIGIN: str = Field(
-        default="http://localhost:3000",
-        description="MinIO CORS allow origin"
-    )
+    MINIO_ENDPOINT: str = Field(default="localhost:9000")
+    MINIO_ACCESS_KEY: str = Field(default="minioadmin")
+    MINIO_SECRET_KEY: str = Field(default="minioadmin")
+    MINIO_BUCKET_NAME: str = Field(default="meeting-documents")
+    MINIO_SECURE: bool = Field(default=False)
+    MINIO_API_CORS_ALLOW_ORIGIN: str = Field(default="http://localhost:3000")
     
     # ========== ADMIN USER ==========
-    ADMIN_USERNAME: str = Field(
-        default="admin",
-        description="Default admin username"
-    )
-    ADMIN_PASSWORD: str = Field(
-        default="",
-        description="Default admin password (should be in .env)"
-    )
+    ADMIN_USERNAME: str = Field(default="admin")
+    ADMIN_PASSWORD: str = Field(default="")
     
     # ========== ROOT PATH ==========
-    ROOT_PATH: str = Field(
-        default="",
-        description="Root path for API"
-    )
+    ROOT_PATH: str = Field(default="")
     
+    # ✅ Use absolute path for .env file
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=loaded_env_path or Path(__file__).resolve().parent.parent / ".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
@@ -315,6 +288,7 @@ class Settings(BaseSettings):
     @classmethod
     def validate_database_url_docker(cls, v: str, info: ValidationInfo) -> str:
         """Auto-adjust database URL for Docker"""
+        # is_running_in_docker is now defined above
         if is_running_in_docker() and 'localhost' in v:
             v = v.replace('localhost', 'mysql')
             logger.info("Auto-converted DATABASE_URL for Docker")
@@ -384,13 +358,21 @@ class Settings(BaseSettings):
     def model_post_init(self, __context):
         """Post-initialization setup"""
         logger.info(f"✅ Settings loaded: {self.ENVIRONMENT}")
+        logger.info(f"   .env file location: {Path(__file__).parent.parent / '.env'}")
+        
+        # ✅ LOG EMAIL SETTINGS TO VERIFY
+        logger.info(f"📧 EMAIL_HOST: {self.EMAIL_HOST if self.EMAIL_HOST else 'NOT SET'}")
+        logger.info(f"📧 EMAIL_PORT: {self.EMAIL_PORT if self.EMAIL_PORT else 'NOT SET'}")
+        logger.info(f"📧 EMAIL_USER: {self.EMAIL_USER if self.EMAIL_USER else 'NOT SET'}")
+        logger.info(f"📧 EMAIL_USE_SSL: {self.EMAIL_USE_SSL}")
+        logger.info(f"📧 EMAIL_USE_TLS: {self.EMAIL_USE_TLS}")
         
         # Validate email configuration
         if not self.EMAIL_HOST or not self.EMAIL_USER or not self.EMAIL_FROM:
             logger.warning("⚠️ Email configuration incomplete - check .env file")
-            logger.warning(f"   EMAIL_HOST: {'✓' if self.EMAIL_HOST else '✗'}")
-            logger.warning(f"   EMAIL_USER: {'✓' if self.EMAIL_USER else '✗'}")
-            logger.warning(f"   EMAIL_FROM: {'✓' if self.EMAIL_FROM else '✗'}")
+            logger.warning(f"   EMAIL_HOST: {'✓' if self.EMAIL_HOST else '✗ Missing'}")
+            logger.warning(f"   EMAIL_USER: {'✓' if self.EMAIL_USER else '✗ Missing'}")
+            logger.warning(f"   EMAIL_FROM: {'✓' if self.EMAIL_FROM else '✗ Missing'}")
         else:
             mode = "SSL" if self.EMAIL_USE_SSL else "STARTTLS" if self.EMAIL_USE_TLS else "Plain"
             logger.info(f"✅ Email configured: {self.EMAIL_HOST}:{self.EMAIL_PORT} ({mode})")
@@ -406,10 +388,22 @@ class Settings(BaseSettings):
         else:
             logger.info("🔐 Using dedicated refresh token secret key")
 
-
-# ========== CREATE SETTINGS INSTANCE ==========
+# ============================================
+# CREATE SETTINGS INSTANCE
+# ============================================
 try:
     settings = Settings()
+    
+    # ✅ Log loaded settings again
+    logger.info("=" * 60)
+    logger.info("📧 FINAL EMAIL CONFIGURATION:")
+    logger.info(f"   EMAIL_HOST: {settings.EMAIL_HOST}")
+    logger.info(f"   EMAIL_PORT: {settings.EMAIL_PORT}")
+    logger.info(f"   EMAIL_USER: {settings.EMAIL_USER}")
+    logger.info(f"   EMAIL_USE_SSL: {settings.EMAIL_USE_SSL}")
+    logger.info(f"   EMAIL_USE_TLS: {settings.EMAIL_USE_TLS}")
+    logger.info("=" * 60)
+    
 except Exception as e:
     logger.error(f"❌ Failed to load settings: {e}")
     raise

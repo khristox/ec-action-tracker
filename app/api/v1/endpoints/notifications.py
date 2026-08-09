@@ -1,27 +1,33 @@
-# app/api/v1/endpoints/notifications.py
-
 import uuid
 import logging
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+from jinja2 import Environment, FileSystemLoader
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, desc, func
+from pydantic import BaseModel, Field
 
 from app.api import deps
+from app.core.config import settings
 from app.db.session import get_db
+from app.models.user import User
+from app.models.meetings.action_tracker import MeetingParticipant, Meeting
 from app.models.notification import (
     Notification, 
     NotificationChannel, 
     NotificationStatus, 
     NotificationCategory
 )
-from app.models.user import User
+from app.services.email_service import email_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Setup Jinja2 environment pointing to app/templates base directory
+jinja_env = Environment(loader=FileSystemLoader("app/templates"))
 
 # 1x1 transparent PNG pixel
 _TRANSPARENT_PIXEL = bytes.fromhex(
@@ -29,6 +35,38 @@ _TRANSPARENT_PIXEL = bytes.fromhex(
     "0000000a4944415478da6360000002000155273de50000000049454e44ae426082"
 )
 
+# ========== REQUEST MODELS ==========
+
+class SendNotificationRequest(BaseModel):
+    """
+    ✅ Send notifications to meeting participants
+    Frontend sends only IDs, backend looks up emails
+    """
+    meeting_id: uuid.UUID
+    participant_ids: List[uuid.UUID] = Field(
+        ..., 
+        description="Participant IDs to notify - backend will look up their emails"
+    )
+    notification_type: List[str] = Field(
+        ..., 
+        description="Channels: 'email', 'whatsapp', 'sms'"
+    )
+    custom_message: Optional[str] = Field(
+        default="",
+        max_length=1000,
+        description="Custom message for notification"
+    )
+
+class NotificationResponse(BaseModel):
+    """Response for sent notification"""
+    success: bool
+    message: str
+    notification_id: Optional[uuid.UUID] = None
+    channel: Optional[str] = None
+    recipient: Optional[str] = None
+    status: Optional[str] = None
+
+# ========== HELPER FUNCTIONS ==========
 
 def _serialize(record) -> dict:
     """Serialize notification record to dict."""
@@ -56,6 +94,328 @@ def _serialize(record) -> dict:
         "last_retry_at": record.last_retry_at.isoformat() if hasattr(record, 'last_retry_at') and record.last_retry_at else None,
     }
 
+# ========== SEND NOTIFICATION ENDPOINT ==========
+
+@router.post("/send-meeting-notification", operation_id="notifications_send_meeting")
+async def send_meeting_notification(
+    request: SendNotificationRequest,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    ✅ Send notifications to meeting participants
+    
+    Frontend sends participant_ids, backend looks up their emails
+    
+    Supports:
+    - Email notifications via SMTP
+    - WhatsApp (if integrated)
+    - SMS (if integrated)
+    
+    Returns tracking of each sent notification
+    """
+    
+    logger.info(f"📧 Notification request from {current_user.email}")
+    logger.info(f"   Meeting: {request.meeting_id}")
+    logger.info(f"   Participant IDs: {len(request.participant_ids)}")
+    logger.info(f"   Channels: {request.notification_type}")
+    
+    # Validate participant IDs
+    if not request.participant_ids or len(request.participant_ids) == 0:
+        logger.error("❌ No participant IDs provided")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No participant IDs provided"
+        )
+    
+    # Validate notification types
+    allowed_channels = ['email', 'whatsapp', 'sms']
+    for channel in request.notification_type:
+        if channel not in allowed_channels:
+            logger.error(f"❌ Invalid notification type: {channel}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid notification type: {channel}. Allowed: {allowed_channels}"
+            )
+    
+    # Fetch meeting details for context
+    meeting_result = await db.execute(
+        select(Meeting).where(Meeting.id == request.meeting_id)
+    )
+    meeting = meeting_result.scalar_one_or_none()
+    
+    # LOOKUP: Fetch participants from database using IDs
+    logger.info(f"🔍 Looking up participant details from database...")
+    
+    result = await db.execute(
+        select(MeetingParticipant).where(
+            MeetingParticipant.id.in_(request.participant_ids),
+            MeetingParticipant.meeting_id == request.meeting_id
+        )
+    )
+    participants_from_db = result.scalars().all()
+    
+    if not participants_from_db:
+        logger.error("❌ No participants found in database for provided IDs")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No participants found for the provided IDs in this meeting"
+        )
+    
+    logger.info(f"   ✅ Found {len(participants_from_db)} participants in database")
+    
+    results = {
+        "total_recipients": len(participants_from_db),
+        "total_sent": 0,
+        "total_failed": 0,
+        "by_channel": {
+            "email": {"sent": 0, "failed": 0},
+            "whatsapp": {"sent": 0, "failed": 0},
+            "sms": {"sent": 0, "failed": 0},
+        },
+        "details": []
+    }
+    
+    # Build absolute frontend URL for email template links
+    base_frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+    meeting_detail_url = f"{base_frontend_url}/admin/action-tracker/meetings/{request.meeting_id}"
+
+    # ========== SEND EMAILS ==========
+    if "email" in request.notification_type:
+        logger.info("📧 Sending emails...")
+        
+        for participant in participants_from_db:
+            notification_id = uuid.uuid4()
+            
+            try:
+                target_email = None
+                name = getattr(participant, 'name', None) or getattr(participant, 'full_name', None) or "Participant"
+
+                # 1. Direct participant email check
+                if getattr(participant, 'email', None) and "@" in participant.email:
+                    target_email = participant.email
+
+                # 2. Extract from JSON field (assigned_to_name)
+                if not target_email and hasattr(participant, 'assigned_to_name') and participant.assigned_to_name:
+                    assigned_data = participant.assigned_to_name
+                    if isinstance(assigned_data, dict):
+                        json_email = assigned_data.get("email")
+                        if json_email and "@" in json_email:
+                            target_email = json_email
+                            if not name or name == "Participant":
+                                name = assigned_data.get("name") or name
+
+                # 3. Lookup via User relationship (assigned_to_id or user_id)
+                user_id_to_check = getattr(participant, 'assigned_to_id', None) or getattr(participant, 'user_id', None)
+                if not target_email and user_id_to_check:
+                    user_result = await db.execute(
+                        select(User).where(User.id == user_id_to_check)
+                    )
+                    user_obj = user_result.scalar_one_or_none()
+                    if user_obj and user_obj.email and "@" in user_obj.email:
+                        target_email = user_obj.email
+                        if not name or name == "Participant":
+                            name = getattr(user_obj, 'full_name', user_obj.email)
+
+                # Skip if no valid domain email is available
+                if not target_email or "@" not in target_email:
+                    logger.warning(f"   ⚠️ Participant {participant.id} has no valid email address, skipping")
+                    results["total_failed"] += 1
+                    results["by_channel"]["email"]["failed"] += 1
+                    results["details"].append({
+                        "participant_id": str(participant.id),
+                        "channel": "email",
+                        "status": "failed",
+                        "error": "No valid email address on file"
+                    })
+                    continue
+                
+                logger.debug(f"   → Sending email to: {target_email}")
+                
+                email_subject = f"Meeting Reminder: {getattr(meeting, 'title', 'Upcoming Meeting')}" if meeting else "Meeting Notification"
+                
+                # Render Jinja2 template from email/meeting_reminder.html
+                try:
+                    template = jinja_env.get_template("email/meeting_reminder.html")
+                    email_body = template.render(
+                        participant_name=name,
+                        meeting_title=getattr(meeting, 'title', 'Upcoming Meeting') if meeting else 'Upcoming Meeting',
+                        time_until=getattr(meeting, 'time_until', 'Soon') if meeting else 'Soon',
+                        meeting_datetime=getattr(meeting, 'start_time', datetime.now()).strftime("%B %d, %Y at %I:%M %p") if meeting and getattr(meeting, 'start_time', None) else "TBD",
+                        platform=getattr(meeting, 'platform', 'online') if meeting else 'online',
+                        location=getattr(meeting, 'location', 'N/A') if meeting else 'N/A',
+                        meeting_link=getattr(meeting, 'meeting_link', None) if meeting else None,
+                        meeting_detail_link=meeting_detail_url,
+                        primary_color="#1e40af",
+                        project_name="ECATMIS",
+                        custom_message=request.custom_message
+                    )
+                except Exception as t_err:
+                    logger.warning(f"Failed to load template, falling back to layout: {t_err}")
+                    email_body = f"""
+                    <html>
+                        <body style="font-family: Arial, sans-serif; color: #333;">
+                            <div style="max-width: 600px; margin: 0 auto;">
+                                <h2 style="color: #1e40af;">Meeting Notification</h2>
+                                <p>Dear {name},</p>
+                                <p>You have been notified about an upcoming meeting.</p>
+                                {f'<div style="background-color: #f5f5f5; padding: 15px; border-left: 4px solid #1e40af; margin: 20px 0;"><strong>Message:</strong><p>{request.custom_message}</p></div>' if request.custom_message else ''}
+                                <p style="margin-top: 20px;">
+                                    <a href="{meeting_detail_url}" style="background-color: #1e40af; color: #ffffff; padding: 10px 15px; text-decoration: none; border-radius: 4px;">View Meeting Details</a>
+                                </p>
+                                <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+                                <p style="font-size: 12px; color: #999;">
+                                    This email was sent to {target_email}. This is an automated notification.
+                                </p>
+                            </div>
+                        </body>
+                    </html>
+                    """
+                
+                # Send via email service
+                email_result = await email_service.send_email(
+                    to_email=target_email,
+                    subject=email_subject,
+                    html_content=email_body
+                )
+                
+                category_val = getattr(NotificationCategory, 'MEETING', getattr(NotificationCategory, 'GENERAL', None))
+
+                try:
+                    if email_result.get("success"):
+                        notification = Notification(
+                            id=notification_id,
+                            user_id=current_user.id,
+                            participant_id=participant.id,
+                            meeting_id=request.meeting_id,
+                            channel=NotificationChannel.EMAIL,
+                            recipient=target_email,
+                            recipient_name=name,
+                            subject=email_subject,
+                            content=request.custom_message or email_subject,
+                            template_name="email/meeting_reminder.html",
+                            status=NotificationStatus.SUCCESSFUL,
+                            sent_at=datetime.now(),
+                            category=category_val,
+                        )
+                        db.add(notification)
+                        await db.commit()
+
+                        results["total_sent"] += 1
+                        results["by_channel"]["email"]["sent"] += 1
+                        results["details"].append({
+                            "participant_id": str(participant.id),
+                            "email": target_email,
+                            "channel": "email",
+                            "status": "success",
+                            "notification_id": str(notification_id)
+                        })
+                        logger.info(f"   ✅ Email sent & logged to DB for {target_email} (ID: {notification_id})")
+                    else:
+                        notification = Notification(
+                            id=notification_id,
+                            user_id=current_user.id,
+                            participant_id=participant.id,
+                            meeting_id=request.meeting_id,
+                            channel=NotificationChannel.EMAIL,
+                            recipient=target_email,
+                            recipient_name=name,
+                            subject=email_subject,
+                            content=request.custom_message or email_subject,
+                            template_name="email/meeting_reminder.html",
+                            status=NotificationStatus.FAILED,
+                            error_message=email_result.get("message", "Unknown error"),
+                            category=category_val,
+                        )
+                        db.add(notification)
+                        await db.commit()
+
+                        results["total_failed"] += 1
+                        results["by_channel"]["email"]["failed"] += 1
+                        results["details"].append({
+                            "participant_id": str(participant.id),
+                            "email": target_email,
+                            "channel": "email",
+                            "status": "failed",
+                            "error": email_result.get("message"),
+                            "notification_id": str(notification_id)
+                        })
+                        logger.error(f"   ❌ Email failed for {target_email}: {email_result.get('message')}")
+
+                except Exception as db_err:
+                    await db.rollback()
+                    logger.error(f"   ❌ DB Error saving notification log: {str(db_err)}")
+
+            except Exception as e:
+                logger.error(f"   ❌ Exception sending email to participant {participant.id}: {str(e)}")
+                await db.rollback()
+                try:
+                    category_val = getattr(NotificationCategory, 'MEETING', getattr(NotificationCategory, 'GENERAL', None))
+                    notification = Notification(
+                        id=notification_id,
+                        user_id=current_user.id,
+                        participant_id=participant.id,
+                        meeting_id=request.meeting_id,
+                        channel=NotificationChannel.EMAIL,
+                        recipient=target_email or "unknown",
+                        recipient_name=name if 'name' in locals() else "Unknown",
+                        subject=email_subject if 'email_subject' in locals() else "Meeting Notification",
+                        content=request.custom_message or "Meeting notification delivery failed",
+                        template_name="email/meeting_reminder.html",
+                        status=NotificationStatus.FAILED,
+                        error_message=str(e),
+                        category=category_val,
+                    )
+                    db.add(notification)
+                    await db.commit()
+                except Exception as db_error:
+                    logger.error(f"   Failed to record notification in database: {str(db_error)}")
+                    await db.rollback()
+                
+                results["total_failed"] += 1
+                results["by_channel"]["email"]["failed"] += 1
+                results["details"].append({
+                    "participant_id": str(participant.id),
+                    "channel": "email",
+                    "status": "failed",
+                    "error": str(e),
+                    "notification_id": str(notification_id)
+                })
+    
+    # ========== SEND WHATSAPP (stub - for integration) ==========
+    if "whatsapp" in request.notification_type:
+        logger.info("📱 WhatsApp support pending integration")
+        for participant in participants_from_db:
+            results["details"].append({
+                "participant_id": str(participant.id),
+                "phone": getattr(participant, 'phone', None),
+                "channel": "whatsapp",
+                "status": "pending",
+                "message": "WhatsApp integration not yet implemented"
+            })
+    
+    # ========== SEND SMS (stub - for integration) ==========
+    if "sms" in request.notification_type:
+        logger.info("📲 SMS support pending integration")
+        for participant in participants_from_db:
+            results["details"].append({
+                "participant_id": str(participant.id),
+                "phone": getattr(participant, 'phone', None),
+                "channel": "sms",
+                "status": "pending",
+                "message": "SMS integration not yet implemented"
+            })
+    
+    # ========== RETURN RESULTS ==========
+    logger.info(f"✅ Notifications completed: {results['total_sent']} sent, {results['total_failed']} failed")
+    
+    return {
+        "success": results["total_failed"] == 0,
+        "message": f"Sent {results['total_sent']} notifications to {len(participants_from_db)} recipients, {results['total_failed']} failed",
+        "results": results
+    }
+
+# ========== TRACKING PIXEL ==========
 
 @router.get("/track/{tracking_id}.png", include_in_schema=False)
 async def track_notification_open(
@@ -68,7 +428,6 @@ async def track_notification_open(
     Returns a 1x1 transparent PNG.
     """
     try:
-        # Find notification by tracking_id
         result = await db.execute(
             select(Notification).where(Notification.tracking_id == tracking_id)
         )
@@ -79,7 +438,6 @@ async def track_notification_open(
             notification.opened_at = datetime.now()
             notification.open_count = (notification.open_count or 0) + 1
             
-            # Track IP if available
             if request.client:
                 ip = request.client.host
                 if not notification.extra_data:
@@ -101,9 +459,9 @@ async def track_notification_open(
         logger.warning(f"Failed to record notification open for {tracking_id}: {e}")
         await db.rollback()
     
-    # Return transparent pixel
     return Response(content=_TRANSPARENT_PIXEL, media_type="image/png")
 
+# ========== GET NOTIFICATIONS ==========
 
 @router.get("/me", operation_id="notifications_get_my_history")
 async def get_my_notifications(
@@ -118,7 +476,6 @@ async def get_my_notifications(
 ):
     """Get current user's notification history."""
     
-    # Remove is_active filter since it doesn't exist
     query = select(Notification).where(
         Notification.user_id == current_user.id,
     )
@@ -132,12 +489,10 @@ async def get_my_notifications(
     if category:
         query = query.where(Notification.category == category)
     
-    # Count total
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
     
-    # Get paginated results
     query = query.order_by(desc(Notification.created_at)).offset(skip).limit(limit)
     result = await db.execute(query)
     notifications = result.scalars().all()
@@ -148,7 +503,6 @@ async def get_my_notifications(
         "skip": skip,
         "limit": limit,
     }
-
 
 @router.get("", include_in_schema=False)
 @router.get("/", operation_id="notifications_list_all")
@@ -170,10 +524,8 @@ async def list_notifications(
     Superusers can see all; regular users see only their own.
     """
     
-    # Remove is_active filter since it doesn't exist
     query = select(Notification)
     
-    # If not superuser, filter by user_id
     if not current_user.is_superuser:
         query = query.where(Notification.user_id == current_user.id)
     elif user_id:
@@ -199,12 +551,10 @@ async def list_notifications(
             )
         )
     
-    # Count total
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
     
-    # Get paginated results
     query = query.order_by(desc(Notification.created_at)).offset(skip).limit(limit)
     result = await db.execute(query)
     notifications = result.scalars().all()
@@ -216,7 +566,6 @@ async def list_notifications(
         "limit": limit,
     }
 
-
 @router.get("/statistics", operation_id="notifications_get_statistics")
 async def get_notification_statistics(
     meeting_id: Optional[uuid.UUID] = Query(None),
@@ -226,13 +575,10 @@ async def get_notification_statistics(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """
-    Get notification statistics.
-    """
-    # Remove is_active filter since it doesn't exist
+    """Get notification statistics."""
+    
     query = select(Notification)
     
-    # If not superuser, filter by user_id
     if not current_user.is_superuser:
         query = query.where(Notification.user_id == current_user.id)
     
@@ -254,7 +600,6 @@ async def get_notification_statistics(
     pending = sum(1 for n in notifications if n.status == NotificationStatus.PENDING)
     opened = sum(1 for n in notifications if n.is_opened)
     
-    # Get channel counts
     channel_counts = {}
     for n in notifications:
         if n.channel:
@@ -276,7 +621,6 @@ async def get_notification_statistics(
         "by_channel": channel_counts,
     }
 
-
 @router.get("/{notification_id}", operation_id="notifications_get_one")
 async def get_notification_detail(
     notification_id: uuid.UUID,
@@ -296,7 +640,6 @@ async def get_notification_detail(
             detail="Notification not found"
         )
     
-    # Check permissions
     if notification.user_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
@@ -305,16 +648,14 @@ async def get_notification_detail(
     
     return _serialize(notification)
 
-
 @router.post("/resend/{notification_id}", operation_id="notifications_resend")
 async def resend_notification(
     notification_id: uuid.UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """
-    Resend a failed notification.
-    """
+    """Resend a failed notification."""
+    
     result = await db.execute(
         select(Notification).where(Notification.id == notification_id)
     )
@@ -326,7 +667,6 @@ async def resend_notification(
             detail="Notification not found"
         )
     
-    # Check permissions
     if notification.user_id != current_user.id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
@@ -339,7 +679,6 @@ async def resend_notification(
             detail=f"Cannot resend notification with status: {notification.status.value}"
         )
     
-    # Reset status for resend
     notification.status = NotificationStatus.PENDING
     notification.error_message = None
     notification.retry_count = (getattr(notification, 'retry_count', 0) or 0) + 1
@@ -348,8 +687,6 @@ async def resend_notification(
     
     await db.commit()
     await db.refresh(notification)
-    
-    # TODO: Trigger actual resend via notification service
     
     return {
         "success": True,

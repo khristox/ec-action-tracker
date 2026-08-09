@@ -1,69 +1,339 @@
 <!DOCTYPE html>
-<html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="x-apple-disable-message-reformatting">
     <title>Welcome to {{ project_name }}</title>
-    <style>
+    <!--[if !mso]><!-->
+    <style type="text/css">
+        /* ── RESET ── */
+        * {
+            margin: 0;
+            padding: 0;
+            -ms-text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+        table {
+            border-collapse: collapse;
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+        }
+        img {
+            border: 0;
+            height: auto;
+            line-height: 100%;
+            outline: none;
+            text-decoration: none;
+            -ms-interpolation-mode: bicubic;
+        }
+        /* ── BODY ── */
         body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        /* ── CONTAINER ── */
+        .email-container {
             max-width: 600px;
             margin: 0 auto;
             padding: 20px;
             background-color: #f4f4f4;
         }
-        .container {
-            background: white;
+        .email-wrapper {
+            background-color: #ffffff;
             border-radius: 10px;
-            padding: 30px;
-            text-align: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
-        .logo h1 {
-            color: #4CAF50;
+        /* ── HEADER ── */
+        .email-header {
+            padding: 30px;
+            background-color: #4CAF50;
+            text-align: center;
+        }
+        .email-header h1 {
+            color: #ffffff;
+            font-size: 24px;
+            font-weight: bold;
             margin: 0;
+            letter-spacing: 0.5px;
+        }
+        .email-header .tagline {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 13px;
+            margin: 8px 0 0;
+        }
+        /* ── BODY ── */
+        .email-body {
+            padding: 30px;
+            color: #333333;
+            text-align: center;
+        }
+        .email-body h2 {
+            color: #4CAF50;
+            font-size: 22px;
+            font-weight: bold;
+            margin: 0 0 10px;
+        }
+        .email-body .emoji {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .email-body p {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #555555;
+            margin: 0 0 15px;
+        }
+        .email-body .greeting strong {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        /* ── FEATURES ── */
+        .features-section {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 25px 0;
+            border: 1px solid #eeeeee;
+        }
+        .features-section h3 {
+            color: #4CAF50;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 0 0 15px;
+            text-align: left;
+        }
+        .feature-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            text-align: left;
+        }
+        .feature-list li {
+            padding: 8px 0;
+            color: #555555;
+            font-size: 14px;
+            border-bottom: 1px solid #eeeeee;
+        }
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        .feature-list li:before {
+            content: "✓ ";
+            color: #4CAF50;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        /* ── BUTTON ── */
+        .button-container {
+            text-align: center;
+            margin: 25px 0;
         }
         .button {
             display: inline-block;
-            padding: 12px 24px;
+            padding: 12px 30px;
             background-color: #4CAF50;
-            color: white !important;
+            color: #ffffff !important;
+            font-size: 15px;
+            font-weight: bold;
             text-decoration: none;
             border-radius: 5px;
-            margin: 20px 0;
-            font-weight: bold;
+            transition: background-color 0.2s;
+            -webkit-transition: background-color 0.2s;
+            mso-padding-alt: 0;
+            text-underline-color: #4CAF50;
         }
-        .footer {
-            margin-top: 30px;
+        .button:hover {
+            background-color: #45a049;
+        }
+        /* ── SUCCESS BOX ── */
+        .success-box {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .success-box p {
+            color: #2e7d32;
+            font-size: 14px;
+            margin: 0;
+            line-height: 1.5;
+        }
+        /* ── FOOTER ── */
+        .email-footer {
+            padding: 20px 30px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #eeeeee;
+            text-align: center;
+        }
+        .email-footer p {
             font-size: 12px;
-            color: #777;
-            border-top: 1px solid #eee;
-            padding-top: 20px;
+            color: #777777;
+            margin: 4px 0;
+            line-height: 1.5;
+        }
+        .email-footer a {
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .email-footer a:hover {
+            text-decoration: underline;
+        }
+        .email-footer .legal {
+            font-size: 11px;
+            color: #999999;
+            margin-top: 8px;
+        }
+        /* ── DIVIDER ── */
+        .divider {
+            border: none;
+            border-top: 1px solid #eeeeee;
+            margin: 20px 0;
+        }
+        /* ── RESPONSIVE ── */
+        @media only screen and (max-width: 480px) {
+            .email-container {
+                padding: 10px;
+            }
+            .email-body {
+                padding: 20px;
+            }
+            .email-header {
+                padding: 20px;
+            }
+            .email-header h1 {
+                font-size: 20px;
+            }
+            .email-body h2 {
+                font-size: 19px;
+            }
+            .features-section {
+                padding: 15px;
+            }
+            .button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+                padding: 13px 20px;
+            }
+            .email-footer {
+                padding: 15px 20px;
+            }
+        }
+        /* Outlook-specific fixes */
+        .ExternalClass {
+            width: 100%;
+        }
+        .ExternalClass,
+        .ExternalClass p,
+        .ExternalClass span,
+        .ExternalClass font,
+        .ExternalClass td,
+        .ExternalClass div {
+            line-height: 100%;
         }
     </style>
+    <!--[if mso]>
+    <style type="text/css">
+        .button {
+            padding: 12px 30px !important;
+        }
+    </style>
+    <![endif]-->
 </head>
 <body>
-    <div class="container">
-        <div class="logo">
-            <h1>{{ project_name }}</h1>
-            <p>{{ project_tagline|default('Your Trusted Platform') }}</p>
-        </div>
-        
-        <h2>Welcome to {{ project_name }}!</h2>
-        
-        <p>Hello <strong>{{ username }}</strong>,</p>
-        
-        <p>Your email has been successfully verified. You can now log in to your account and start using <strong>{{ project_name }}</strong>:</p>
-        
-        <a href="{{ login_url }}" class="button">Login Now</a>
-        
-        <p>We're excited to have you on board!</p>
-        
-        <div class="footer">
-            <p>Need help? Contact us at <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
-            <p>&copy; {{ year }} {{ project_name }}. All rights reserved.</p>
+    <!--[if (gte mso 9)|(IE)]>
+    <table width="600" align="center" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td>
+    <![endif]-->
+    <div class="email-container">
+        <div class="email-wrapper">
+            
+            <!-- ─── HEADER ─── -->
+            <div class="email-header">
+                <h1>{{ project_name }}</h1>
+                <p class="tagline">{{ project_tagline|default('Your Trusted Platform') }}</p>
+            </div>
+            
+            <!-- ─── BODY ─── -->
+            <div class="email-body">
+                <div class="emoji">🎉</div>
+                <h2>Welcome to {{ project_name }}!</h2>
+                <p>Your email has been successfully verified.</p>
+                
+                <p>Hello <strong>{{ username }}</strong>,</p>
+                
+                <p>You're all set! Your account is now active and ready to use. Log in to your account to get started with {{ project_name }}.</p>
+                
+                <!-- ─── BUTTON ─── -->
+                <div class="button-container">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ login_url }}" style="height: 44px; v-text-anchor: middle; width: 200px;" arcsize="8%" stroke="f" fillcolor="#4CAF50">
+                        <w:anchorlock/>
+                        <center style="color: #ffffff; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold;">
+                            Login Now
+                        </center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-->
+                    <a href="{{ login_url }}" class="button">Login to Your Account</a>
+                    <!--<![endif]-->
+                </div>
+                
+                <!-- ─── FEATURES ─── -->
+                <div class="features-section">
+                    <h3>🚀 What You Can Do Now</h3>
+                    <ul class="feature-list">
+                        <li>Access your personal dashboard</li>
+                        <li>Manage your profile and settings</li>
+                        <li>Connect your tools and integrations</li>
+                        <li>Start collaborating with your team</li>
+                        <li>Explore all premium features</li>
+                    </ul>
+                </div>
+                
+                <!-- ─── SUCCESS MESSAGE ─── -->
+                <div class="success-box">
+                    <p><strong>✓ Verification Complete</strong><br>Your account is fully activated and ready to use. We're excited to have you on board!</p>
+                </div>
+                
+                <p style="color: #999999; font-size: 12px; margin-top: 20px;">
+                    Questions? Check out our <a href="{{ frontend_url }}/docs" style="color: #4CAF50; text-decoration: none;">documentation</a> or contact us at <a href="mailto:{{ support_email }}" style="color: #4CAF50; text-decoration: none;">{{ support_email }}</a>
+                </p>
+            </div>
+            
+            <!-- ─── FOOTER ─── -->
+            <hr class="divider">
+            <div class="email-footer">
+                <p>
+                    <strong>{{ project_name }}</strong>
+                    {% if organization_name %} • {{ organization_name }}{% endif %}
+                </p>
+                <p>
+                    <a href="mailto:{{ support_email }}">{{ support_email }}</a>
+                </p>
+                <p class="legal">
+                    &copy; {{ year }} {{ project_name }}. All rights reserved.
+                </p>
+                <p class="legal">
+                    This is an automated message. Please do not reply to this email.
+                </p>
+            </div>
+            
         </div>
     </div>
+    <!--[if (gte mso 9)|(IE)]>
+            </td>
+        </tr>
+    </table>
+    <![endif]-->
 </body>
 </html>

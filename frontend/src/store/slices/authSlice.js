@@ -919,7 +919,7 @@ const authSlice = createSlice({
         state.fieldErrors = action.payload?.fieldErrors || {};
         state.errorCode = action.payload?.errorCode;
         
-        // Handle rate limiting
+        // ✅ FIXED: Handle rate limiting
         if (action.payload?.status === 429) {
           state.isRateLimited = true;
           state.rateLimitRetryAfter = action.payload.retryAfter || 30;
@@ -927,16 +927,23 @@ const authSlice = createSlice({
           state.remainingAttempts = Math.max(0, RATE_LIMIT.MAX_ATTEMPTS - state.failedAttempts);
         }
         
-        // Handle account lock
-        if (action.payload?.errorCode === 'ACCOUNT_LOCKED' || action.payload?.status === 403) {
+        // ✅ FIXED: Handle account lock (423 only, not 403!)
+        if (action.payload?.status === 423 || action.payload?.errorCode === 'ACCOUNT_LOCKED') {
           state.isLocked = true;
           const lockDuration = action.payload.lockDuration || RATE_LIMIT.LOCK_DURATION;
           state.lockTimeRemaining = lockDuration;
           state.failedAttempts = RATE_LIMIT.MAX_ATTEMPTS;
           state.remainingAttempts = 0;
+          state.isRateLimited = false; // Clear rate limit if locked
         }
         
-        // Handle remaining attempts
+        // ✅ Handle email not verified (403 without ACCOUNT_LOCKED error code)
+        if (action.payload?.status === 403 && action.payload?.errorCode !== 'ACCOUNT_LOCKED') {
+          state.isLocked = false; // DON'T lock for unverified email!
+          // SignInCard will detect "not verified" from error message
+        }
+        
+        // ✅ Handle remaining attempts (401 only)
         if (action.payload?.status === 401 && action.payload.remainingAttempts !== null) {
           state.remainingAttempts = action.payload.remainingAttempts;
           state.failedAttempts = RATE_LIMIT.MAX_ATTEMPTS - action.payload.remainingAttempts;
@@ -948,6 +955,7 @@ const authSlice = createSlice({
           state.isAuthenticated = false;
         }
       })
+
 
       // ==================== REGISTER ====================
       .addCase(register.pending, (state) => {

@@ -178,7 +178,7 @@ async def send_meeting_notification(
     
     # Build absolute frontend URL for email template links
     base_frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')
-    meeting_detail_url = f"{base_frontend_url}/admin/action-tracker/meetings/{request.meeting_id}"
+    meeting_detail_url = f"{base_frontend_url}/meetings/{request.meeting_id}"
 
     # ========== SEND EMAILS ==========
     if "email" in request.notification_type:

@@ -118,6 +118,8 @@ const SignInCard = () => {
   
   // Auth selectors
   const { isLoading, error, isAuthenticated, loginSuccess, verificationEmailSent } = useSelector((state) => state.auth);
+
+
   const remainingAttempts = useSelector((state) => state.auth.remainingAttempts);
   const isLocked = useSelector((state) => state.auth.isLocked);
   const lockTimeRemaining = useSelector((state) => state.auth.lockTimeRemaining);

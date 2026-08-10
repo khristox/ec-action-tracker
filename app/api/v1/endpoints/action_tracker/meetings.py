@@ -1437,7 +1437,7 @@ async def patch_meeting(
         
     
 
-@router.get("/{meeting_id}/members", response_model=list)
+@router.get("/{meeting_id}/members", response_model=List[MeetingParticipantResponse])
 async def list_participants(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
@@ -1449,6 +1449,7 @@ async def list_participants(
     ✅ UPDATED: 
     - FULL access: See all participants
     - LIMITED access: See only their own participant record
+    - Returns proper response model
     """
     
     try:
@@ -1479,7 +1480,28 @@ async def list_participants(
         result = await db.execute(query)
         participants = result.scalars().all()
         
-        return participants
+        # ✅ Convert to response model
+        response_items = []
+        for p in participants:
+            # Convert to dict first
+            response_items.append({
+                "id": p.id,
+                "meeting_id": p.meeting_id,
+                "name": p.name,
+                "email": p.email,
+                "telephone": p.telephone,
+                "title": p.title,
+                "organization": p.organization,
+                "is_chairperson": p.is_chairperson,
+                "is_secretary": p.is_secretary,
+                "attendance_status": p.attendance_status,
+                "apology_comment": p.apology_comment,
+                "is_active": p.is_active,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+            })
+        
+        return response_items
         
     except HTTPException:
         raise
@@ -1487,9 +1509,9 @@ async def list_participants(
         logger.error(f"Error listing participants: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch participants"
+            detail=f"Failed to fetch participants: {str(e)}"
         )
-
+    
 @router.post("/{meeting_id}/members", response_model=MeetingParticipantResponse)
 async def add_participant(
     meeting_id: UUID,

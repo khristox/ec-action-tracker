@@ -60,7 +60,8 @@ import {
   fetchActionTrackerAttributes,
   selectActionStatusOptions,
   selectActionTrackerLoading,
-  selectActionTrackerError
+  selectActionTrackerError,
+  selectCurrentMeeting, // ADD THIS
 } from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
 
@@ -255,7 +256,14 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const minutesList = useSelector(selectMeetingMinutes);
   const statusOptions = useSelector(selectActionStatusOptions);
   const statusOptionsError = useSelector(selectActionTrackerError);
+  const currentMeeting = useSelector(selectCurrentMeeting); // ADD THIS
+  
   const { updatingProgress } = useSelector((state) => state.actions || {});
+
+  // ==================== ACCESS LEVEL CHECK ====================
+  const accessLevel = currentMeeting?.access_level || 'none';
+  const isFullAccess = accessLevel === 'full';
+  const isLimitedAccess = accessLevel === 'limited';
 
   // ==================== REFS ====================
   const isMountedRef = useRef(true);
@@ -384,6 +392,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   // ==================== API CALLS ====================
 
   const fetchMinutes = useCallback(() => {
+    // ✅ CHECK ACCESS LEVEL BEFORE MAKING API CALL
+    if (!isFullAccess) {
+      console.log('⛔ Limited access user - skipping minutes fetch');
+      return Promise.resolve();
+    }
+    
     if (!meetingId || !isMountedRef.current || isFetchingRef.current) {
       return Promise.resolve();
     }
@@ -393,7 +407,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       .finally(() => {
         isFetchingRef.current = false;
       });
-  }, [dispatch, meetingId]);
+  }, [dispatch, meetingId, isFullAccess]);
 
   const fetchAttributes = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -446,7 +460,19 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       if (!isActive) return;
       setLoading(true);
       try {
-        await fetchMinutes();
+        // ✅ Only fetch minutes if user has full access
+        if (isFullAccess) {
+          await fetchMinutes();
+        } else {
+          console.log('⛔ Limited access - skipping minutes fetch in useEffect');
+          // Still fetch attributes (they're usually public)
+          await fetchAttributes();
+          // Set loading to false since we're not fetching minutes
+          if (isActive && isMountedRef.current) {
+            setLoading(false);
+          }
+          return;
+        }
         await fetchAttributes();
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -478,7 +504,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
         fetchTimeoutRef.current = null;
       }
     };
-  }, [meetingId, fetchMinutes, fetchAttributes]);
+  }, [meetingId, fetchMinutes, fetchAttributes, isFullAccess]);
 
   useEffect(() => {
     if (minutesList && isMountedRef.current) {
@@ -502,6 +528,13 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const handleRefresh = useCallback(() => {
     if (!isMountedRef.current || isFetchingRef.current) return;
 
+    // ✅ Only refresh if user has full access
+    if (!isFullAccess) {
+      console.log('⛔ Limited access user - skipping refresh');
+      setError('You do not have permission to view actions');
+      return;
+    }
+
     setLoading(true);
     previousMinutesStringRef.current = '';
     fetchMinutes()
@@ -511,7 +544,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
         }
       });
     if (onRefresh) onRefresh();
-  }, [fetchMinutes, onRefresh]);
+  }, [fetchMinutes, onRefresh, isFullAccess]);
 
   const handleViewAction = useCallback((actionId) => {
     navigate(`/actions/${actionId}`);
@@ -519,6 +552,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleEditAction = useCallback(async (action) => {
     if (!isMountedRef.current) return;
+
+    // ✅ Check if user can edit
+    if (!isFullAccess) {
+      setError('You do not have permission to edit actions');
+      return;
+    }
 
     setLoadingActionId(action.id);
     let fullAction = action;
@@ -537,23 +576,32 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       setShowEditDialog(true);
       setLoadingActionId(null);
     }
-  }, []);
+  }, [isFullAccess]);
 
   const handleAssignAction = useCallback((action) => {
     if (!isMountedRef.current) return;
+    
+    // ✅ Check if user can assign
+    if (!isFullAccess) {
+      setError('You do not have permission to assign actions');
+      return;
+    }
+    
     const meetingIdFromAction = action.minutes?.meeting_id || action.meeting_id;
     setSelectedAction({
       ...action,
       _meetingId: meetingIdFromAction
     });
     setShowAssignDialog(true);
-  }, []);
+  }, [isFullAccess]);
 
   const handleRefreshAfterAction = useCallback(() => {
     if (!isMountedRef.current) return;
+    // ✅ Only refresh if user has full access
+    if (!isFullAccess) return;
     previousMinutesStringRef.current = '';
     fetchMinutes();
-  }, [fetchMinutes]);
+  }, [fetchMinutes, isFullAccess]);
 
   const handleEditSave = useCallback(() => {
     handleRefreshAfterAction();
@@ -573,9 +621,16 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleOpenProgressDialog = useCallback((action) => {
     if (!isMountedRef.current) return;
+    
+    // ✅ Check if user can update progress
+    if (!isFullAccess) {
+      setError('You do not have permission to update progress');
+      return;
+    }
+    
     setSelectedAction(action);
     setShowProgressDialog(true);
-  }, []);
+  }, [isFullAccess]);
 
   const handleProgressUpdateComplete = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -587,6 +642,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleActionCreate = useCallback(async (payload) => {
     if (!isMountedRef.current || !meetingId) return;
+
+    // ✅ Check if user can create actions
+    if (!isFullAccess) {
+      setError('You do not have permission to create actions');
+      throw new Error('Permission denied');
+    }
 
     if (isFetchingRef.current) return;
 
@@ -640,10 +701,16 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       }
       throw err;
     }
-  }, [meetingId, minutesList, fetchMinutes, handleActionCreated]);
+  }, [meetingId, minutesList, fetchMinutes, handleActionCreated, isFullAccess]);
 
   const handleActionUpdate = useCallback(async (payload) => {
     if (!isMountedRef.current || !editingAction?.id) return;
+
+    // ✅ Check if user can update actions
+    if (!isFullAccess) {
+      setError('You do not have permission to update actions');
+      throw new Error('Permission denied');
+    }
 
     try {
       const response = await api.put(
@@ -677,9 +744,24 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       }
       throw err;
     }
-  }, [editingAction, handleEditSave]);
+  }, [editingAction, handleEditSave, isFullAccess]);
 
   // ==================== RENDER ====================
+
+  // Show access denied message for limited access users
+  if (isLimitedAccess) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6 }}>
+        <LockIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2, opacity: 0.5 }} />
+        <Typography variant="h6" sx={{ color: 'text.secondary', mb: 1 }}>
+          Limited Access
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 400, mx: 'auto' }}>
+          You have limited access to this meeting. Actions are only available to users with full access permissions.
+        </Typography>
+      </Box>
+    );
+  }
 
   if (loading && actions.length === 0) {
     return (
@@ -978,7 +1060,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <IconButton
                               size="small"
                               onClick={() => handleOpenProgressDialog(action)}
-                              disabled={false}
+                              disabled={!isFullAccess}
                               sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main' }}
                             >
                               <TrendingUpIcon sx={{ fontSize: 18 }} />
@@ -990,7 +1072,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <IconButton
                               size="small"
                               onClick={() => handleEditAction(action)}
-                              disabled={loadingActionId === action.id}
+                              disabled={loadingActionId === action.id || !isFullAccess}
                               sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
                             >
                               {loadingActionId === action.id ? <CircularProgress size={14} /> : <EditIcon sx={{ fontSize: 18 }} />}
@@ -1002,7 +1084,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <IconButton
                               size="small"
                               onClick={() => handleAssignAction(action)}
-                              disabled={false}
+                              disabled={!isFullAccess}
                               sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}
                             >
                               <PersonAdd sx={{ fontSize: 18 }} />
@@ -1177,7 +1259,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               <IconButton
                                 size="small"
                                 onClick={() => handleOpenProgressDialog(action)}
-                                disabled={false}
+                                disabled={!isFullAccess}
                                 sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
                                 <TrendingUpIcon sx={{ fontSize: 16 }} />
@@ -1189,7 +1271,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               <IconButton
                                 size="small"
                                 onClick={() => handleEditAction(action)}
-                                disabled={loadingActionId === action.id}
+                                disabled={loadingActionId === action.id || !isFullAccess}
                                 sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
                                 {loadingActionId === action.id ? <CircularProgress size={14} /> : <EditIcon sx={{ fontSize: 16 }} />}
@@ -1201,7 +1283,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                               <IconButton
                                 size="small"
                                 onClick={() => handleAssignAction(action)}
-                                disabled={false}
+                                disabled={!isFullAccess}
                                 sx={{ color: isDarkMode ? '#34D399' : 'success.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
                                 <PersonAdd sx={{ fontSize: 16 }} />

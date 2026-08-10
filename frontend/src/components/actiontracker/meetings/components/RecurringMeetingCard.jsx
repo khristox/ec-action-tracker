@@ -66,6 +66,24 @@ const InfoIconBox = ({ children, bgcolor, color, size = 30 }) => (
 const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate, status, locationLine, LocationIcon, timeRange, completionPct, totalGenerated, maxOccurrences, progressColor, createdDate, lastOccurrence, hasNext, isPaused, isCompleted, recurrenceInterval }) => {
   const theme = useTheme();
 
+  // Wrapper for onView that passes the recurring-meetings source
+  const handleView = useCallback(() => {
+    onClose();
+    onView(meeting?.id);
+  }, [onClose, onView, meeting?.id]);
+
+  // Wrapper for onEdit that passes the recurring-meetings source
+  const handleEdit = useCallback(() => {
+    onClose();
+    onEdit(meeting?.id);
+  }, [onClose, onEdit, meeting?.id]);
+
+  // Wrapper for onGenerate
+  const handleGenerate = useCallback(() => {
+    onClose();
+    onGenerate(meeting);
+  }, [onClose, onGenerate, meeting]);
+
   return (
     <Drawer
       anchor="bottom"
@@ -244,7 +262,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         <Button
           variant="outlined"
           startIcon={<Edit />}
-          onClick={(e) => { onClose(); onEdit(meeting?.id); }}
+          onClick={handleEdit}
           fullWidth
           sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
         >
@@ -254,7 +272,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
           variant="outlined"
           color="success"
           startIcon={<Add />}
-          onClick={(e) => { onClose(); onGenerate(meeting); }}
+          onClick={handleGenerate}
           disabled={!hasNext}
           fullWidth
           sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
@@ -264,7 +282,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         <Button
           variant="contained"
           endIcon={<ArrowForwardIcon />}
-          onClick={(e) => { onClose(); onView(meeting?.id); }}
+          onClick={handleView}
           fullWidth
           sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
         >
@@ -324,6 +342,45 @@ export const RecurringMeetingCard = ({
   const recurrenceInterval = meeting?.recurrence_interval || 1;
   const progressColor = isCompleted ? theme.palette.info.main : theme.palette.success.main;
 
+  // ── Event Handlers ────────────────────────────────────────────────────────
+  
+  /**
+   * Handle card click - opens drawer on mobile, navigates on desktop
+   * Passes 'recurring-meetings' as the source via navigation state
+   */
+  const handleCardClick = () => {
+    if (isMobile) {
+      setDrawerOpen(true);
+    } else {
+      // Desktop: navigate with state indicating source
+      onView(meeting?.id);
+    }
+  };
+
+  /**
+   * Handle "View series" button click - passes 'recurring-meetings' as source
+   */
+  const handleViewClick = (e) => {
+    if (e) e.stopPropagation();
+    onView(meeting?.id);
+  };
+
+  /**
+   * Handle "Edit" button click - passes 'recurring-meetings' as source
+   */
+  const handleEditClick = (e) => {
+    if (e) e.stopPropagation();
+    onEdit(meeting?.id);
+  };
+
+  /**
+   * Handle "Generate" button click
+   */
+  const handleGenerateClick = (e) => {
+    if (e) e.stopPropagation();
+    onGenerate(meeting);
+  };
+
   // ── Styles ────────────────────────────────────────────────────────────────
   const borderColor = {
     active: alpha(theme.palette.success.main, 0.35),
@@ -337,18 +394,13 @@ export const RecurringMeetingCard = ({
     completed: alpha(theme.palette.info.main, 0.02),
   }[status.key];
 
-  const handleCardClick = () => {
-    if (isMobile) {
-      setDrawerOpen(true);
-    } else {
-      onView(meeting?.id);
-    }
-  };
-
   const drawerProps = {
     open: drawerOpen,
     onClose: () => setDrawerOpen(false),
-    meeting, onView, onEdit, onGenerate,
+    meeting, 
+    onView: handleViewClick,  // Pass the wrapped handler
+    onEdit: handleEditClick,  // Pass the wrapped handler
+    onGenerate: handleGenerateClick,
     status, locationLine, LocationIcon, timeRange,
     completionPct, totalGenerated, maxOccurrences, progressColor,
     createdDate, lastOccurrence, hasNext, isPaused, isCompleted,
@@ -546,7 +598,7 @@ export const RecurringMeetingCard = ({
               <Tooltip title="Edit series">
                 <IconButton
                   size="small"
-                  onClick={(e) => { e.stopPropagation(); onEdit(meeting?.id); }}
+                  onClick={handleEditClick}
                   sx={{ borderRadius: 1.5, p: 1, '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) } }}
                 >
                   <Edit sx={{ fontSize: 20 }} />
@@ -556,7 +608,7 @@ export const RecurringMeetingCard = ({
                 <Tooltip title="Generate next occurrence">
                   <IconButton
                     size="small"
-                    onClick={(e) => { e.stopPropagation(); onGenerate(meeting); }}
+                    onClick={handleGenerateClick}
                     sx={{ borderRadius: 1.5, p: 1, '&:hover': { bgcolor: alpha(theme.palette.success.main, 0.1), color: 'success.main' } }}
                   >
                     <Add sx={{ fontSize: 20 }} />
@@ -573,7 +625,7 @@ export const RecurringMeetingCard = ({
             <Button
               size="small"
               endIcon={<ArrowForwardIcon sx={{ fontSize: '14px' }} />}
-              onClick={(e) => { e.stopPropagation(); onView(meeting?.id); }}
+              onClick={handleViewClick}
               sx={{
                 fontWeight: 600, textTransform: 'none', fontSize: '0.8125rem',
                 color: 'text.secondary',

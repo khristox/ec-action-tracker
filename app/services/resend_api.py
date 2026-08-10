@@ -22,8 +22,9 @@ class ResendAPIService:
             logger.error("Resend API not configured")
             return False
         
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:8001')
-        verification_url = f"{frontend_url}/verify-email?token={token}"
+        base_url = getattr(settings, 'API_BASE_URL', 'http://127.0.0.1:8001')
+        base_url = str(base_url).rstrip('/') 
+        verification_url = f"{base_url}/api/v1/auth/verify-email?token={token}"
         
         html_content = f"""
         <h2>Welcome to {self.from_name}!</h2>

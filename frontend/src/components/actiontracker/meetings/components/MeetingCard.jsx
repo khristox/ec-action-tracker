@@ -458,6 +458,8 @@ export const MeetingCard = ({
   onCopyLink,
   onPrint,
   sx = {},
+  // NEW: Source context for navigation
+  source = 'meetings', // 'meetings' or 'recurring-meetings'
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -564,20 +566,29 @@ export const MeetingCard = ({
   }, [isMobile, isTablet]);
 
   // ============ HANDLERS ============
+  
+  /**
+   * Handle card click - navigates to meeting detail with source context
+   */
   const handleCardClick = useCallback(() => {
     if (meeting?.id && onView) {
-      onView(meeting.id);
+      // Pass the source context to the onView callback
+      // The parent component will handle the navigation with state
+      onView(meeting.id, source);
     }
-  }, [onView, meeting?.id]);
+  }, [onView, meeting?.id, source]);
 
+  /**
+   * Handle edit click - navigates to edit page with source context
+   */
   const handleEditClick = useCallback(
     (e) => {
       e.stopPropagation();
       if (meeting?.id && onEdit) {
-        onEdit(meeting.id);
+        onEdit(meeting.id, source);
       }
     },
-    [onEdit, meeting?.id],
+    [onEdit, meeting?.id, source],
   );
 
   const handleNotifyClick = useCallback(

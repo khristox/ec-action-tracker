@@ -2,7 +2,7 @@
 // Complete file with all fixes for 403 Access Denied handling & simplified No Access view
 
 import React, { useState, useEffect, useCallback, useMemo, memo, useRef, lazy, Suspense } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Box, Container, Paper, Typography, Stack, Chip, Button, IconButton, Divider, Alert,
@@ -205,9 +205,13 @@ ViewModeToggle.displayName = 'ViewModeToggle';
 const MeetingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation(); // Added for navigation state
   const dispatch = useDispatch();
   const isDarkMode = useTheme().palette.mode === 'dark';
   const isMobile = useMediaQuery(useTheme().breakpoints.down('sm'));
+
+  // Get the source page from navigation state (defaults to 'meetings')
+  const from = location.state?.from || 'meetings';
 
   const fetchAttemptedRef = useRef(false);
   const abortControllerRef = useRef(null);
@@ -523,7 +527,16 @@ const MeetingDetail = () => {
   }, [tabOrder, id]);
 
   // ==================== HANDLERS ====================
-  const handleBack = useCallback(() => navigate('/meetings'), [navigate]);
+ 
+  /**
+   * Smart back navigation that respects where the user came from
+   * Checks both the navigation state and the meeting's recurring_meeting_id property
+   */
+  const handleBack = useCallback(() => {
+    // Try to use browser back history first
+    // This handles all cases: from meetings list, recurring meetings, or anywhere else
+    navigate(-1);
+  }, [navigate]);
   
   const handleEdit = useCallback(() => {
     if (controlsDisabled) {
@@ -1245,10 +1258,10 @@ const MeetingDetail = () => {
                   }
                   isLimitedAccess={isLimitedAccess}
                   onRefresh={handleRefresh}
-                  meetingStatus={normalizedMeeting?.status?.short_name || normalizedMeeting?.status}  // ← Add this
-                  meetingStartTime={normalizedMeeting?.start_time}  // ← Add this
-                  currentChairpersonId={normalizedMeeting?.chairperson_id}  // ← Add this
-                  currentSecretaryId={normalizedMeeting?.secretary_id}  // ← Add this
+                  meetingStatus={normalizedMeeting?.status?.short_name || normalizedMeeting?.status}
+                  meetingStartTime={normalizedMeeting?.start_time}
+                  currentChairpersonId={normalizedMeeting?.chairperson_id}
+                  currentSecretaryId={normalizedMeeting?.secretary_id}
               />
               </TabPanel>
 

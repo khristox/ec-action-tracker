@@ -1,3 +1,5 @@
+// src/components/actiontracker/meetings/MeetingsList.jsx
+
 import React, { useEffect, useState, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
@@ -72,14 +74,16 @@ const STATUS_LABEL_MAP = {
 };
 
 // ============================================================
-// MEETING CARD COMPONENT
+// MEETING CARD COMPONENT (Local version with navigation state)
 // ============================================================
 const MeetingCard = ({ 
   meeting, 
   onClick,
+  onEdit,
   onAddAction,
   canAddActions,
   canAddActionsPermission,
+  source = 'meetings', // Source context for navigation
 }) => {
   const getStatusInfo = () => {
     if (meeting.status && typeof meeting.status === 'object') {
@@ -140,6 +144,11 @@ const MeetingCard = ({
 
   const isAddActionEnabled = canAddActions && canAddActionsPermission;
 
+  // Handle card click with source context
+  const handleCardClick = useCallback(() => {
+    onClick(meeting.id, source);
+  }, [onClick, meeting.id, source]);
+
   const handleAddActionClick = (e) => {
     e.stopPropagation();
     if (isAddActionEnabled && onAddAction) {
@@ -170,7 +179,7 @@ const MeetingCard = ({
         display: 'flex',
         flexDirection: 'column',
       }} 
-      onClick={() => onClick(meeting.id)}
+      onClick={handleCardClick}
     >
       <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
         <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
@@ -325,13 +334,33 @@ const MeetingsList = () => {
     setPage(1);
   }, [searchTerm, statusFilter]);
 
+  // ============ NAVIGATION HANDLERS WITH SOURCE CONTEXT ============
+  
+  /**
+   * Handle viewing a meeting - navigates with source context
+   * Accepts source parameter from child components
+   */
+  const handleViewMeeting = useCallback((meetingId, source = 'meetings') => {
+    navigate(`/meetings/${meetingId}`, { 
+      state: { from: source } 
+    });
+  }, [navigate]);
+
+  /**
+   * Handle editing a meeting - navigates with source context
+   * Accepts source parameter from child components
+   */
+  const handleEditMeeting = useCallback((meetingId, source = 'meetings') => {
+    navigate(`/meetings/${meetingId}/edit`, { 
+      state: { from: source } 
+    });
+  }, [navigate]);
+
   const handleCreateMeeting = () => {
     if (canCreateMeeting) {
       navigate('/meetings/create');
     }
   };
-  
-  const handleViewMeeting = (id) => navigate(`/meetings/${id}`);
 
   // ============ ADD ACTION HANDLERS ============
   const handleAddAction = async (meeting) => {
@@ -371,6 +400,7 @@ const MeetingsList = () => {
       setAddActionDialogOpen(false);
       setSelectedMeetingForAction(null);
       
+      // Refresh the meetings list
       dispatch(fetchMeetings({
         page,
         limit: rowsPerPage,
@@ -683,6 +713,7 @@ const MeetingsList = () => {
                   onAddAction={handleAddAction}
                   canAddActions={canAddActions(meeting)}
                   canAddActionsPermission={canCreateAction}
+                  source="meetings" // Explicitly set source for regular meetings
                 />
               </Grid>
             ))}
@@ -702,6 +733,11 @@ const MeetingsList = () => {
                 return "Add Action";
               };
 
+              // Handle list item click with source context
+              const handleListItemClick = () => {
+                handleViewMeeting(meeting.id, 'meetings');
+              };
+
               return (
                 <Box
                   key={meeting.id}
@@ -718,7 +754,7 @@ const MeetingsList = () => {
                     flexWrap: 'wrap',
                     gap: 1,
                   }}
-                  onClick={() => handleViewMeeting(meeting.id)}
+                  onClick={handleListItemClick}
                 >
                   <Box sx={{ flex: 1, minWidth: 200 }}>
                     <Typography variant="subtitle1" fontWeight="600">

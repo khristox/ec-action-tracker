@@ -20,7 +20,8 @@ import {
   WatchLater, CheckCircleOutlined, PauseCircle, CancelOutlined,
   HighlightOff, HourglassEmpty, People, Label, Lightbulb, Schedule,
   Assignment, Flag, Category, Refresh, MoreVert, Person,
-  Email, Phone, Star as StarIcon
+  Email, Phone, Star as StarIcon,
+  TrendingUp
 } from '@mui/icons-material';
 import LockIcon from '@mui/icons-material/Lock';
 
@@ -165,9 +166,9 @@ const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const PriorityStars = ({ priority }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
-  
+
   const getStars = (priority) => {
-    switch(priority) {
+    switch (priority) {
       case 1: return 4;
       case 2: return 3;
       case 3: return 2;
@@ -175,18 +176,18 @@ const PriorityStars = ({ priority }) => {
       default: return 0;
     }
   };
-  
+
   const starCount = getStars(priority);
   const filledColor = isDarkMode ? '#FBBF24' : '#F59E0B';
   const emptyColor = isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB';
   const priorityLabel = PRIORITY[priority]?.label || 'Unknown';
-  
+
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
       {[1, 2, 3, 4].map((index) => (
-        <StarIcon 
+        <StarIcon
           key={index}
-          sx={{ 
+          sx={{
             fontSize: 16,
             color: index <= starCount ? filledColor : emptyColor,
           }}
@@ -202,25 +203,25 @@ const PriorityStars = ({ priority }) => {
 // ==================== COMPACT FIELD ITEM ====================
 
 const DetailField = ({ label, value, icon, isDarkMode }) => (
-  <Box sx={{ 
-    display: 'flex', 
-    alignItems: 'center', 
-    gap: 1.5, 
+  <Box sx={{
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1.5,
     py: 1,
     borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#F3F4F6'}`,
     '&:last-child': { borderBottom: 'none' }
   }}>
-    <Box sx={{ 
-      color: isDarkMode ? 'rgba(255,255,255,0.4)' : '#9CA3AF', 
-      display: 'flex', 
+    <Box sx={{
+      color: isDarkMode ? 'rgba(255,255,255,0.4)' : '#9CA3AF',
+      display: 'flex',
       alignItems: 'center',
       minWidth: 20
     }}>
       {icon ? React.cloneElement(icon, { fontSize: 'small' }) : <Info fontSize="small" />}
     </Box>
-    <Typography 
-      variant="body2" 
-      sx={{ 
+    <Typography
+      variant="body2"
+      sx={{
         color: isDarkMode ? 'rgba(255,255,255,0.5)' : '#6B7280',
         fontWeight: 500,
         minWidth: 100,
@@ -230,10 +231,10 @@ const DetailField = ({ label, value, icon, isDarkMode }) => (
     >
       {label}
     </Typography>
-    <Typography 
-      variant="body2" 
-      sx={{ 
-        color: isDarkMode ? '#FFFFFF' : '#111827', 
+    <Typography
+      variant="body2"
+      sx={{
+        color: isDarkMode ? '#FFFFFF' : '#111827',
         fontWeight: 500,
         wordBreak: 'break-word',
         flex: 1,
@@ -296,11 +297,11 @@ const ImplementerCard = ({ person, isDarkMode }) => {
         </Box>
       </Stack>
       {person.is_private && (
-        <Chip 
-          label="Private" 
-          size="small" 
-          icon={<LockIcon sx={{ fontSize: '10px !important' }} />} 
-          sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600 }} 
+        <Chip
+          label="Private"
+          size="small"
+          icon={<LockIcon sx={{ fontSize: '10px !important' }} />}
+          sx={{ height: 20, fontSize: '0.6rem', fontWeight: 600 }}
         />
       )}
     </Box>
@@ -368,7 +369,7 @@ const ActionDetail = () => {
 
   useEffect(() => {
     if (!id) return;
-    
+
     // Create cancel token
     const source = api.CancelToken?.source?.();
     if (source) {
@@ -377,7 +378,7 @@ const ActionDetail = () => {
 
     dispatch(fetchActionById(id));
     dispatch(fetchActionTrackerAttributes());
-    
+
     return () => {
       // Cancel any pending requests
       if (cancelTokenRef.current) {
@@ -523,7 +524,7 @@ const ActionDetail = () => {
     try {
       await dispatch(deleteAction(id)).unwrap();
       setShowDeleteTaskDialog(false);
-      
+
       // Use system back after deletion
       if (window.history.length > 2) {
         window.history.back();
@@ -602,146 +603,226 @@ const ActionDetail = () => {
 
   return (
     <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: isDarkMode ? '#0F172A' : '#F3F4F6', p: { xs: 1.5, sm: 3 } }}>
-      
+
       {/* ========== STICKY HEADER ========== */}
-      <Paper 
+      <Paper
         elevation={0}
-        sx={{ 
+        sx={{
           position: 'sticky',
           top: 0,
           zIndex: 10,
-          p: { xs: 2, sm: 3 },
+          p: { xs: 2, sm: 2.5 },
           borderRadius: 2,
           bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.95)' : '#FFFFFF',
           border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #E5E7EB',
           backdropFilter: 'blur(8px)',
-          mb: 2
+          mb: 2,
         }}
       >
-        <Stack direction="row" alignItems="center" spacing={2} flexWrap="wrap">
-          <IconButton onClick={handleGoBack} size="small" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280' }}>
-            <ArrowBack />
-          </IconButton>
-          
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography 
-              variant="h6" 
-              fontWeight={700} 
-              sx={{ 
-                color: isDarkMode ? '#FFFFFF' : '#111827',
-                fontSize: { xs: '1rem', sm: '1.25rem' },
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis'
+        <Stack spacing={1.5}>
+
+          {/* ── Row 1: back · title · priority/status chips · refresh ── */}
+          <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap" useFlexGap>
+            <IconButton
+              onClick={handleGoBack}
+              size="small"
+              sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280' }}
+            >
+              <ArrowBack />
+            </IconButton>
+
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography
+                variant="h6"
+                fontWeight={700}
+                sx={{
+                  color: isDarkMode ? '#FFFFFF' : '#111827',
+                  fontSize: { xs: '1rem', sm: '1.15rem' },
+                  lineHeight: 1.25,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {currentAction.title || currentAction.description || 'Action Tracker Form'}
+              </Typography>
+            </Box>
+
+            {/* Status + Priority chips + refresh, as one cluster */}
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+              <Chip
+                icon={activePriority.icon}
+                label={activePriority.label}
+                color={activePriority.color}
+                size="small"
+                sx={{ height: 24, fontSize: '0.7rem' }}
+              />
+              <Chip
+                icon={currentStatusConfig.icon}
+                label={currentStatusConfig.label}
+                size="small"
+                sx={{
+                  bgcolor: currentStatusConfig.bgColor,
+                  border: `1px solid ${currentStatusConfig.borderColor}`,
+                  color: currentStatusConfig.color,
+                  fontWeight: 600,
+                  height: 24,
+                  fontSize: '0.7rem',
+                  '& .MuiChip-icon': { color: currentStatusConfig.color },
+                }}
+              />
+              <Tooltip title="Refresh">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={refreshAction}
+                    disabled={isActionInProgress}
+                    sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280' }}
+                  >
+                    <Refresh fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+          </Stack>
+
+          {/* ── Row 2: progress bar ── */}
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Typography
+              variant="caption"
+              fontWeight={600}
+              sx={{
+                color: isDarkMode ? 'rgba(255,255,255,0.55)' : '#6B7280',
+                minWidth: 56,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontSize: '0.65rem',
               }}
             >
-              {currentAction.title || currentAction.description || 'Action Tracker Form'}
-            </Typography>
-          </Box>
-
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              icon={activePriority.icon}
-              label={activePriority.label}
-              color={activePriority.color}
-              size="small"
-              sx={{ height: 24, fontSize: '0.7rem' }}
-            />
-            <Chip
-              icon={currentStatusConfig.icon}
-              label={currentStatusConfig.label}
-              size="small"
-              sx={{
-                bgcolor: currentStatusConfig.bgColor,
-                border: `1px solid ${currentStatusConfig.borderColor}`,
-                color: currentStatusConfig.color,
-                fontWeight: 600,
-                height: 24,
-                fontSize: '0.7rem',
-                '& .MuiChip-icon': { color: currentStatusConfig.color }
-              }}
-            />
-            <Tooltip title="Refresh">
-              <IconButton size="small" onClick={refreshAction} disabled={isActionInProgress}>
-                <Refresh fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-        </Stack>
-
-        {/* Progress Bar in Header */}
-        <Box sx={{ mt: 1.5 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-            <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280' }}>
               Progress
             </Typography>
-            <Typography variant="caption" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : '#111827' }}>
+
+            <LinearProgress
+              variant="determinate"
+              value={progress}
+              sx={{
+                flex: 1,
+                height: 6,
+                borderRadius: 3,
+                bgcolor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB',
+                '& .MuiLinearProgress-bar': {
+                  bgcolor: isCompleted ? '#34D399' : '#3B82F6',
+                  borderRadius: 3,
+                },
+              }}
+            />
+
+            <Typography
+              variant="caption"
+              fontWeight={700}
+              sx={{
+                color: isDarkMode ? '#FFFFFF' : '#111827',
+                minWidth: 36,
+                textAlign: 'right',
+              }}
+            >
               {progress}%
             </Typography>
           </Stack>
-          <LinearProgress
-            variant="determinate"
-            value={progress}
-            sx={{
-              height: 4,
-              borderRadius: 2,
-              bgcolor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB',
-              '& .MuiLinearProgress-bar': { bgcolor: isCompleted ? '#34D399' : '#3B82F6', borderRadius: 2 }
-            }}
-          />
-        </Box>
 
-        {/* Action Buttons */}
-        {!isCompleted && (
-          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => setShowProgressDialog(true)}
-              disabled={isActionInProgress}
-              sx={{ 
-                flex: 1,
-                borderRadius: 1.5,
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB',
-                color: isDarkMode ? '#FFFFFF' : '#374151',
-                py: 0.75
-              }}
-            >
-              Update
-            </Button>
-            <Button
-              variant="contained"
-              color="success"
-              size="small"
-              startIcon={<CheckCircle sx={{ fontSize: 16 }} />}
-              onClick={() => setShowCompleteConfirm(true)}
-              disabled={isActionInProgress}
-              sx={{ 
-                flex: 1,
-                borderRadius: 1.5,
-                fontWeight: 600,
-                fontSize: '0.7rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                bgcolor: '#10B981',
-                '&:hover': { bgcolor: '#059669' },
-                py: 0.75
-              }}
-            >
-              Complete
-            </Button>
+          {/* ── Row 3: action buttons — Delete on left, Update/Complete on right ── */}
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            justifyContent="space-between"
+            flexWrap="wrap"
+            useFlexGap
+            sx={{ pt: 0.5, rowGap: 1 }}
+          >
+            {/* Left — destructive */}
+            {canDeleteTask() && !isCompleted ? (
+              <Button
+                variant="text"
+                size="small"
+                color="error"
+                onClick={() => setShowDeleteTaskDialog(true)}
+                disabled={isActionInProgress}
+                startIcon={<Delete fontSize="small" />}
+                sx={{
+                  borderRadius: 1.5,
+                  fontWeight: 500,
+                  fontSize: '0.75rem',
+                  textTransform: 'none',
+                  letterSpacing: 0,
+                  px: 1.5,
+                  py: 0.5,
+                }}
+              >
+                Delete Task
+              </Button>
+            ) : (
+              <span />
+            )}
+
+            {/* Right — primary actions */}
+            {!isCompleted && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => setShowProgressDialog(true)}
+                  disabled={isActionInProgress}
+                  startIcon={<TrendingUp fontSize="small" />}
+                  sx={{
+                    borderRadius: 1.5,
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                    px: 2,
+                    py: 0.5,
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB',
+                    color: isDarkMode ? '#FFFFFF' : '#374151',
+                    '&:hover': {
+                      borderColor: isDarkMode ? 'rgba(255,255,255,0.35)' : '#9CA3AF',
+                      bgcolor: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                    },
+                  }}
+                >
+                  Update
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => setShowCompleteConfirm(true)}
+                  disabled={isActionInProgress}
+                  startIcon={<CheckCircle fontSize="small" />}
+                  sx={{
+                    borderRadius: 1.5,
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                    px: 2,
+                    py: 0.5,
+                    bgcolor: '#10B981',
+                    '&:hover': { bgcolor: '#059669' },
+                  }}
+                >
+                  Complete
+                </Button>
+              </Stack>
+            )}
           </Stack>
-        )}
+
+        </Stack>
       </Paper>
 
       {(localError || reduxError) && (
-        <Alert 
-          severity="error" 
-          sx={{ mb: 2, borderRadius: 1.5 }} 
+        <Alert
+          severity="error"
+          sx={{ mb: 2, borderRadius: 1.5 }}
           onClose={() => { setLocalError(''); dispatch(clearError()); }}
         >
           {localError || reduxError}
@@ -759,9 +840,9 @@ const ActionDetail = () => {
       )}
 
       {/* ========== MAIN CONTENT ========== */}
-      <Paper 
+      <Paper
         elevation={0}
-        sx={{ 
+        sx={{
           borderRadius: 2,
           bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.4)' : '#FFFFFF',
           border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #E5E7EB',
@@ -795,10 +876,10 @@ const ActionDetail = () => {
             <Grid container spacing={3}>
               {/* LEFT COLUMN - Details */}
               <Grid item xs={12} md={6}>
-                <Typography 
-                  variant="subtitle2" 
-                  fontWeight={600} 
-                  sx={{ 
+                <Typography
+                  variant="subtitle2"
+                  fontWeight={600}
+                  sx={{
                     color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
                     mb: 1.5,
                     textTransform: 'uppercase',
@@ -809,69 +890,69 @@ const ActionDetail = () => {
                   Details
                 </Typography>
                 <Box>
-                  <DetailField 
-                    label="Category" 
-                    value={currentAction.title} 
-                    icon={<Category />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Category"
+                    value={currentAction.title}
+                    icon={<Category />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Key Action" 
-                    value={currentAction.is_key_action ? 'Yes' : 'No'} 
-                    icon={<Lightbulb />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Key Action"
+                    value={currentAction.is_key_action ? 'Yes' : 'No'}
+                    icon={<Lightbulb />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Issue" 
-                    value={currentAction.issue_challenge} 
-                    icon={<ErrorIcon />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Issue"
+                    value={currentAction.issue_challenge}
+                    icon={<ErrorIcon />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Type" 
-                    value={currentAction.type_of_action} 
-                    icon={<Info />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Type"
+                    value={currentAction.type_of_action}
+                    icon={<Info />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Action" 
-                    value={currentAction.description} 
-                    icon={<Assignment />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Action"
+                    value={currentAction.description}
+                    icon={<Assignment />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Priority" 
-                    value={<PriorityStars priority={currentAction?.priority} />} 
-                    icon={<Flag />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Priority"
+                    value={<PriorityStars priority={currentAction?.priority} />}
+                    icon={<Flag />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Initiated" 
-                    value={currentAction.date_initiated ? new Date(currentAction.date_initiated).toLocaleDateString() : '—'} 
-                    icon={<Event />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Initiated"
+                    value={currentAction.date_initiated ? new Date(currentAction.date_initiated).toLocaleDateString() : '—'}
+                    icon={<Event />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Due Date" 
-                    value={currentAction.due_date ? new Date(currentAction.due_date).toLocaleDateString() : '—'} 
-                    icon={<AccessTime />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Due Date"
+                    value={currentAction.due_date ? new Date(currentAction.due_date).toLocaleDateString() : '—'}
+                    icon={<AccessTime />}
+                    isDarkMode={isDarkMode}
                   />
-                  <DetailField 
-                    label="Tags" 
-                    value={currentAction.tags?.join(', ')} 
-                    icon={<Label />} 
-                    isDarkMode={isDarkMode} 
+                  <DetailField
+                    label="Tags"
+                    value={currentAction.tags?.join(', ')}
+                    icon={<Label />}
+                    isDarkMode={isDarkMode}
                   />
                 </Box>
               </Grid>
 
               {/* RIGHT COLUMN - Implementers */}
               <Grid item xs={12} md={6}>
-                <Typography 
-                  variant="subtitle2" 
-                  fontWeight={600} 
-                  sx={{ 
+                <Typography
+                  variant="subtitle2"
+                  fontWeight={600}
+                  sx={{
                     color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
                     mb: 1.5,
                     textTransform: 'uppercase',
@@ -882,9 +963,9 @@ const ActionDetail = () => {
                   Implementers {displayImplementers.length > 0 && `(${displayImplementers.length})`}
                 </Typography>
                 {displayImplementers.length === 0 ? (
-                  <Box 
-                    sx={{ 
-                      p: 3, 
+                  <Box
+                    sx={{
+                      p: 3,
                       textAlign: 'center',
                       border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
                       borderRadius: 2
@@ -898,10 +979,10 @@ const ActionDetail = () => {
                 ) : (
                   <Stack spacing={1.5}>
                     {displayImplementers.map((person, idx) => (
-                      <ImplementerCard 
-                        key={idx} 
-                        person={person} 
-                        isDarkMode={isDarkMode} 
+                      <ImplementerCard
+                        key={idx}
+                        person={person}
+                        isDarkMode={isDarkMode}
                       />
                     ))}
                   </Stack>
@@ -915,9 +996,9 @@ const ActionDetail = () => {
         {activeTab === 1 && (
           <Box sx={{ p: { xs: 2, sm: 3 } }}>
             {history.length === 0 ? (
-              <Box 
-                sx={{ 
-                  p: 4, 
+              <Box
+                sx={{
+                  p: 4,
                   textAlign: 'center',
                   border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
                   borderRadius: 2
@@ -988,23 +1069,6 @@ const ActionDetail = () => {
           </Box>
         )}
       </Paper>
-
-      {/* ========== DELETE BUTTON ========== */}
-      {canDeleteTask() && !isCompleted && (
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            color="error"
-            startIcon={<Delete fontSize="small" />}
-            onClick={() => setShowDeleteTaskDialog(true)}
-            size="small"
-            disabled={isActionInProgress}
-            sx={{ textTransform: 'none', fontWeight: 500 }}
-            variant="text"
-          >
-            Delete Task
-          </Button>
-        </Box>
-      )}
 
       {/* ========== DIALOGS ========== */}
 

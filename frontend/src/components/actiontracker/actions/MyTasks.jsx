@@ -9,7 +9,7 @@ import {
   useTheme, alpha, ToggleButton, useMediaQuery, Card, CardContent
 } from '@mui/material';
 import {
-  Visibility, Search, Refresh, AccessTime, Assignment,
+  Edit as EditIcon, Search, Refresh, AccessTime, Assignment,
   Warning as WarningIcon, CheckCircle as CheckCircleIcon,
   Pending as PendingIcon
 } from '@mui/icons-material';
@@ -171,6 +171,11 @@ const MyTasks = () => {
     navigate(`/actions/${taskId}`);
   };
 
+const handleUpdateTask = (taskId) => {
+  if (!isValidUUID(taskId)) return;
+  navigate(`/actions/${taskId}/progress`);
+};
+
   const handleRefresh = () => fetchTasks();
 
   const getStatusDisplay = (task) => {
@@ -211,20 +216,20 @@ const MyTasks = () => {
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', py: { xs: 1.5, sm: 2.5 } }}>
       <Container maxWidth="xl" sx={{ px: { xs: 1.5, sm: 2.5 } }}>
-        
+
         {/* Header Section */}
-        <Box 
-          display="flex" 
-          justifyContent="space-between" 
-          alignItems={{ xs: 'flex-start', sm: 'center' }} 
-          mb={2} 
+        <Box
+          display="flex"
+          justifyContent="space-between"
+          alignItems={{ xs: 'flex-start', sm: 'center' }}
+          mb={2}
           flexDirection={{ xs: 'column', sm: 'row' }}
           gap={1}
         >
           <Box>
-            <Typography 
-              variant="h6" 
-              fontWeight={700} 
+            <Typography
+              variant="h6"
+              fontWeight={700}
               sx={{ color: 'text.primary', fontSize: { xs: '1.25rem', md: '1.5rem' }, lineHeight: 1.2 }}
             >
               My Tasks
@@ -278,9 +283,9 @@ const MyTasks = () => {
             <Stack direction="row" spacing={1} sx={{ flex: 1 }}>
               <FormControl size="small" fullWidth>
                 <InputLabel sx={{ fontSize: '0.85rem' }}>Status</InputLabel>
-                <Select 
-                  value={statusFilter} 
-                  onChange={(e) => setStatusFilter(e.target.value)} 
+                <Select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
                   label="Status"
                   sx={{ fontSize: '0.85rem' }}
                 >
@@ -297,9 +302,9 @@ const MyTasks = () => {
 
               <FormControl size="small" fullWidth>
                 <InputLabel sx={{ fontSize: '0.85rem' }}>Priority</InputLabel>
-                <Select 
-                  value={priorityFilter} 
-                  onChange={(e) => setPriorityFilter(e.target.value)} 
+                <Select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
                   label="Priority"
                   sx={{ fontSize: '0.85rem' }}
                 >
@@ -466,6 +471,19 @@ const MyTasks = () => {
                             {task.overall_progress_percentage || 0}%
                           </Typography>
                         </Box>
+
+                        {/* Mobile Update action */}
+                        <Box display="flex" justifyContent="flex-end" mt={1}>
+                          <Tooltip title="Update Task">
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateTask(task.id); }}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
                       </CardContent>
                     </Card>
                   );
@@ -496,7 +514,9 @@ const MyTasks = () => {
                         <TableRow
                           key={task.id}
                           hover
+                          onClick={() => handleViewTask(task.id)}
                           sx={{
+                            cursor: 'pointer',
                             bgcolor: isOverdue ? alpha(theme.palette.error.main, isDark ? 0.08 : 0.03) : 'transparent'
                           }}
                         >
@@ -555,10 +575,14 @@ const MyTasks = () => {
                               </Typography>
                             </Box>
                           </TableCell>
-                          <TableCell align="center" sx={{ py: 1 }}>
-                            <Tooltip title="View Details">
-                              <IconButton size="small" onClick={() => handleViewTask(task.id)} color="primary">
-                                <Visibility fontSize="small" />
+                          <TableCell align="center" sx={{ py: 1 }} onClick={(e) => e.stopPropagation()}>
+                            <Tooltip title="Update Task">
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={(e) => { e.stopPropagation(); handleUpdateTask(task.id); }}
+                              >
+                                <EditIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                           </TableCell>

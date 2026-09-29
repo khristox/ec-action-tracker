@@ -8,6 +8,7 @@ Features:
 - Recurring meeting support
 - Excludes recurring meetings by default
 - Full CRUD operations with permission checks
+- Audit logging for all operations
 """
 
 import asyncio
@@ -21,9 +22,10 @@ from uuid import UUID
 
 from app.api.v1.endpoints.action_tracker.meetings_access_control import AccessLevel, DepartmentAccessControl, check_meeting_access_or_403
 from app.api.v1.endpoints.action_tracker.utils import build_meeting_response
+from app.api.v1.endpoints.action_tracker.audit_logger import log_audit  # ✅ ADDED
 from app.models.notification import Notification, NotificationChannel, NotificationStatus
 from app.services.notification_service import NotificationService
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy import and_, distinct, func, select, or_, desc, asc, cast, String, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -707,6 +709,7 @@ async def create_meeting(
     meeting_in: MeetingCreate,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    request: Request = None,  # ✅ ADDED for audit
 ):
     """
     Create meeting with participants.
@@ -720,6 +723,7 @@ async def create_meeting(
     - Better error handling and rollback
     - Cache invalidation
     - Auto-assigns MEETING_STATUS_PENDING status
+    - Audit logging for creation
     
     Request Body Example:
     {
@@ -818,6 +822,7 @@ async def create_meeting(
             # ========== STEP 3: ADD PARTICIPANTS ==========
             participant_count = 0
             failed_participants = []
+            participants_added = []
             
             if meeting_in.custom_participants:
                 logger.info(f"📋 Step 3: Processing {len(meeting_in.custom_participants)} participants...")
@@ -882,6 +887,12 @@ async def create_meeting(
                         
                         db.add(participant)
                         participant_count += 1
+                        participants_added.append({
+                            "name": p.name.strip(),
+                            "email": email_normalized,
+                            "is_chairperson": participant.is_chairperson,
+                            "is_secretary": participant.is_secretary
+                        })
                         
                         logger.info(f"   ✅ Participant {idx + 1}: {p.name} ({email_normalized})")
                         if getattr(p, 'is_chairperson', False):
@@ -912,12 +923,53 @@ async def create_meeting(
             
             logger.info(f"   ✅ Transaction committed successfully")
             
-            return meeting, participant_count, failed_participants
+            return meeting, participant_count, failed_participants, participants_added
         
-        meeting, participant_count, failed_participants = await retry_db_operation(create_transaction)
+        meeting, participant_count, failed_participants, participants_added = await retry_db_operation(create_transaction)
+        
+        # ========== LOG TO AUDIT LOGS ==========
+        logger.info("📋 Step 5: Creating audit log...")
+        
+        await log_audit(
+            db=db,
+            action="CREATE",
+            table_name="meetings",
+            record_id=str(meeting.id),
+            user_id=str(current_user.id),
+            new_values={
+                "title": meeting.title,
+                "description": meeting.description,
+                "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+                "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+                "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+                "location_text": meeting.location_text,
+                "location_id": str(meeting.location_id) if meeting.location_id else None,
+                "agenda": meeting.agenda,
+                "facilitator": meeting.facilitator,
+                "chairperson_name": meeting.chairperson_name,
+                "status_id": str(meeting.status_id) if meeting.status_id else None,
+                "visibility": meeting.visibility,
+                "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+                "is_recurring": meeting.is_recurring,
+                "participants_added": participants_added,
+                "participant_count": participant_count,
+                "failed_participants": failed_participants
+            },
+            status="success",
+            ip_address=request.client.host if hasattr(request, 'client') else None,
+            user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+            endpoint="/api/v1/meetings",
+            extra_data={
+                "meeting_title": meeting.title,
+                "participant_count": participant_count,
+                "failed_participants_count": len(failed_participants)
+            }
+        )
+        
+        logger.info("   ✅ Audit log created")
         
         # ========== INVALIDATE CACHE ==========
-        logger.info("📋 Step 5: Invalidating cache...")
+        logger.info("📋 Step 6: Invalidating cache...")
         
         await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
         
@@ -977,7 +1029,6 @@ async def create_meeting(
             detail=f"Failed to create meeting: {str(e)}"
         )
 
-    
     
 @router.get("/{meeting_id}", response_model=dict)
 async def get_meeting(
@@ -1055,18 +1106,21 @@ async def get_meeting(
             detail=f"Failed to fetch meeting: {str(e)}"
         )
 
+
 @router.put("/{meeting_id}", response_model=MeetingResponse)
 async def update_meeting(
     meeting_id: UUID,
     meeting_in: MeetingCreate,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    request: Request = None,  # ✅ ADDED for audit
 ):
     """
     Update meeting details and sync custom participants.
     
     ✅ Requires OWNER permission
     ✅ Handles participant addition, updates, and soft-deletes
+    ✅ Logs all changes to audit_logs
     """
     
     try:
@@ -1082,8 +1136,12 @@ async def update_meeting(
                 detail="Only the meeting owner can update this meeting"
             )
         
-        # Fetch meeting
-        result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+        # Fetch meeting with participants for audit
+        result = await db.execute(
+            select(Meeting).options(
+                selectinload(Meeting.participants)
+            ).where(Meeting.id == meeting_id)
+        )
         meeting = result.scalar_one_or_none()
         
         if not meeting:
@@ -1091,6 +1149,36 @@ async def update_meeting(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Meeting not found"
             )
+        
+        # ✅ Capture OLD values for audit
+        old_values = {
+            "title": meeting.title,
+            "description": meeting.description,
+            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "location_text": meeting.location_text,
+            "location_id": str(meeting.location_id) if meeting.location_id else None,
+            "agenda": meeting.agenda,
+            "facilitator": meeting.facilitator,
+            "chairperson_name": meeting.chairperson_name,
+            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "visibility": meeting.visibility,
+            "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+            "is_recurring": meeting.is_recurring,
+            "participants": [
+                {
+                    "name": p.name,
+                    "email": p.email,
+                    "is_chairperson": p.is_chairperson,
+                    "is_secretary": p.is_secretary
+                }
+                for p in meeting.participants if p.is_active
+            ]
+        }
+        
+        logger.info(f"📝 Updating meeting {meeting_id}")
+        logger.info(f"   Old values captured: {len(old_values)} fields")
         
         # ========== UPDATE MEETING FIELDS ==========
         meeting.title = meeting_in.title
@@ -1109,8 +1197,10 @@ async def update_meeting(
         meeting.updated_at = datetime.now()
 
         # ========== SYNC CUSTOM PARTICIPANTS ==========
+        participant_changes = {"added": [], "updated": [], "removed": []}
+        
         if meeting_in.custom_participants is not None:
-            # Fetch existing active participants for this meeting
+            # Fetch existing active participants
             existing_p_result = await db.execute(
                 select(MeetingParticipant).where(
                     MeetingParticipant.meeting_id == meeting_id,
@@ -1125,18 +1215,16 @@ async def update_meeting(
 
             for idx, p in enumerate(meeting_in.custom_participants):
                 try:
-                    # Helper to extract value whether p is Dict or Pydantic model
                     p_name = p.name if hasattr(p, 'name') else p.get('name')
                     p_email = p.email if hasattr(p, 'email') else p.get('email')
 
                     if not p_name or not p_email:
-                        logger.warning(f"⚠️ Participant #{idx + 1}: Missing name/email during update, skipping")
+                        logger.warning(f"⚠️ Participant #{idx + 1}: Missing name/email")
                         continue
 
                     email_normalized = p_email.strip().lower()
                     incoming_emails.add(email_normalized)
 
-                    # Extract attributes
                     telephone = (p.telephone if hasattr(p, 'telephone') else p.get('telephone')) or None
                     title = (p.title if hasattr(p, 'title') else p.get('title')) or None
                     org = (p.organization if hasattr(p, 'organization') else p.get('organization')) or None
@@ -1144,8 +1232,18 @@ async def update_meeting(
                     is_sec = bool(p.is_secretary if hasattr(p, 'is_secretary') else p.get('is_secretary', False))
 
                     if email_normalized in existing_participants:
-                        # UPDATE existing participant details
+                        # UPDATE existing participant
                         p_obj = existing_participants[email_normalized]
+                        old_p_data = {
+                            "name": p_obj.name,
+                            "email": p_obj.email,
+                            "telephone": p_obj.telephone,
+                            "title": p_obj.title,
+                            "organization": p_obj.organization,
+                            "is_chairperson": p_obj.is_chairperson,
+                            "is_secretary": p_obj.is_secretary
+                        }
+                        
                         p_obj.name = p_name.strip()
                         p_obj.telephone = telephone.strip() if telephone else None
                         p_obj.title = title.strip() if title else None
@@ -1153,6 +1251,21 @@ async def update_meeting(
                         p_obj.is_chairperson = is_chair
                         p_obj.is_secretary = is_sec
                         p_obj.updated_at = datetime.now()
+                        
+                        participant_changes["updated"].append({
+                            "email": email_normalized,
+                            "old": old_p_data,
+                            "new": {
+                                "name": p_name.strip(),
+                                "email": email_normalized,
+                                "telephone": telephone.strip() if telephone else None,
+                                "title": title.strip() if title else None,
+                                "organization": org.strip() if org else None,
+                                "is_chairperson": is_chair,
+                                "is_secretary": is_sec
+                            }
+                        })
+                        logger.info(f"   🔄 Updated participant: {email_normalized}")
                     else:
                         # ADD new participant
                         new_participant = MeetingParticipant(
@@ -1171,20 +1284,77 @@ async def update_meeting(
                             is_active=True,
                         )
                         db.add(new_participant)
+                        
+                        participant_changes["added"].append({
+                            "name": p_name.strip(),
+                            "email": email_normalized,
+                            "is_chairperson": is_chair,
+                            "is_secretary": is_sec
+                        })
+                        logger.info(f"   ➕ Added new participant: {email_normalized}")
 
                 except Exception as p_err:
-                    logger.error(f"❌ Error syncing participant #{idx + 1}: {p_err}", exc_info=True)
+                    logger.error(f"❌ Error syncing participant #{idx + 1}: {p_err}")
                     continue
 
-            # SOFT DELETE participants removed from incoming custom_participants list
+            # SOFT DELETE removed participants
             for email, p_obj in existing_participants.items():
                 if email not in incoming_emails:
+                    participant_changes["removed"].append({
+                        "name": p_obj.name,
+                        "email": email,
+                        "previous_role": "participant"
+                    })
                     p_obj.is_active = False
                     p_obj.updated_at = datetime.now()
+                    logger.info(f"   ❌ Removed participant: {email}")
 
         # ========== COMMIT & REFRESH ==========
         await db.commit()
         await db.refresh(meeting)
+        
+        # ✅ Capture NEW values for audit
+        new_values = {
+            "title": meeting.title,
+            "description": meeting.description,
+            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "location_text": meeting.location_text,
+            "location_id": str(meeting.location_id) if meeting.location_id else None,
+            "agenda": meeting.agenda,
+            "facilitator": meeting.facilitator,
+            "chairperson_name": meeting.chairperson_name,
+            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "visibility": meeting.visibility,
+            "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+            "is_recurring": meeting.is_recurring,
+            "participant_changes": participant_changes
+        }
+        
+        # ✅ LOG TO AUDIT LOGS TABLE
+        logger.info("📝 Creating audit log for update...")
+        
+        await log_audit(
+            db=db,
+            action="UPDATE",
+            table_name="meetings",
+            record_id=str(meeting_id),
+            user_id=str(current_user.id),
+            old_values=old_values,
+            new_values=new_values,
+            status="success",
+            ip_address=request.client.host if hasattr(request, 'client') else None,
+            user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+            endpoint=f"/api/v1/meetings/{meeting_id}",
+            extra_data={
+                "meeting_title": meeting.title,
+                "participant_changes": participant_changes,
+                "update_fields": list(meeting_in.model_dump(exclude_unset=True).keys())
+            }
+        )
+        
+        logger.info("   ✅ Audit log created")
         
         # Invalidate caches
         await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
@@ -1192,10 +1362,10 @@ async def update_meeting(
             await _stats_cache.delete(f"meeting_stats:user_{meeting.created_by_id}")
         
         logger.info(f"✅ Meeting {meeting_id} updated by user {current_user.id}")
+        logger.info(f"   📝 Audit log created")
         
         response = await build_meeting_response(meeting)
         
-        # Handle dict vs object response formats smoothly
         if isinstance(response, dict):
             response["user_permission"] = permission.value
         elif hasattr(response, "__dict__"):
@@ -1226,11 +1396,13 @@ async def delete_meeting(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    request: Request = None,  # ✅ ADDED for audit
 ):
     """
     Delete meeting (soft delete).
     
     ✅ Requires OWNER permission
+    ✅ Logs deletion to audit_logs
     """
     
     try:
@@ -1246,17 +1418,67 @@ async def delete_meeting(
                 detail="Only the meeting owner can delete this meeting"
             )
         
-        result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+        # Fetch meeting with details for audit
+        result = await db.execute(
+            select(Meeting).options(
+                selectinload(Meeting.participants)
+            ).where(Meeting.id == meeting_id)
+        )
         meeting = result.scalar_one_or_none()
         
         if not meeting:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         
+        # ✅ Capture values BEFORE deletion for audit
+        old_values = {
+            "title": meeting.title,
+            "description": meeting.description,
+            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "location_text": meeting.location_text,
+            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "visibility": meeting.visibility,
+            "is_recurring": meeting.is_recurring,
+            "participants": [
+                {"name": p.name, "email": p.email}
+                for p in meeting.participants if p.is_active
+            ],
+            "is_active": meeting.is_active
+        }
+        
+        logger.info(f"🗑️ Deleting meeting {meeting_id}: {meeting.title}")
+        
+        # Soft delete
         meeting.is_active = False
         meeting.updated_by_id = current_user.id
         meeting.updated_at = datetime.now()
         
         await db.commit()
+        
+        # ✅ LOG DELETION TO AUDIT LOGS
+        logger.info("📝 Creating audit log for deletion...")
+        
+        await log_audit(
+            db=db,
+            action="DELETE",
+            table_name="meetings",
+            record_id=str(meeting_id),
+            user_id=str(current_user.id),
+            old_values=old_values,
+            new_values={"is_active": False, "deleted_by": str(current_user.id)},
+            status="success",
+            ip_address=request.client.host if hasattr(request, 'client') else None,
+            user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+            endpoint=f"/api/v1/meetings/{meeting_id}",
+            extra_data={
+                "meeting_title": meeting.title,
+                "soft_delete": True,
+                "participant_count": len(meeting.participants) if meeting.participants else 0
+            }
+        )
+        
+        logger.info("   ✅ Audit log created")
         
         # Invalidate caches
         await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
@@ -1267,7 +1489,6 @@ async def delete_meeting(
         if meeting.participants:
             for p in meeting.participants:
                 if p.email:
-                    # Try to find user by email and invalidate their cache
                     user_result = await db.execute(
                         select(User).where(User.email == p.email)
                     )
@@ -1276,6 +1497,7 @@ async def delete_meeting(
                         await _stats_cache.delete(f"meeting_stats:user_{user.id}")
         
         logger.info(f"✅ Meeting {meeting_id} deleted by user {current_user.id}")
+        logger.info(f"   📝 Audit log created")
         
     except HTTPException:
         raise
@@ -1288,18 +1510,18 @@ async def delete_meeting(
         )
 
 
-
-
 @router.patch("/{meeting_id}", response_model=MeetingResponse)
 async def patch_meeting(
     meeting_id: UUID,
     meeting_update: MeetingUpdate,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    request: Request = None,  # ✅ ADDED for audit
 ):
     """
     Partial update meeting (PATCH).
     Only updates the fields provided in the request.
+    ✅ Logs changes to audit_logs
     """
     
     try:
@@ -1325,9 +1547,29 @@ async def patch_meeting(
                 detail="Meeting not found"
             )
         
+        # ✅ Capture old values
+        old_values = {
+            "title": meeting.title,
+            "description": meeting.description,
+            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "location_text": meeting.location_text,
+            "location_id": str(meeting.location_id) if meeting.location_id else None,
+            "agenda": meeting.agenda,
+            "facilitator": meeting.facilitator,
+            "chairperson_name": meeting.chairperson_name,
+            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "visibility": meeting.visibility,
+            "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+            "is_recurring": meeting.is_recurring,
+            "platform": meeting.platform,
+            "meeting_link": meeting.meeting_link
+        }
+        
         # Get update data
         update_data = meeting_update.model_dump(exclude_unset=True)
-        logger.info(f"📝 PATCH update data: {update_data}")
+        logger.info(f"📝 PATCH update data for meeting {meeting_id}: {update_data}")
         
         # Helper function to convert string to UUID
         def to_uuid(value):
@@ -1342,70 +1584,67 @@ async def patch_meeting(
                     return None
             return value
         
-        # Update each field with proper type conversion
+        # Update each field
         if 'title' in update_data:
             meeting.title = update_data['title']
-        
+            logger.info(f"   📝 Updated title to: {update_data['title']}")
         if 'description' in update_data:
             meeting.description = update_data['description']
-        
+            logger.info(f"   📝 Updated description")
         if 'meeting_date' in update_data:
             meeting.meeting_date = update_data['meeting_date']
-        
+            logger.info(f"   📝 Updated meeting_date to: {update_data['meeting_date']}")
         if 'start_time' in update_data:
             meeting.start_time = update_data['start_time']
-        
+            logger.info(f"   📝 Updated start_time to: {update_data['start_time']}")
         if 'end_time' in update_data:
             meeting.end_time = update_data['end_time']
-        
+            logger.info(f"   📝 Updated end_time to: {update_data['end_time']}")
         if 'location_text' in update_data:
             meeting.location_text = update_data['location_text']
-        
+            logger.info(f"   📝 Updated location_text to: {update_data['location_text']}")
         if 'location_id' in update_data:
             meeting.location_id = to_uuid(update_data['location_id'])
-        
+            logger.info(f"   📝 Updated location_id to: {meeting.location_id}")
         if 'agenda' in update_data:
             meeting.agenda = update_data['agenda']
-        
+            logger.info(f"   📝 Updated agenda")
         if 'facilitator' in update_data:
             meeting.facilitator = update_data['facilitator']
-        
+            logger.info(f"   📝 Updated facilitator to: {update_data['facilitator']}")
         if 'chairperson_name' in update_data:
             meeting.chairperson_name = update_data['chairperson_name']
-        
-        # ========== HANDLE STATUS_ID (by UUID) ==========
+            logger.info(f"   📝 Updated chairperson_name to: {update_data['chairperson_name']}")
         if 'status_id' in update_data:
             val = update_data['status_id']
             if val is None or val == '':
                 meeting.status_id = None
-                logger.info("✅ Status cleared")
+                logger.info(f"   📝 Cleared status_id")
             else:
                 status_uuid = to_uuid(val)
                 if status_uuid:
                     meeting.status_id = status_uuid
-                    logger.info(f"✅ Status updated to UUID: {status_uuid}")
+                    logger.info(f"   📝 Updated status_id to: {status_uuid}")
                 else:
-                    # If it's a string name, try to find the status by name
-                    logger.warning(f"⚠️ Invalid status_id format: {val}")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid status_id format. Expected UUID, got: {val}"
                     )
-        
         if 'visibility' in update_data:
             meeting.visibility = update_data['visibility']
-        
+            logger.info(f"   📝 Updated visibility to: {update_data['visibility']}")
         if 'restricted_department_id' in update_data:
             meeting.restricted_department_id = to_uuid(update_data['restricted_department_id'])
-        
+            logger.info(f"   📝 Updated restricted_department_id to: {meeting.restricted_department_id}")
         if 'is_recurring' in update_data:
             meeting.is_recurring = bool(update_data['is_recurring'])
-        
+            logger.info(f"   📝 Updated is_recurring to: {meeting.is_recurring}")
         if 'platform' in update_data:
             meeting.platform = update_data['platform']
-        
+            logger.info(f"   📝 Updated platform to: {update_data['platform']}")
         if 'meeting_link' in update_data:
             meeting.meeting_link = update_data['meeting_link']
+            logger.info(f"   📝 Updated meeting_link")
         
         meeting.updated_by_id = current_user.id
         meeting.updated_at = datetime.now()
@@ -1413,12 +1652,56 @@ async def patch_meeting(
         await db.commit()
         await db.refresh(meeting)
         
+        # ✅ Capture new values after update
+        new_values = {
+            "title": meeting.title,
+            "description": meeting.description,
+            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
+            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "location_text": meeting.location_text,
+            "location_id": str(meeting.location_id) if meeting.location_id else None,
+            "agenda": meeting.agenda,
+            "facilitator": meeting.facilitator,
+            "chairperson_name": meeting.chairperson_name,
+            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "visibility": meeting.visibility,
+            "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+            "is_recurring": meeting.is_recurring,
+            "platform": meeting.platform,
+            "meeting_link": meeting.meeting_link
+        }
+        
+        # ✅ LOG TO AUDIT LOGS
+        logger.info("📝 Creating audit log for PATCH...")
+        
+        await log_audit(
+            db=db,
+            action="PATCH",
+            table_name="meetings",
+            record_id=str(meeting_id),
+            user_id=str(current_user.id),
+            old_values=old_values,
+            new_values=new_values,
+            status="success",
+            ip_address=request.client.host if hasattr(request, 'client') else None,
+            user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+            endpoint=f"/api/v1/meetings/{meeting_id}",
+            extra_data={
+                "meeting_title": meeting.title,
+                "updated_fields": list(update_data.keys())
+            }
+        )
+        
+        logger.info("   ✅ Audit log created")
+        
         # Invalidate caches
         await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
         if meeting.created_by_id:
             await _stats_cache.delete(f"meeting_stats:user_{meeting.created_by_id}")
         
         logger.info(f"✅ Meeting {meeting_id} partially updated by user {current_user.id}")
+        logger.info(f"   Updated fields: {list(update_data.keys())}")
         
         response = await build_meeting_response(meeting)
         response["user_permission"] = permission.value
@@ -1434,607 +1717,9 @@ async def patch_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update meeting: {str(e)}"
         )
-        
-    
-
-@router.get("/{meeting_id}/members", response_model=List[MeetingParticipantResponse])
-async def list_participants(
-    meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    List meeting participants.
-    
-    ✅ UPDATED: 
-    - FULL access: See all participants
-    - LIMITED access: See only their own participant record
-    - Returns proper response model
-    """
-    
-    try:
-        # Check access
-        access_level = await DepartmentAccessControl.get_access_level(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if access_level == AccessLevel.NONE:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # Build query
-        query = select(MeetingParticipant).where(
-            MeetingParticipant.meeting_id == meeting_id,
-            MeetingParticipant.is_active == True
-        )
-        
-        # LIMITED access: Only show own participant record
-        if access_level == AccessLevel.LIMITED:
-            query = query.where(MeetingParticipant.email == current_user.email)
-        
-        query = query.order_by(MeetingParticipant.name)
-        
-        result = await db.execute(query)
-        participants = result.scalars().all()
-        
-        # ✅ Convert to response model
-        response_items = []
-        for p in participants:
-            # Convert to dict first
-            response_items.append({
-                "id": p.id,
-                "meeting_id": p.meeting_id,
-                "name": p.name,
-                "email": p.email,
-                "telephone": p.telephone,
-                "title": p.title,
-                "organization": p.organization,
-                "is_chairperson": p.is_chairperson,
-                "is_secretary": p.is_secretary,
-                "attendance_status": p.attendance_status,
-                "apology_comment": p.apology_comment,
-                "is_active": p.is_active,
-                "created_at": p.created_at,
-                "updated_at": p.updated_at,
-            })
-        
-        return response_items
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing participants: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch participants: {str(e)}"
-        )
-    
-@router.post("/{meeting_id}/members", response_model=MeetingParticipantResponse)
-async def add_participant(
-    meeting_id: UUID,
-    participant_data: MeetingParticipantCreate,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    Add participant to meeting.
-    
-    ✅ Requires OWNER or ORGANIZER permission
-    """
-    
-    try:
-        # Check permission
-        permission = await PermissionChecker.get_user_permission(
-            db, meeting_id, current_user.id,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        # Only owner or organizer can add
-        if permission not in [MeetingPermission.OWNER, MeetingPermission.ORGANIZER]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only meeting creator or organizer can add participants"
-            )
-        
-        # Check duplicate
-        if participant_data.email:
-            existing = await db.execute(
-                select(MeetingParticipant).where(
-                    MeetingParticipant.meeting_id == meeting_id,
-                    MeetingParticipant.email == participant_data.email,
-                    MeetingParticipant.is_active == True
-                )
-            )
-            if existing.scalar_one_or_none():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Participant already added"
-                )
-        
-        participant = MeetingParticipant(
-            id=uuid.uuid4(),
-            meeting_id=meeting_id,
-            name=participant_data.name,
-            email=participant_data.email,
-            telephone=getattr(participant_data, 'telephone', None),
-            title=getattr(participant_data, 'title', None),
-            organization=getattr(participant_data, 'organization', None),
-            is_chairperson=getattr(participant_data, 'is_chairperson', False),
-            is_secretary=getattr(participant_data, 'is_secretary', False),
-            created_by_id=current_user.id,
-            created_at=datetime.now(),
-            is_active=True,
-        )
-        
-        db.add(participant)
-        await db.commit()
-        await db.refresh(participant)
-        
-        logger.info(f"✅ Participant added to meeting {meeting_id}")
-        
-        return participant
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error adding participant: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to add participant"
-        )
-
-
-@router.post("/{meeting_id}/notifications")
-async def create_meeting_notifications(
-    meeting_id: UUID,
-    request: NotificationRequest,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    Create and send meeting invitation notifications.
-    
-    ✅ Flow:
-    1. Send email via NotificationService.send_meeting_invitation
-    2. Only save notification record if email succeeds
-    """
-    try:
-        logger.info(f"Creating notifications for meeting {meeting_id}")
-        
-        # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if not can_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # Get meeting
-        result = await db.execute(
-            select(Meeting).options(
-                selectinload(Meeting.participants)
-            ).where(Meeting.id == meeting_id)
-        )
-        meeting = result.scalar_one_or_none()
-        
-        if not meeting:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Meeting not found"
-            )
-        
-        # Get participants
-        participant_ids = request.participant_ids
-        if not participant_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No participants specified"
-            )
-        
-        participants = [p for p in meeting.participants if p.id in participant_ids]
-        
-        if not participants:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No participants found in this meeting"
-            )
-        
-        sent_count = 0
-        failed_participants = []
-        saved_notifications = []
-        
-        # ✅ Process each participant
-        for participant in participants:
-            if not participant.email:
-                logger.warning(f"Participant {participant.id} has no email")
-                failed_participants.append({
-                    "participant_id": str(participant.id),
-                    "name": participant.name,
-                    "reason": "No email address"
-                })
-                continue
-            
-            # ✅ STEP 1: SEND EMAIL using NotificationService
-            try:
-                result = await NotificationService.send_meeting_invitation(
-                    db=db,
-                    meeting=meeting,
-                    participant=participant,
-                    custom_message=request.custom_message,
-                    channel=NotificationChannel.EMAIL,
-                    user_id=current_user.id,
-                )
-                
-                if not result.get("success"):
-                    logger.error(f"❌ Failed to send email to {participant.email}: {result.get('error')}")
-                    failed_participants.append({
-                        "participant_id": str(participant.id),
-                        "name": participant.name,
-                        "email": participant.email,
-                        "reason": result.get("error", "Email notification failed")
-                    })
-                    continue
-                
-                # ✅ Email sent successfully
-                sent_count += 1
-                saved_notifications.append({
-                    "notification_id": result.get("notification_id"),
-                    "participant_id": str(participant.id),
-                    "email": participant.email,
-                    "status": "sent"
-                })
-                
-                logger.info(f"✅ Email sent successfully to {participant.email}")
-                
-            except Exception as email_error:
-                logger.error(f"❌ Error sending email to {participant.email}: {email_error}")
-                failed_participants.append({
-                    "participant_id": str(participant.id),
-                    "name": participant.name,
-                    "email": participant.email,
-                    "reason": f"Email error: {str(email_error)}"
-                })
-                continue
-        
-        logger.info(f"✅ Successfully created {sent_count} notifications")
-        
-        return {
-            "success": sent_count > 0,
-            "total_participants": len(participants),
-            "sent": sent_count,
-            "failed": len(failed_participants),
-            "saved_notifications": saved_notifications,
-            "failed_participants": failed_participants if failed_participants else None,
-            "message": f"Created {sent_count}/{len(participants)} notifications successfully"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as error:
-        await db.rollback()
-        logger.error(f"❌ Error creating notifications: {error}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create notifications: {str(error)}"
-        )
-
-
-     
-@router.delete("/{meeting_id}/participants/{participant_id}")
-async def remove_meeting_participant(
-    meeting_id: UUID,
-    participant_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    Remove a participant from a meeting.
-    """
-    try:
-        # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if not can_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # Get meeting
-        result = await db.execute(
-            select(Meeting).where(Meeting.id == meeting_id)
-        )
-        meeting = result.scalar_one_or_none()
-        
-        if not meeting:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Meeting not found"
-            )
-        
-        # Get participant
-        result = await db.execute(
-            select(MeetingParticipant).where(
-                MeetingParticipant.id == participant_id,
-                MeetingParticipant.meeting_id == meeting_id
-            )
-        )
-        participant = result.scalar_one_or_none()
-        
-        if not participant:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Participant not found in this meeting"
-            )
-        
-        # Remove participant
-        await db.delete(participant)
-        await db.commit()
-        
-        logger.info(f"✅ Removed participant {participant_id} from meeting {meeting_id}")
-        
-        return {
-            "success": True,
-            "message": f"Participant {participant.name} removed from meeting",
-            "meeting_id": str(meeting_id),
-            "participant_id": str(participant_id)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as error:
-        await db.rollback()
-        logger.error(f"❌ Error removing participant: {error}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to remove participant: {str(error)}"
-        )
-    
-
-@router.get("/{meeting_id}/notifications")
-async def get_meeting_notifications(
-    meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-    status_filter: Optional[str] = Query(None),
-    channel_filter: Optional[str] = Query(None),
-):
-    """
-    Get all notifications for a meeting.
-    
-    ✅ Optional filters by status and channel
-    """
-    try:
-        # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if not can_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # Build query
-        query = select(Notification).where(
-            Notification.meeting_id == meeting_id
-        )
-        
-        # Apply optional filters
-        if status_filter:
-            try:
-                status_enum = NotificationStatus(status_filter)
-                query = query.where(Notification.status == status_enum)
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status. Must be one of: {', '.join([s.value for s in NotificationStatus])}"
-                )
-        
-        if channel_filter:
-            try:
-                channel_enum = NotificationChannel(channel_filter)
-                query = query.where(Notification.channel == channel_enum)
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid channel. Must be one of: {', '.join([c.value for c in NotificationChannel])}"
-                )
-        
-        # Get count
-        count_result = await db.execute(
-            select(func.count(Notification.id)).where(
-                Notification.meeting_id == meeting_id
-            )
-        )
-        total = count_result.scalar() or 0
-        
-        # Get paginated results
-        result = await db.execute(
-            query.order_by(desc(Notification.created_at))
-            .offset(skip).limit(limit)
-        )
-        notifications = result.scalars().all()
-        
-        logger.info(f"✅ Retrieved {len(notifications)} notifications for meeting {meeting_id}")
-        
-        return {
-            "items": notifications,
-            "total": total,
-            "skip": skip,
-            "limit": limit,
-            "meeting_id": str(meeting_id)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching notifications: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch notifications"
-        )
-    
-@router.put("/{meeting_id}/members/{member_id}", response_model=MeetingParticipantResponse)
-async def update_participant(
-    meeting_id: UUID,
-    member_id: UUID,
-    participant_data: MeetingParticipantUpdate,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    Update participant details.
-    
-    ✅ Requires OWNER or ORGANIZER permission
-    """
-    
-    try:
-        # Check permission
-        permission = await PermissionChecker.get_user_permission(
-            db, meeting_id, current_user.id,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if permission not in [MeetingPermission.OWNER, MeetingPermission.ORGANIZER]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only meeting creator or organizer can update participants"
-            )
-        
-        # Get participant
-        result = await db.execute(
-            select(MeetingParticipant).where(
-                MeetingParticipant.id == member_id,
-                MeetingParticipant.meeting_id == meeting_id,
-                MeetingParticipant.is_active == True
-            )
-        )
-        participant = result.scalar_one_or_none()
-        
-        if not participant:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Participant not found"
-            )
-        
-        # Update fields
-        if participant_data.name is not None:
-            participant.name = participant_data.name
-        if participant_data.email is not None:
-            participant.email = participant_data.email
-        if participant_data.telephone is not None:
-            participant.telephone = participant_data.telephone
-        if participant_data.title is not None:
-            participant.title = participant_data.title
-        if participant_data.organization is not None:
-            participant.organization = participant_data.organization
-        if participant_data.is_chairperson is not None:
-            participant.is_chairperson = participant_data.is_chairperson
-        if participant_data.is_secretary is not None:
-            participant.is_secretary = participant_data.is_secretary
-        if participant_data.attendance_status is not None:
-            participant.attendance_status = participant_data.attendance_status
-        if participant_data.apology_comment is not None:
-            participant.apology_comment = participant_data.apology_comment
-        
-        participant.updated_by_id = current_user.id
-        participant.updated_at = datetime.now()
-        
-        await db.commit()
-        await db.refresh(participant)
-        
-        logger.info(f"✅ Participant {member_id} updated in meeting {meeting_id}")
-        
-        return participant
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error updating participant: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update participant"
-        )
-
-
-@router.delete("/{meeting_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_participant(
-    meeting_id: UUID,
-    member_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    Remove participant from meeting.
-    
-    ✅ Requires OWNER or ORGANIZER permission
-    """
-    
-    try:
-        # Check permission
-        permission = await PermissionChecker.get_user_permission(
-            db, meeting_id, current_user.id,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if permission not in [MeetingPermission.OWNER, MeetingPermission.ORGANIZER]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only meeting creator or organizer can remove participants"
-            )
-        
-        result = await db.execute(
-            select(MeetingParticipant).where(
-                MeetingParticipant.id == member_id,
-                MeetingParticipant.meeting_id == meeting_id
-            )
-        )
-        participant = result.scalar_one_or_none()
-        
-        if not participant:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Participant not found"
-            )
-        
-        participant.is_active = False
-        participant.updated_by_id = current_user.id
-        participant.updated_at = datetime.now()
-        
-        await db.commit()
-        
-        logger.info(f"✅ Participant removed from meeting {meeting_id}")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error removing participant: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to remove participant"
-        )
 
 
 # ==================== MEETING MINUTES ENDPOINTS ====================
-
 
 @router.get("/{meeting_id}/minutes", response_model=Optional[MeetingMinutesResponse])
 async def get_meeting_minutes(
@@ -2077,11 +1762,13 @@ async def create_meeting_minutes(
     minutes_data: Dict[str, Any],
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    request: Request = None,  # ✅ ADDED for audit
 ):
     """
     Create or update meeting minutes.
     
     ✅ Access control: User must have access to meeting
+    ✅ Logs creation/update to audit_logs
     """
     
     try:
@@ -2109,15 +1796,6 @@ async def create_meeting_minutes(
                 detail="Meeting not found"
             )
         
-        # Check if minutes already exist
-        existing_result = await db.execute(
-            select(MeetingMinutes).where(
-                MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
-            )
-        )
-        existing_minutes = existing_result.scalar_one_or_none()
-        
         # Extract data with correct field names
         topic = minutes_data.get('topic', '')
         discussion = minutes_data.get('discussion', '')
@@ -2131,7 +1809,24 @@ async def create_meeting_minutes(
         if not decisions:
             decisions = minutes_data.get('action_items', '') or minutes_data.get('decisions_made', '')
         
+        # Check if minutes already exist
+        existing_result = await db.execute(
+            select(MeetingMinutes).where(
+                MeetingMinutes.meeting_id == meeting_id,
+                MeetingMinutes.is_active == True
+            )
+        )
+        existing_minutes = existing_result.scalar_one_or_none()
+        
         if existing_minutes:
+            # ✅ Capture old values for audit
+            old_values = {
+                "topic": existing_minutes.topic,
+                "discussion": existing_minutes.discussion,
+                "decisions": existing_minutes.decisions,
+                "is_active": existing_minutes.is_active
+            }
+            
             # Update existing
             existing_minutes.topic = topic
             existing_minutes.discussion = discussion
@@ -2141,7 +1836,33 @@ async def create_meeting_minutes(
             
             await db.commit()
             await db.refresh(existing_minutes)
+            
+            # ✅ Log update to audit
+            await log_audit(
+                db=db,
+                action="UPDATE",
+                table_name="meeting_minutes",
+                record_id=str(meeting_id),
+                user_id=str(current_user.id),
+                old_values=old_values,
+                new_values={
+                    "topic": topic,
+                    "discussion": discussion,
+                    "decisions": decisions,
+                    "updated_by": str(current_user.id)
+                },
+                status="success",
+                ip_address=request.client.host if hasattr(request, 'client') else None,
+                user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+                endpoint=f"/api/v1/meetings/{meeting_id}/minutes",
+                extra_data={
+                    "meeting_title": meeting.title,
+                    "action": "updated_minutes"
+                }
+            )
+            
             logger.info(f"✅ Meeting minutes updated for meeting {meeting_id}")
+            logger.info(f"   📝 Audit log created")
             return existing_minutes
         else:
             # Create new
@@ -2155,12 +1876,37 @@ async def create_meeting_minutes(
                 created_by_id=current_user.id,
                 created_at=datetime.now(),
                 is_active=True,
-                is_default=True,  # First set of minutes is default
+                is_default=True,
             )
             db.add(new_minutes)
             await db.commit()
             await db.refresh(new_minutes)
+            
+            # ✅ Log creation to audit
+            await log_audit(
+                db=db,
+                action="CREATE",
+                table_name="meeting_minutes",
+                record_id=str(meeting_id),
+                user_id=str(current_user.id),
+                new_values={
+                    "topic": topic,
+                    "discussion": discussion,
+                    "decisions": decisions,
+                    "created_by": str(current_user.id)
+                },
+                status="success",
+                ip_address=request.client.host if hasattr(request, 'client') else None,
+                user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+                endpoint=f"/api/v1/meetings/{meeting_id}/minutes",
+                extra_data={
+                    "meeting_title": meeting.title,
+                    "action": "created_minutes"
+                }
+            )
+            
             logger.info(f"✅ Meeting minutes created for meeting {meeting_id}")
+            logger.info(f"   📝 Audit log created")
             return new_minutes
         
     except HTTPException:
@@ -2174,94 +1920,18 @@ async def create_meeting_minutes(
         )
 
 
-@router.put("/{meeting_id}/minutes", response_model=MeetingMinutesResponse)
-async def update_meeting_minutes(
-    meeting_id: UUID,
-    minutes_data: Dict[str, Any],
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-):
-    """
-    Update meeting minutes.
-    
-    ✅ Access control: User must have access to meeting
-    """
-    
-    try:
-        # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if not can_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # Get minutes
-        result = await db.execute(
-            select(MeetingMinutes).where(
-                MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
-            )
-        )
-        minutes = result.scalar_one_or_none()
-        
-        if not minutes:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Meeting minutes not found"
-            )
-        
-        # Update fields if provided
-        if 'topic' in minutes_data:
-            minutes.topic = minutes_data['topic']
-        if 'discussion' in minutes_data:
-            minutes.discussion = minutes_data['discussion']
-        if 'decisions' in minutes_data:
-            minutes.decisions = minutes_data['decisions']
-        
-        # Support alternative field names
-        if 'title' in minutes_data and 'topic' not in minutes_data:
-            minutes.topic = minutes_data['title']
-        if 'content' in minutes_data and 'discussion' not in minutes_data:
-            minutes.discussion = minutes_data['content']
-        if 'action_items' in minutes_data and 'decisions' not in minutes_data:
-            minutes.decisions = minutes_data['action_items']
-        
-        minutes.updated_by_id = current_user.id
-        minutes.updated_at = datetime.now()
-        
-        await db.commit()
-        await db.refresh(minutes)
-        
-        logger.info(f"✅ Meeting minutes updated for meeting {meeting_id}")
-        
-        return minutes
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error updating meeting minutes: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update meeting minutes"
-        )
-
-
 @router.delete("/{meeting_id}/minutes", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_meeting_minutes(
     meeting_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
+    request: Request = None,  # ✅ ADDED for audit
 ):
     """
     Delete meeting minutes (soft delete).
     
     ✅ Access control: User must have access to meeting
+    ✅ Logs deletion to audit_logs
     """
     
     try:
@@ -2275,6 +1945,18 @@ async def delete_meeting_minutes(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this meeting"
+            )
+        
+        # Get meeting for title
+        meeting_result = await db.execute(
+            select(Meeting).where(Meeting.id == meeting_id)
+        )
+        meeting = meeting_result.scalar_one_or_none()
+        
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
             )
         
         # Get minutes
@@ -2291,6 +1973,14 @@ async def delete_meeting_minutes(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Meeting minutes not found"
             )
+        
+        # ✅ Capture old values for audit
+        old_values = {
+            "topic": minutes.topic,
+            "discussion": minutes.discussion,
+            "decisions": minutes.decisions,
+            "is_active": minutes.is_active
+        }
         
         # Soft delete
         minutes.is_active = False
@@ -2299,7 +1989,27 @@ async def delete_meeting_minutes(
         
         await db.commit()
         
+        # ✅ Log deletion to audit
+        await log_audit(
+            db=db,
+            action="DELETE",
+            table_name="meeting_minutes",
+            record_id=str(meeting_id),
+            user_id=str(current_user.id),
+            old_values=old_values,
+            new_values={"is_active": False, "deleted_by": str(current_user.id)},
+            status="success",
+            ip_address=request.client.host if hasattr(request, 'client') else None,
+            user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+            endpoint=f"/api/v1/meetings/{meeting_id}/minutes",
+            extra_data={
+                "meeting_title": meeting.title,
+                "soft_delete": True
+            }
+        )
+        
         logger.info(f"✅ Meeting minutes deleted for meeting {meeting_id}")
+        logger.info(f"   📝 Audit log created")
         
     except HTTPException:
         raise
@@ -2309,168 +2019,4 @@ async def delete_meeting_minutes(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete meeting minutes"
-        )
-
-
-# ==================== MEETING HISTORY ENDPOINTS ====================
-
-@router.get("/{meeting_id}/history", response_model=list)
-async def get_meeting_history(
-    meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = 0,
-    limit: int = 50,
-):
-    """
-    Get meeting audit trail/history.
-    
-    ✅ UPDATED: Only FULL access allowed
-    """
-    
-    try:
-        # Check access - FULL only
-        access_level = await check_meeting_access_or_403(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False),
-            required_level=AccessLevel.FULL
-        )
-        
-        if access_level != AccessLevel.FULL:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to view meeting history"
-            )
-        
-        # Fetch and return history
-        result = await db.execute(
-            select(Meeting).where(Meeting.id == meeting_id)
-        )
-        meeting = result.scalar_one_or_none()
-        
-        if not meeting:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Meeting not found"
-            )
-        
-        # Build history
-        history = []
-        if meeting.created_at:
-            history.append({
-                'event': 'meeting_created',
-                'action': 'Meeting created',
-                'timestamp': meeting.created_at,
-                'user_id': meeting.created_by_id,
-            })
-        
-        if meeting.updated_at:
-            history.append({
-                'event': 'meeting_updated',
-                'action': 'Meeting updated',
-                'timestamp': meeting.updated_at,
-                'user_id': meeting.updated_by_id,
-            })
-        
-        history.sort(key=lambda x: x['timestamp'], reverse=True)
-        return history[skip:skip + limit]
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching history: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
- 
- 
-
-# ==================== MEETING AUDIT LOGS ENDPOINT ====================
-
-@router.get("/{meeting_id}/audit-logs", response_model=List[Dict[str, Any]])
-async def get_meeting_audit_logs(
-    meeting_id: UUID,
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user),
-    skip: int = 0,
-    limit: int = 20,
-):
-    """
-    Get meeting audit logs.
-    Alias for history endpoint with default limit of 20.
-    
-    ✅ Access control: User must have access to meeting
-    ✅ Query params: skip, limit
-    """
-    
-    try:
-        # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
-        )
-        
-        if not can_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # Build audit logs from meeting updates
-        result = await db.execute(
-            select(Meeting).where(Meeting.id == meeting_id)
-        )
-        meeting = result.scalar_one_or_none()
-        
-        if not meeting:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Meeting not found"
-            )
-        
-        # Build audit trail (most recent first)
-        logs = []
-        
-        # Meeting created event
-        if meeting.created_at:
-            logs.append({
-                'id': f"{meeting.id}-created",
-                'event': 'meeting_created',
-                'action': 'Meeting created',
-                'timestamp': meeting.created_at,
-                'user_id': meeting.created_by_id,
-                'details': f"Meeting '{meeting.title}' was created",
-                'entity_type': 'meeting',
-                'entity_id': str(meeting.id)
-            })
-        
-        # Meeting updated event
-        if meeting.updated_at:
-            logs.append({
-                'id': f"{meeting.id}-updated",
-                'event': 'meeting_updated',
-                'action': 'Meeting updated',
-                'timestamp': meeting.updated_at,
-                'user_id': meeting.updated_by_id,
-                'details': f"Meeting '{meeting.title}' was updated",
-                'entity_type': 'meeting',
-                'entity_id': str(meeting.id)
-            })
-        
-        # Sort by timestamp (most recent first)
-        logs.sort(key=lambda x: x.get('timestamp', datetime.now()), reverse=True)
-        
-        # Apply pagination
-        total = len(logs)
-        logs = logs[skip : skip + limit]
-        
-        logger.info(f"✅ Retrieved {len(logs)} audit logs for meeting {meeting_id}")
-        
-        return logs
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching meeting audit logs: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch meeting audit logs"
         )

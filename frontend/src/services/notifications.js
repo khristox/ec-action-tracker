@@ -1,11 +1,7 @@
 // src/services/notifications.js
 import axios from 'axios';
 
-// Get base URL and sanitize it by removing trailing slashes or duplicate /api/v1
-const rawBaseUrl = import.meta.env.VITE_API_URL || '';
-const cleanBaseUrl = rawBaseUrl.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
-
-const NOTIFICATIONS_ENDPOINT = `${cleanBaseUrl}/api/v1/action-tracker/notifications`;
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';const NOTIFICATIONS_ENDPOINT = `${API_BASE_URL}/api/v1/notifications`;
 
 export const sendNotifications = async (payload, authToken) => {
   try {

@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
-from app.api.v1.endpoints.action_tracker.audit_logger import log_audit
+from app.services.audit import log_audit
 from app.crud.base import CRUDBase
 from app.core.minio_client import minio_service
 from app.models.meetings.action_tracker import (

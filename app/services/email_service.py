@@ -117,6 +117,44 @@ class EmailService:
             logger.error(f"Template rendering error for {template_name}: {e}")
             return ""
     
+    def _clean_base_url(self, url: str) -> str:
+        """
+        Clean base URL by removing API path segments if present.
+        Ensures consistent URL construction across all email methods.
+        """
+        if not url:
+            return url
+        
+        # Remove common API path patterns
+        patterns_to_remove = [
+            "/api/v1/auth/",
+            "/api/v1/",
+            "/api/",
+            "/auth/"
+        ]
+        
+        cleaned = url
+        for pattern in patterns_to_remove:
+            if pattern in cleaned:
+                cleaned = cleaned.replace(pattern, "").rstrip("/")
+        
+        return cleaned
+
+    def _build_reset_url(self, token: str) -> str:
+        """Build password reset URL with proper base"""
+        base_url = self._clean_base_url(settings.FRONTEND_URL)
+        return f"{base_url}/api/v1/auth/reset-password?token={token}"
+
+    def _build_verification_url(self, token: str) -> str:
+        """Build email verification URL with proper base"""
+        base_url = self._clean_base_url(str(settings.API_BASE_URL))
+        return f"{base_url}/api/v1/auth/verify-email?token={token}"
+
+    def _build_login_url(self) -> str:
+        """Build login URL with proper base"""
+        base_url = self._clean_base_url(settings.FRONTEND_URL)
+        return f"{base_url}/login"
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -254,18 +292,18 @@ class EmailService:
             return {"success": False, "message": "Email service not configured"}
         
         try:
-            # ✅ Fix: Build URL safely without double slashes
-            base_url = str(settings.API_BASE_URL).rstrip('/')
-            verification_url = f"{base_url}/api/v1/auth/verify-email?token={token}"
+            # ✅ Build URL consistently using helper method
+            verification_url = self._build_verification_url(token)
+            support_email = self.config.from_email
             
             # Try to use template, fallback to simple HTML
             html_content = self.render_template("verification.html", {
                 "project_name": settings.PROJECT_NAME,
                 "project_tagline": settings.PROJECT_TAGLINE,
                 "username": username,
-                "verification_url": verification_url,  # ✅ Using the fixed URL
+                "verification_url": verification_url,
                 "expires_in_hours": settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
-                "support_email": settings.SUPPORT_EMAIL,
+                "support_email": support_email,
                 "year": datetime.now().year,
                 "organization_name": settings.ORGANIZATION_NAME,
             })
@@ -286,7 +324,7 @@ class EmailService:
                             </div>
                             <p style="color: #999; font-size: 12px; text-align: center;">This link expires in {settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS} hours.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-                            <p style="color: #999; font-size: 12px; text-align: center;">Questions? Contact us at <a href="mailto:{settings.SUPPORT_EMAIL}">{settings.SUPPORT_EMAIL}</a></p>
+                            <p style="color: #999; font-size: 12px; text-align: center;">Questions? Contact us at <a href="mailto:{support_email}">{support_email}</a></p>
                         </div>
                     </body>
                 </html>
@@ -310,13 +348,17 @@ class EmailService:
             return False
         
         try:
+            # ✅ Build login URL consistently
+            login_url = self._build_login_url()
+            support_email = self.config.from_email
+            
             html_content = self.render_template("welcome.html", {
                 "project_name": settings.PROJECT_NAME,
                 "project_tagline": settings.PROJECT_TAGLINE,
                 "username": username,
                 "first_name": first_name or username,
-                "login_url": f"{settings.FRONTEND_URL}/login",
-                "support_email": settings.SUPPORT_EMAIL,
+                "login_url": login_url,
+                "support_email": support_email,
                 "year": datetime.now().year,
                 "organization_name": settings.ORGANIZATION_NAME,
             })
@@ -331,12 +373,12 @@ class EmailService:
                             <p style="color: #666; font-size: 14px;">Your email has been verified successfully!</p>
                             <p style="color: #666; font-size: 14px;">You can now log in and start using {settings.PROJECT_NAME}.</p>
                             <div style="text-align: center; margin: 30px 0;">
-                                <a href="{settings.FRONTEND_URL}/login" style="display: inline-block; background-color: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                                <a href="{login_url}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
                                     Login Now
                                 </a>
                             </div>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-                            <p style="color: #999; font-size: 12px; text-align: center;">Questions? Contact us at <a href="mailto:{settings.SUPPORT_EMAIL}">{settings.SUPPORT_EMAIL}</a></p>
+                            <p style="color: #999; font-size: 12px; text-align: center;">Questions? Contact us at <a href="mailto:{support_email}">{support_email}</a></p>
                         </div>
                     </body>
                 </html>
@@ -348,7 +390,7 @@ class EmailService:
         except Exception as e:
             logger.error(f"❌ Welcome email error: {str(e)}", exc_info=True)
             return False
-    
+
     async def send_password_reset_email(
         self,
         to_email: str,
@@ -361,13 +403,17 @@ class EmailService:
             return False
         
         try:
+            # ✅ Build reset URL consistently using helper method
+            reset_url = self._build_reset_url(token)
+            support_email = self.config.from_email
+            
             html_content = self.render_template("password_reset.html", {
                 "project_name": settings.PROJECT_NAME,
                 "project_tagline": settings.PROJECT_TAGLINE,
                 "username": username,
-                "reset_url": f"{settings.FRONTEND_URL}/reset-password?token={token}",
+                "reset_url": reset_url,
                 "expires_in_hours": settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS,
-                "support_email": settings.SUPPORT_EMAIL,
+                "support_email": support_email,
                 "year": datetime.now().year,
                 "organization_name": settings.ORGANIZATION_NAME,
             })
@@ -382,14 +428,14 @@ class EmailService:
                             <p style="color: #666; font-size: 14px;">Hi {username},</p>
                             <p style="color: #666; font-size: 14px;">Click the button below to reset your password:</p>
                             <div style="text-align: center; margin: 30px 0;">
-                                <a href="{settings.FRONTEND_URL}/reset-password?token={token}" style="display: inline-block; background-color: #ff9800; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                                <a href="{reset_url}" style="display: inline-block; background-color: #ff9800; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
                                     Reset Password
                                 </a>
                             </div>
                             <p style="color: #999; font-size: 12px;">This link expires in {settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS} hour(s).</p>
                             <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-                            <p style="color: #999; font-size: 12px; text-align: center;">Questions? Contact us at <a href="mailto:{settings.SUPPORT_EMAIL}">{settings.SUPPORT_EMAIL}</a></p>
+                            <p style="color: #999; font-size: 12px; text-align: center;">Questions? Contact us at <a href="mailto:{support_email}">{support_email}</a></p>
                         </div>
                     </body>
                 </html>

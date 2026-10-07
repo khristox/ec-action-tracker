@@ -175,73 +175,113 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             logger.error(f"Error getting roles for user {user_id}: {e}")
             return []
     
-    async def add_role(self, db: AsyncSession, user_id: UUID, role_id: UUID) -> bool:
-        """
-        Add a role to a user.
-        
-        Args:
-            db: Database session
-            user_id: UUID of the user
-            role_id: UUID of the role to add
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Check if already assigned
-            existing = await db.scalar(
-                select(user_roles).where(
-                    user_roles.c.user_id == user_id,
-                    user_roles.c.role_id == role_id
+    async def add_role(
+            self,
+            db: AsyncSession,
+            user_id: UUID,
+            role_id: UUID
+        ) -> bool:
+            """
+            Add a role to a user.
+
+            Does NOT commit the transaction.
+            The caller controls commit/rollback.
+            """
+            try:
+                # Check if already assigned
+                existing = await db.execute(
+                    select(user_roles).where(
+                        and_(
+                            user_roles.c.user_id == user_id,
+                            user_roles.c.role_id == role_id
+                        )
+                    )
                 )
-            )
-            
-            if existing:
-                logger.info(f"User {user_id} already has role {role_id}")
+
+                if existing.first():
+                    return True
+
+                # Assign role
+                await db.execute(
+                    user_roles.insert().values(
+                        user_id=user_id,
+                        role_id=role_id,
+                        assigned_at=datetime.utcnow()
+                    )
+                )
+
+                logger.info(
+                    f"✅ Added role {role_id} to user {user_id}"
+                )
+
                 return True
-            
-            # Assign role
-            await db.execute(
-                user_roles.insert().values(
-                    user_id=user_id, 
-                    role_id=role_id,
-                    assigned_at=datetime.utcnow()
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Error adding role {role_id} to user {user_id}: {e}"
                 )
-            )
-            await db.commit()
-            logger.info(f"✅ Added role {role_id} to user {user_id}")
-            return True
-            
-        except SQLAlchemyError as e:
-            await db.rollback()
-            logger.error(f"Error adding role to user {user_id}: {e}")
-            return False
+                raise
     
-    async def add_role_by_name(self, db: AsyncSession, user_id: UUID, role_name: str) -> bool:
-        """
-        Add a role to a user by role name.
-        
-        Args:
-            db: Database session
-            user_id: UUID of the user
-            role_name: Name of the role to add
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        from app.crud.role import role as role_crud
-        
-        try:
-            role_obj = await role_crud.get_by_name(db, role_name)
-            if not role_obj:
-                logger.warning(f"Role '{role_name}' not found")
-                return False
-            
-            return await self.add_role(db, user_id, role_obj.id)
-            
-        except SQLAlchemyError as e:
-            logger.error(f"Error adding role '{role_name}' to user {user_id}: {e}")
-            return False
+    async def add_role_by_name(
+            self,
+            db: AsyncSession,
+            user_id: UUID,
+            role_name: str
+        ) -> bool:
+            """
+            Add a role to a user using either role name or role code.
+
+            Does NOT commit the transaction.
+            """
+
+            try:
+                role_name = str(role_name).strip()
+
+                if not role_name:
+                    logger.warning(
+                        f"Empty role supplied for user {user_id}"
+                    )
+                    return False
+
+                # Match either the role name OR role code
+                result = await db.execute(
+                    select(Role).where(
+                        or_(
+                            Role.name == role_name,
+                            Role.code == role_name
+                        )
+                    )
+                )
+
+                role_obj = result.scalar_one_or_none()
+
+                if not role_obj:
+                    logger.error(
+                        f"❌ Role '{role_name}' not found "
+                        f"by name or code"
+                    )
+                    return False
+
+                logger.info(
+                    f"Found role: "
+                    f"name='{role_obj.name}', "
+                    f"code='{role_obj.code}', "
+                    f"id='{role_obj.id}'"
+                )
+
+                return await self.add_role(
+                    db,
+                    user_id,
+                    role_obj.id
+                )
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Error adding role '{role_name}' "
+                    f"to user {user_id}: {e}",
+                    exc_info=True
+                )
+                raise
     
     async def remove_role(self, db: AsyncSession, user_id: UUID, role_id: UUID) -> bool:
         """
@@ -416,14 +456,42 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             await db.flush()
             
             # Assign roles
+            # Assign roles
             if roles:
+                logger.info(
+                    f"Assigning roles to user '{username}': {roles}"
+                )
+
                 for role_name in roles:
-                    await self.add_role_by_name(db, user.id, role_name)
-            
-            await db.commit()
-            await db.refresh(user)
-            logger.info(f"✅ Created user: {username}")
-            return user
+                    if not role_name:
+                        continue
+
+                    role_name = str(role_name).strip()
+
+                    if not role_name:
+                        continue
+
+                    logger.info(
+                        f"Looking up role '{role_name}' "
+                        f"for user '{username}'"
+                    )
+
+                    role_result = await self.add_role_by_name(
+                        db,
+                        user.id,
+                        role_name
+                    )
+
+                    if not role_result:
+                        raise ValueError(
+                            f"Failed to assign role '{role_name}' "
+                            f"to user '{username}'"
+                        )
+
+                    logger.info(
+                        f"✅ Successfully assigned role "
+                        f"'{role_name}' to '{username}'"
+                    )
             
         except SQLAlchemyError as e:
             await db.rollback()

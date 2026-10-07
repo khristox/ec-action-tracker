@@ -12,6 +12,10 @@ import traceback
 import subprocess
 import signal
 import time
+import json
+import urllib.request
+import urllib.parse
+import urllib.error
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import urlparse
@@ -867,8 +871,78 @@ class UserSeeder:
 EXCLUDED_SHELL_SCRIPTS = {"setup.sh", "run_all_seeds.sh", "create_location.sh", "diagnosis.sh"}
 
 
-async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, password: str):
+# ==================== API AUTHENTICATION ====================
+
+async def authenticate_admin(
+    base_url: str,
+    username: str,
+    password: str
+) -> str:
+    """
+    Authenticate once against the API and return the admin access token.
+
+    The token is then reused by all shell seed scripts.
+    """
+
+    login_url = f"{base_url.rstrip('/')}/api/v1/auth/login"
+
+    logger.info("🔐 Authenticating admin user once...")
+    logger.info(f"   API: {login_url}")
+    logger.info(f"   Username: {username}")
+
+    form_data = urllib.parse.urlencode({
+        "username": username,
+        "password": password
+    }).encode("utf-8")
+
+    request = urllib.request.Request(
+        login_url,
+        data=form_data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response_body = response.read().decode("utf-8")
+
+        data = json.loads(response_body)
+
+        token = data.get("access_token")
+
+        if not token:
+            raise RuntimeError(
+                f"Authentication succeeded but no access_token was returned: "
+                f"{data}"
+            )
+
+        logger.info("✅ Admin authentication successful")
+        logger.info("🔑 ADMIN_TOKEN acquired successfully")
+
+        return token
+
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+
+        logger.error(
+            f"❌ Admin authentication failed: HTTP {e.code}"
+        )
+        logger.error(f"   Response: {body}")
+
+        raise RuntimeError(
+            f"Admin authentication failed: HTTP {e.code}"
+        ) from e
+
+    except Exception as e:
+        logger.error(f"❌ Admin authentication failed: {e}")
+        raise
+
+async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, password: str, admin_token: str):
     """Run all .sh scripts with Docker-optimized execution"""
+    
     if not scripts_dir.exists():
         logger.warning(f"Scripts directory not found: {scripts_dir}")
         return
@@ -898,10 +972,22 @@ async def run_shell_scripts(scripts_dir: Path, base_url: str, username: str, pas
             db_config = get_db_config_from_env()
             env.update({
                 'API_BASE_URL': base_url,
+                'BASE_URL': base_url,
+
+                # Authentication
                 'ADMIN_USERNAME': username,
                 'ADMIN_PASSWORD': password,
+                'ADMIN_TOKEN': admin_token,
+
+                # Backward compatibility for existing seed scripts
+                'USERNAME': username,
+                'PASSWORD': password,
+
+                # Environment info
                 'DOCKER_ENV': str(is_running_in_docker()),
                 'APP_ENV': get_environment(),
+
+                # Database connection info
                 'DB_HOST': db_config['host'],
                 'DB_PORT': str(db_config['port']),
                 'DB_USER': db_config['user'],
@@ -1076,15 +1162,44 @@ async def init_db(drop_existing: bool = None, base_url: str = None,
         
         # Step 6: Run shell scripts (unless skipped)
         if not SeedConfig.SKIP_SEED:
-            logger.info("\n" + "=" * 60)
-            logger.info("📜 RUNNING SHELL SCRIPTS")
-            logger.info("=" * 60)
+            #logger.info("\n" + "=" * 60)
+            #logger.info("📜 RUNNING SHELL SCRIPTS")
+            #logger.info("=" * 60)
             
             final_base_url = base_url or SeedConfig.DEFAULT_BASE_URL
             final_username = username or SeedConfig.DEFAULT_USERNAME
             final_password = password or SeedConfig.DEFAULT_PASSWORD
             
-            await run_shell_scripts(scripts_dir, final_base_url, final_username, final_password)
+            #await run_shell_scripts(scripts_dir, final_base_url, final_username, final_password)
+            #===============================================================================
+            # Step 7: Authenticate admin user once and pass token to scripts
+            #===============================================================================
+            try:
+                admin_token = await authenticate_admin(
+                    final_base_url, 
+                    final_username, 
+                    final_password
+                )
+                logger.info("✅ Authentication completed")
+                logger.info("🔄 Reusing ADMIN_TOKEN for all seed scripts")
+            except Exception as e:
+                logger.error(
+                    f"❌ Cannot run shell seed scripts because authentication failed: {e}"
+                )
+                raise
+
+            
+            # ================================================================================
+            # Pass the SAME token to every child script to avoid multiple logins and rate limits. Each script can
+            # Run all shell scripts with the acquired token
+            # ================================================================================
+            await run_shell_scripts(
+                scripts_dir, 
+                final_base_url, 
+                final_username, 
+                final_password, 
+                admin_token
+            )
         else:
             logger.info("Shell scripts skipped (SKIP_SEED=true)")
         

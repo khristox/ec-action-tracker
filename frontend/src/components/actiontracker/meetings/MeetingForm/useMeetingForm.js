@@ -255,25 +255,25 @@ export const useMeetingForm = () => {
   // Department Helpers
   // ==========================================================================
 
+  // Departments the current user may pick: their own plus everything below them
+  // (admins: all). The old '/departments' route does not exist on the API.
   const fetchUserDepartments = useCallback(async () => {
     try {
-      const response = await api.get('/auth/me/departments', {
-        params: { limit: 100, active_only: true }
-      });
+      const response = await api.get('/auth/me/accessible-departments');
 
       let departmentsData = [];
-      if (response.data?.success === true && Array.isArray(response.data.data)) {
-        departmentsData = response.data.data;
-      } else if (Array.isArray(response.data)) {
+      if (Array.isArray(response.data)) {
         departmentsData = response.data;
+      } else if (response.data?.success === true && Array.isArray(response.data.data)) {
+        departmentsData = response.data.data;
       } else if (response.data?.items) {
         departmentsData = response.data.items;
       }
 
       const transformed = departmentsData.map(dept => ({
-        id: dept.department_id || dept.id,
-        name: dept.department_name || dept.name,
-        code: dept.code || dept.department_code || '',
+        id: String(dept.id ?? dept.department_id),
+        name: dept.name || dept.department_name,
+        code: dept.department_code || dept.code || '',
         role: dept.role || 'member'
       }));
 
@@ -289,14 +289,16 @@ export const useMeetingForm = () => {
 
   const getDepartmentNameById = useCallback((deptId) => {
     if (!deptId) return '';
-    const dept = departmentsList.find(d => d.id === deptId);
+    const dept = departmentsList.find(d => String(d.id) === String(deptId));
     return dept?.name || String(deptId);
   }, [departmentsList]);
 
-  const handleRestrictedDepartmentChange = useCallback((deptId) => {
+  // DepartmentSelector passes (id, departmentObject), so the name can be taken
+  // straight from the selected department (the Review step then shows a name,
+  // not a UUID).
+  const handleRestrictedDepartmentChange = useCallback((deptId, dept) => {
     setRestrictedDepartmentId(deptId);
-    const name = getDepartmentNameById(deptId);
-    setRestrictedDepartmentName(name);
+    setRestrictedDepartmentName(dept?.name || getDepartmentNameById(deptId));
     setFormDirty(true);
   }, [getDepartmentNameById]);
 
@@ -415,7 +417,7 @@ export const useMeetingForm = () => {
         setRestrictedDepartmentId(deptId);
         if (deptId) {
           const depts = await fetchUserDepartments();
-          const dept = depts.find(d => d.id === deptId);
+          const dept = depts.find(d => String(d.id) === String(deptId));
           setRestrictedDepartmentName(dept?.name || String(deptId));
         }
 
@@ -553,6 +555,10 @@ export const useMeetingForm = () => {
     dispatch(addCustomParticipant({
       ...user,
       id: user.id,
+      // Links the participant to the system account. The API reads the user's
+      // REAL email from this id, so the meeting shows up on their dashboard
+      // even when the picker only had a masked email.
+      user_id: user.id,
       is_chairperson: false,
       is_existing: true
     }));
@@ -562,8 +568,9 @@ export const useMeetingForm = () => {
       message: `Added ${user.name} to participants`,
       severity: 'success'
     });
-  }, [dispatch]);
+  }, [dispatch]); 
 
+  
   const handleAddManualParticipant = useCallback((participant) => {
     dispatch(addCustomParticipant(participant));
     setFormDirty(true);
@@ -572,18 +579,26 @@ export const useMeetingForm = () => {
       message: `Added ${participant.name} to participants`,
       severity: 'success'
     });
-  }, [dispatch]);
+  }, [dispatch]); 
 
-  const handleAddFromList = useCallback((participants) => {
+  
+  // FIX: accepts either a plain array of participants or an object with a
+  // `participants` array, so a payload-shape mismatch can no longer throw
+  // "participants.forEach is not a function".
+  const handleAddFromList = useCallback((input) => {
+    const participants = Array.isArray(input) ? input : input?.participants || [];
+    if (participants.length === 0) return;
+
     participants.forEach(p => dispatch(addCustomParticipant(p)));
     setFormDirty(true);
     setSnackbar({
       open: true,
-      message: `Added ${participants.length} participants from list`,
+      message: `Added ${participants.length} participant${participants.length !== 1 ? 's' : ''} from list`,
       severity: 'success'
     });
-  }, [dispatch]);
+  }, [dispatch]); 
 
+  
   const handleSetChairperson = useCallback((pid) => {
     dispatch(setMeetingChairperson(pid));
     setFormDirty(true);
@@ -641,7 +656,9 @@ export const useMeetingForm = () => {
 
     const cleanParticipants = meetingParticipants.map(p => {
       const participant = {
-        id: p.is_existing ? p.id : undefined,
+        // user_id is only set for people picked from the system's users; the API
+        // uses it to look up their real email. Manual/list entries have none.
+        user_id: p.user_id || undefined,
         name: p.name,
         email: p.email || null,
         telephone: p.telephone || null,
@@ -678,6 +695,11 @@ export const useMeetingForm = () => {
       }
     }
 
+    // Only a department-restricted meeting carries a department. If the user
+    // switched back to "Open to All", a department picked earlier is not sent.
+    const departmentForMeeting =
+      visibility === VISIBILITY.DEPARTMENT ? (restrictedDepartmentId || null) : null;
+
     const payload = {
       title: formData.title,
       description: formData.description || null,
@@ -692,9 +714,9 @@ export const useMeetingForm = () => {
       agenda: formData.agenda || null,
       secretary_name: formData.secretary_name || null,
       chairperson_name: chairpersonParticipant?.name || null,
-      organization_id: restrictedDepartmentId || null,
+      organization_id: departmentForMeeting,
       visibility,
-      restricted_department_id: restrictedDepartmentId || null,
+      restricted_department_id: departmentForMeeting,
       custom_participants: cleanParticipants,
     };
 

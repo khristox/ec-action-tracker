@@ -9,6 +9,7 @@ Features:
 - Excludes recurring meetings by default
 - Full CRUD operations with permission checks
 - Audit logging for all operations
+- Department-hierarchy visibility and department filter (see meeting_visibility.py)
 """
 
 import asyncio
@@ -23,6 +24,9 @@ from uuid import UUID
 from app.api.v1.endpoints.action_tracker.meetings_access_control import AccessLevel, DepartmentAccessControl, check_meeting_access_or_403
 from app.api.v1.endpoints.action_tracker.utils import build_meeting_response
 from app.api.v1.endpoints.action_tracker.audit_logger import log_audit  # ✅ ADDED
+from app.api.v1.endpoints.action_tracker.meeting_visibility import (
+    build_meeting_access_filter, build_department_filter,
+)
 from app.models.notification import Notification, NotificationChannel, NotificationStatus
 from app.services.notification_service import NotificationService
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
@@ -76,6 +80,11 @@ class MeetingAccessRole(str, Enum):
 
 # ==================== PERMISSION SYSTEM ====================
 
+def _norm_email(value: Optional[str]) -> str:
+    """Normalize an email for comparison (trim + lowercase)."""
+    return (value or "").strip().lower()
+
+
 class AccessControl:
     """
     Check if user has access to a meeting.
@@ -96,7 +105,7 @@ class AccessControl:
         User can access if:
         1. Is superuser
         2. Created the meeting
-        3. Is a participant (by email)
+        3. Is a participant (by email, case-insensitive)
         4. Meeting is open/public
         """
         
@@ -120,8 +129,9 @@ class AccessControl:
             
             # Check if participant
             if meeting.participants:
+                email_norm = _norm_email(user_email)
                 for participant in meeting.participants:
-                    if (participant.email == user_email and 
+                    if (_norm_email(participant.email) == email_norm and 
                         participant.is_active):
                         return True
             
@@ -174,10 +184,11 @@ class PermissionChecker:
             if meeting.created_by_id == user_id:
                 return MeetingPermission.OWNER
             
-            # Check if user is a participant by email
+            # Check if user is a participant by email (case-insensitive)
             if meeting.participants:
+                email_norm = _norm_email(user_email)
                 for participant in meeting.participants:
-                    if participant.email == user_email and participant.is_active:
+                    if _norm_email(participant.email) == email_norm and participant.is_active:
                         # Chairperson or Secretary has organizer access
                         if participant.is_chairperson or participant.is_secretary:
                             return MeetingPermission.ORGANIZER
@@ -218,15 +229,15 @@ class PermissionChecker:
             if not user_email:
                 return None
             
-            # Check participant role by email
+            # Check participant role by email (case-insensitive)
             result = await db.execute(
                 select(MeetingParticipant).where(
                     MeetingParticipant.meeting_id == meeting_id,
-                    MeetingParticipant.email == user_email,
+                    func.lower(MeetingParticipant.email) == _norm_email(user_email),
                     MeetingParticipant.is_active == True
                 )
             )
-            participant = result.scalar_one_or_none()
+            participant = result.scalars().first()
             
             if participant:
                 if participant.is_chairperson:
@@ -447,7 +458,7 @@ class StatsComputer:
                 query = select(Meeting).where(
                     Meeting.participants.any(
                         and_(
-                            MeetingParticipant.email == user_email,
+                            func.lower(MeetingParticipant.email) == _norm_email(user_email),
                             MeetingParticipant.is_active == True
                         )
                     ),
@@ -578,12 +589,21 @@ async def list_meetings(
     search: str = Query(None),
     is_recurring: bool = Query(None),
     include_recurring: bool = Query(True),  # Include recurring by default to match dashboard
+    department_id: Optional[UUID] = Query(None),          # filter by one department
+    include_child_departments: bool = Query(True),        # ...and everything below it
     sort_by: str = Query("meeting_date"),
     sort_order: str = Query("desc"),
 ):
     """
     List meetings accessible to user.
-    Uses exact same access logic as /stats endpoint.
+
+    Visible to a user: open meetings, meetings they created, meetings they were
+    added to as a participant (email, case-insensitive), and meetings that belong
+    to one of their departments or a department below it (see meeting_visibility.py).
+
+    Optional department filter: pass department_id (and include_child_departments)
+    to narrow the list. Users may only filter by their own departments or the
+    ones below them (admins: any department).
     """
     try:
         async def fetch_meetings():
@@ -603,26 +623,17 @@ async def list_meetings(
                 Meeting.is_active == True,
             ]
             
-            # ========== UNIFIED ACCESS FILTER (MATCHES DASHBOARD) ==========
-            # Rule 1: Open meetings are public
-            # Rule 2: Restricted/Private meetings - must be Creator or Participant
-            access_filter = or_(
-                Meeting.visibility == "open",
-                and_(
-                    Meeting.visibility != "open",
-                    or_(
-                        Meeting.created_by_id == current_user.id,
-                        Meeting.participants.any(
-                            and_(
-                                MeetingParticipant.email == current_user.email,
-                                MeetingParticipant.is_active == True
-                            )
-                        )
+            # ========== UNIFIED ACCESS FILTER ==========
+            # open | creator | participant (email) | own department or one below it
+            base_conditions.append(await build_meeting_access_filter(db, current_user))
+
+            # ========== OPTIONAL DEPARTMENT FILTER ==========
+            if department_id:
+                base_conditions.append(
+                    await build_department_filter(
+                        db, current_user, department_id, include_child_departments
                     )
                 )
-            )
-            
-            base_conditions.append(access_filter)
             
             # ========== OTHER FILTERS ==========
             if is_recurring is not None:
@@ -696,6 +707,9 @@ async def list_meetings(
             pages=(total + limit - 1) // limit if total > 0 else 1
         )
         
+    except HTTPException:
+        # e.g. 403 when filtering by a department the user may not look at
+        raise
     except Exception as e:
         logger.error(f"Error listing meetings: {e}", exc_info=True)
         raise HTTPException(
@@ -717,11 +731,12 @@ async def create_meeting(
     ✅ Improved:
     - Proper participant validation and creation
     - Email normalization (strip, lowercase)
+    - Existing system users are linked by user_id (real email taken from the users table)
     - Duplicate participant detection
     - Per-participant error handling
     - Comprehensive logging
     - Better error handling and rollback
-    - Cache invalidation
+    - Cache invalidation (creator AND participants)
     - Auto-assigns MEETING_STATUS_PENDING status
     - Audit logging for creation
     
@@ -839,7 +854,19 @@ async def create_meeting(
                             })
                             continue
                         
-                        if not p.email or not p.email.strip():
+                        # Resolve the email. For existing system users the REAL address
+                        # comes from the users table (the picker may only hold a masked
+                        # one), so they can see the meeting when they log in.
+                        raw_email = getattr(p, 'email', None)
+                        linked_user_id = getattr(p, 'user_id', None)
+                        if linked_user_id:
+                            linked_email = (await db.execute(
+                                select(User.email).where(User.id == linked_user_id)
+                            )).scalar_one_or_none()
+                            if linked_email:
+                                raw_email = linked_email
+                        
+                        if not raw_email or not raw_email.strip():
                             logger.warning(f"   ⚠️ Participant {idx} ({p.name}): Missing email, skipping")
                             failed_participants.append({
                                 "index": idx,
@@ -849,7 +876,7 @@ async def create_meeting(
                             continue
                         
                         # Normalize email (strip whitespace and lowercase)
-                        email_normalized = p.email.strip().lower()
+                        email_normalized = raw_email.strip().lower()
                         
                         # Check for duplicate emails in this batch
                         existing = await db.execute(
@@ -859,7 +886,7 @@ async def create_meeting(
                                 MeetingParticipant.is_active == True
                             )
                         )
-                        if existing.scalar_one_or_none():
+                        if existing.scalars().first():
                             logger.warning(f"   ⚠️ Participant {idx}: Duplicate email {email_normalized}, skipping")
                             failed_participants.append({
                                 "index": idx,
@@ -972,6 +999,20 @@ async def create_meeting(
         logger.info("📋 Step 6: Invalidating cache...")
         
         await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
+
+        # Also clear the cached dashboard stats of every participant who has an
+        # account, so the new meeting shows up as soon as they log in.
+        if participants_added:
+            try:
+                participant_rows = await db.execute(
+                    select(User.id).where(
+                        func.lower(User.email).in_([p["email"] for p in participants_added])
+                    )
+                )
+                for (participant_user_id,) in participant_rows.all():
+                    await _stats_cache.delete(f"meeting_stats:user_{participant_user_id}")
+            except Exception as cache_err:
+                logger.warning(f"⚠️ Could not invalidate participant stats cache: {cache_err}")
         
         logger.info(f"✅ Meeting creation completed successfully")
         logger.info(f"   Meeting ID: {meeting.id}")
@@ -1193,6 +1234,10 @@ async def update_meeting(
         meeting.chairperson_name = getattr(meeting_in, 'chairperson_name', None)
         meeting.status_id = meeting_in.status_id
         meeting.visibility = getattr(meeting_in, 'visibility', meeting.visibility)
+        # Keep the restricted department in sync with the form (PUT previously ignored it)
+        meeting.restricted_department_id = getattr(
+            meeting_in, 'restricted_department_id', meeting.restricted_department_id
+        )
         meeting.updated_by_id = current_user.id
         meeting.updated_at = datetime.now()
 
@@ -1485,16 +1530,15 @@ async def delete_meeting(
         if meeting.created_by_id:
             await _stats_cache.delete(f"meeting_stats:user_{meeting.created_by_id}")
         
-        # Invalidate for all participants (by email)
+        # Invalidate for all participants (by email, case-insensitive)
         if meeting.participants:
             for p in meeting.participants:
                 if p.email:
-                    user_result = await db.execute(
-                        select(User).where(User.email == p.email)
+                    user_rows = await db.execute(
+                        select(User.id).where(func.lower(User.email) == _norm_email(p.email))
                     )
-                    user = user_result.scalar_one_or_none()
-                    if user:
-                        await _stats_cache.delete(f"meeting_stats:user_{user.id}")
+                    for (participant_user_id,) in user_rows.all():
+                        await _stats_cache.delete(f"meeting_stats:user_{participant_user_id}")
         
         logger.info(f"✅ Meeting {meeting_id} deleted by user {current_user.id}")
         logger.info(f"   📝 Audit log created")

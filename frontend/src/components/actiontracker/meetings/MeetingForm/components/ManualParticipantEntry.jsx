@@ -47,7 +47,10 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
         }
         return '';
       case 'telephone':
-        if (value && !/^[\d\s\+\-\(\)]{8,}$/.test(value.replace(/\s/g, ''))) {
+        if (
+          value &&
+          !/^[\d+()-]{8,}$/.test(value.replace(/\s/g, ''))
+        ) {
           return 'Invalid phone number';
         }
         return '';
@@ -115,7 +118,7 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
       email: '',
       telephone: '',
       title: '',
-      organization: 'Residential Apartment' // Keep pre-filled
+      organization: 'EC' // Keep pre-filled
     });
     setErrors({});
     setTouched({});
@@ -127,7 +130,7 @@ export const ManualParticipantEntry = ({ onAddParticipant, onCancel }) => {
       email: '',
       telephone: '',
       title: '',
-      organization: 'Residential Apartment' // Keep pre-filled
+      organization: 'EC' // Keep pre-filled
     });
     setErrors({});
     setTouched({});

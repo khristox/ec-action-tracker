@@ -620,9 +620,14 @@ const EnhancedTreeNode = ({
   depth = 0,
   onExpand,
   expanded,
-  searchTerm
+  searchTerm,
+  tileMinWidth = 200,
+  densityLevel = 'comfortable'
 }) => {
   const theme = useTheme();
+  const compact = densityLevel === 'compact' || densityLevel === 'dense';
+  const dense = densityLevel === 'dense';
+  const cardWidth = tileMinWidth + 40; // fixed tile width so every card is the same size and centers cleanly
   const [isDragOver, setIsDragOver] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
   const isMatched = searchTerm && node.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -669,7 +674,7 @@ const EnhancedTreeNode = ({
       flexDirection: 'column', 
       alignItems: 'center',
       position: 'relative',
-      minWidth: 200,
+      minWidth: cardWidth,
       opacity: isMatched ? 1 : (searchTerm ? 0.4 : 1),
       transition: 'opacity 0.3s ease'
     }}>
@@ -687,7 +692,9 @@ const EnhancedTreeNode = ({
             cursor: isMoveInProgress ? 'not-allowed' : 'grab',
             transition: 'opacity 0.2s, transform 0.2s',
             position: 'relative',
-            width: '100%',
+            width: cardWidth,
+            maxWidth: '100%',
+            mx: 'auto',
             '&:active': { cursor: isMoveInProgress ? 'not-allowed' : 'grabbing' }
           }}
         >
@@ -750,7 +757,7 @@ const EnhancedTreeNode = ({
               />
             )}
             
-            <CardContent sx={{ p: 2, position: 'relative' }}>
+            <CardContent sx={{ p: dense ? 0.75 : compact ? 1.25 : 2, position: 'relative' }}>
               {/* Drag indicator and header */}
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flex: 1, minWidth: 0 }}>
@@ -767,7 +774,7 @@ const EnhancedTreeNode = ({
                     sx={{ 
                       fontWeight: 'bold', 
                       flex: 1, 
-                      fontSize: '0.8rem',
+                      fontSize: dense ? '0.7rem' : '0.8rem',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap'
@@ -815,11 +822,14 @@ const EnhancedTreeNode = ({
               </Box>
               
               {/* Title */}
-              <Typography variant="caption" sx={{ opacity: 0.9, mb: 1, display: 'block', fontSize: '0.7rem' }}>
-                {node.title}
-              </Typography>
+              {!dense && (
+                <Typography variant="caption" sx={{ opacity: 0.9, mb: 1, display: 'block', fontSize: '0.7rem' }}>
+                  {node.title}
+                </Typography>
+              )}
               
               {/* Stats badges */}
+              {!dense && (
               <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 0.5 }}>
                 {node.employee_count > 0 && (
                   <Chip 
@@ -849,6 +859,8 @@ const EnhancedTreeNode = ({
                 )}
               </Box>
               
+              )}
+
               {/* Expand/collapse for children */}
               {hasChildren && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mt: 0.5 }}>
@@ -886,7 +898,7 @@ const EnhancedTreeNode = ({
           }}>
             <Box sx={{ 
               display: 'flex', 
-              gap: 2, 
+              gap: compact ? 1 : 2,
               justifyContent: 'center',
               flexWrap: 'wrap',
               position: 'relative',
@@ -918,6 +930,8 @@ const EnhancedTreeNode = ({
                     onExpand={onExpand}
                     expanded={expanded}
                     searchTerm={searchTerm}
+                    tileMinWidth={tileMinWidth}
+                    densityLevel={densityLevel}
                   />
                 </Box>
               ))}
@@ -931,7 +945,7 @@ const EnhancedTreeNode = ({
 
 // ==================== Main Component ====================
 
-export function AdminStructures() {
+export function AdminStructures({ initialView = 'tree' }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.down('md'));
@@ -949,7 +963,7 @@ export function AdminStructures() {
   const [isMoveInProgress, setIsMoveInProgress] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [viewMode, setViewMode] = useState('tree');
+  const [viewMode, setViewMode] = useState(initialView);
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   
@@ -1049,6 +1063,16 @@ export function AdminStructures() {
       totalChildren: treeData.reduce((acc, node) => acc + (node.children?.length || 0), 0)
     };
   }, [treeData]);
+
+  // ==================== Tile Density (responsive sizing) ====================
+  // Tiles shrink and trim their content as the number of departments grows.
+  const density = useMemo(() => {
+    const n = stats.totalDepartments;
+    if (n <= 8)  return { level: 'comfortable', minWidth: 220 };
+    if (n <= 20) return { level: 'cozy',        minWidth: 180 };
+    if (n <= 40) return { level: 'compact',     minWidth: 150 };
+    return              { level: 'dense',       minWidth: 120 };
+  }, [stats.totalDepartments]);
 
   // ==================== Drag and Drop Handlers ====================
 
@@ -1367,12 +1391,12 @@ export function AdminStructures() {
     const displayData = searchTerm ? filterNodes([...treeData]) : treeData;
     
     return (
-      <Box sx={{ 
-        display: 'flex', 
-        gap: 3, 
-        justifyContent: 'center', 
-        alignItems: 'flex-start',
+      <Box sx={{
+        display: 'flex',
         flexWrap: 'wrap',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        gap: density.level === 'dense' ? 1 : 3,
         p: 1
       }}>
         {displayData.map(node => (
@@ -1391,13 +1415,15 @@ export function AdminStructures() {
             onExpand={handleToggleExpand}
             expanded={expandedNodes.has(node.id)}
             searchTerm={searchTerm}
+            tileMinWidth={density.minWidth}
+            densityLevel={density.level}
           />
         ))}
       </Box>
     );
   }, [treeData, searchTerm, handleOpenDialog, handleDelete, handleDragStart, 
       handleDragOver, handleDrop, handleDragEnd, draggedNodeId, isMoveInProgress, 
-      expandedNodes, handleToggleExpand]);
+      expandedNodes, handleToggleExpand, density]);
 
   const renderListView = useCallback(() => {
     if (!treeData || !Array.isArray(treeData) || treeData.length === 0) {
@@ -1467,252 +1493,14 @@ export function AdminStructures() {
     );
   }, [treeData, searchTerm, handleOpenDialog, handleDelete, selectedDepartment, theme]);
 
-  // ==================== Loading State ====================
+  // ==================== Form Dialog + Snackbar (shared) ====================
+  // FIX: These were previously rendered only in the main return, so the
+  // "Create First Department" button in the empty state set dialogOpen=true
+  // but no <Dialog> existed on the page. They are now defined once here and
+  // rendered in BOTH the empty state and the main view.
 
-  if (loading && treeData.length === 0) {
-    return (
-      <Box sx={{ p: 2 }}>
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <Skeleton variant="rectangular" height={40} sx={{ borderRadius: 1 }} />
-        </Paper>
-        <Paper sx={{ p: 2 }}>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {[1, 2, 3].map(i => (
-              <Skeleton key={i} variant="rectangular" width={180} height={120} sx={{ borderRadius: 2 }} />
-            ))}
-          </Box>
-        </Paper>
-      </Box>
-    );
-  }
-
-  // ==================== Empty State ====================
-
-  if (treeData.length === 0) {
-    return (
-      <Box sx={{ p: 2 }}>
-        <Paper sx={{ p: 3, textAlign: 'center', py: 6 }}>
-          <BusinessIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" fontWeight="bold" gutterBottom>
-            No Departments Found
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Get started by creating your first department
-          </Typography>
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />} 
-            onClick={() => handleOpenDialog('create')}
-            size="medium"
-          >
-            Create First Department
-          </Button>
-        </Paper>
-      </Box>
-    );
-  }
-
-  // ==================== Main Render ====================
-  
-  return (
-    <Box sx={{ p: { xs: 1.5, sm: 2 } }}>
-      {/* Header with Stats - More Compact */}
-      <Paper 
-        sx={{ 
-          p: { xs: 1.5, sm: 2 }, 
-          mb: 2,
-          background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.03)} 0%, ${alpha(theme.palette.primary.main, 0.01)} 100%)`,
-          borderRadius: 2,
-          border: '1px solid',
-          borderColor: 'divider'
-        }}
-      >
-        {/* Header Row */}
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: { xs: 'stretch', sm: 'center' },
-          flexDirection: { xs: 'column', sm: 'row' },
-          gap: 1.5,
-          mb: 1.5
-        }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <BusinessIcon sx={{ fontSize: 24, color: 'primary.main' }} />
-            <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.1rem', sm: '1.3rem' } }}>
-              Organization
-            </Typography>
-            <Chip 
-              label={`${stats.totalDepartments} depts`} 
-              size="small" 
-              color="primary" 
-              sx={{ fontWeight: 'bold', fontSize: '0.65rem', height: 22 }}
-            />
-          </Box>
-          
-          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-            <Tooltip title="Collapse All">
-              <span>
-                <IconButton size="small" onClick={handleCollapseAll} disabled={viewMode === 'list'} sx={{ p: 0.5 }}>
-                  <ExpandLessIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="Expand All">
-              <span>
-                <IconButton size="small" onClick={handleExpandAll} disabled={viewMode === 'list'} sx={{ p: 0.5 }}>
-                  <ExpandMoreIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="Refresh">
-              <IconButton size="small" onClick={loadData} disabled={loading || isMoveInProgress} sx={{ p: 0.5 }}>
-                <RefreshIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
-              </IconButton>
-            </Tooltip>
-            <Button 
-              variant="contained" 
-              startIcon={<AddIcon sx={{ fontSize: '0.9rem' }} />} 
-              onClick={() => handleOpenDialog('create')}
-              disabled={isMoveInProgress}
-              size="small"
-              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.5, py: 0.5 }}
-            >
-              Add
-            </Button>
-          </Box>
-        </Box>
-        
-        {/* Stats Row */}
-        <StatsRow stats={stats} />
-        
-        {/* Search and View Controls - More Compact */}
-        <Box sx={{ display: 'flex', gap: 1.5, mt: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-          <SearchBar 
-            value={searchTerm} 
-            onChange={setSearchTerm} 
-            onFilterToggle={() => setShowFilters(!showFilters)}
-            showFilters={showFilters}
-          />
-          
-          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto' }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-              View:
-            </Typography>
-            <ToggleButtonGroup
-              value={viewMode}
-              exclusive
-              onChange={(e, val) => {
-                if (val !== null) {
-                  setViewMode(val);
-                }
-              }}
-              size="small"
-              sx={{ 
-                '& .MuiToggleButton-root': { 
-                  px: 0.75,
-                  py: 0.25,
-                  fontSize: '0.65rem',
-                  '&.Mui-selected': {
-                    bgcolor: 'primary.main',
-                    color: 'white',
-                    '&:hover': {
-                      bgcolor: 'primary.dark',
-                    }
-                  }
-                } 
-              }}
-            >
-              <ToggleButton value="tree" aria-label="tree view">
-                <Tooltip title="Tree View">
-                  <AccountTreeIcon sx={{ fontSize: '0.9rem' }} />
-                </Tooltip>
-              </ToggleButton>
-              <ToggleButton value="list" aria-label="list view">
-                <Tooltip title="List View">
-                  <ViewListIcon sx={{ fontSize: '0.9rem' }} />
-                </Tooltip>
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-        </Box>
-        
-        {searchTerm && (
-          <Alert severity="info" sx={{ mt: 1, py: 0.25, fontSize: '0.7rem' }} onClose={() => setSearchTerm('')}>
-            Found {treeData.filter(n => n.name.toLowerCase().includes(searchTerm.toLowerCase())).length} matching departments
-          </Alert>
-        )}
-        
-        {isMoveInProgress && (
-          <LinearProgress sx={{ mt: 1, borderRadius: 1, height: 2 }} />
-        )}
-      </Paper>
-
-      {/* Content Area - Tree or List View */}
-      <Paper 
-        sx={{ 
-          p: { xs: 1.5, sm: 2 }, 
-          overflowX: 'auto', 
-          minHeight: '350px',
-          borderRadius: 2,
-          border: '1px solid',
-          borderColor: 'divider'
-        }}
-      >
-        {viewMode === 'tree' ? (
-          <>
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontSize: '0.65rem' }}>
-              <AccountTreeIcon sx={{ mr: 0.5, verticalAlign: 'middle', fontSize: '0.75rem' }} />
-              Drag cards to reorganize — drop onto a department to make it a child
-            </Typography>
-            {renderTreeView()}
-          </>
-        ) : (
-          <>
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontSize: '0.65rem' }}>
-              <ViewListIcon sx={{ mr: 0.5, verticalAlign: 'middle', fontSize: '0.75rem' }} />
-              Click department to see path · Edit or delete using action buttons
-            </Typography>
-            {renderListView()}
-          </>
-        )}
-      </Paper>
-
-      {/* Speed Dial for quick actions - More compact */}
-      <SpeedDial
-        ariaLabel="Quick Actions"
-        sx={{ 
-          position: 'fixed', 
-          bottom: 16, 
-          right: 16,
-          '& .MuiFab-primary': {
-            width: 44,
-            height: 44
-          }
-        }}
-        icon={<SpeedDialIcon />}
-      >
-        <SpeedDialAction
-          icon={<AddIcon sx={{ fontSize: '1.1rem' }} />}
-          tooltipTitle="Add Department"
-          onClick={() => handleOpenDialog('create')}
-          FabProps={{ size: 'small' }}
-        />
-        <SpeedDialAction
-          icon={<RefreshIcon sx={{ fontSize: '1.1rem' }} />}
-          tooltipTitle="Refresh"
-          onClick={loadData}
-          FabProps={{ size: 'small' }}
-        />
-        {viewMode === 'tree' && (
-          <SpeedDialAction
-            icon={expandedNodes.size > 0 ? <ExpandLessIcon sx={{ fontSize: '1.1rem' }} /> : <ExpandMoreIcon sx={{ fontSize: '1.1rem' }} />}
-            tooltipTitle={expandedNodes.size > 0 ? "Collapse All" : "Expand All"}
-            onClick={expandedNodes.size > 0 ? handleCollapseAll : handleExpandAll}
-            FabProps={{ size: 'small' }}
-          />
-        )}
-      </SpeedDial>
-
+  const formDialogAndSnackbar = (
+    <>
       {/* Form Dialog */}
       <Dialog 
         open={dialogOpen} 
@@ -1980,6 +1768,260 @@ export function AdminStructures() {
           </Typography>
         </Alert>
       </Snackbar>
+    </>
+  );
+
+  // ==================== Loading State ====================
+
+  if (loading && treeData.length === 0) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Skeleton variant="rectangular" height={40} sx={{ borderRadius: 1 }} />
+        </Paper>
+        <Paper sx={{ p: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {[1, 2, 3].map(i => (
+              <Skeleton key={i} variant="rectangular" width={180} height={120} sx={{ borderRadius: 2 }} />
+            ))}
+          </Box>
+        </Paper>
+      </Box>
+    );
+  }
+
+  // ==================== Empty State ====================
+
+  if (treeData.length === 0) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Paper sx={{ p: 3, textAlign: 'center', py: 6 }}>
+          <BusinessIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
+          <Typography variant="h6" fontWeight="bold" gutterBottom>
+            No Departments Found
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Get started by creating your first department
+          </Typography>
+          <Button 
+            variant="contained" 
+            startIcon={<AddIcon />} 
+            onClick={() => handleOpenDialog('create')}
+            size="medium"
+          >
+            Create First Department
+          </Button>
+        </Paper>
+
+        {/* FIX: render the dialog + snackbar in the empty state too */}
+        {formDialogAndSnackbar}
+      </Box>
+    );
+  }
+
+  // ==================== Main Render ====================
+  
+  return (
+    <Box sx={{ p: { xs: 1.5, sm: 2 } }}>
+      {/* Header with Stats - More Compact */}
+      <Paper 
+        sx={{ 
+          p: { xs: 1.5, sm: 2 }, 
+          mb: 2,
+          background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.03)} 0%, ${alpha(theme.palette.primary.main, 0.01)} 100%)`,
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider'
+        }}
+      >
+        {/* Header Row */}
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: { xs: 'stretch', sm: 'center' },
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: 1.5,
+          mb: 1.5
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <BusinessIcon sx={{ fontSize: 24, color: 'primary.main' }} />
+            <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.1rem', sm: '1.3rem' } }}>
+              Organization
+            </Typography>
+            <Chip 
+              label={`${stats.totalDepartments} depts`} 
+              size="small" 
+              color="primary" 
+              sx={{ fontWeight: 'bold', fontSize: '0.65rem', height: 22 }}
+            />
+          </Box>
+          
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+            <Tooltip title="Collapse All">
+              <span>
+                <IconButton size="small" onClick={handleCollapseAll} disabled={viewMode === 'list'} sx={{ p: 0.5 }}>
+                  <ExpandLessIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Expand All">
+              <span>
+                <IconButton size="small" onClick={handleExpandAll} disabled={viewMode === 'list'} sx={{ p: 0.5 }}>
+                  <ExpandMoreIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={loadData} disabled={loading || isMoveInProgress} sx={{ p: 0.5 }}>
+                <RefreshIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
+              </IconButton>
+            </Tooltip>
+            <Button 
+              variant="contained" 
+              startIcon={<AddIcon sx={{ fontSize: '0.9rem' }} />} 
+              onClick={() => handleOpenDialog('create')}
+              disabled={isMoveInProgress}
+              size="small"
+              sx={{ borderRadius: 1.5, textTransform: 'none', fontSize: '0.75rem', px: 1.5, py: 0.5 }}
+            >
+              Add
+            </Button>
+          </Box>
+        </Box>
+        
+        {/* Stats Row */}
+        <StatsRow stats={stats} />
+        
+        {/* Search and View Controls - More Compact */}
+        <Box sx={{ display: 'flex', gap: 1.5, mt: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+          <SearchBar 
+            value={searchTerm} 
+            onChange={setSearchTerm} 
+            onFilterToggle={() => setShowFilters(!showFilters)}
+            showFilters={showFilters}
+          />
+          
+          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
+              View:
+            </Typography>
+            <ToggleButtonGroup
+              value={viewMode}
+              exclusive
+              onChange={(e, val) => {
+                if (val !== null) {
+                  setViewMode(val);
+                }
+              }}
+              size="small"
+              sx={{ 
+                '& .MuiToggleButton-root': { 
+                  px: 0.75,
+                  py: 0.25,
+                  fontSize: '0.65rem',
+                  '&.Mui-selected': {
+                    bgcolor: 'primary.main',
+                    color: 'white',
+                    '&:hover': {
+                      bgcolor: 'primary.dark',
+                    }
+                  }
+                } 
+              }}
+            >
+              <ToggleButton value="tree" aria-label="tree view">
+                <Tooltip title="Tree View">
+                  <AccountTreeIcon sx={{ fontSize: '0.9rem' }} />
+                </Tooltip>
+              </ToggleButton>
+              <ToggleButton value="list" aria-label="list view">
+                <Tooltip title="List View">
+                  <ViewListIcon sx={{ fontSize: '0.9rem' }} />
+                </Tooltip>
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        </Box>
+        
+        {searchTerm && (
+          <Alert severity="info" sx={{ mt: 1, py: 0.25, fontSize: '0.7rem' }} onClose={() => setSearchTerm('')}>
+            Found {treeData.filter(n => n.name.toLowerCase().includes(searchTerm.toLowerCase())).length} matching departments
+          </Alert>
+        )}
+        
+        {isMoveInProgress && (
+          <LinearProgress sx={{ mt: 1, borderRadius: 1, height: 2 }} />
+        )}
+      </Paper>
+
+      {/* Content Area - Tree or List View */}
+      <Paper 
+        sx={{ 
+          p: { xs: 1.5, sm: 2 }, 
+          overflowX: 'auto', 
+          minHeight: '350px',
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider'
+        }}
+      >
+        {viewMode === 'tree' ? (
+          <>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontSize: '0.65rem' }}>
+              <AccountTreeIcon sx={{ mr: 0.5, verticalAlign: 'middle', fontSize: '0.75rem' }} />
+              Drag cards to reorganize — drop onto a department to make it a child
+            </Typography>
+            {renderTreeView()}
+          </>
+        ) : (
+          <>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontSize: '0.65rem' }}>
+              <ViewListIcon sx={{ mr: 0.5, verticalAlign: 'middle', fontSize: '0.75rem' }} />
+              Click department to see path · Edit or delete using action buttons
+            </Typography>
+            {renderListView()}
+          </>
+        )}
+      </Paper>
+
+      {/* Speed Dial for quick actions - More compact */}
+      <SpeedDial
+        ariaLabel="Quick Actions"
+        sx={{ 
+          position: 'fixed', 
+          bottom: 16, 
+          right: 16,
+          '& .MuiFab-primary': {
+            width: 44,
+            height: 44
+          }
+        }}
+        icon={<SpeedDialIcon />}
+      >
+        <SpeedDialAction
+          icon={<AddIcon sx={{ fontSize: '1.1rem' }} />}
+          tooltipTitle="Add Department"
+          onClick={() => handleOpenDialog('create')}
+          FabProps={{ size: 'small' }}
+        />
+        <SpeedDialAction
+          icon={<RefreshIcon sx={{ fontSize: '1.1rem' }} />}
+          tooltipTitle="Refresh"
+          onClick={loadData}
+          FabProps={{ size: 'small' }}
+        />
+        {viewMode === 'tree' && (
+          <SpeedDialAction
+            icon={expandedNodes.size > 0 ? <ExpandLessIcon sx={{ fontSize: '1.1rem' }} /> : <ExpandMoreIcon sx={{ fontSize: '1.1rem' }} />}
+            tooltipTitle={expandedNodes.size > 0 ? "Collapse All" : "Expand All"}
+            onClick={expandedNodes.size > 0 ? handleCollapseAll : handleExpandAll}
+            FabProps={{ size: 'small' }}
+          />
+        )}
+      </SpeedDial>
+
+      {/* Form Dialog + Snackbar (shared with the empty state) */}
+      {formDialogAndSnackbar}
     </Box>
   );
 }

@@ -274,18 +274,22 @@ export const ParticipantsStep = ({
         </Box>
       </Card>
 
-      {/* Add Participant Dialog */}
+      {/* Add Participant Dialog
+          FIX: MUI v7 removed `PaperProps`, so the old sizing was ignored.
+          Use slotProps.paper, go fullScreen on mobile, and let DialogContent scroll. */}
       <Dialog 
         open={showAddDialog} 
         onClose={handleCloseDialog} 
         maxWidth="sm" 
         fullWidth
-        PaperProps={{
-          sx: {
-            borderRadius: 3,
-            maxHeight: '85vh',
-            display: 'flex',
-            flexDirection: 'column'
+        fullScreen={isMobile}
+        scroll="paper"
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: isMobile ? 0 : 3,
+              maxHeight: { xs: '100dvh', sm: '85vh' },
+            }
           }
         }}
       >
@@ -318,7 +322,18 @@ export const ParticipantsStep = ({
           </IconButton>
         </DialogTitle>
         
-        <DialogContent sx={{ p: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* FIX: was overflow: 'hidden', which clipped the Manual form.
+            Now scrolls vertically; the title and footer stay pinned. */}
+        <DialogContent
+          sx={{
+            p: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto',
+            minHeight: 0,
+            WebkitOverflowScrolling: 'touch'
+          }}
+        >
           {/* Compact Tabs */}
           <Box sx={{ 
             display: 'flex', 
@@ -359,8 +374,10 @@ export const ParticipantsStep = ({
             ))}
           </Box>
 
-          {/* Tab Content */}
-          <Box sx={{ flex: 1, overflow: 'hidden' }}>
+          {/* Tab Content
+              FIX: removed overflow: 'hidden' so tall content (Manual form) is
+              reachable by scrolling DialogContent. */}
+          <Box sx={{ flexShrink: 0 }}>
             {participantTab === 'existing' && (
               <ExistingUsersSelector
                 selectedUserIds={selectedUserIds}

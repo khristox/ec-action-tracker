@@ -18,7 +18,7 @@ from app.core.account_lockout import (
 )
 from app.models.base import BaseModel
 from app.models.meetings.organization import OrganizationNode
-from app.models.meetings.user_department import UserDepartment
+from app.models.meetings.user_department import UserDepartment, UserDepartmentStatus
 from fastapi import (
     APIRouter, Depends, HTTPException, 
     Request, Response, status, UploadFile, File, Query as FastQuery
@@ -259,7 +259,7 @@ async def resend_verification_email(
 
 
 @router.post("/login", response_model=Token, operation_id="auth_login")
-@limiter.limit("5/minute")
+@limiter.limit("5/minute") # For development, adjust as needed for production
 async def login(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
@@ -859,60 +859,6 @@ async def get_my_profile_picture(
     }
 
 
-@router.get(
-    "/me/departments",
-    response_model=List[UserDepartmentResponse],
-    operation_id="auth_get_current_user_departments"
-)
-async def get_current_user_departments(
-    limit: int = FastQuery(100, ge=1, le=1000),
-    active_only: bool = FastQuery(True),
-    role_filter: Optional[str] = FastQuery(None),
-    db: AsyncSession = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
-) -> List[UserDepartmentResponse]:
-    """Get all departments assigned to the current user"""
-    logger.info(f"Fetching departments for user: {current_user.id}")
-
-    query = select(
-        UserDepartment,
-        OrganizationNode
-    ).join(
-        OrganizationNode,
-        OrganizationNode.id == UserDepartment.department_id
-    ).where(
-        UserDepartment.user_id == current_user.id
-    )
-
-    if active_only:
-        query = query.where(OrganizationNode.is_active == True)
-        query = query.where(UserDepartment.status == 'active')
-
-    if role_filter:
-        query = query.where(UserDepartment.role == role_filter)
-
-    query = query.limit(limit)
-
-    result = await db.execute(query)
-    rows = result.all()
-
-    departments_list = []
-    for user_department, org_node in rows:
-        departments_list.append(
-            UserDepartmentResponse(
-                id=str(user_department.id),
-                user_id=str(user_department.user_id),
-                department_id=str(org_node.id),
-                department_name=str(org_node.name) if org_node.name else "",
-                department_path=str(org_node.path) if org_node.path else "",
-                department_code=str(org_node.department_code) if org_node.department_code else None,
-                role=str(user_department.role) if user_department.role else "member",
-                status=str(user_department.status) if user_department.status else "active",
-                is_primary=bool(user_department.is_primary),
-            )
-        )
-
-    return departments_list
 
 
 @router.post("/test-email", operation_id="auth_test_email")
@@ -1175,3 +1121,189 @@ async def get_user_profile_picture_base64(
         "has_picture": True,
         "content_type": user.profile_picture_type
     }
+
+@router.get(
+    "/me/departments",
+    operation_id="auth_get_current_user_departments",
+)
+async def get_current_user_departments(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Return departments accessible to the current user.
+
+    Admins / superusers:
+        - All active departments.
+
+    Regular users:
+        - Their own active departments.
+        - All active descendant departments in the hierarchy.
+    """
+    from app.api.v1.endpoints.action_tracker.department_hierarchy import (
+        get_descendant_ids,
+    )
+
+    # Reload the user with roles so the admin check is reliable.
+    result = await db.execute(
+        select(User)
+        .where(User.id == current_user.id)
+        .options(selectinload(User.roles))
+    )
+
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    # ---------------------------------------------------------
+    # Determine whether the user is an administrator
+    # ---------------------------------------------------------
+    role_codes = {
+        role.code
+        for role in user.roles
+        if role.code
+    }
+
+    is_admin = (
+        bool(user.is_superuser)
+        or "admin" in role_codes
+        or "super_admin" in role_codes
+    )
+
+    logger.info(
+        "Loading accessible departments for user=%s admin=%s roles=%s",
+        getattr(user, "username", user.id),
+        is_admin,
+        sorted(role_codes),
+    )
+
+    # ---------------------------------------------------------
+    # ADMIN / SUPERUSER
+    # ---------------------------------------------------------
+    # Administrators can restrict meetings to ANY active
+    # department in the organization.
+    # ---------------------------------------------------------
+    if is_admin:
+        result = await db.execute(
+            select(OrganizationNode)
+            .where(OrganizationNode.is_active == True)
+            .order_by(OrganizationNode.name)
+        )
+
+        nodes = result.scalars().all()
+
+        departments = []
+
+        for node in nodes:
+            departments.append(
+                {
+                    "id": node.id,
+                    "name": node.name,
+                    "department_code": getattr(node, "department_code", None),
+                    "parent_id": node.parent_id,
+                    "level": getattr(node, "level", None),
+                    "role": "admin",
+                    "is_primary": False,
+                    "inherited": False,
+                }
+            )
+
+        logger.info(
+            "Admin department access: user=%s departments=%d",
+            getattr(user, "username", user.id),
+            len(departments),
+        )
+
+        return departments
+
+    # ---------------------------------------------------------
+    # REGULAR USER
+    # ---------------------------------------------------------
+    # Start with the user's active department memberships.
+    # ---------------------------------------------------------
+    result = await db.execute(
+        select(UserDepartment)
+        .where(
+            UserDepartment.user_id == user.id,
+            UserDepartment.status == UserDepartmentStatus.ACTIVE,
+            UserDepartment.end_date.is_(None),
+        )
+    )
+
+    memberships = {
+        membership.department_id: membership
+        for membership in result.scalars().all()
+    }
+
+    if not memberships:
+        logger.info(
+            "User has no active department memberships: user=%s",
+            getattr(user, "username", user.id),
+        )
+        return []
+
+    # ---------------------------------------------------------
+    # Include the user's departments AND all descendants.
+    # ---------------------------------------------------------
+    accessible_ids = await get_descendant_ids(
+        db,
+        memberships.keys(),
+        include_roots=True,
+    )
+
+    if not accessible_ids:
+        return []
+
+    # ---------------------------------------------------------
+    # Load only active organization nodes.
+    # ---------------------------------------------------------
+    result = await db.execute(
+        select(OrganizationNode)
+        .where(
+            OrganizationNode.id.in_(accessible_ids),
+            OrganizationNode.is_active == True,
+        )
+        .order_by(OrganizationNode.name)
+    )
+
+    nodes = result.scalars().all()
+
+    departments = []
+
+    for node in nodes:
+        membership = memberships.get(node.id)
+
+        departments.append(
+            {
+                "id": node.id,
+                "name": node.name,
+                "department_code": getattr(node, "department_code", None),
+                "parent_id": node.parent_id,
+                "level": getattr(node, "level", None),
+                "role": (
+                    getattr(membership, "role", None)
+                    if membership
+                    else None
+                ),
+                "is_primary": (
+                    bool(getattr(membership, "is_primary", False))
+                    if membership
+                    else False
+                ),
+                "inherited": node.id not in memberships,
+            }
+        )
+
+    logger.info(
+        "Department access: user=%s own=%d accessible=%d returned=%d",
+        getattr(user, "username", user.id),
+        len(memberships),
+        len(accessible_ids),
+        len(departments),
+    )
+
+    return departments

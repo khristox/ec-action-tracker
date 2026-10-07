@@ -250,23 +250,35 @@ const CreateMeeting = () => {
   const handleNewParticipantChange = (field) => (event) =>
     setNewParticipant({ ...newParticipant, [field]: event.target.value });
 
-  const handleUseParticipantList = () => {
-    if (selectedParticipantList) {
+  const handleUseParticipantList = async () => {
+    if (!selectedParticipantList) return;
+    try {
       const list = participantLists.find((l) => l.id === selectedParticipantList);
-      if (list?.participants) {
-        dispatch(
-          addParticipantsFromListToMeeting({
-            listId: selectedParticipantList,
-            participants: list.participants,
-          })
-        );
-        setSnackbar({
-          open: true,
-          message: `Added ${list.participants.length} participants`,
-          severity: 'success',
-        });
+      let members = list?.participants;
+
+      if (!members) {
+        // ASSUMPTION: adjust this endpoint to your backend
+        //const res = await api.get(`/participant-lists/${selectedParticipantList}`);
+        const res = await api.get(`/participant-lists/${selectedParticipantList}/participants`);
+        members = res.data?.participants || res.data?.items || [];
       }
+
+      if (!members.length) {
+        setSnackbar({ open: true, message: 'This list has no participants', severity: 'warning' });
+        return;
+      }
+
+      dispatch(
+        addParticipantsFromListToMeeting({
+          listId: selectedParticipantList,
+          participants: members,
+        })
+      );
+      setSnackbar({ open: true, message: `Added ${members.length} participants`, severity: 'success' });
       setSelectedParticipantList(null);
+    } catch (err) {
+      console.error(err);
+      setSnackbar({ open: true, message: 'Could not load that list', severity: 'error' });
     }
   };
 
@@ -1015,9 +1027,22 @@ const CreateMeeting = () => {
           onClose={() => setShowAddParticipantDialog(false)}
           maxWidth="sm"
           fullWidth
+          fullScreen={isMobile}
+          scroll="paper"
+          PaperProps={{
+            sx: {
+              height: { xs: '100dvh', sm: 'auto' },
+              maxHeight: { xs: '100dvh', sm: '90vh' },
+              display: 'flex',
+              flexDirection: 'column',
+            },
+          }}
         >
-          <DialogTitle>Add New Participant</DialogTitle>
-          <DialogContent>
+          <DialogTitle sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            Add New Participant
+          </DialogTitle>
+
+          <DialogContent dividers sx={{ pb: 2 }}>
             <Stack spacing={2} sx={{ mt: 1 }}>
               <TextField
                 fullWidth
@@ -1026,6 +1051,7 @@ const CreateMeeting = () => {
                 value={newParticipant.name}
                 onChange={handleNewParticipantChange('name')}
                 size="small"
+                autoFocus
               />
               <TextField
                 fullWidth
@@ -1058,13 +1084,28 @@ const CreateMeeting = () => {
               />
             </Stack>
           </DialogContent>
-          <DialogActions>
+
+          <DialogActions
+            sx={{
+              flex: '0 0 auto',
+              borderTop: 1,
+              borderColor: 'divider',
+              px: 3,
+              py: 2,
+              bgcolor: 'background.paper',
+            }}
+          >
             <Button onClick={() => setShowAddParticipantDialog(false)}>Cancel</Button>
             <Button
               variant="contained"
               onClick={handleAddCustomParticipant}
               disabled={!newParticipant.name.trim()}
-              sx={{ bgcolor: '#7C3AED' }}
+              sx={{
+                bgcolor: '#7C3AED',
+                '&:hover': {
+                  bgcolor: '#6D28D9',
+                },
+              }}
             >
               Add Participant
             </Button>

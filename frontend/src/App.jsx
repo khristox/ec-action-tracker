@@ -405,7 +405,9 @@ const routeConfig = {
     { path: 'settings/roles',                     element: <RoleManagement />,       menuCode: 'admin_roles' },
     { path: 'settings/audit',                     element: <AuditLogs />,            menuCode: 'admin_audit' },
     { path: 'settings/role-menu-assignment',      element: <RoleMenuAssignment />,   menuCode: 'admin_role_menu' },
-    { path: 'settings/admin-structures/departments', element: <AdminStructures />,   menuCode: 'admin_structures' },
+    //{ path: 'settings/admin-structures/departments', element: <AdminStructures />,   menuCode: 'admin_structures' },
+    { path: 'settings/admin-structures/departments', element: <AdminStructures key="departments" initialView="list" />, menuCode: 'admin_structures' },
+    { path: 'settings/admin-structures/hierarchy',   element: <AdminStructures key="hierarchy" initialView="tree" />,  menuCode: 'admin_structures' },
   ],
   adminRoutes: [
     { path: 'admin/users',  element: <UserManagement />, menuCode: 'admin_users' },

@@ -1,9 +1,6 @@
 # app/models/refresh_token.py
 
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index,UniqueConstraint
-from sqlalchemy.orm import relationship
-
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -15,15 +12,13 @@ class RefreshToken(Base):
     """Refresh token model for storing refresh tokens."""
     __tablename__ = "refresh_tokens"
     __table_args__ = (
-        Index('idx_refresh_token_user', 'user_id'),
-        Index('idx_refresh_token_token', 'token', unique=True),
         Index('idx_refresh_token_expires', 'expires_at'),
-        {'extend_existing': True}
+        {'extend_existing': True},
     )
-    
+
     id = Column(CustomUUID, primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(CustomUUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    token = Column(String(500), unique=True, nullable=False)  # Make sure this field exists
+    token = Column(String(500), unique=True, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     is_active = Column(Boolean, default=True, index=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
@@ -32,10 +27,4 @@ class RefreshToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
-    # ✅ Add a composite unique constraint to prevent multiple active tokens per user (optional)
-    __table_args__ = (
-         UniqueConstraint('user_id', 'is_active', name='uq_user_active_token'),
-    )
-    
-    #relationships
     user = relationship("User")

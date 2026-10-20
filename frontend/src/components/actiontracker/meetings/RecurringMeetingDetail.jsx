@@ -404,7 +404,14 @@ const RecurringMeetingDetail = () => {
                 >
                   {recurringMeeting.title}
                 </Typography>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  sx={{
+                    mt: 0.5,
+                    flexWrap: 'wrap',
+                  }}
+                >
                   <Chip 
                     label="Recurring" 
                     size="small" 
@@ -644,10 +651,10 @@ const RecurringMeetingDetail = () => {
           <Box sx={{ p: isMobile ? 1.5 : 4 }}>
             <Grid container spacing={isMobile ? 2 : 4}>
               {/* Core Information & Schedule */}
-              <Grid item xs={12} lg={6}>
+              <Grid size={{ xs: 12, lg: 6 }}>
                 <Stack spacing={isMobile ? 2 : 3}>
                   <Box>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', textTransform: 'uppercase' }}>
                       Description
                     </Typography>
                     <Typography variant="body1" sx={{ mt: 0.5, color: 'text.primary', fontSize: isMobile ? '0.9rem' : '1rem' }}>
@@ -750,7 +757,7 @@ const RecurringMeetingDetail = () => {
               </Grid>
 
               {/* Next and Most Recent Occurrences */}
-              <Grid item xs={12} lg={6}>
+              <Grid size={{ xs: 12, lg: 6 }}>
                 <Stack spacing={isMobile ? 2 : 3}>
                   <Card variant="outlined" sx={{ borderRadius: 3, p: isMobile ? 2 : 2.5, bgcolor: alpha(COLORS.info, 0.02) }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
@@ -1033,7 +1040,10 @@ const RecurringMeetingDetail = () => {
                         const globalIndex = (page - 1) * rowsPerPage + index;
                         const isPast = new Date(occurrence.scheduled_date) < new Date();
                         return (
-                          <Grid item xs={12} sm={6} lg={4} key={occurrence.id}>
+                          <Grid
+                            size={{ xs: 12, sm: 6, lg: 4 }}
+                            key={occurrence.id}
+                          >
                             <Card 
                               variant="outlined"
                               sx={{ 
@@ -1129,32 +1139,66 @@ const RecurringMeetingDetail = () => {
             onOpen={() => setSpeedDialOpen(true)} 
             open={speedDialOpen}
           >
-            <SpeedDialAction 
-              icon={<AddIcon />} 
-              tooltipTitle="Generate Next" 
-              onClick={handleGenerateNext} 
-              FabProps={{ sx: { bgcolor: COLORS.primary, '&:hover': { bgcolor: COLORS.primaryDark } } }}
+            <SpeedDialAction
+              icon={<AddIcon />}
+              onClick={handleGenerateNext}
+              slotProps={{
+                tooltip: {
+                  title: 'Generate Next',
+                },
+                fab: {
+                  sx: {
+                    bgcolor: COLORS.primary,
+                    '&:hover': {
+                      bgcolor: COLORS.primaryDark,
+                    },
+                  },
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<CalendarTodayIcon />} 
-              tooltipTitle="Generate 5" 
-              onClick={() => handleGenerateMultiple(5)} 
+            <SpeedDialAction
+              icon={<CalendarTodayIcon />}
+              onClick={() => handleGenerateMultiple(5)}
+              slotProps={{
+                tooltip: {
+                  title: 'Generate 5',
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<DownloadIcon />} 
-              tooltipTitle="Export" 
-              onClick={handleExport} 
+            <SpeedDialAction
+              icon={<DownloadIcon />}
+              onClick={handleExport}
+              slotProps={{
+                tooltip: {
+                  title: 'Export',
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<EditIcon />} 
-              tooltipTitle="Edit" 
-              onClick={() => navigate(`/recurring-meetings/${id}/edit`)} 
+            <SpeedDialAction
+              icon={<EditIcon />}
+              onClick={() => navigate(`/recurring-meetings/${id}/edit`)}
+              slotProps={{
+                tooltip: {
+                  title: 'Edit',
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<DeleteIcon />} 
-              tooltipTitle="Delete" 
-              onClick={() => setDeleteDialogOpen(true)} 
-              FabProps={{ sx: { bgcolor: COLORS.danger, '&:hover': { bgcolor: COLORS.dangerDark } } }}
+            <SpeedDialAction
+              icon={<DeleteIcon />}
+              onClick={() => setDeleteDialogOpen(true)}
+              slotProps={{
+                tooltip: {
+                  title: 'Delete',
+                },
+                fab: {
+                  sx: {
+                    bgcolor: COLORS.danger,
+                    '&:hover': {
+                      bgcolor: COLORS.dangerDark,
+                    },
+                  },
+                },
+              }}
             />
           </SpeedDial>
         </Fade>

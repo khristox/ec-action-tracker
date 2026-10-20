@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, date
 from enum import Enum
 from typing import List, Optional, Dict, Any, Callable, TypeVar, Tuple
 from uuid import UUID
+from pydantic import BaseModel
 
 from app.api.v1.endpoints.action_tracker.meetings_access_control import AccessLevel, DepartmentAccessControl, check_meeting_access_or_403
 from app.api.v1.endpoints.action_tracker.utils import build_meeting_response
@@ -37,6 +38,7 @@ from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
 from app.api import deps
 from app.core.config import settings
+from app.core.admin_access import is_admin_user
 from app.models.meetings.action_tracker import (
     Meeting, MeetingAction, MeetingParticipant, MeetingStatusHistory, MeetingMinutes
 )
@@ -518,6 +520,183 @@ class StatsComputer:
 
 # ==================== ENDPOINTS ====================
 
+class AttendanceStatus(str, Enum):
+    pending = "pending"
+    attended = "attended"
+    absent = "absent"
+    absent_with_apology = "absent_with_apology"
+
+
+class MemberIn(BaseModel):
+    user_id: Optional[UUID] = None
+    name: str
+    email: Optional[str] = None
+    telephone: Optional[str] = None
+    title: Optional[str] = None
+    organization: Optional[str] = None
+    is_chairperson: bool = False
+    is_secretary: bool = False
+    attendance_status: AttendanceStatus = AttendanceStatus.pending
+    apology_comment: Optional[str] = None
+
+
+class MemberPatch(BaseModel):
+    attendance_status: Optional[AttendanceStatus] = None
+    apology_comment: Optional[str] = None
+
+
+async def _require_manage(db, meeting_id: UUID, user: User):
+    perm = await PermissionChecker.get_user_permission(
+        db, meeting_id, user.id, is_admin_user(user)
+    )
+    if perm not in (MeetingPermission.OWNER, MeetingPermission.ORGANIZER):
+        raise HTTPException(403, "Only the owner, chairperson or secretary can do this")
+
+
+async def _get_member(db, meeting_id: UUID, member_id: UUID) -> MeetingParticipant:
+    member = (await db.execute(
+        select(MeetingParticipant).where(
+            MeetingParticipant.id == member_id,
+            MeetingParticipant.meeting_id == meeting_id,
+            MeetingParticipant.is_active == True,
+        )
+    )).scalar_one_or_none()
+    if not member:
+        raise HTTPException(404, "Member not found")
+    return member
+
+@router.get("/series/{recurring_meeting_id}/actions")
+async def get_series_actions(
+    recurring_meeting_id: UUID,
+    include_completed: bool = Query(True),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """All actions from every occurrence of a recurring meeting."""
+    access = await build_meeting_access_filter(db, current_user)
+
+    query = (
+        select(MeetingAction)
+        .join(MeetingMinutes, MeetingAction.minute_id == MeetingMinutes.id)
+        .join(Meeting, MeetingMinutes.meeting_id == Meeting.id)
+        .where(
+            Meeting.recurring_meeting_id == recurring_meeting_id,
+            Meeting.is_active == True,
+            MeetingMinutes.is_active == True,
+            MeetingAction.is_active == True,
+            access,
+        )
+        .options(
+            selectinload(MeetingAction.implementers),
+            selectinload(MeetingAction.overall_status),
+            selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+        )
+        .order_by(MeetingAction.due_date.asc().nulls_last(), MeetingAction.created_at.desc())
+    )
+    if not include_completed:
+        query = query.where(MeetingAction.completed_at.is_(None))
+
+    actions = (await db.execute(query)).scalars().all()
+
+    items = []
+    for a in actions:
+        d = a.to_dict(include_relationships=True)
+        m = a.minutes.meeting if a.minutes else None
+        d["meeting_id"] = str(m.id) if m else None
+        d["meeting_title"] = m.title if m else None
+        d["meeting_date"] = m.meeting_date.isoformat() if m and m.meeting_date else None
+        d["occurrence_number"] = m.occurrence_number if m else None
+        items.append(d)
+
+    return {
+        "items": items,
+        "total": len(items),
+        "open": sum(1 for i in items if not i["is_completed"]),
+        "completed": sum(1 for i in items if i["is_completed"]),
+    }
+
+
+@router.post("/{meeting_id}/members", status_code=201)
+async def add_member(meeting_id: UUID, data: MemberIn,
+                     db: AsyncSession = Depends(deps.get_db),
+                     current_user: User = Depends(deps.get_current_user)):
+    await _require_manage(db, meeting_id, current_user)
+
+    email = data.email
+    if data.user_id:
+        email = (await db.execute(
+            select(User.email).where(User.id == data.user_id)
+        )).scalar_one_or_none() or email
+    email = _norm_email(email)
+    if not email:
+        raise HTTPException(400, "An email address is required")
+
+    dup = (await db.execute(
+        select(MeetingParticipant.id).where(
+            MeetingParticipant.meeting_id == meeting_id,
+            func.lower(MeetingParticipant.email) == email,
+            MeetingParticipant.is_active == True,
+        )
+    )).first()
+    if dup:
+        raise HTTPException(409, "This person is already a participant")
+
+    member = MeetingParticipant(
+        id=uuid.uuid4(), meeting_id=meeting_id, name=data.name.strip(), email=email,
+        telephone=data.telephone, title=data.title, organization=data.organization,
+        is_chairperson=data.is_chairperson, is_secretary=data.is_secretary,
+        attendance_status=data.attendance_status.value,
+        apology_comment=data.apology_comment,
+        created_by_id=current_user.id, is_active=True,
+    )
+    db.add(member)
+    await db.commit()
+    await db.refresh(member)
+    return member.to_dict()
+
+
+@router.put("/{meeting_id}/members/{member_id}")
+@router.patch("/{meeting_id}/members/{member_id}")
+async def update_member(meeting_id: UUID, member_id: UUID, data: MemberPatch,
+                        db: AsyncSession = Depends(deps.get_db),
+                        current_user: User = Depends(deps.get_current_user)):
+    await _require_manage(db, meeting_id, current_user)
+    member = await _get_member(db, meeting_id, member_id)
+    changes = data.model_dump(exclude_unset=True)
+    if "attendance_status" in changes and changes["attendance_status"]:
+        member.attendance_status = changes["attendance_status"].value
+    if "apology_comment" in changes:
+        member.apology_comment = changes["apology_comment"]
+    member.updated_by_id = current_user.id
+    await db.commit()
+    await db.refresh(member)
+    return member.to_dict()
+
+@router.get("/{meeting_id}/members")
+async def list_members(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    await _require_manage(db, meeting_id, current_user)   # or a looser check
+    rows = (await db.execute(
+        select(MeetingParticipant).where(
+            MeetingParticipant.meeting_id == meeting_id,
+            MeetingParticipant.is_active == True,
+        ).order_by(MeetingParticipant.name)
+    )).scalars().all()
+    return [m.to_dict() for m in rows]
+
+@router.delete("/{meeting_id}/members/{member_id}", status_code=204)
+async def remove_member(meeting_id: UUID, member_id: UUID,
+                        db: AsyncSession = Depends(deps.get_db),
+                        current_user: User = Depends(deps.get_current_user)):
+    await _require_manage(db, meeting_id, current_user)
+    member = await _get_member(db, meeting_id, member_id)
+    member.is_active = False
+    member.updated_by_id = current_user.id
+    await db.commit()
+
 @router.get("/stats")
 async def get_meeting_stats(
     db: AsyncSession = Depends(deps.get_db),
@@ -588,7 +767,7 @@ async def list_meetings(
     status_id: UUID = Query(None),
     search: str = Query(None),
     is_recurring: bool = Query(None),
-    include_recurring: bool = Query(True),  # Include recurring by default to match dashboard
+    include_recurring: bool = Query(False),  # Include recurring by default to match dashboard
     department_id: Optional[UUID] = Query(None),          # filter by one department
     include_child_departments: bool = Query(True),        # ...and everything below it
     sort_by: str = Query("meeting_date"),
@@ -636,15 +815,14 @@ async def list_meetings(
                 )
             
             # ========== OTHER FILTERS ==========
-            if is_recurring is not None:
-                base_conditions.append(Meeting.is_recurring == is_recurring)
-            elif not include_recurring:
-                base_conditions.append(
-                    or_(
-                        Meeting.is_recurring == False,
-                        Meeting.is_recurring.is_(None)
-                    )
-                )
+            recurring_marker = or_(
+                Meeting.is_recurring == True,
+                Meeting.recurring_meeting_id.is_not(None),
+            )
+            if is_recurring is True:
+                base_conditions.append(recurring_marker)
+            elif is_recurring is False or not include_recurring:
+                base_conditions.append(~recurring_marker)
             
             if date_conditions:
                 base_conditions.append(or_(*date_conditions))
@@ -1086,7 +1264,7 @@ async def get_meeting(
         # ✅ Step 1: Check access
         access_level = await DepartmentAccessControl.get_access_level(
             db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
+            is_admin_user(current_user)
         )
         
         logger.info(f"📊 User {current_user.id} access level: {access_level.value}")
@@ -1168,7 +1346,7 @@ async def update_meeting(
         # Check permission
         permission = await PermissionChecker.get_user_permission(
             db, meeting_id, current_user.id,
-            getattr(current_user, 'is_superuser', False)
+            is_admin_user(current_user)
         )
         
         if permission != MeetingPermission.OWNER:
@@ -1454,7 +1632,7 @@ async def delete_meeting(
         # Check permission
         permission = await PermissionChecker.get_user_permission(
             db, meeting_id, current_user.id,
-            getattr(current_user, 'is_superuser', False)
+            is_admin_user(current_user)
         )
         
         if permission != MeetingPermission.OWNER:
@@ -1572,7 +1750,7 @@ async def patch_meeting(
         # Check permission
         permission = await PermissionChecker.get_user_permission(
             db, meeting_id, current_user.id,
-            getattr(current_user, 'is_superuser', False)
+            is_admin_user(current_user)
         )
         
         if permission != MeetingPermission.OWNER:
@@ -1584,6 +1762,27 @@ async def patch_meeting(
         # Fetch meeting
         result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
         meeting = result.scalar_one_or_none()
+
+        # Chairperson / secretary assignment
+        _provided = meeting_update.model_dump(exclude_unset=True)
+        for role, flag in (("chairperson_id", "is_chairperson"), ("secretary_id", "is_secretary")):
+            if role in _provided:
+                raw = _provided[role]
+                target_id = UUID(str(raw)) if raw else None
+                target = next(
+                    (p for p in meeting.participants if p.id == target_id and p.is_active),
+                    None,
+                )
+                if target_id and not target:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"{role} is not an active participant of this meeting",
+                    )
+                setattr(meeting, role, target_id)
+                for p in meeting.participants:
+                    setattr(p, flag, p.id == target_id)
+                if role == "chairperson_id":
+                    meeting.chairperson_name = target.name if target else None
         
         if not meeting:
             raise HTTPException(
@@ -1610,7 +1809,7 @@ async def patch_meeting(
             "platform": meeting.platform,
             "meeting_link": meeting.meeting_link
         }
-        
+                        
         # Get update data
         update_data = meeting_update.model_dump(exclude_unset=True)
         logger.info(f"📝 PATCH update data for meeting {meeting_id}: {update_data}")
@@ -1776,7 +1975,7 @@ async def get_meeting_minutes(
     try:
         access_level = await check_meeting_access_or_403(
             db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False),
+            is_admin_user(current_user),
             required_level=AccessLevel.FULL
         )
         
@@ -1819,7 +2018,7 @@ async def create_meeting_minutes(
         # Check access
         can_access = await AccessControl.can_access_meeting(
             db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
+            is_admin_user(current_user)
         )
         
         if not can_access:
@@ -1982,7 +2181,7 @@ async def delete_meeting_minutes(
         # Check access
         can_access = await AccessControl.can_access_meeting(
             db, meeting_id, current_user.id, current_user.email,
-            getattr(current_user, 'is_superuser', False)
+            is_admin_user(current_user)
         )
         
         if not can_access:

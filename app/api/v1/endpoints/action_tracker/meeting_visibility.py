@@ -24,7 +24,7 @@ from typing import Iterable, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, false, func, or_, select
+from sqlalchemy import and_, false, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -35,6 +35,7 @@ from app.api.v1.endpoints.action_tracker.department_hierarchy import (
 from app.models.meetings.action_tracker import Meeting, MeetingParticipant
 from app.models.meetings.user_department import UserDepartment, UserDepartmentStatus
 from app.models.user import User
+from app.core.admin_access import is_admin_user
 
 
 def participant_clause(user):
@@ -71,8 +72,22 @@ def department_scope_clause(dept_ids: Iterable[UUID]):
     )
 
 
+async def user_is_admin(db: AsyncSession, user) -> bool:
+    """Admin by flag/role on the user object, or by roles loaded from the database."""
+    if is_admin_user(user):          # shared sync check (flags, already-loaded roles)
+        return True
+    result = await db.execute(
+        select(User).where(User.id == user.id).options(selectinload(User.roles))
+    )
+    loaded = result.scalar_one_or_none()
+    return bool(loaded) and any(r.code in ("admin", "super_admin") for r in loaded.roles)
+
+
 async def build_meeting_access_filter(db: AsyncSession, user):
     """SQLAlchemy condition for 'meetings this user is allowed to see'."""
+    if await user_is_admin(db, user):
+        return true()                # admins see every meeting
+
     accessible = await get_accessible_department_ids(db, user.id)
 
     clauses = [
@@ -83,16 +98,6 @@ async def build_meeting_access_filter(db: AsyncSession, user):
     if accessible:
         clauses.append(department_scope_clause(accessible))
     return or_(*clauses)
-
-
-async def is_admin_user(db: AsyncSession, user) -> bool:
-    if getattr(user, "is_superuser", False):
-        return True
-    result = await db.execute(
-        select(User).where(User.id == user.id).options(selectinload(User.roles))
-    )
-    loaded = result.scalar_one_or_none()
-    return bool(loaded) and any(r.code in ("admin", "super_admin") for r in loaded.roles)
 
 
 async def build_department_filter(
@@ -106,7 +111,7 @@ async def build_department_filter(
     Raises 403 if the user is not allowed to look at that department.
     Combine it with build_meeting_access_filter so users never see more than they may.
     """
-    if not await is_admin_user(db, user):
+    if not await user_is_admin(db, user):
         accessible = await get_accessible_department_ids(db, user.id)
         if department_id not in accessible:
             raise HTTPException(

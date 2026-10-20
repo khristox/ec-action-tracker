@@ -24,7 +24,7 @@ from app.core.minio_client import minio_service
 from app.models.meetings.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
     Participant, ParticipantList, ActionStatusHistory, ActionComment, 
-    MeetingDocument, MeetingStatusHistory, ActionImplementer
+    MeetingDocument, MeetingStatusHistory, ActionImplementer, ActionStatus
 )
 from app.schemas.action_tracker_participants import (
     ParticipantCreate, ParticipantListCreate, ParticipantListUpdate, ParticipantUpdate
@@ -40,7 +40,7 @@ from app.schemas.action_tracker import ActionCommentCreate, ActionCommentUpdate,
 from app.schemas.action_tracker import MeetingCreate, MeetingUpdate
 
 from app.models.meetings.action_tracker import participant_list_members
-
+from app.models.general.dynamic_attribute import Attribute 
 from app.services.implementer_linking import (
     normalize_email,
     normalize_phone,
@@ -1203,6 +1203,64 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             email=self._get_person_email(person_dict),
         )
     
+    async def _resolve_status(self, db: AsyncSession, status_id: Optional[UUID]) -> Optional[ActionStatus]:
+        """Return the ActionStatus row for an id.
+
+        Accepts an action_statuses id directly. If the id belongs to an
+        ACTION_STATUS_* attribute, map it to the action status with the same code.
+        """
+        if not status_id:
+            return None
+
+        row = (await db.execute(
+            select(ActionStatus).where(ActionStatus.id == status_id, ActionStatus.is_active == True)
+        )).scalar_one_or_none()
+        if row:
+            return row
+
+        attr_code = (await db.execute(
+            select(Attribute.code).where(Attribute.id == status_id)
+        )).scalar_one_or_none()
+        if attr_code and attr_code.startswith("ACTION_STATUS_"):
+            row = (await db.execute(
+                select(ActionStatus).where(
+                    ActionStatus.code == attr_code[len("ACTION_STATUS_"):],
+                    ActionStatus.is_active == True,
+                )
+            )).scalar_one_or_none()
+            if row:
+                return row
+
+        raise ValueError("Unknown action status. Reload the page and pick a status again.")
+
+    async def can_update_progress(self, db: AsyncSession, action: MeetingAction, user: User) -> bool:
+        """Superuser, the meeting's creator, or someone implementing this action."""
+        if getattr(user, "is_superuser", False):
+            return True
+
+        meeting = action.minutes.meeting if action.minutes else None
+        if meeting and meeting.created_by_id == user.id:
+            return True
+
+        if action.assigned_to_id == user.id:
+            return True
+
+        email = normalize_email(user.email) if user.email else None
+        raw_phone = getattr(user, "phone", None) or getattr(user, "telephone", None)
+        phone = normalize_phone(raw_phone) if raw_phone else None
+
+        for imp in action.implementers or []:
+            if imp.user_id:
+                if imp.user_id == user.id:
+                    return True
+            else:
+                if email and imp.email and normalize_email(imp.email) == email:
+                    return True
+                if phone and imp.phone and normalize_phone(imp.phone) == phone:
+                    return True
+        return False
+
+    
     # ==================== CREATE ====================
     
     async def create_action(
@@ -1292,7 +1350,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                         email=email,
                         phone=phone,
                         sort_order=idx,
-                        linked_at=datetime.now(timezone.utc) if user_id else None,
+                        #linked_at=datetime.now(timezone.utc) if user_id else None,
                     )
                     db.add(implementer)
                     logger.info(f"Added implementer: {implementer.name} (sort_order: {idx})")
@@ -1636,6 +1694,13 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             action = await self.get(db, action_id)
             if not action:
                 return None
+
+            user = await db.get(User, user_id)
+            if not user or not await self.can_update_progress(db, action, user):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the meeting creator or a person implementing this action can update its progress",
+                )                
             
             update_data = action_in.model_dump(exclude_unset=True)
             
@@ -1667,7 +1732,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                         email=email,
                         phone=phone,
                         sort_order=idx,
-                        linked_at=datetime.now(timezone.utc) if user_id else None,
+                        #linked_at=datetime.now(timezone.utc) if user_id else None,
                     )
                     
                     db.add(implementer)
@@ -1707,8 +1772,14 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 'description', 'due_date', 'priority', 'remarks',
                 'title', 'issue_challenge', 'type_of_action',
                 'is_key_action', 'tags', 'assign_to_meeting_id',
-                'overall_status_id', 'overall_progress_percentage'
+                'overall_status_id', 'overall_status_name', 'overall_progress_percentage'
             ]
+            
+            if update_data.get('overall_status_id') is not None:
+                status_row = await self._resolve_status(db, update_data['overall_status_id'])
+                update_data['overall_status_id'] = status_row.id      # save the real action_statuses id
+                update_data['overall_status_name'] = status_row.name            
+
             for field in fields_to_update:
                 if field in update_data and update_data[field] is not None:
                     setattr(action, field, update_data[field])
@@ -1730,7 +1801,10 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             logger.info(f"Action {action_id} updated with {len(action.implementers)} implementers")
             return action
-            
+
+        except HTTPException:
+            raise
+        
         except Exception as e:
             await db.rollback()
             logger.error(f"Failed to update action: {str(e)}", exc_info=True)
@@ -1748,41 +1822,53 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             action = await self.get(db, action_id)
             if not action:
                 return None
-            
+
             old_progress = action.overall_progress_percentage
-            old_status_id = action.overall_status_id
-            
+
+            # Resolve incoming id (attribute id OR action_statuses id) to a real
+            # action_statuses row. Raises ValueError if unknown.
+            status_row = await self._resolve_status(
+                db, progress_update.individual_status_id
+            )
+
             action.overall_progress_percentage = progress_update.progress_percentage
-            
-            if progress_update.individual_status_id:
-                action.overall_status_id = progress_update.individual_status_id
-            
+
+            if status_row:
+                action.overall_status_id = status_row.id
+                action.overall_status_name = status_row.name
+
             if progress_update.progress_percentage >= 100:
                 if not action.completed_at:
                     action.completed_at = datetime.now(timezone.utc)
             elif action.completed_at:
                 action.completed_at = None
-            
+
             action.updated_at = datetime.now(timezone.utc)
             action.updated_by_id = user_id
-            
+
             status_history = ActionStatusHistory(
                 action_id=action_id,
-                individual_status_id=progress_update.individual_status_id,
+                individual_status_id=status_row.id if status_row else None,
                 progress_percentage=progress_update.progress_percentage,
-                remarks=progress_update.remarks or f"Progress updated from {old_progress}% to {progress_update.progress_percentage}%",
+                remarks=progress_update.remarks or (
+                    f"Progress updated from {old_progress}% to "
+                    f"{progress_update.progress_percentage}%"
+                ),
                 created_by_id=user_id,
                 created_at=datetime.now(timezone.utc),
-                is_active=True
+                is_active=True,
             )
-            
+
             db.add(status_history)
             await db.commit()
             await db.refresh(action)
-            
-            logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}%")
+
+            logger.info(
+                f"Action {action_id} progress updated to "
+                f"{progress_update.progress_percentage}%"
+            )
             return action
-            
+
         except Exception as e:
             await db.rollback()
             logger.error(f"Failed to update progress: {str(e)}", exc_info=True)

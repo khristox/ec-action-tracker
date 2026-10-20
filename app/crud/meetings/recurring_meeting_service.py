@@ -353,6 +353,9 @@ class RecurringMeetingService:
                 chairperson_id=recurring.chairperson_id,
                 secretary_id=recurring.secretary_id,
                 facilitator=recurring.facilitator,
+                visibility=getattr(recurring, "visibility", "open"),
+                restricted_department_id=getattr(recurring, "restricted_department_id", None),
+                department_id=getattr(recurring, "department_id", None),
                 agenda=recurring.agenda,
                 status_id=status_id,
                 is_recurring=True,
@@ -827,7 +830,7 @@ class RecurringMeetingService:
                 id=uuid.uuid4(),
                 title=recurring.title,
                 description=recurring.description,
-                department_id=recurring.department_id,
+                department_id=getattr(recurring, "department_id", None),
                 meeting_date=meeting_date,
                 start_time=start_time,
                 end_time=end_time,
@@ -840,6 +843,8 @@ class RecurringMeetingService:
                 secretary_id=recurring.secretary_id,
                 facilitator=recurring.facilitator,
                 agenda=recurring.agenda,
+                visibility=getattr(recurring, "visibility", "open"),
+                restricted_department_id=getattr(recurring, "restricted_department_id", None),
                 status_id=status_id,
                 is_recurring=True,
                 recurring_meeting_id=recurring.id,
@@ -853,6 +858,16 @@ class RecurringMeetingService:
             
             self.db.add(meeting)
             await self.db.flush()
+            self.db.add(RecurringMeetingOccurrence(
+                id=uuid.uuid4(),
+                recurring_meeting_id=recurring.id,
+                meeting_id=meeting.id,
+                occurrence_number=meeting.occurrence_number,
+                scheduled_date=start_time,
+                status="scheduled",
+                created_at=now,
+                updated_at=now,
+            ))
             
             # Update recurring meeting counts with naive datetimes
             recurring.total_occurrences_generated = (recurring.total_occurrences_generated or 0) + 1

@@ -19,7 +19,6 @@ import { checkAuth, selectAuth } from './store/slices/authSlice';
 import { ThemeContextProvider } from './context/ThemeProvider';
 // Components
 import Layout from './components/common/Layout';
-import { MeetingRecorderProvider } from './context/MeetingRecorderContext';
 import EditRecurringMeeting from './components/actiontracker/meetings/EditRecurringMeeting';
 import { AdminStructures } from './components/admin/adminStructures';
 import { selectAllowedMenuCodes, selectMenuLoading } from './store/slices/menuSlice';
@@ -72,7 +71,6 @@ const COMPONENT_IMPORTS = {
   'MeetingDetail':          () => import('./components/actiontracker/meetings/MeetingDetail'),
   'EditMeeting':            () => import('./components/actiontracker/meetings/EditMeeting'),
   'MeetingForm':            () => import('./components/actiontracker/meetings/MeetingForm/MeetingForm'),
-  'MeetingRecorder':        () => import('./components/actiontracker/meetings/MeetingRecorder'),
   'MeetingEmailNotifications': () => import('./components/actiontracker/meetings/components/meetings/MeetingEmailNotifications'),
   'RecurringMeetingDetail': () => import('./components/actiontracker/meetings/RecurringMeetingDetail'),
   'ActionsList':            () => import('./components/actiontracker/actions/ActionsList'),
@@ -197,7 +195,6 @@ const MeetingForm      = createLazyComponent('MeetingForm');
 const CreateMeeting    = createLazyComponent('CreateMeeting');
 const MeetingDetail    = createLazyComponent('MeetingDetail');
 const EditMeeting      = createLazyComponent('EditMeeting');
-const MeetingRecorder  = createLazyComponent('MeetingRecorder');
 const MeetingEmailNotifications = createLazyComponent('MeetingEmailNotifications');
 const ActionsList      = createLazyComponent('ActionsList');
 const MyTasks          = createLazyComponent('MyTasks');
@@ -271,11 +268,6 @@ const LoadingScreen = ({ message = 'Initializing System...', fullScreen = true, 
   </Fade>
 );
 
-const RecordingRouteWrapper = ({ children }) => (
-  <MeetingRecorderProvider>
-    {children}
-  </MeetingRecorderProvider>
-);
 
 // ==================== Route Guards ====================
 const ProtectedRoute = ({ children, requiredRoles = [], requiredPermissions = [], requireSuperuser = false }) => {
@@ -348,10 +340,7 @@ const routeConfig = {
     { path: '/403',        element: <Forbidden /> },
     { path: '/forbidden',  element: <Forbidden /> },
     { path: '/404',        element: <NotFound /> },
-  ],
-  recordingRoutes: [
-    { path: 'meetings/:id/record', element: <MeetingRecorder /> },
-  ],
+  ],  
   regularMeetingRoutes: [
     { path: 'meetings',                   element: <Meetings /> },
     { path: 'meetings/create',            element: <MeetingForm /> },
@@ -598,17 +587,7 @@ const AppContent = () => {
             {routeConfig.recurringMeetingRoutes.map(({ path, element }) => (
               <Route key={path} path={path} element={<Lazy message="Loading recurring meeting page...">{element}</Lazy>} />
             ))}
-            {routeConfig.recordingRoutes.map(({ path, element }) => (
-              <Route
-                key={path}
-                path={path}
-                element={
-                  <RecordingRouteWrapper>
-                    <Lazy message="Loading recorder...">{element}</Lazy>
-                  </RecordingRouteWrapper>
-                }
-              />
-            ))}
+            
             {routeConfig.protectedRoutes.map(({ path, element, menuCode, roles, superuserOnly }) => {
               const gated = (
                 <MenuProtectedRoute menuCode={menuCode}>

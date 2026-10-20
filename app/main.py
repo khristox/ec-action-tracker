@@ -24,6 +24,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from app.services.action_due_reminders import action_due_reminder_scheduler
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -42,6 +43,7 @@ from app.core.redis_client import init_redis, close_redis, get_redis
 from app.core.limiter import limiter
 from app.core.minio_client import minio_service
 from app.services.reminder_scheduler import reminder_scheduler
+from app.services.meeting_status_scheduler import meeting_status_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -247,40 +249,78 @@ async def lifespan(app: FastAPI):
     minio_service.ensure_bucket()
     logger.info("✅ MinIO bucket ensured")
 
-    # ==================== START REMINDER SCHEDULER ====================
-    # Create a background task for the reminder scheduler
-    # This will run in the background and send action reminders 3x daily
-    scheduler_task = asyncio.create_task(reminder_scheduler.start())
-    logger.info("✅ Meeting reminder scheduler started in background")
+    
+    # ==================== START BACKGROUND SCHEDULERS ====================
 
-    # Store the task so we can cancel it on shutdown
+    # Reminder scheduler: sends action reminders.
+    scheduler_task = asyncio.create_task(
+        reminder_scheduler.start()
+    )
     app.state.scheduler_task = scheduler_task
+    logger.info("Reminder scheduler started in background")
 
-    yield  # ← Application runs here
+    # Meeting status scheduler: automatically sets STARTED and ENDED.
+    from app.services.meeting_status_scheduler import (
+        meeting_status_scheduler,
+    )
 
-    # ==================== SHUTDOWN CLEANUP ====================
-    logger.info("🛑 Shutting down Action Tracker...")
+    meeting_status_task = asyncio.create_task(
+        meeting_status_scheduler()
+    )
+    app.state.meeting_status_task = meeting_status_task
+    logger.info("Meeting status scheduler started in background")
 
-    # Stop the reminder scheduler gracefully
-    if hasattr(app.state, 'scheduler_task'):
-        app.state.scheduler_task.cancel()
-        try:
-            await app.state.scheduler_task
-        except asyncio.CancelledError:
-            # Expected when cancelling the task
-            pass
-        logger.info("✅ Reminder scheduler stopped")
+    app.state.action_reminder_task = asyncio.create_task(action_due_reminder_scheduler.start())
+    logger.info("✅ Action due-date reminder scheduler started in background")
 
-    # Close Redis connection
-    await close_redis()
-    logger.info("✅ Redis connection closed")
 
-    # Close database connections
-    if async_engine:
-        await async_engine.dispose()
-        logger.info("✅ Database connections closed")
+    
+        # ==================== APPLICATION RUNNING ====================
 
-    logger.info("🛑 Action Tracker shutdown complete")
+    try:
+        # Keep the application running until FastAPI initiates shutdown.
+        yield
+
+    finally:
+        # ==================== SHUTDOWN CLEANUP ====================
+
+        logger.info("Shutting down Action Tracker...")
+
+        for task_name in ("scheduler_task", "meeting_status_task"):
+            task = getattr(app.state, task_name, None)
+
+            if task is not None and not task.done():
+                task.cancel()
+
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception(
+                        "Error while stopping background task: %s",
+                        task_name,
+                    )
+
+                logger.info("Background task stopped: %s", task_name)
+
+        
+            if hasattr(app.state, "action_reminder_task"):
+                app.state.action_reminder_task.cancel()
+                try:
+                    await app.state.action_reminder_task
+                except asyncio.CancelledError:
+                    pass
+        # Close Redis connection
+        await close_redis()
+        logger.info("✅ Redis connection closed")
+
+        # Close database connections
+        if async_engine:
+            await async_engine.dispose()
+            logger.info("✅ Database connections closed")
+
+        logger.info("🛑 Action Tracker shutdown complete")
 
 
 # ==================== CREATE FASTAPI APPLICATION ====================

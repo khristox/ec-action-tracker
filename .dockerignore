@@ -12,9 +12,7 @@ yarn-error.log
 # DATABASE & MIGRATIONS
 # ============================================
 # Exclude alembic source files but keep the versions directory if needed
-alembic/
-!alembic/versions/
-!alembic.ini
+
 *.sqlite
 *.db
 *.sqlite3
@@ -56,10 +54,10 @@ docker-compose*
 # ============================================
 # PYTHON CACHE
 # ============================================
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
 .Python
 *.so
 *.dylib

@@ -61,7 +61,7 @@ import {
   selectActionStatusOptions,
   selectActionTrackerLoading,
   selectActionTrackerError,
-  selectCurrentMeeting, // ADD THIS
+  selectCurrentMeeting,
 } from '../../../store/slices/actionTracker/meetingSlice';
 import api from '../../../services/api';
 
@@ -135,7 +135,6 @@ const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
   const isOverdue = action.due_date && new Date(action.due_date) < new Date() && !action.completed_at;
   const isCompleted = action.completed_at || action.overall_progress_percentage >= 100;
 
-  // If completed, show completed status
   if (isCompleted) {
     return (
       <Chip
@@ -147,13 +146,11 @@ const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
     );
   }
 
-  // Find the status from options
   const status = statusOptions.find(s => s.id === action.overall_status_id);
-  
+
   let statusLabel = status?.label || status?.name?.replace('Action Status - ', '') || 'Pending';
   let statusColor = status?.color || '#F59E0B';
-  
-  // If overdue, show overdue status (even if status says something else)
+
   if (isOverdue) {
     return (
       <Stack direction="row" spacing={0.5} alignItems="center">
@@ -161,22 +158,21 @@ const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
           size="small"
           label="Overdue"
           icon={<WarningIcon sx={{ fontSize: 14 }} />}
-          sx={{ 
-            height: 20, 
-            fontSize: '0.6rem', 
+          sx={{
+            height: 20,
+            fontSize: '0.6rem',
             fontWeight: 700,
             bgcolor: alpha('#EF4444', 0.15),
             color: '#EF4444',
             '& .MuiChip-icon': { color: '#EF4444', fontSize: 14 }
           }}
         />
-        {/* Show original status as secondary chip */}
         <Chip
           size="small"
           label={statusLabel}
-          sx={{ 
-            height: 18, 
-            fontSize: '0.5rem', 
+          sx={{
+            height: 18,
+            fontSize: '0.5rem',
             fontWeight: 500,
             bgcolor: alpha(statusColor, 0.1),
             color: statusColor,
@@ -188,14 +184,13 @@ const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
     );
   }
 
-  // Regular status (not overdue, not completed)
   return (
     <Chip
       size="small"
       label={statusLabel}
-      sx={{ 
-        height: 20, 
-        fontSize: '0.6rem', 
+      sx={{
+        height: 20,
+        fontSize: '0.6rem',
         fontWeight: 600,
         bgcolor: alpha(statusColor, 0.12),
         color: statusColor,
@@ -208,7 +203,7 @@ const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
 const MinimalProgress = ({ percentage }) => {
   const clamped = Math.min(Math.max(percentage || 0, 0), 100);
   const isComplete = clamped >= 100;
-  
+
   return (
     <Tooltip title={`${clamped}% complete`} placement="top">
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 60 }}>
@@ -245,7 +240,7 @@ const MinimalProgress = ({ percentage }) => {
 
 // ==================== MAIN COMPONENT ====================
 
-const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
+const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRefresh }) => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const theme = useTheme();
@@ -256,14 +251,16 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const minutesList = useSelector(selectMeetingMinutes);
   const statusOptions = useSelector(selectActionStatusOptions);
   const statusOptionsError = useSelector(selectActionTrackerError);
-  const currentMeeting = useSelector(selectCurrentMeeting); // ADD THIS
-  
+  const currentMeeting = useSelector(selectCurrentMeeting);
+
   const { updatingProgress } = useSelector((state) => state.actions || {});
 
   // ==================== ACCESS LEVEL CHECK ====================
   const accessLevel = currentMeeting?.access_level || 'none';
   const isFullAccess = accessLevel === 'full';
   const isLimitedAccess = accessLevel === 'limited';
+
+  const isSeries = Boolean(recurringMeetingId);
 
   // ==================== REFS ====================
   const isMountedRef = useRef(true);
@@ -286,9 +283,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const progressFormRef = useRef(null);
 
+  
+
   // ==================== COMPUTED VALUES ====================
   const canEdit = useMemo(() => canEditActions(meetingStatus), [meetingStatus]);
-  const hasNoMinutes = minutesList.length === 0 && !loading;
+  const hasNoMinutes = (isSeries ? actions.length === 0 : minutesList.length === 0) && !loading;
   const statusMessage = useMemo(() => getStatusMessage(meetingStatus), [meetingStatus]);
 
   const tagSuggestions = useMemo(() => {
@@ -301,6 +300,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     return Array.from(set).sort();
   }, [actions]);
 
+  
   // ==================== HELPER FUNCTIONS ====================
 
   function getStatusMessage(status) {
@@ -391,23 +391,40 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== API CALLS ====================
 
+ 
+
+  const fetchSeriesActions = useCallback(async () => {
+    if (!recurringMeetingId || !isMountedRef.current) return;
+    try {
+      const res = await api.get(`/action-tracker/meetings/series/${recurringMeetingId}/actions`);
+      if (!isMountedRef.current) return;
+      const items = res.data?.items || [];
+      previousMinutesStringRef.current = JSON.stringify(items);
+      setActions(items);
+      setError(null);
+    } catch (err) {
+      console.error('Error loading series actions:', err);
+      if (isMountedRef.current) setError(extractErrorMessage(err));
+    }
+  }, [recurringMeetingId]);
+  
   const fetchMinutes = useCallback(() => {
-    // ✅ CHECK ACCESS LEVEL BEFORE MAKING API CALL
     if (!isFullAccess) {
-      console.log('⛔ Limited access user - skipping minutes fetch');
+      // console.log('⛔ Limited access user - skipping minutes fetch');
       return Promise.resolve();
     }
-    
+
     if (!meetingId || !isMountedRef.current || isFetchingRef.current) {
       return Promise.resolve();
     }
 
     isFetchingRef.current = true;
     return dispatch(fetchMeetingMinutes(meetingId))
+      .then(() => (recurringMeetingId ? fetchSeriesActions() : undefined))
       .finally(() => {
         isFetchingRef.current = false;
       });
-  }, [dispatch, meetingId, isFullAccess]);
+  }, [dispatch, meetingId, isFullAccess, recurringMeetingId, fetchSeriesActions]);
 
   const fetchAttributes = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -460,14 +477,11 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
       if (!isActive) return;
       setLoading(true);
       try {
-        // ✅ Only fetch minutes if user has full access
         if (isFullAccess) {
           await fetchMinutes();
         } else {
-          console.log('⛔ Limited access - skipping minutes fetch in useEffect');
-          // Still fetch attributes (they're usually public)
+          // console.log('⛔ Limited access - skipping minutes fetch in useEffect');
           await fetchAttributes();
-          // Set loading to false since we're not fetching minutes
           if (isActive && isMountedRef.current) {
             setLoading(false);
           }
@@ -507,10 +521,10 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   }, [meetingId, fetchMinutes, fetchAttributes, isFullAccess]);
 
   useEffect(() => {
-    if (minutesList && isMountedRef.current) {
+    if (minutesList && isMountedRef.current && !recurringMeetingId) {
       extractActionsFromMinutes();
     }
-  }, [minutesList, extractActionsFromMinutes]);
+  }, [minutesList, extractActionsFromMinutes, recurringMeetingId]);
 
   useEffect(() => {
     if (successMessage) {
@@ -528,9 +542,8 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const handleRefresh = useCallback(() => {
     if (!isMountedRef.current || isFetchingRef.current) return;
 
-    // ✅ Only refresh if user has full access
     if (!isFullAccess) {
-      console.log('⛔ Limited access user - skipping refresh');
+      // console.log('⛔ Limited access user - skipping refresh');
       setError('You do not have permission to view actions');
       return;
     }
@@ -550,10 +563,18 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
     navigate(`/actions/${actionId}`);
   }, [navigate]);
 
+    // Row click — mirrors the View Details button exactly.
+  const handleRowClick = useCallback((e, actionId) => {
+    if (e.target.closest('button, a, input, select, textarea')) {
+      return;
+    }
+
+    handleViewAction(actionId);
+  }, [handleViewAction]);
+
   const handleEditAction = useCallback(async (action) => {
     if (!isMountedRef.current) return;
 
-    // ✅ Check if user can edit
     if (!isFullAccess) {
       setError('You do not have permission to edit actions');
       return;
@@ -580,13 +601,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleAssignAction = useCallback((action) => {
     if (!isMountedRef.current) return;
-    
-    // ✅ Check if user can assign
+
     if (!isFullAccess) {
       setError('You do not have permission to assign actions');
       return;
     }
-    
+
     const meetingIdFromAction = action.minutes?.meeting_id || action.meeting_id;
     setSelectedAction({
       ...action,
@@ -597,7 +617,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleRefreshAfterAction = useCallback(() => {
     if (!isMountedRef.current) return;
-    // ✅ Only refresh if user has full access
     if (!isFullAccess) return;
     previousMinutesStringRef.current = '';
     fetchMinutes();
@@ -621,13 +640,12 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   const handleOpenProgressDialog = useCallback((action) => {
     if (!isMountedRef.current) return;
-    
-    // ✅ Check if user can update progress
+
     if (!isFullAccess) {
       setError('You do not have permission to update progress');
       return;
     }
-    
+
     setSelectedAction(action);
     setShowProgressDialog(true);
   }, [isFullAccess]);
@@ -643,7 +661,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const handleActionCreate = useCallback(async (payload) => {
     if (!isMountedRef.current || !meetingId) return;
 
-    // ✅ Check if user can create actions
     if (!isFullAccess) {
       setError('You do not have permission to create actions');
       throw new Error('Permission denied');
@@ -706,7 +723,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
   const handleActionUpdate = useCallback(async (payload) => {
     if (!isMountedRef.current || !editingAction?.id) return;
 
-    // ✅ Check if user can update actions
     if (!isFullAccess) {
       setError('You do not have permission to update actions');
       throw new Error('Permission denied');
@@ -748,7 +764,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
 
   // ==================== RENDER ====================
 
-  // Show access denied message for limited access users
   if (isLimitedAccess) {
     return (
       <Box sx={{ textAlign: 'center', py: 6 }}>
@@ -786,6 +801,9 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
         >
           <Typography variant="h6" fontWeight={700} sx={{ color: isDarkMode ? '#FFFFFF' : 'inherit' }}>
             Action Items ({actions.length})
+            {isSeries && (
+              <Chip size="small" label="All occurrences" sx={{ ml: 1, height: 20, fontSize: '0.65rem' }} />
+            )}
           </Typography>
           <Stack direction="row" spacing={1}>
             <Tooltip title="Add new action item">
@@ -901,11 +919,30 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                 <Card
                   key={action.id}
                   variant="outlined"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => handleRowClick(e, action.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleViewAction(action.id);
+                    }
+                  }}
                   sx={{
                     borderRadius: 2,
+                    cursor: 'pointer',
+                    transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
                     bgcolor: isDarkMode ? '#1F2937' : 'background.paper',
                     borderColor: isDarkMode ? '#374151' : '#E5E7EB',
                     boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.05)',
+                    '&:hover': {
+                      boxShadow: isDarkMode ? '0 4px 14px rgba(0,0,0,0.45)' : '0 4px 12px rgba(0,0,0,0.08)',
+                      borderColor: isDarkMode ? '#4B5563' : '#D1D5DB',
+                    },
+                    '&:focus-visible': {
+                      outline: (theme) => `2px solid ${theme.palette.primary.main}`,
+                      outlineOffset: 2,
+                    },
                   }}
                 >
                   <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
@@ -919,10 +956,10 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                       <Typography variant="caption" fontWeight={600} sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary' }}>
                         #{index + 1} • {action.meeting_title || action.minutes?.meeting?.title || 'Meeting Committee'}
                       </Typography>
-                      <ActionStatusChip 
-                        action={action} 
-                        statusOptions={statusOptions} 
-                        isDarkMode={isDarkMode} 
+                      <ActionStatusChip
+                        action={action}
+                        statusOptions={statusOptions}
+                        isDarkMode={isDarkMode}
                       />
                     </Stack>
 
@@ -971,7 +1008,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         </Typography>
                       </Box>
 
-                      {/* Person(s) Implementing with Badge for count > 1 — spans full width */}
                       <Box sx={{ gridColumn: '1 / -1', mt: 0.5 }}>
                         <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
                           Person(s) field
@@ -1017,7 +1053,6 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         </Box>
                       )}
 
-                      {/* ✅ PROGRESS - Added for mobile view */}
                       <Box sx={{ gridColumn: '1 / -1', mt: 0.5 }}>
                         <Typography variant="caption" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', display: 'block' }}>
                           Progress
@@ -1053,13 +1088,13 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         )}
                       </Stack>
 
-                      {/* Action Tool Buttons */}
+                      {/* Action Tool Buttons — each stops propagation */}
                       <Stack direction="row" spacing={0.5}>
                         <Tooltip title="Update Progress">
                           <span>
                             <IconButton
                               size="small"
-                              onClick={() => handleOpenProgressDialog(action)}
+                              onClick={(e) => { e.stopPropagation(); handleOpenProgressDialog(action); }}
                               disabled={!isFullAccess}
                               sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main' }}
                             >
@@ -1071,7 +1106,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           <span>
                             <IconButton
                               size="small"
-                              onClick={() => handleEditAction(action)}
+                              onClick={(e) => { e.stopPropagation(); handleEditAction(action); }}
                               disabled={loadingActionId === action.id || !isFullAccess}
                               sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main' }}
                             >
@@ -1083,7 +1118,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           <span>
                             <IconButton
                               size="small"
-                              onClick={() => handleAssignAction(action)}
+                              onClick={(e) => { e.stopPropagation(); handleAssignAction(action); }}
                               disabled={!isFullAccess}
                               sx={{ color: isDarkMode ? '#34D399' : 'success.main' }}
                             >
@@ -1094,7 +1129,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         <Tooltip title="View Details">
                           <IconButton
                             size="small"
-                            onClick={() => handleViewAction(action.id)}
+                            onClick={(e) => { e.stopPropagation(); handleViewAction(action.id); }}
                             sx={{ color: isDarkMode ? '#9CA3AF' : 'default' }}
                           >
                             <VisibilityIcon sx={{ fontSize: 18 }} />
@@ -1148,9 +1183,23 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                     <TableRow
                       key={action.id}
                       hover
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => handleRowClick(e, action.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleViewAction(action.id);
+                        }
+                      }}
                       sx={{
+                        cursor: 'pointer',
                         '&:hover': {
                           bgcolor: isDarkMode ? '#FFFFFF0D' : '#00000005'
+                        },
+                        '&:focus-visible': {
+                          outline: (theme) => `2px solid ${theme.palette.primary.main}`,
+                          outlineOffset: -2,
                         },
                       }}
                     >
@@ -1169,12 +1218,16 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                         <Typography variant="body2" fontWeight={500} sx={{ fontSize: '0.75rem', color: isDarkMode ? '#FFFFFF' : 'text.primary' }}>
                           {action.description}
                         </Typography>
+                        {isSeries && action.meeting_id && String(action.meeting_id) !== String(meetingId) && (
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.25, fontSize: '0.65rem', color: 'text.secondary' }}>
+                            Raised at meeting of {formatDate(action.meeting_date)}{action.occurrence_number ? ` · #${action.occurrence_number}` : ''}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary', fontSize: '0.75rem' }}>
                         {formatDate(action.due_date)}
                       </TableCell>
 
-                      {/* Person(s) Implementing with Circular Badge for > 1 */}
                       <TableCell>
                         <Stack direction="row" alignItems="center" spacing={1}>
                           <Badge
@@ -1221,8 +1274,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                       <TableCell sx={{ color: isDarkMode ? '#D1D5DB' : 'text.primary', fontSize: '0.75rem' }}>
                         {formatDate(action.updated_at || action.created_at)}
                       </TableCell>
-                      
-                      {/* Priority */}
+
                       <TableCell align="center">
                         {priorityConfig.stars > 0 ? (
                           <Stack direction="row" spacing={0.2} justifyContent="center">
@@ -1236,29 +1288,26 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           </Typography>
                         )}
                       </TableCell>
-                      
-                      {/* Status */}
+
                       <TableCell align="center">
-                        <ActionStatusChip 
-                          action={action} 
-                          statusOptions={statusOptions} 
-                          isDarkMode={isDarkMode} 
+                        <ActionStatusChip
+                          action={action}
+                          statusOptions={statusOptions}
+                          isDarkMode={isDarkMode}
                         />
                       </TableCell>
-                      
-                      {/* Progress */}
+
                       <TableCell align="center">
                         <MinimalProgress percentage={progress} />
                       </TableCell>
-                      
-                      {/* Actions */}
+
                       <TableCell align="center">
                         <Stack direction="row" spacing={0.2} justifyContent="center">
                           <Tooltip title="Update Progress">
                             <span>
                               <IconButton
                                 size="small"
-                                onClick={() => handleOpenProgressDialog(action)}
+                                onClick={(e) => { e.stopPropagation(); handleOpenProgressDialog(action); }}
                                 disabled={!isFullAccess}
                                 sx={{ color: isDarkMode ? '#60A5FA' : 'primary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
@@ -1270,7 +1319,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <span>
                               <IconButton
                                 size="small"
-                                onClick={() => handleEditAction(action)}
+                                onClick={(e) => { e.stopPropagation(); handleEditAction(action); }}
                                 disabled={loadingActionId === action.id || !isFullAccess}
                                 sx={{ color: isDarkMode ? '#A78BFA' : 'secondary.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
@@ -1282,7 +1331,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                             <span>
                               <IconButton
                                 size="small"
-                                onClick={() => handleAssignAction(action)}
+                                onClick={(e) => { e.stopPropagation(); handleAssignAction(action); }}
                                 disabled={!isFullAccess}
                                 sx={{ color: isDarkMode ? '#34D399' : 'success.main', '&.Mui-disabled': { opacity: 0.4 } }}
                               >
@@ -1293,7 +1342,7 @@ const MeetingActionsList = ({ meetingId, meetingStatus, onRefresh }) => {
                           <Tooltip title="View Details">
                             <IconButton
                               size="small"
-                              onClick={() => handleViewAction(action.id)}
+                              onClick={(e) => { e.stopPropagation(); handleViewAction(action.id); }}
                               sx={{ color: isDarkMode ? '#9CA3AF' : 'default' }}
                             >
                               <VisibilityIcon sx={{ fontSize: 16 }} />

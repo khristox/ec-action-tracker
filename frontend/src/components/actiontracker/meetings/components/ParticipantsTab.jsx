@@ -918,33 +918,35 @@ const ParticipantsTab = ({
   }, [meetingId, onRefresh, canEdit, showSnack]);
 
   const handleAttendanceChange = useCallback(async (participantId, status, comment = '') => {
-    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return; }
-    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
+    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return false; }
+    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return false; }
     setLoading(true);
     try {
       // ✅ Use the correct endpoint: PUT /members/{memberId}
       await api.put(`/action-tracker/meetings/${meetingId}/members/${participantId}`, {
         attendance_status: status, 
-        apology_comment: comment,
+        apology_comment: comment || null,
       });
       setAttendanceStatus(prev => ({ ...prev, [participantId]: status }));
       if (comment) setApologyComments(prev => ({ ...prev, [participantId]: comment }));
       showSnack(
-        status === 'absent_with_apology' ? 'Marked absent with apology' : `Marked as ${status.replace('_', ' ')}`,
-        status === 'absent' || status === 'absent_with_apology' ? 'warning' : 'success',
+        status === 'absent_with_apology' ? 'Marked absent with apology' : `Marked as ${status.replace(/_/g, ' ')}`,
+        status === 'attended' ? 'success' : 'warning',
       );
       if (typeof onRefresh === 'function') onRefresh();
+      return true;
     } catch (e) { 
       console.error('Attendance update error:', e);
       showSnack(e.response?.data?.detail || 'Failed to update attendance', 'error'); 
+      return false;
     }
     finally { setLoading(false); }
   }, [meetingId, isMeetingStarted, canEdit, onRefresh, showSnack]);
 
 
   const handleOpenApologyDialog = useCallback((participant) => {
-    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return; }
-    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
+    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return false; }
+    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return false; }
     setSelectedParticipant(participant); setShowApologyDialog(true);
   }, [isMeetingStarted, canEdit, showSnack]);
 
@@ -952,12 +954,14 @@ const ParticipantsTab = ({
     if (!selectedParticipant) return;
     
     // First update attendance status
-    await handleAttendanceChange(selectedParticipant.id, 'absent_with_apology', message);
-    
+    const ok =await handleAttendanceChange(selectedParticipant.id, 'absent_with_apology', message);
+    if (!ok) throw new Error('Failed to update attendance status'); // ApologyDialog catches this and stays open
     // Then send notification (optional - can be removed if not needed)
     try {
       await api.post(`/action-tracker/meetings/${meetingId}/notifications`, {
+        meeting_id: meetingId,
         participant_ids: [selectedParticipant.id],
+        notification_type: ['email', 'sms'],
         custom_message: `Apology Reason: ${message}`,
       });
     } catch (e) { 

@@ -7,10 +7,19 @@ An action implementer is a PERSON, who may or may not have a system account.
     user_id IS NULL      -> external person (participant, guest, colleague)
     user_id IS NOT NULL  -> linked to a system account
 
-Identity is carried by EMAIL (and optionally phone), not by an id from the
-client. The client must never send user_id directly: the ids it holds come
-from the participant picker (meeting_participants.id) and are NOT user ids.
-Sending one is what caused the fk_action_implementers_user violation.
+Identity is resolved on the SERVER, never trusted from the client:
+
+  * The client may send `user_id` (a person picked from the system users) and/or
+    the legacy `id` field. Either one is VERIFIED against the users table before
+    it is used. An id that is not a users.id (for example a
+    meeting_participants.id from the participant picker) is simply ignored and
+    the person is matched by EMAIL instead. That is what caused the
+    fk_action_implementers_user violation before: a participant id was written
+    straight into action_implementers.user_id.
+  * When the person IS a system user, their name, email and phone are read from
+    the users table (the picker only sees masked contact details). An
+    implementer without a real email can never receive a reminder and can never
+    be linked to an account later, so this matters.
 
 Everything that resolves or links an implementer lives in this file.
 """
@@ -66,7 +75,9 @@ async def resolve_user_by_email(
     result = await db.execute(
         select(User).where(func.lower(User.email) == email)
     )
-    return result.scalar_one_or_none()
+    # .first(), not scalar_one_or_none(): two accounts that differ only by
+    # letter case must not crash the whole action save.
+    return result.scalars().first()
 
 
 async def resolve_implementer_user_id(
@@ -106,40 +117,87 @@ async def resolve_implementer_user_id(
     return None
 
 
+async def resolve_person_identity(
+    db: AsyncSession,
+    raw_id: Optional[Any] = None,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> tuple[Optional[UUID], str, Optional[str], Optional[str]]:
+    """
+    Resolve a person to (user_id, name, email, phone).
+
+    When the person IS a system user, their details come from the users
+    table: the client often sends only an id (or a masked email), and trusting
+    its blanks is how rows end up named 'Unassigned' with no email.
+    """
+    email = normalize_email(email)
+    phone = normalize_phone(phone)
+    name = (name or "").strip()
+
+    user = None
+    if raw_id:
+        try:
+            uid = raw_id if isinstance(raw_id, UUID) else UUID(str(raw_id))
+            user = await db.get(User, uid)
+        except (ValueError, TypeError):
+            user = None
+        if user is None:
+            logger.debug(
+                "Id %s is not a users.id (probably a participant id); "
+                "falling back to email matching.",
+                raw_id,
+            )
+    if user is None:
+        user = await resolve_user_by_email(db, email)
+
+    if user:
+        return (
+            user.id,
+            name or getattr(user, "full_name", None) or user.username,
+            normalize_email(user.email) or email,
+            phone or normalize_phone(getattr(user, "phone", None)),
+        )
+
+    return None, name or "Unassigned", email, phone
+
+
 async def build_implementer(
     db: AsyncSession,
     action_id: UUID,
     person: Dict[str, Any],
     sort_order: int,
 ) -> ActionImplementer:
-    """
-    Build one ActionImplementer row from whatever the client sent.
-
-    Accepts any of these key spellings, because different parts of the
-    frontend send different shapes:
-        user_id / assigned_to_id / id   -> candidate user id (validated)
-        name
-        email
-        phone / telephone
-    """
-    raw_id = (
-        person.get("user_id")
-        or person.get("assigned_to_id")
-        or person.get("id")
-    )
+    """Build an implementer without mistaking participant IDs for user IDs."""
     email = normalize_email(person.get("email"))
-    phone = normalize_phone(person.get("phone") or person.get("telephone"))
+    phone = normalize_phone(
+        person.get("phone") or person.get("telephone")
+    )
+    name = (person.get("name") or "").strip()
 
-    user_id = await resolve_implementer_user_id(db, user_id=raw_id, email=email)
+    # `user_id` is the explicit field. The legacy `id` is accepted too, but
+    # either one is only used if it really is a users.id (resolve_person_identity
+    # checks the users table), so a participant's id can never end up in
+    # action_implementers.user_id.
+    raw_user_id = person.get("user_id") or person.get("id")
+
+    user_id, resolved_name, resolved_email, resolved_phone = (
+        await resolve_person_identity(
+            db,
+            raw_id=raw_user_id,
+            name=name,
+            email=email,
+            phone=phone,
+        )
+    )
 
     return ActionImplementer(
         action_id=action_id,
         user_id=user_id,
-        name=(person.get("name") or "").strip() or "Unassigned",
-        email=email,
-        phone=phone,
+        name=resolved_name,
+        email=resolved_email,
+        phone=resolved_phone,
         sort_order=sort_order,
-        linked_at=func.now() if user_id else None,
     )
 
 
@@ -148,8 +206,15 @@ async def build_implementers(
     action_id: UUID,
     people: List[Dict[str, Any]],
 ) -> List[ActionImplementer]:
-    """Build the full implementer list for an action, de-duplicated by email."""
+    """
+    Build the full implementer list for an action.
+
+    De-duplicated by email AND by linked account, so the same person picked
+    twice (once as a system user, once as a meeting participant) is stored once
+    and gets one reminder email, not two.
+    """
     seen_emails: set[str] = set()
+    seen_user_ids: set[UUID] = set()
     rows: List[ActionImplementer] = []
 
     for person in people or []:
@@ -159,13 +224,27 @@ async def build_implementers(
         elif hasattr(person, "dict"):
             person = person.dict()
 
-        email = normalize_email(person.get("email"))
-        if email and email in seen_emails:
+        client_email = normalize_email(person.get("email"))
+        if client_email and client_email in seen_emails:
             continue
-        if email:
-            seen_emails.add(email)
 
-        rows.append(await build_implementer(db, action_id, person, len(rows)))
+        row = await build_implementer(db, action_id, person, len(rows))
+
+        # The row's final identity may differ from what the client sent
+        # (e.g. the real email read from the account).
+        if row.user_id and row.user_id in seen_user_ids:
+            continue
+        if row.email and row.email in seen_emails:
+            continue
+
+        if row.user_id:
+            seen_user_ids.add(row.user_id)
+        if row.email:
+            seen_emails.add(row.email)
+        if client_email:
+            seen_emails.add(client_email)
+
+        rows.append(row)
 
     return rows
 
@@ -204,7 +283,7 @@ async def link_implementers_to_user(
     result = await db.execute(
         update(ActionImplementer)
         .where(or_(*conditions), ActionImplementer.user_id.is_(None))
-        .values(user_id=user.id, linked_at=func.now())
+        .values(user_id=user.id)
     )
     count = result.rowcount or 0
 
@@ -240,43 +319,3 @@ def implementer_belongs_to(user: User, email_verified: bool = True):
         )
 
     return or_(*conditions)
-
-
-async def resolve_person_identity(
-    db: AsyncSession,
-    raw_id: Optional[Any] = None,
-    name: Optional[str] = None,
-    email: Optional[str] = None,
-    phone: Optional[str] = None,
-) -> tuple[Optional[UUID], str, Optional[str], Optional[str]]:
-    """
-    Resolve a person to (user_id, name, email, phone).
-
-    When the person IS a system user, their details come from the users
-    table — the client often sends only an id, and trusting its blanks is
-    how rows end up named 'Unassigned' with no email. An implementer with
-    no email can never be linked to an account later, so this matters.
-    """
-    email = normalize_email(email)
-    phone = normalize_phone(phone)
-    name = (name or "").strip()
-
-    user = None
-    if raw_id:
-        try:
-            uid = raw_id if isinstance(raw_id, UUID) else UUID(str(raw_id))
-            user = await db.get(User, uid)
-        except (ValueError, TypeError):
-            user = None
-    if user is None:
-        user = await resolve_user_by_email(db, email)
-
-    if user:
-        return (
-            user.id,
-            name or getattr(user, "full_name", None) or user.username,
-            normalize_email(user.email) or email,
-            phone or normalize_phone(getattr(user, "phone", None)),
-        )
-
-    return None, name or "Unassigned", email, phone

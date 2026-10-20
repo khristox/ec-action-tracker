@@ -107,7 +107,13 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
       <Box sx={{ px: 2.5, pt: 1.5, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Stack direction="row" alignItems="flex-start" justifyContent="space-between" gap={1}>
           <Box sx={{ flex: 1 }}>
-            <Stack direction="row" spacing={1} alignItems="center" mb={0.75} flexWrap="wrap">
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              mb={0.75}
+              sx={{ flexWrap: 'wrap' }}
+            >
               <Chip
                 size="small"
                 color={status.color}
@@ -449,7 +455,7 @@ export const RecurringMeetingCard = ({
         <CardActionArea onClick={handleCardClick} sx={{ flexGrow: 1, alignItems: 'flex-start' }}>
           <CardContent sx={{ p: isMobile ? 2 : 2.5, pb: '12px !important' }}>
             {/* Header row */}
-            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1} mb={1.5}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{flexWrap: "wrap"}}  gap={1} mb={1.5}>
               <Chip
                 size="small"
                 color={status.color}
@@ -549,7 +555,12 @@ export const RecurringMeetingCard = ({
 
             {/* Stats row — desktop only */}
             {showStats && !isMobile && (
-              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ gap: 1 }}>
+              <Stack
+                direction="row"
+                spacing={2}
+                useFlexGap
+                sx={{ flexWrap: 'wrap', gap: 1 }}
+              >
                 <Stack direction="row" alignItems="center" spacing={0.75}>
                   <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: progressColor }} />
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>

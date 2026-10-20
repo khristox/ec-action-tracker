@@ -5,8 +5,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-# Switch to root to install packages
-USER root
 
 WORKDIR /app
 
@@ -18,12 +16,8 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        jq \
-        curl \
-        gcc \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends curl gcc libpq-dev jq && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for better caching)
 COPY requirements.txt .
@@ -31,31 +25,20 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire application - use a single COPY command
-COPY . .
+RUN addgroup --system app && adduser --system --ingroup app app
 
-# Copy .env file if it exists (use RUN with shell conditional)
-RUN if [ -f .env ]; then cp .env /app/.env; fi
-RUN if [ -f .env.example ]; then cp .env.example /app/.env.example; fi
+COPY --chown=app:app . .
 
 # Create necessary directories
 RUN mkdir -p /app/static && \
-    chmod -R 755 /app/static
+    chown app:app /app /app/static
 
-# List files for debugging (optional - remove in production)
-RUN ls -la /app/ && ls -la /app/app/ 2>/dev/null || echo "app directory check" && \
-    ls -la /app/static/ 2>/dev/null || echo "Static directory not found"
+RUN mkdir -p /app/static /app/logs /app/uploads && \
+    chown app:app /app /app/static /app/logs /app/uploads
 
-# Create a non-root user
-RUN addgroup --system app && \
-    adduser --system --group app && \
-    chown -R app:app /app
-
-# Switch to non-root user
 USER app
-
-# Expose port
 EXPOSE 8001
+
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

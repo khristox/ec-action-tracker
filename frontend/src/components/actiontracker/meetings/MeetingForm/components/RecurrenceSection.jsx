@@ -14,7 +14,15 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { format, isBefore, startOfDay } from 'date-fns';
 import { RECURRENCE_TYPES, WEEK_DAYS, END_OPTIONS } from '../constants';
-import { formatRecurrenceSummary, generatePreviewOccurrences } from '../utils';
+import {
+  formatRecurrenceSummary,
+  generatePreviewOccurrences,
+  getDefaultRecurrence,
+  normalizeRecurrence,
+  isLegacyRecurrence,
+  RECURRENCE_LIMITS,
+  MAX_OCCURRENCES
+} from '../utils';
 
 const MONTHLY_WEEK_OPTIONS = [
   { value: 'first', label: 'First' },
@@ -24,11 +32,19 @@ const MONTHLY_WEEK_OPTIONS = [
   { value: 'last', label: 'Last' }
 ];
 
+// Zoom-style: only daily / weekly / monthly (biweekly = weekly every 2 weeks),
+// and the series always ends by date or after N occurrences.
+const TYPE_OPTIONS = RECURRENCE_TYPES.filter(t => RECURRENCE_LIMITS[t.value]);
+const END_OPTIONS_LIMITED = END_OPTIONS.filter(o => o.value !== 'never');
+
 const normalizeDate = (date) => {
   if (!date) return null;
   const value = date instanceof Date ? date : new Date(date);
   return Number.isNaN(value.getTime()) ? null : value;
 };
+
+const ordinalSuffix = (day) =>
+  day === 1 ? 'st' : day === 2 ? 'nd' : day === 3 ? 'rd' : 'th';
 
 export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
   const [showPreview, setShowPreview] = useState(false);
@@ -39,26 +55,20 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
   // recurrence.enabled is the single source of truth.
   const isRecurring = !!recurrence?.enabled;
 
+  const currentType = recurrence?.type || 'weekly';
+  const limit = RECURRENCE_LIMITS[currentType] || RECURRENCE_LIMITS.weekly;
+
+  // Migrate legacy data (biweekly, quarterly, "never") to the Zoom-style model.
+  useEffect(() => {
+    if (recurrence?.enabled && isLegacyRecurrence(recurrence)) {
+      setRecurrence(normalizeRecurrence(recurrence));
+    }
+  }, [recurrence, setRecurrence]);
+
   const handleRecurringToggle = (checked) => {
     if (checked) {
-      setRecurrence({
-        enabled: true,
-        type: 'weekly',
-        interval: 1,
-        days: ['monday'],
-        day_of_month: 1,
-
-        // Monthly recurrence supports both:
-        // 1. A fixed day of the month.
-        // 2. A relative weekday, e.g. First Monday / Last Friday.
-        monthly_pattern: 'day_of_month',
-        monthly_week: 'first',
-        monthly_day: 'monday',
-
-        end_option: 'never',
-        end_date: null,
-        max_occurrences: null
-      });
+      // Weekday / day of month default to the meeting's start date.
+      setRecurrence(getDefaultRecurrence(startDate));
       setStatusMessage('');
     } else {
       setRecurrence(null);
@@ -73,6 +83,31 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
       ...(prev || {}),
       [field]: value
     }));
+  };
+
+  const handleTypeChange = (type) => {
+    const defaults = getDefaultRecurrence(startDate);
+
+    setRecurrence(prev => {
+      const p = prev || {};
+      return {
+        ...p,
+        type,
+        // Respect the per-type interval cap (e.g. max 3 months).
+        interval: Math.min(p.interval || 1, RECURRENCE_LIMITS[type].max),
+        ...(type === 'weekly' && !p.days?.length
+          ? { days: defaults.days }
+          : {}),
+        ...(type === 'monthly'
+          ? {
+              monthly_pattern: p.monthly_pattern || 'day_of_month',
+              day_of_month: p.day_of_month || defaults.day_of_month,
+              monthly_week: p.monthly_week || defaults.monthly_week,
+              monthly_day: p.monthly_day || defaults.monthly_day
+            }
+          : {})
+      };
+    });
   };
 
   const calculatePreviewDates = useCallback(() => {
@@ -121,33 +156,27 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
     const currentDays = recurrence?.days || [];
 
     if (currentDays.includes(day)) {
-      updateRecurrence(
-        'days',
-        currentDays.filter(d => d !== day)
-      );
+      updateRecurrence('days', currentDays.filter(d => d !== day));
     } else {
-      updateRecurrence(
-        'days',
-        [...currentDays, day]
-      );
+      updateRecurrence('days', [...currentDays, day]);
     }
   };
 
   const handleEndOptionChange = (value) => {
-    updateRecurrence('end_option', value);
+    setRecurrence(prev => {
+      const next = { ...(prev || {}), end_option: value };
 
-    if (value === 'never') {
-      updateRecurrence('end_date', null);
-      updateRecurrence('max_occurrences', null);
-    } else if (value === 'after') {
-      updateRecurrence('end_date', null);
-
-      if (!recurrence?.max_occurrences || recurrence.max_occurrences < 1) {
-        updateRecurrence('max_occurrences', 10);
+      if (value === 'after') {
+        next.end_date = null;
+        const m = Number(next.max_occurrences);
+        next.max_occurrences =
+          Number.isInteger(m) && m >= 1 ? Math.min(m, MAX_OCCURRENCES) : 10;
+      } else if (value === 'on') {
+        next.max_occurrences = null;
       }
-    } else if (value === 'on') {
-      updateRecurrence('max_occurrences', null);
-    }
+
+      return next;
+    });
   };
 
   const startDateValue = normalizeDate(startDate);
@@ -159,19 +188,23 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
     endDateValue &&
     isBefore(startOfDay(endDateValue), startOfDay(startDateValue));
 
+  const endDateMissing =
+    isRecurring && recurrence?.end_option === 'on' && !endDateValue;
+
   const weeklyDaysError =
     isRecurring &&
-    (recurrence?.type === 'weekly' || recurrence?.type === 'biweekly') &&
+    currentType === 'weekly' &&
     (!recurrence?.days || recurrence.days.length === 0);
 
   const occurrencesError =
     isRecurring &&
     recurrence?.end_option === 'after' &&
     (!Number.isInteger(Number(recurrence?.max_occurrences)) ||
-      Number(recurrence?.max_occurrences) < 1);
+      Number(recurrence?.max_occurrences) < 1 ||
+      Number(recurrence?.max_occurrences) > MAX_OCCURRENCES);
 
   const recurrenceHasValidationError =
-    weeklyDaysError || endDateError || occurrencesError;
+    weeklyDaysError || endDateError || endDateMissing || occurrencesError;
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 2 }}>
@@ -233,7 +266,6 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                   checked={isRecurring}
                   onChange={(e) => handleRecurringToggle(e.target.checked)}
                   color="primary"
-                  size="large"
                 />
 
                 <Stack>
@@ -271,39 +303,13 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
               <Grid container spacing={3}>
                 <Grid size={{ xs: 12, md: 6 }}>
                   <FormControl fullWidth>
-                    <InputLabel>Repeats every</InputLabel>
+                    <InputLabel>Recurrence</InputLabel>
                     <Select
-                      value={recurrence?.type || 'weekly'}
-                      onChange={(e) => {
-                        const type = e.target.value;
-
-                        updateRecurrence('type', type);
-
-                        // Give each recurrence type a sensible default.
-                        if (type === 'weekly' || type === 'biweekly') {
-                          if (!recurrence?.days?.length) {
-                            updateRecurrence('days', ['monday']);
-                          }
-                        }
-
-                        if (type === 'monthly') {
-                          updateRecurrence(
-                            'monthly_pattern',
-                            recurrence?.monthly_pattern || 'day_of_month'
-                          );
-                          updateRecurrence(
-                            'monthly_week',
-                            recurrence?.monthly_week || 'first'
-                          );
-                          updateRecurrence(
-                            'monthly_day',
-                            recurrence?.monthly_day || 'monday'
-                          );
-                        }
-                      }}
-                      label="Repeats every"
+                      value={currentType}
+                      onChange={(e) => handleTypeChange(e.target.value)}
+                      label="Recurrence"
                     >
-                      {RECURRENCE_TYPES.map(type => (
+                      {TYPE_OPTIONS.map(type => (
                         <MenuItem key={type.value} value={type.value}>
                           <Stack direction="row" alignItems="center" spacing={1}>
                             <Typography variant="body1">
@@ -334,22 +340,20 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                     onChange={(e) =>
                       updateRecurrence(
                         'interval',
-                        Math.max(1, parseInt(e.target.value, 10) || 1)
+                        Math.min(
+                          limit.max,
+                          Math.max(1, parseInt(e.target.value, 10) || 1)
+                        )
                       )
                     }
                     InputProps={{
-                      inputProps: { min: 1, max: 365 }
+                      inputProps: { min: 1, max: limit.max }
                     }}
-                    helperText={
-                      RECURRENCE_TYPES.find(
-                        t => t.value === recurrence?.type
-                      )?.intervalText || 'day(s)'
-                    }
+                    helperText={`${limit.unit} (max ${limit.max})`}
                   />
                 </Grid>
 
-                {(recurrence?.type === 'weekly' ||
-                  recurrence?.type === 'biweekly') && (
+                {currentType === 'weekly' && (
                   <Grid size={{ xs: 12 }}>
                     <Typography variant="subtitle2" gutterBottom>
                       Repeat on
@@ -368,7 +372,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                         <ToggleButton
                           key={day.value}
                           value={day.value}
-                          selected={recurrence?.days?.includes(day.value)}
+                          selected={!!recurrence?.days?.includes(day.value)}
                           onChange={() => toggleDay(day.value)}
                           sx={{
                             width: 48,
@@ -398,13 +402,11 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                       ))}
                     </Stack>
 
-                    {weeklyDaysError && (
+                    {weeklyDaysError ? (
                       <FormHelperText error>
                         Please select at least one day.
                       </FormHelperText>
-                    )}
-
-                    {!weeklyDaysError && (
+                    ) : (
                       <FormHelperText>
                         Select one or more days for the recurring meeting.
                       </FormHelperText>
@@ -412,7 +414,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                   </Grid>
                 )}
 
-                {recurrence?.type === 'monthly' && (
+                {currentType === 'monthly' && (
                   <Grid size={{ xs: 12 }}>
                     <Typography variant="subtitle2" gutterBottom>
                       Repeat on
@@ -421,10 +423,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                     <RadioGroup
                       value={recurrence?.monthly_pattern || 'day_of_month'}
                       onChange={(e) =>
-                        updateRecurrence(
-                          'monthly_pattern',
-                          e.target.value
-                        )
+                        updateRecurrence('monthly_pattern', e.target.value)
                       }
                     >
                       <FormControlLabel
@@ -433,42 +432,29 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                         label="Day of the month"
                       />
 
-                      {recurrence?.monthly_pattern === 'day_of_month' && (
+                      {(recurrence?.monthly_pattern || 'day_of_month') === 'day_of_month' && (
                         <Box sx={{ ml: 4, mb: 1 }}>
                           <FormControl size="small" sx={{ minWidth: 220 }}>
                             <InputLabel>Day of month</InputLabel>
                             <Select
                               value={recurrence?.day_of_month || 1}
                               onChange={(e) =>
-                                updateRecurrence(
-                                  'day_of_month',
-                                  e.target.value
-                                )
+                                updateRecurrence('day_of_month', e.target.value)
                               }
                               label="Day of month"
                             >
-                              {Array.from(
-                                { length: 31 },
-                                (_, i) => i + 1
-                              ).map(day => (
+                              {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
                                 <MenuItem key={day} value={day}>
-                                  {day}
-                                  {day === 1
-                                    ? 'st'
-                                    : day === 2
-                                      ? 'nd'
-                                      : day === 3
-                                        ? 'rd'
-                                        : 'th'}{' '}
-                                  day
+                                  {day}{ordinalSuffix(day)} day
                                 </MenuItem>
                               ))}
 
-                              <MenuItem value="last">
-                                Last day
-                              </MenuItem>
+                              <MenuItem value="last">Last day</MenuItem>
                             </Select>
                           </FormControl>
+                          <FormHelperText>
+                            Months with fewer days use their last day.
+                          </FormHelperText>
                         </Box>
                       )}
 
@@ -487,22 +473,14 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                           <FormControl size="small" sx={{ minWidth: 150 }}>
                             <InputLabel>Week</InputLabel>
                             <Select
-                              value={
-                                recurrence?.monthly_week || 'first'
-                              }
+                              value={recurrence?.monthly_week || 'first'}
                               onChange={(e) =>
-                                updateRecurrence(
-                                  'monthly_week',
-                                  e.target.value
-                                )
+                                updateRecurrence('monthly_week', e.target.value)
                               }
                               label="Week"
                             >
                               {MONTHLY_WEEK_OPTIONS.map(option => (
-                                <MenuItem
-                                  key={option.value}
-                                  value={option.value}
-                                >
+                                <MenuItem key={option.value} value={option.value}>
                                   {option.label}
                                 </MenuItem>
                               ))}
@@ -512,22 +490,14 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                           <FormControl size="small" sx={{ minWidth: 170 }}>
                             <InputLabel>Weekday</InputLabel>
                             <Select
-                              value={
-                                recurrence?.monthly_day || 'monday'
-                              }
+                              value={recurrence?.monthly_day || 'monday'}
                               onChange={(e) =>
-                                updateRecurrence(
-                                  'monthly_day',
-                                  e.target.value
-                                )
+                                updateRecurrence('monthly_day', e.target.value)
                               }
                               label="Weekday"
                             >
                               {WEEK_DAYS.map(day => (
-                                <MenuItem
-                                  key={day.value}
-                                  value={day.value}
-                                >
+                                <MenuItem key={day.value} value={day.value}>
                                   {day.full}
                                 </MenuItem>
                               ))}
@@ -552,13 +522,11 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                     <FormControl size="small" sx={{ minWidth: 180 }}>
                       <InputLabel>End</InputLabel>
                       <Select
-                        value={recurrence?.end_option || 'never'}
-                        onChange={(e) =>
-                          handleEndOptionChange(e.target.value)
-                        }
+                        value={recurrence?.end_option || 'after'}
+                        onChange={(e) => handleEndOptionChange(e.target.value)}
                         label="End"
                       >
-                        {END_OPTIONS.map(opt => (
+                        {END_OPTIONS_LIMITED.map(opt => (
                           <MenuItem key={opt.value} value={opt.value}>
                             {opt.label}
                           </MenuItem>
@@ -582,7 +550,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                               : Math.max(
                                   1,
                                   Math.min(
-                                    999,
+                                    MAX_OCCURRENCES,
                                     parseInt(value, 10) || 1
                                   )
                                 )
@@ -591,14 +559,11 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                         error={occurrencesError}
                         helperText={
                           occurrencesError
-                            ? 'Enter at least 1 occurrence.'
-                            : 'Maximum 999 occurrences'
+                            ? `Enter between 1 and ${MAX_OCCURRENCES} occurrences.`
+                            : `Maximum ${MAX_OCCURRENCES} occurrences`
                         }
                         InputProps={{
-                          inputProps: {
-                            min: 1,
-                            max: 999
-                          }
+                          inputProps: { min: 1, max: MAX_OCCURRENCES }
                         }}
                       />
                     )}
@@ -608,17 +573,17 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                         label="End date"
                         value={endDateValue}
                         minDate={startDateValue || undefined}
-                        onChange={(date) =>
-                          updateRecurrence('end_date', date)
-                        }
+                        onChange={(date) => updateRecurrence('end_date', date)}
                         slotProps={{
                           textField: {
                             size: 'small',
                             sx: { width: 250 },
-                            error: !!endDateError,
+                            error: !!endDateError || endDateMissing,
                             helperText: endDateError
                               ? 'End date cannot be before the meeting start date.'
-                              : undefined
+                              : endDateMissing
+                                ? 'Please choose an end date.'
+                                : undefined
                           }
                         }}
                       />
@@ -639,9 +604,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                   size="small"
                   disabled={recurrenceHasValidationError}
                 >
-                  {showPreview
-                    ? 'Hide Preview'
-                    : 'Preview Occurrences'}
+                  {showPreview ? 'Hide Preview' : 'Preview Occurrences'}
                 </Button>
               </Stack>
 
@@ -674,11 +637,7 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                   ) : previewDates.length > 0 ? (
                     <Stack
                       spacing={1}
-                      sx={{
-                        mt: 1,
-                        maxHeight: 300,
-                        overflow: 'auto'
-                      }}
+                      sx={{ mt: 1, maxHeight: 300, overflow: 'auto' }}
                     >
                       {previewDates.map((date, idx) => (
                         <Stack
@@ -687,16 +646,10 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                           alignItems="center"
                           spacing={2}
                         >
-                          <Badge
-                            badgeContent={idx + 1}
-                            color="primary"
-                          />
+                          <Badge badgeContent={idx + 1} color="primary" />
                           <EventIcon fontSize="small" />
                           <Typography variant="body2">
-                            {format(
-                              date,
-                              'EEEE, MMMM d, yyyy'
-                            )}
+                            {format(date, 'EEEE, MMMM d, yyyy')}
                           </Typography>
                         </Stack>
                       ))}
@@ -713,32 +666,24 @@ export const RecurrenceSection = ({ recurrence, setRecurrence, startDate }) => {
                     <Typography
                       variant="caption"
                       color="text.secondary"
-                      sx={{
-                        mt: 1,
-                        display: 'block'
-                      }}
+                      sx={{ mt: 1, display: 'block' }}
                     >
                       Based on start date:{' '}
-                      {format(
-                        new Date(startDate),
-                        'MMM d, yyyy'
-                      )}
+                      {format(new Date(startDate), 'MMM d, yyyy')}
                     </Typography>
                   )}
                 </Alert>
               )}
 
-              <Alert
-                severity="info"
-                sx={{ mt: 2 }}
-                icon={<InfoIcon />}
-              >
+              <Alert severity="info" sx={{ mt: 2 }} icon={<InfoIcon />}>
                 <Typography variant="body2">
                   <strong>How it works:</strong> This will create a
                   series of meetings based on the pattern above. The
                   recurring meeting will appear in your dashboard
                   showing the next occurrence date. When you click
                   "Join", the actual meeting instance will be created.
+                  The action log belongs to the whole series, so
+                  actions from every occurrence are kept together.
                 </Typography>
               </Alert>
             </Box>

@@ -107,23 +107,17 @@ def parse_due_date(due_date: Optional[str]) -> Optional[datetime]:
 
 
 def serialize_implementer(imp: ActionImplementer) -> Dict[str, Any]:
-    """
-    Serialize one implementer for the REST endpoints.
-
-    user_id is NULL for people who have no system account yet. That is a
-    valid, expected state -- they are linked later, by email, once they
-    register and verify.
-    """
+    """Serialize one implementer for the REST endpoints."""
     return {
         "id": str(imp.id),
         "action_id": str(imp.action_id),
         "user_id": str(imp.user_id) if imp.user_id else None,
         "is_system_user": imp.user_id is not None,
-        "linked_at": imp.linked_at.isoformat() if imp.linked_at else None,
         "name": imp.name,
         "email": imp.email,
         "phone": imp.phone,
         "sort_order": imp.sort_order,
+        "created_at": imp.created_at.isoformat() if imp.created_at else None,
     }
 
 
@@ -187,6 +181,7 @@ def build_my_task_response(action: MeetingAction, is_overdue_flag: bool) -> MyTa
                 email=imp.email,
                 phone=imp.phone,
                 sort_order=imp.sort_order or 0,
+                created_at=imp.created_at,
             )
             for imp in sorted(implementers, key=lambda i: i.sort_order or 0)
         ],
@@ -730,32 +725,47 @@ async def update_action_progress(
         if progress_update.progress_percentage < 0 or progress_update.progress_percentage > 100:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Progress percentage must be between 0 and 100"
+                detail="Progress percentage must be between 0 and 100",
             )
 
-        # Check permission - only assigned user or admin can update progress
+        # Check permission: superuser/admin, meeting creator, or someone implementing this action
         is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
-        if action_obj.assigned_to_id and action_obj.assigned_to_id != current_user.id and not is_admin:
+        if not is_admin and not await meeting_action.can_update_progress(db, action_obj, current_user):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the assigned user or admin can update progress"
+                detail="Only the meeting creator or a person implementing this action can update its progress",
             )
 
-        # Update the progress directly
-        now = datetime.now(timezone.utc)
-        action_obj.overall_progress_percentage = progress_update.progress_percentage
-
-        # Update status if provided
+        # Resolve the incoming status id (may be an ACTION_STATUS_* attribute id
+        # or an action_statuses id) to a real action_statuses row.
+        status_row = None
         if progress_update.individual_status_id:
-            action_obj.overall_status_id = progress_update.individual_status_id
+            status_row = await meeting_action._resolve_status(
+                db, progress_update.individual_status_id
+            )
+            if not status_row:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown status id: {progress_update.individual_status_id}",
+                )
 
-        # Update remarks if provided
+        now = datetime.now(timezone.utc)
+
+        # Write the RESOLVED id, never the raw incoming id
+        action_obj.overall_progress_percentage = progress_update.progress_percentage
+        if status_row:
+            action_obj.overall_status_id = status_row.id
+            action_obj.overall_status_name = status_row.name
+
         if progress_update.remarks:
             action_obj.remarks = progress_update.remarks
 
-        # If progress is 100%, mark as completed
+        # Mark completed or clear completion
         if progress_update.progress_percentage >= 100:
-            action_obj.completed_at = now
+            if not action_obj.completed_at:
+                action_obj.completed_at = now
+        elif action_obj.completed_at:
+            action_obj.completed_at = None
 
         action_obj.updated_by_id = current_user.id
         action_obj.updated_at = now
@@ -763,7 +773,7 @@ async def update_action_progress(
         # Record this change in the status history table
         history_entry = ActionStatusHistory(
             action_id=action_obj.id,
-            individual_status_id=progress_update.individual_status_id,
+            individual_status_id=status_row.id if status_row else None,
             progress_percentage=progress_update.progress_percentage,
             remarks=progress_update.remarks,
             created_by_id=current_user.id,
@@ -774,17 +784,28 @@ async def update_action_progress(
         await db.commit()
         await db.refresh(action_obj)
 
-        logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}% by user {current_user.id}")
+        logger.info(
+            f"Action {action_id} progress updated to "
+            f"{progress_update.progress_percentage}% by user {current_user.id}"
+        )
         return action_obj
 
     except HTTPException:
         raise
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
-        logger.error(f"Error updating action progress {action_id}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error updating action progress {action_id}: {str(e)}", exc_info=True
+        )
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update progress: {str(e)}"
+            detail=f"Failed to update progress: {str(e)}",
         )
 
 

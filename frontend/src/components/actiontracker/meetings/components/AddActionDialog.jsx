@@ -235,6 +235,8 @@ const getRandomRemarksPlaceholder = () => {
 const TYPE_OF_ACTION_OPTIONS = [
   'Operational',
   'Strategic',
+  'Commission',
+  'Management',
   'Administrative',
   'Financial',
   'Technical',

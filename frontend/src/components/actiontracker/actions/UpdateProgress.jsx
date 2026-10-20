@@ -47,7 +47,7 @@ const normalizeError = (detail, fallback = 'Something went wrong') => {
 const buildStatusOptions = (attributes) => {
   const list = attributes?.items || attributes?.data || attributes || [];
   return list
-    .filter((attr) => attr.code && attr.code.startsWith('ACTION_STATUS_'))
+    .filter((attr) => attr.code && attr.code.startsWith('ACTION_STATUS_') && attr.is_active !== false)
     .map((attr) => ({
       id: attr.id,
       value: (attr.short_name || attr.code).toLowerCase().replace('action_status_', ''),
@@ -84,14 +84,7 @@ const STATUS_CONFIG = {
   cancelled:   { label: 'Cancelled',   color: '#EF4444', bgColor: 'rgba(239, 68, 68, 0.15)',  icon: <Cancel fontSize="small" /> },
 };
 
-const FALLBACK_STATUSES = [
-  { id: 'pending',     name: 'Pending',     value: 'pending',     short_name: 'pending' },
-  { id: 'in_progress', name: 'In Progress', value: 'in_progress', short_name: 'in_progress' },
-  { id: 'completed',   name: 'Completed',   value: 'completed',   short_name: 'completed' },
-  { id: 'overdue',     name: 'Overdue',     value: 'overdue',     short_name: 'overdue' },
-  { id: 'on_hold',     name: 'On Hold',     value: 'on_hold',     short_name: 'on_hold' },
-  { id: 'cancelled',   name: 'Cancelled',   value: 'cancelled',   short_name: 'cancelled' },
-];
+const FALLBACK_STATUSES = [];
 
 const PRIORITY_CONFIG = {
   1: { label: 'High',     color: '#EF4444', icon: <PriorityHigh fontSize="small" /> },
@@ -131,6 +124,7 @@ const UpdateProgress = forwardRef(({
     remarks: '',
   });
   const [touched, setTouched] = useState(false);
+  const [statusLoadDone, setStatusLoadDone] = useState(false);
 
   // ------------------------------------------------
   // Effective statuses = real UUIDs preferred
@@ -138,10 +132,10 @@ const UpdateProgress = forwardRef(({
   // ------------------------------------------------
   const effectiveStatuses = useMemo(() => {
     const parent = Array.isArray(statusOptions)
-      ? normalizeStatusOptions(statusOptions)
+      ? normalizeStatusOptions(statusOptions.filter((o) => o?.is_active !== false))
       : [];
     const fetched = Array.isArray(fetchedStatuses)
-      ? normalizeStatusOptions(fetchedStatuses)
+      ? normalizeStatusOptions(fetchedStatuses.filter((o) => o?.is_active !== false))
       : [];
 
     const parentHasRealIds = parent.some((s) => isValidUuid(s.id));
@@ -208,11 +202,16 @@ const UpdateProgress = forwardRef(({
         if (!cancelled && opts.length > 0) setFetchedStatuses(opts);
       } catch (err) {
         console.warn('Could not fetch status options, using fallback:', err);
+      }finally {
+        if (!cancelled) setStatusLoadDone(true);
       }
     })();
     return () => { cancelled = true; };
   }, [statusOptions]);
 
+  useEffect(() => {
+    if (statusLoadDone && effectiveStatuses.length === 0) setFetching(false);
+  }, [statusLoadDone, effectiveStatuses]);
   // ------------------------------------------------
   // Load action data (re-runs when effectiveStatuses changes)
   // ------------------------------------------------
@@ -220,6 +219,8 @@ const UpdateProgress = forwardRef(({
     if (actionId && effectiveStatuses.length > 0) fetchActionData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actionId, effectiveStatuses]);
+
+  
 
   const fetchActionData = async () => {
     try {
@@ -237,7 +238,7 @@ const UpdateProgress = forwardRef(({
         actionData.overall_status_short_name ||
         actionData.status
       );
-      const defaultStatusId = matchedId || (effectiveStatuses[0]?.id || '');
+      const defaultStatusId = matchedId;  // Pending action: nothing preselected, use picks
 
       setFormData({
         overall_progress_percentage: actionData.overall_progress_percentage || 0,
@@ -245,9 +246,13 @@ const UpdateProgress = forwardRef(({
         remarks: actionData.remarks || '',
       });
 
+      const isPendingName = /^(pending|not[\s_-]?started)$/i.test(
+        String(actionData.overall_status_name || '').trim()
+      );
+
       const hadStatus = Boolean(
         actionData.overall_status_id ||
-        actionData.overall_status_name ||
+        (actionData.overall_status_name && !isPendingName) ||
         actionData.status
       );
       if (hadStatus && !matchedId && !embedded) {
@@ -285,6 +290,11 @@ const UpdateProgress = forwardRef(({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (effectiveStatuses.length === 0) {
+      setError('Statuses could not be loaded. Close this dialog and try again.');
+      return;
+    }
 
     if (!formData.overall_status_id) {
       setError('Please select a status');
@@ -353,7 +363,11 @@ const UpdateProgress = forwardRef(({
     else navigate(-1);
   };
 
-  if (fetching) {
+  const noStatuses = effectiveStatuses.length === 0;
+  const shownStatusConfig = previousStatusConfig || (action ? STATUS_CONFIG.pending : null);
+  const shownStatusLabel = previousStatusObj?.label || previousStatusObj?.name || 'Pending';
+
+  if (fetching) {    
     return (
       <Box sx={{ p: 3, textAlign: 'center' }}>
         <CircularProgress size={32} />
@@ -428,7 +442,7 @@ const UpdateProgress = forwardRef(({
           </Alert>
         </Fade>
 
-        {error && !embedded && (
+        {error && (
           <Alert
             severity="warning"
             sx={{ mb: 1, py: 0.25, '& .MuiAlert-message': { fontSize: '0.8rem' } }}
@@ -468,6 +482,12 @@ const UpdateProgress = forwardRef(({
               }}
             >
               <Stack spacing={1.75}>
+
+                {noStatuses && (
+                  <Alert severity="error" sx={{ py: 0.25 }}>
+                    Statuses could not be loaded. Close this dialog and try again.
+                  </Alert>
+                )}
 
                 {action && (
                   <Box>
@@ -511,18 +531,18 @@ const UpdateProgress = forwardRef(({
                           fontSize: '0.65rem',
                         }}
                       />
-                      {previousStatusConfig && (
+                      {shownStatusConfig && (
                         <Chip
                           size="small"
-                          icon={previousStatusConfig.icon}
-                          label={previousStatusObj?.label || previousStatusObj?.name || 'Status'}
+                          icon={shownStatusConfig.icon}
+                          label={shownStatusLabel}
                           sx={{
-                            bgcolor: previousStatusConfig.bgColor,
-                            color: previousStatusConfig.color,
+                            bgcolor: shownStatusConfig.bgColor,
+                            color: shownStatusConfig.color,
                             fontWeight: 600,
                             height: 20,
                             fontSize: '0.65rem',
-                            '& .MuiChip-icon': { color: previousStatusConfig.color, fontSize: 13 },
+                            '& .MuiChip-icon': { color: shownStatusConfig.color, fontSize: 13 },
                           }}
                         />
                       )}
@@ -883,7 +903,7 @@ const UpdateProgress = forwardRef(({
                       type="submit"
                       variant="contained"
                       size="small"
-                      disabled={loading || !formData.overall_status_id}
+                      disabled={loading  || noStatuses || !formData.overall_status_id}
                       startIcon={
                         loading
                           ? <CircularProgress size={14} color="inherit" />

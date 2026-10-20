@@ -62,7 +62,6 @@ const ParticipantsTab = lazy(() => import('./components/ParticipantsTab'));
 const NotificationDialog = lazy(() => import('./components/NotificationDialog'));
 const UpdateMeetingLinkDialog = lazy(() => import('./components/UpdateMeetingLinkDialog'));
 const MeetingAudit = lazy(() => import('./MeetingAudit'));
-const MeetingRecorder = lazy(() => import('./MeetingRecorder'));
 
 const NOT_FOUND_DELAY_MS = 7000;
 const SNACKBAR_AUTO_HIDE_MS = 6000;
@@ -76,14 +75,31 @@ const DARK = {
 };
 
 const STATUS_CONFIG = {
-  pending:     { label: 'Pending',     icon: <ScheduleIcon />,     color: 'warning' },
-  started:     { label: 'In Progress', icon: <PendingIcon />,      color: 'info' },
-  ongoing:     { label: 'In Progress', icon: <PendingIcon />,      color: 'info' },
-  in_progress: { label: 'In Progress', icon: <PendingIcon />,      color: 'info' },
-  ended:       { label: 'Ended',       icon: <CheckCircleIcon />,  color: 'success' },
-  closed:      { label: 'Closed',      icon: <CheckCircleIcon />,  color: 'success' },
-  cancelled:   { label: 'Cancelled',   icon: <CancelIcon />,       color: 'error' },
-  awaiting:    { label: 'Awaiting',    icon: <HourglassEmptyIcon />, color: 'warning' },
+  pending: {
+    label: 'Pending',
+    icon: <ScheduleIcon />,
+    color: 'warning',
+  },
+  started: {
+    label: 'Started',
+    icon: <PendingIcon />,
+    color: 'info',
+  },
+  ended: {
+    label: 'Ended',
+    icon: <CheckCircleIcon />,
+    color: 'success',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    icon: <CancelIcon />,
+    color: 'error',
+  },
+};
+
+const getStatusKey = (status) => {
+  const normalized = normalizeStatus(status);
+  return normalized?.short_name || null;
 };
 
 const TABS = [
@@ -143,24 +159,64 @@ const TABS = [
     requiresPermission: 'admin:view_audit',
     minAccessLevel: 'full'
   },
-  { 
-    label: 'Recordings',   
-    icon: <FiberManualRecordIcon />,  
-    value: 7, 
-    simple: false, 
-    requiresPermission: 'meeting:view_recorder',
-    minAccessLevel: 'full'
-  },
+  
 ];
 
+const VALID_MEETING_STATUSES = ['pending', 'started', 'ended', 'cancelled'];
+
 const normalizeStatus = (status) => {
-  if (!status) return null;
-  if (status.short_name) return status;
-  if (typeof status === 'string') {
-    const s = status.includes('_') ? status.split('_').pop() : status;
-    return { short_name: s.toLowerCase(), name: status, code: status, id: null };
+  let rawValue = null;
+
+  if (status && typeof status === 'object') {
+    rawValue =
+      status.short_name ||
+      status.code ||
+      status.name ||
+      null;
+  } else if (typeof status === 'string') {
+    rawValue = status;
   }
-  return status;
+
+  if (!rawValue) {
+    return null;
+  }
+
+  let normalized = String(rawValue)
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_');
+
+  // Handle seeded codes such as MEETING_STATUS_STARTED
+  if (normalized.startsWith('meeting_status_')) {
+    normalized = normalized.replace('meeting_status_', '');
+  }
+
+  // Support both spellings during migration.
+  if (normalized === 'canceled') {
+    normalized = 'cancelled';
+  }
+
+  if (!VALID_MEETING_STATUSES.includes(normalized)) {
+    console.warn(
+      `Unsupported meeting status received: ${rawValue}`
+    );
+    return null;
+  }
+
+  if (status && typeof status === 'object') {
+    return {
+      ...status,
+      short_name: normalized,
+    };
+  }
+
+  return {
+    short_name: normalized,
+    name: normalized,
+    code: normalized,
+    id: null,
+  };
 };
 
 const TabPanel = memo(({ children, value, index, ...other }) => (
@@ -228,7 +284,12 @@ const MeetingDetail = () => {
   const userPermissions = useSelector(selectUserPermissions);
   const currentUser = useSelector((state) => state.auth.user);
 
-  const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
+  //const isAdmin = currentUser?.is_superuser || currentUser?.is_admin || false;
+  const isAdmin = Boolean(
+    currentUser?.is_superuser ||
+    currentUser?.is_admin ||
+    currentUser?.roles?.some((r) => ['admin', 'super_admin'].includes(r.code))
+  );
   const canDeleteMeeting = isAdmin || hasPermission(userPermissions, 'meeting:delete');
   const canUpdateMeeting = isAdmin || hasPermission(userPermissions, 'meeting:update');
   const canSendNotifications = hasPermission(userPermissions, 'notification:send') || hasPermission(userPermissions, 'notification:email');
@@ -268,6 +329,58 @@ const MeetingDetail = () => {
   const [emailNotifications, setEmailNotifications] = useState([]);
 
   const normalizedMeeting = useMemo(() => currentMeeting ? { ...currentMeeting, status: normalizeStatus(currentMeeting.status) } : null, [currentMeeting]);
+
+  const meetingStatusOptions = useMemo(() => {
+    if (statusOptions?.length) {
+      return statusOptions
+        .map((status) => {
+          const rawValue =
+            status?.short_name ||
+            status?.value ||
+            status?.code ||
+            status?.name ||
+            '';
+
+          let normalized = String(rawValue)
+            .trim()
+            .toLowerCase()
+            .replace(/-/g, '_')
+            .replace(/\s+/g, '_');
+
+          if (normalized.startsWith('meeting_status_')) {
+            normalized = normalized.replace('meeting_status_', '');
+          }
+
+          if (normalized === 'canceled') {
+            normalized = 'cancelled';
+          }
+
+          if (!VALID_MEETING_STATUSES.includes(normalized)) {
+            return null;
+          }
+
+          return {
+            ...status,
+            value: normalized,
+            short_name: normalized,
+            label:
+              status?.label ||
+              status?.name ||
+              STATUS_CONFIG[normalized]?.label ||
+              normalized,
+          };
+        })
+        .filter(Boolean);
+    }
+
+    return Object.entries(STATUS_CONFIG).map(([value, config]) => ({
+      value,
+      short_name: value,
+      label: config.label,
+      id: null,
+      color: null,
+    }));
+  }, [statusOptions]);
   
   const accessLevel = useMemo(() => {
     return normalizedMeeting?.access_level || 'none';
@@ -288,53 +401,73 @@ const MeetingDetail = () => {
   const emailSentCount = useMemo(() => emailNotifications.filter((n) => n.status === 'successful').length, [emailNotifications]);
 
   const getStatusValue = useCallback(() => {
-    if (!normalizedMeeting?.status) return '';
-    return normalizedMeeting.status.short_name?.toLowerCase() || '';
+    return getStatusKey(normalizedMeeting?.status);
   }, [normalizedMeeting]);
 
   const getStatusDisplay = useCallback(() => {
-    if (!normalizedMeeting?.status) return 'Unknown';
-    const statusValue = normalizedMeeting.status.short_name?.toLowerCase() || '';
-    
-    const dynamicStatus = statusOptions?.find(s => s.value === statusValue);
-    if (dynamicStatus) {
-      return dynamicStatus.label || dynamicStatus.short_name || statusValue;
+    const statusValue = getStatusValue();
+
+    if (!statusValue) {
+      return 'Pending';
     }
-    
-    return STATUS_CONFIG[statusValue]?.label || normalizedMeeting.status.short_name || 'Unknown';
-  }, [normalizedMeeting, statusOptions]);
+
+    return STATUS_CONFIG[statusValue]?.label || 'Pending';
+  }, [getStatusValue]);
 
   const getStatusColor = useCallback(() => {
-    if (!normalizedMeeting?.status) return '#6B7280';
-    const statusValue = normalizedMeeting.status.short_name?.toLowerCase() || '';
-    
-    const dynamicStatus = statusOptions?.find(s => s.value === statusValue);
-    if (dynamicStatus && dynamicStatus.color) {
+    const statusValue = getStatusValue();
+
+    const dynamicStatus = statusOptions?.find((s) => {
+      const value = String(
+        s.short_name || s.value || s.code || ''
+      ).toLowerCase();
+
+      return value === statusValue;
+    });
+
+    if (dynamicStatus?.color) {
       return dynamicStatus.color;
     }
-    
+
     const defaultConfigColors = {
       warning: '#F59E0B',
       info: '#3B82F6',
       success: '#10B981',
       error: '#EF4444',
     };
-    const mappedConfigColor = STATUS_CONFIG[statusValue]?.color;
-    return defaultConfigColors[mappedConfigColor] || '#6B7280';
-  }, [normalizedMeeting, statusOptions]);
+
+    const mappedConfigColor =
+      STATUS_CONFIG[statusValue]?.color || 'warning';
+
+    return defaultConfigColors[mappedConfigColor];
+  }, [getStatusValue, statusOptions]);
 
   const getStatusIcon = useCallback(() => {
-    if (!normalizedMeeting?.status) return <ScheduleIcon />;
-    const statusValue = normalizedMeeting.status.short_name?.toLowerCase() || '';
-    
-    const dynamicStatus = statusOptions?.find(s => s.value === statusValue);
-    if (dynamicStatus) {
-      const color = dynamicStatus.color || '#6B7280';
-      return <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: color }} />;
+    const statusValue = getStatusValue();
+
+    const dynamicStatus = statusOptions?.find((s) => {
+      const value = String(
+        s.short_name || s.value || s.code || ''
+      ).toLowerCase();
+
+      return value === statusValue;
+    });
+
+    if (dynamicStatus?.color) {
+      return (
+        <Box
+          sx={{
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            bgcolor: dynamicStatus.color,
+          }}
+        />
+      );
     }
-    
-    return STATUS_CONFIG[statusValue]?.icon || <ScheduleIcon />;
-  }, [normalizedMeeting, statusOptions]);
+
+    return STATUS_CONFIG[statusValue]?.icon || STATUS_CONFIG.pending.icon;
+  }, [getStatusValue, statusOptions]);
 
   // ==================== DATA FETCHING ====================
   const fetchMeetingData = useCallback(async () => {
@@ -609,33 +742,40 @@ const MeetingDetail = () => {
   const handleMoreMenuOpen = useCallback((e) => setMoreMenuAnchor(e.currentTarget), []);
   const handleMoreMenuClose = useCallback(() => setMoreMenuAnchor(null), []);
 
-  const handleStatusSelect = useCallback((statusValue) => { 
-    let selectedStatusObj = null;
-    
-    if (statusOptions && statusOptions.length > 0) {
-      selectedStatusObj = statusOptions.find(s => 
-        s.value === statusValue || 
-        s.short_name === statusValue ||
-        s.id === statusValue
+  const handleStatusSelect = useCallback((statusValue) => {
+    const selectedStatusObj = meetingStatusOptions.find((status) => {
+      return (
+        status.id === statusValue ||
+        status.value === statusValue ||
+        status.short_name === statusValue
       );
-    }
-    
-    if (!selectedStatusObj) {
-      const defaultStatus = Object.keys(STATUS_CONFIG).find(key => key === statusValue);
-      if (defaultStatus) {
-        selectedStatusObj = { 
-          value: defaultStatus, 
-          short_name: defaultStatus,
-          label: STATUS_CONFIG[defaultStatus].label,
-          id: null
-        };
+    });
+
+    if (selectedStatusObj) {
+      setSelectedStatus(selectedStatusObj);
+    } else {
+      const normalized = String(statusValue)
+        .trim()
+        .toLowerCase();
+
+      if (VALID_MEETING_STATUSES.includes(normalized)) {
+        setSelectedStatus({
+          value: normalized,
+          short_name: normalized,
+          label: STATUS_CONFIG[normalized].label,
+          id: null,
+        });
+      } else {
+        console.warn(
+          `Ignoring unsupported meeting status: ${statusValue}`
+        );
+        return;
       }
     }
-    
-    setSelectedStatus(selectedStatusObj || statusValue); 
-    setStatusDialogOpen(true); 
-    setStatusMenuAnchor(null); 
-  }, [statusOptions]);
+
+    setStatusDialogOpen(true);
+    setStatusMenuAnchor(null);
+  }, [meetingStatusOptions]);
 
   const handleStatusUpdate = useCallback(async () => {
     if (!selectedStatus) return;
@@ -874,6 +1014,8 @@ const MeetingDetail = () => {
   const visibleTabsForMode = useMemo(() => {
     return visibleTabs.filter(t => viewMode === 'detailed' || t.simple);
   }, [visibleTabs, viewMode]);
+
+  
 
   const orderedVisibleTabsForMode = useMemo(() => {
     const map = new Map(visibleTabsForMode.map(t => [t.value, t]));
@@ -1237,7 +1379,8 @@ const MeetingDetail = () => {
               </TabPanel>
               <TabPanel value={effectiveTabValue} index={2}>
                 <MeetingActionsList 
-                  meetingId={id} 
+                  meetingId={id}
+                  recurringMeetingId={normalizedMeeting?.recurring_meeting_id} 
                   meetingStatus={getStatusValue()} 
                   onRefresh={handleRefresh} 
                 />
@@ -1276,11 +1419,7 @@ const MeetingDetail = () => {
                   <MeetingAudit meetingId={id} />
                 </TabPanel>
               )}
-              {hasPermission(userPermissions, 'meeting:view_recorder') && isFullAccess && (
-                <TabPanel value={effectiveTabValue} index={7}>
-                  <MeetingRecorder meetingId={id} />
-                </TabPanel>
-              )}
+              
             </Box>
           </Paper>
         )}
@@ -1397,8 +1536,7 @@ const MeetingDetail = () => {
         open={Boolean(statusMenuAnchor)} 
         onClose={handleStatusMenuClose}
       >
-        {statusOptions && statusOptions.length > 0 ? (
-          statusOptions.map((status) => (
+        {meetingStatusOptions.map((status) => (
             <MenuItem 
               key={status.id || status.value} 
               onClick={() => handleStatusSelect(status.id || status.value)}
@@ -1415,21 +1553,7 @@ const MeetingDetail = () => {
               )}
             </MenuItem>
           ))
-        ) : (
-          Object.keys(STATUS_CONFIG).map((key) => (
-            <MenuItem 
-              key={key} 
-              onClick={() => handleStatusSelect(key)}
-              selected={getStatusValue() === key}
-            >
-              <ListItemIcon>{STATUS_CONFIG[key].icon}</ListItemIcon>
-              <ListItemText primary={STATUS_CONFIG[key].label} />
-              {getStatusValue() === key && (
-                <CheckCircleIcon sx={{ fontSize: 16, color: STATUS_CONFIG[key].color, ml: 1 }} />
-              )}
-            </MenuItem>
-          ))
-        )}
+        }
       </Menu>
 
       <Dialog open={statusDialogOpen} onClose={() => setStatusDialogOpen(false)} maxWidth="xs" fullWidth>

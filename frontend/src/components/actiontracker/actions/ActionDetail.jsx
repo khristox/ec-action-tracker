@@ -10,7 +10,7 @@ import {
   DialogContent, DialogActions, FormControl, InputLabel,
   Select, MenuItem, Skeleton, Alert, Collapse,
   useTheme, useMediaQuery, CircularProgress, Card,
-  CardContent, Tooltip, Badge, Tabs, Tab
+  CardContent, Tooltip, Badge
 } from '@mui/material';
 import {
   ArrowBack, Delete, History,
@@ -157,9 +157,17 @@ const STATUS_CONFIG = {
     icon: <Cancel fontSize="small" />,
     muiColor: 'default'
   }
-};
+}; STATUS_CONFIG.not_started = { ...STATUS_CONFIG.pending, label: 'Pending' };
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+const statusKey = (v) =>
+  String(v || '')
+    .replace(/^action[_ ]status[_ -]*/i, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+
+const optionKey = (opt) => statusKey(opt.code || opt.short_name || opt.name || opt.label);
 
 // ==================== PRIORITY STARS ====================
 
@@ -336,7 +344,6 @@ const ActionDetail = () => {
   const [showDeleteTaskDialog, setShowDeleteTaskDialog] = useState(false);
   const [deletingTask, setDeletingTask] = useState(false);
   const [isActionInProgress, setIsActionInProgress] = useState(false);
-  const [activeTab, setActiveTab] = useState(0);
 
   const displayImplementers = useMemo(() => {
     if (currentAction?.persons_implementing && currentAction.persons_implementing.length > 0) {
@@ -400,6 +407,18 @@ const ActionDetail = () => {
     dispatch(fetchActionImplementers(currentAction.id));
   }, [currentAction?.id, currentAction?.persons_implementing?.length, id, dispatch]);
 
+  const openProgressDialog = () => {
+    const currentKey = statusKey(currentAction?.overall_status_name) || 'not_started';
+    const match =
+      statusOptions.find((o) => optionKey(o) === currentKey) ||
+      statusOptions.find((o) => ['not_started', 'pending'].includes(optionKey(o)));
+
+    setSelectedStatusId(match?.id || '');
+    setSelectedStatusValue(currentAction?.overall_status_name || '');
+    setProgress(currentAction?.overall_progress_percentage || 0);
+    setShowProgressDialog(true);
+  };
+  
   const fetchHistory = useCallback(async (actionId) => {
     if (!actionId) return;
     try {
@@ -431,13 +450,9 @@ const ActionDetail = () => {
 
   useEffect(() => {
     if (currentAction) {
-      setProgress(currentAction.overall_progress_percentage || 0);
-      setSelectedStatusId(currentAction.overall_status_id || '');
-      if (currentAction.overall_status_name) {
-        setSelectedStatusValue(currentAction.overall_status_name);
-      }
+      setProgress(currentAction.overall_progress_percentage || 0);      
     }
-  }, [currentAction?.overall_progress_percentage, currentAction?.overall_status_id, currentAction?.overall_status_name]);
+  }, [currentAction?.overall_progress_percentage]);
 
   const refreshAction = useCallback(() => {
     if (id) dispatch(fetchActionById(id));
@@ -550,9 +565,7 @@ const ActionDetail = () => {
     if (isCompleted) return STATUS_CONFIG.completed;
     if (currentAction?.is_overdue) return STATUS_CONFIG.overdue;
 
-    const statusValue = currentAction?.overall_status_name?.toLowerCase() ||
-      currentAction?.status?.toLowerCase() ||
-      'pending';
+    const statusValue = statusKey(currentAction?.overall_status_name || currentAction?.status) || 'pending';
 
     return STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
   }, [isCompleted, currentAction?.is_overdue, currentAction?.overall_status_name, currentAction?.status]);
@@ -564,15 +577,11 @@ const ActionDetail = () => {
     return currentUser.is_admin || currentAction.created_by_id === currentUser.id;
   };
 
-  const getStatusName = (statusId) => {
-    const option = statusOptions.find(opt => opt.id === statusId);
-    return option?.label || option?.short_name || 'Unknown';
-  };
-
-  const getStatusConfigForHistory = (statusId, statusName) => {
-    const option = statusOptions.find(opt => opt.id === statusId);
-    const statusValue = option?.value || statusName?.toLowerCase() || 'pending';
-    return STATUS_CONFIG[statusValue] || STATUS_CONFIG.pending;
+  const getHistoryStatus = (entry) => {
+    const optionById = statusOptions.find((o) => o.id === entry.individual_status_id);
+    const name = entry.status_name || optionById?.label || optionById?.short_name || null;
+    const config = STATUS_CONFIG[statusKey(entry.status_code || name)] || null;
+    return { name, config };
   };
 
   if (loading && !currentAction) {
@@ -771,7 +780,7 @@ const ActionDetail = () => {
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={() => setShowProgressDialog(true)}
+                  onClick={openProgressDialog}
                   disabled={isActionInProgress}
                   startIcon={<TrendingUp fontSize="small" />}
                   sx={{
@@ -846,228 +855,297 @@ const ActionDetail = () => {
           borderRadius: 2,
           bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.4)' : '#FFFFFF',
           border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid #E5E7EB',
-          overflow: 'hidden'
+          overflow: 'hidden',
         }}
       >
-        <Tabs
-          value={activeTab}
-          onChange={(_, v) => setActiveTab(v)}
-          variant={isMobile ? "fullWidth" : "standard"}
-          sx={{
-            px: { xs: 1, sm: 3 },
-            pt: 1,
-            '& .MuiTab-root': {
-              fontWeight: 600,
-              textTransform: 'none',
-              fontSize: '0.8rem',
-              minHeight: 40
-            }
-          }}
-        >
-          <Tab label="Details & Implementers" icon={<Info sx={{ fontSize: 18 }} />} iconPosition="start" />
-          <Tab label="History" icon={<History sx={{ fontSize: 18 }} />} iconPosition="start" />
-        </Tabs>
-
-        <Divider />
-
-        {/* ===== TAB 1: DETAILS & IMPLEMENTERS ===== */}
-        {activeTab === 0 && (
-          <Box sx={{ p: { xs: 2, sm: 3 } }}>
-            <Grid container spacing={3}>
-              {/* LEFT COLUMN - Details */}
-              <Grid item xs={12} md={6}>
-                <Typography
-                  variant="subtitle2"
-                  fontWeight={600}
-                  sx={{
-                    color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
-                    mb: 1.5,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Details
-                </Typography>
-                <Box>
-                  <DetailField
-                    label="Category"
-                    value={currentAction.title}
-                    icon={<Category />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Key Action"
-                    value={currentAction.is_key_action ? 'Yes' : 'No'}
-                    icon={<Lightbulb />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Issue"
-                    value={currentAction.issue_challenge}
-                    icon={<ErrorIcon />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Type"
-                    value={currentAction.type_of_action}
-                    icon={<Info />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Action"
-                    value={currentAction.description}
-                    icon={<Assignment />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Priority"
-                    value={<PriorityStars priority={currentAction?.priority} />}
-                    icon={<Flag />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Initiated"
-                    value={currentAction.date_initiated ? new Date(currentAction.date_initiated).toLocaleDateString() : '—'}
-                    icon={<Event />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Due Date"
-                    value={currentAction.due_date ? new Date(currentAction.due_date).toLocaleDateString() : '—'}
-                    icon={<AccessTime />}
-                    isDarkMode={isDarkMode}
-                  />
-                  <DetailField
-                    label="Tags"
-                    value={currentAction.tags?.join(', ')}
-                    icon={<Label />}
-                    isDarkMode={isDarkMode}
-                  />
-                </Box>
-              </Grid>
-
-              {/* RIGHT COLUMN - Implementers */}
-              <Grid item xs={12} md={6}>
-                <Typography
-                  variant="subtitle2"
-                  fontWeight={600}
-                  sx={{
-                    color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
-                    mb: 1.5,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  Implementers {displayImplementers.length > 0 && `(${displayImplementers.length})`}
-                </Typography>
-                {displayImplementers.length === 0 ? (
-                  <Box
-                    sx={{
-                      p: 3,
-                      textAlign: 'center',
-                      border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
-                      borderRadius: 2
-                    }}
-                  >
-                    <People sx={{ fontSize: 40, color: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB', mb: 1 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      No implementers assigned
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Stack spacing={1.5}>
-                    {displayImplementers.map((person, idx) => (
-                      <ImplementerCard
-                        key={idx}
-                        person={person}
-                        isDarkMode={isDarkMode}
-                      />
-                    ))}
-                  </Stack>
-                )}
-              </Grid>
-            </Grid>
-          </Box>
-        )}
-
-        {/* ===== TAB 2: HISTORY ===== */}
-        {activeTab === 1 && (
-          <Box sx={{ p: { xs: 2, sm: 3 } }}>
-            {history.length === 0 ? (
-              <Box
+        <Box sx={{ p: { xs: 2, sm: 3 } }}>
+          <Grid container spacing={3}>
+            {/* LEFT COLUMN — Details (with History below Tags) */}
+            <Grid item xs={12} md={6}>
+              <Typography
+                variant="subtitle2"
+                fontWeight={600}
                 sx={{
-                  p: 4,
-                  textAlign: 'center',
-                  border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
-                  borderRadius: 2
+                  color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
+                  mb: 1.5,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontSize: '0.7rem',
                 }}
               >
-                <History sx={{ fontSize: 40, color: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB', mb: 1 }} />
-                <Typography variant="body2" color="text.secondary">
-                  No update logs recorded yet.
-                </Typography>
+                Details
+              </Typography>
+              <Box>
+                <DetailField
+                  label="Category"
+                  value={currentAction.title}
+                  icon={<Category />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Key Action"
+                  value={currentAction.is_key_action ? 'Yes' : 'No'}
+                  icon={<Lightbulb />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Issue"
+                  value={currentAction.issue_challenge}
+                  icon={<ErrorIcon />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Type"
+                  value={currentAction.type_of_action}
+                  icon={<Info />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Action"
+                  value={currentAction.description}
+                  icon={<Assignment />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Priority"
+                  value={<PriorityStars priority={currentAction?.priority} />}
+                  icon={<Flag />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Initiated"
+                  value={currentAction.date_initiated ? new Date(currentAction.date_initiated).toLocaleDateString() : '—'}
+                  icon={<Event />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Due Date"
+                  value={currentAction.due_date ? new Date(currentAction.due_date).toLocaleDateString() : '—'}
+                  icon={<AccessTime />}
+                  isDarkMode={isDarkMode}
+                />
+                <DetailField
+                  label="Tags"
+                  value={currentAction.tags?.join(', ')}
+                  icon={<Label />}
+                  isDarkMode={isDarkMode}
+                />
               </Box>
-            ) : (
-              <List disablePadding>
-                {history.map((entry, index) => {
-                  const statusName = getStatusName(entry.individual_status_id);
-                  const statusConfig = STATUS_CONFIG[entry.status_value] || getStatusConfigForHistory(entry.individual_status_id, statusName);
 
-                  return (
-                    <React.Fragment key={entry.id || index}>
-                      <ListItem alignItems="flex-start" sx={{ px: 0, py: 1.5 }}>
-                        <ListItemText
-                          primary={
-                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                              <Chip
-                                label={statusName}
-                                size="small"
-                                icon={statusConfig.icon}
-                                sx={{
-                                  height: 22,
-                                  fontSize: '0.7rem',
-                                  bgcolor: statusConfig.bgColor,
-                                  border: `1px solid ${statusConfig.borderColor}`,
-                                  color: statusConfig.color,
-                                  fontWeight: 600,
-                                  '& .MuiChip-icon': { color: statusConfig.color }
-                                }}
-                              />
-                              <Typography variant="caption" fontWeight={600} color="text.secondary">
-                                {entry.progress_percentage}% completed
-                              </Typography>
-                            </Stack>
-                          }
-                          secondary={
-                            <Box sx={{ mt: 0.75 }}>
-                              {entry.remarks && (
-                                <Typography variant="body2" sx={{ color: isDarkMode ? 'rgba(255,255,255,0.85)' : 'text.primary', mb: 0.5, fontSize: '0.85rem' }}>
-                                  {entry.remarks}
-                                </Typography>
-                              )}
-                              <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
-                                <Typography variant="caption" color="text.secondary">
-                                  By {entry.created_by_name || 'System'}
-                                </Typography>
-                                <span>•</span>
-                                <Typography variant="caption" color="text.secondary">
-                                  {entry.created_at ? new Date(entry.created_at.replace('Z', '')).toLocaleString() : 'Recent'}
-                                </Typography>
-                              </Stack>
-                            </Box>
-                          }
+              {/* ===== COLLAPSIBLE HISTORY (below Tags) ===== */}
+              <Box sx={{ mt: 3 }}>
+                <Box
+                  onClick={() => setHistoryExpanded((v) => !v)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setHistoryExpanded((v) => !v);
+                    }
+                  }}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    px: 1.5,
+                    py: 1,
+                    borderRadius: 1.5,
+                    bgcolor: isDarkMode ? 'rgba(255,255,255,0.03)' : '#F9FAFB',
+                    border: isDarkMode
+                      ? '1px solid rgba(255,255,255,0.08)'
+                      : '1px solid #E5E7EB',
+                    transition: 'background-color 0.15s ease',
+                    '&:hover': {
+                      bgcolor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#F3F4F6',
+                    },
+                  }}
+                >
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <History
+                      sx={{
+                        fontSize: 18,
+                        color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
+                      }}
+                    />
+                    <Typography
+                      variant="subtitle2"
+                      fontWeight={600}
+                      sx={{
+                        color: isDarkMode ? 'rgba(255,255,255,0.75)' : '#374151',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        fontSize: '0.7rem',
+                      }}
+                    >
+                      History {history.length > 0 && `(${history.length})`}
+                    </Typography>
+                  </Stack>
+                  <IconButton
+                    size="small"
+                    component="span"
+                    sx={{ color: isDarkMode ? 'rgba(255,255,255,0.5)' : '#6B7280' }}
+                  >
+                    {historyExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+                  </IconButton>
+                </Box>
+
+                <Collapse in={historyExpanded} timeout="auto" unmountOnExit>
+                  <Box sx={{ pt: 1.5 }}>
+                    {history.length === 0 ? (
+                      <Box
+                        sx={{
+                          p: 3,
+                          textAlign: 'center',
+                          border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
+                          borderRadius: 2,
+                        }}
+                      >
+                        <History
+                          sx={{
+                            fontSize: 32,
+                            color: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB',
+                            mb: 1,
+                          }}
                         />
-                      </ListItem>
-                      {index < history.length - 1 && <Divider component="li" sx={{ opacity: 0.5 }} />}
-                    </React.Fragment>
-                  );
-                })}
-              </List>
-            )}
-          </Box>
-        )}
+                        <Typography variant="body2" color="text.secondary">
+                          No update logs recorded yet.
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <List disablePadding>
+                        {history.map((entry, index) => {
+                          const { name: statusName, config: statusConfig } = getHistoryStatus(entry);
+
+                          return (
+                            <React.Fragment key={entry.id || index}>
+                              <ListItem alignItems="flex-start" sx={{ px: 0, py: 1.5 }}>
+                                <ListItemText
+                                  primary={
+                                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                      {statusName && (
+                                        <Chip
+                                          label={statusName}
+                                          size="small"
+                                          icon={(statusConfig || STATUS_CONFIG.pending).icon}
+                                          sx={{
+                                            height: 22,
+                                            fontSize: '0.7rem',
+                                            bgcolor: (statusConfig || STATUS_CONFIG.pending).bgColor,
+                                            border: `1px solid ${(statusConfig || STATUS_CONFIG.pending).borderColor}`,
+                                            color: (statusConfig || STATUS_CONFIG.pending).color,
+                                            fontWeight: 600,
+                                            '& .MuiChip-icon': { color: (statusConfig || STATUS_CONFIG.pending).color },
+                                          }}
+                                        />
+                                      )}
+                                      <Typography variant="caption" fontWeight={600} color="text.secondary">
+                                        {entry.progress_percentage}% completed
+                                      </Typography>
+                                    </Stack>
+                                  }
+                                  secondary={
+                                    <Box sx={{ mt: 0.75 }}>
+                                      {entry.remarks && (
+                                        <Typography
+                                          variant="body2"
+                                          sx={{
+                                            color: isDarkMode
+                                              ? 'rgba(255,255,255,0.85)'
+                                              : 'text.primary',
+                                            mb: 0.5,
+                                            fontSize: '0.85rem',
+                                          }}
+                                        >
+                                          {entry.remarks}
+                                        </Typography>
+                                      )}
+                                      <Stack
+                                        direction="row"
+                                        spacing={1.5}
+                                        alignItems="center"
+                                        flexWrap="wrap"
+                                      >
+                                        <Typography variant="caption" color="text.secondary">
+                                          By {entry.created_by_name || 'System'}
+                                        </Typography>
+                                        <span>•</span>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {entry.created_at
+                                            ? new Date(
+                                                entry.created_at.replace('Z', '')
+                                              ).toLocaleString()
+                                            : 'Recent'}
+                                        </Typography>
+                                      </Stack>
+                                    </Box>
+                                  }
+                                />
+                              </ListItem>
+                              {index < history.length - 1 && (
+                                <Divider component="li" sx={{ opacity: 0.5 }} />
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </List>
+                    )}
+                  </Box>
+                </Collapse>
+              </Box>
+            </Grid>
+
+            {/* RIGHT COLUMN — Implementers */}
+            <Grid item xs={12} md={6}>
+              <Typography
+                variant="subtitle2"
+                fontWeight={600}
+                sx={{
+                  color: isDarkMode ? 'rgba(255,255,255,0.6)' : '#6B7280',
+                  mb: 1.5,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontSize: '0.7rem',
+                }}
+              >
+                Implementers{' '}
+                {displayImplementers.length > 0 && `(${displayImplementers.length})`}
+              </Typography>
+              {displayImplementers.length === 0 ? (
+                <Box
+                  sx={{
+                    p: 3,
+                    textAlign: 'center',
+                    border: `2px dashed ${isDarkMode ? 'rgba(255,255,255,0.1)' : '#E5E7EB'}`,
+                    borderRadius: 2,
+                  }}
+                >
+                  <People
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? 'rgba(255,255,255,0.2)' : '#D1D5DB',
+                      mb: 1,
+                    }}
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    No implementers assigned
+                  </Typography>
+                </Box>
+              ) : (
+                <Stack spacing={1.5}>
+                  {displayImplementers.map((person, idx) => (
+                    <ImplementerCard
+                      key={idx}
+                      person={person}
+                      isDarkMode={isDarkMode}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Grid>
+          </Grid>
+        </Box>
       </Paper>
 
       {/* ========== DIALOGS ========== */}
@@ -1080,7 +1158,9 @@ const ActionDetail = () => {
         maxWidth="xs"
         PaperProps={{ sx: { borderRadius: 2, p: 0 } }}
       >
-        <DialogTitle fontWeight={700} sx={{ px: 3, pt: 2.5, pb: 1 }}>Update Progress</DialogTitle>
+        <DialogTitle fontWeight={700} sx={{ px: 3, pt: 2.5, pb: 1 }}>
+          Update Progress
+        </DialogTitle>
         <DialogContent sx={{ px: 3, py: 1 }}>
           <Stack spacing={2.5} sx={{ mt: 0.5 }}>
             <Box>
@@ -1127,7 +1207,9 @@ const ActionDetail = () => {
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
-          <Button onClick={() => setShowProgressDialog(false)} size="small">Cancel</Button>
+          <Button onClick={() => setShowProgressDialog(false)} size="small">
+            Cancel
+          </Button>
           <Button
             variant="contained"
             onClick={handleUpdateProgress}
@@ -1140,32 +1222,60 @@ const ActionDetail = () => {
       </Dialog>
 
       {/* Mark Complete Confirmation */}
-      <Dialog open={showCompleteConfirm} onClose={() => setShowCompleteConfirm(false)} PaperProps={{ sx: { borderRadius: 2, p: 0, maxWidth: 360 } }}>
-        <DialogTitle fontWeight={700} sx={{ px: 3, pt: 2.5, pb: 1 }}>Complete Task?</DialogTitle>
+      <Dialog
+        open={showCompleteConfirm}
+        onClose={() => setShowCompleteConfirm(false)}
+        PaperProps={{ sx: { borderRadius: 2, p: 0, maxWidth: 360 } }}
+      >
+        <DialogTitle fontWeight={700} sx={{ px: 3, pt: 2.5, pb: 1 }}>
+          Complete Task?
+        </DialogTitle>
         <DialogContent sx={{ px: 3, py: 1 }}>
           <Typography variant="body2" color="text.secondary">
             This will mark progress at 100% and record completion.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
-          <Button onClick={() => setShowCompleteConfirm(false)} size="small">Cancel</Button>
-          <Button color="success" variant="contained" onClick={handleMarkAsCompleted} disabled={isActionInProgress} size="small">
+          <Button onClick={() => setShowCompleteConfirm(false)} size="small">
+            Cancel
+          </Button>
+          <Button
+            color="success"
+            variant="contained"
+            onClick={handleMarkAsCompleted}
+            disabled={isActionInProgress}
+            size="small"
+          >
             Confirm
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Delete Confirmation */}
-      <Dialog open={showDeleteTaskDialog} onClose={() => setShowDeleteTaskDialog(false)} PaperProps={{ sx: { borderRadius: 2, p: 0, maxWidth: 360 } }}>
-        <DialogTitle fontWeight={700} color="error" sx={{ px: 3, pt: 2.5, pb: 1 }}>Delete Task</DialogTitle>
+      <Dialog
+        open={showDeleteTaskDialog}
+        onClose={() => setShowDeleteTaskDialog(false)}
+        PaperProps={{ sx: { borderRadius: 2, p: 0, maxWidth: 360 } }}
+      >
+        <DialogTitle fontWeight={700} color="error" sx={{ px: 3, pt: 2.5, pb: 1 }}>
+          Delete Task
+        </DialogTitle>
         <DialogContent sx={{ px: 3, py: 1 }}>
           <Typography variant="body2" color="text.secondary">
             Are you sure you want to delete this action item permanently?
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5 }}>
-          <Button onClick={() => setShowDeleteTaskDialog(false)} disabled={deletingTask} size="small">Cancel</Button>
-          <Button color="error" variant="contained" onClick={handleDeleteTask} disabled={deletingTask} size="small">
+          <Button onClick={() => setShowDeleteTaskDialog(false)} disabled={deletingTask} size="small">
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleDeleteTask}
+            disabled={deletingTask}
+            size="small"
+          >
             {deletingTask ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>

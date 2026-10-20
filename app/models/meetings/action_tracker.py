@@ -3,10 +3,9 @@ Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
 from datetime import datetime, timezone
-from select import select
 from typing import Optional, List, Dict, Any
 import uuid
-from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
+from sqlalchemy import select, JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
 from sqlalchemy.orm import relationship, validates, selectinload
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -1036,6 +1035,14 @@ class ActionStatusHistory(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
     
+    @property
+    def individual_status_name(self) -> Optional[str]:
+        return self.individual_status.name if self.individual_status else None
+
+    @property
+    def individual_status_code(self) -> Optional[str]:
+        return self.individual_status.code if self.individual_status else None
+
     def to_dict(self) -> dict:
         return {
             "id": str(self.id),

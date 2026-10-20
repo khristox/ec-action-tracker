@@ -21,7 +21,6 @@ try:
     from app.api.v1.endpoints.menus import router as menus_router
     from app.api.v1.endpoints.chart_data import router as chart_data
     from app.api.v1.endpoints.meeting_participants import router as meeting_participants_router
-    from app.api.v1.endpoints.action_tracker.recordings import router as recordings_router
     from app.api.v1.endpoints.action_tracker.meeting_report import router as meeting_report
     from app.api.v1.endpoints.action_tracker.meeting_minutes import router as meeting_minutes
     from app.api.v1.endpoints.role_menu_permissions import router as role_menu_permissions
@@ -79,12 +78,7 @@ api_router.include_router(role_menu_permissions, prefix="/role-menu-permissions"
 # Recurring Meetings
 api_router.include_router(recurr_meetings, prefix="/recurring-meetings", tags=["recurring-meetings"])
 
-# Meeting Recordings
-api_router.include_router(
-    recordings_router,
-    prefix="/meetings",
-    tags=["meeting-recordings"]
-)
+
 
 # Action Tracker (this already includes all sub-routers)
 api_router.include_router(action_tracker_router, prefix="/action-tracker", tags=["action-tracker-documents"])

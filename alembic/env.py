@@ -10,6 +10,8 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text, pool  # Add pool here
 from alembic import context
+from app.models.notification import Notification  # noqa: F401
+from app.services.action_due_reminders import ActionDueReminder  # noqa: F401
 
 # ==================== PATH & ENVIRONMENT SETUP ====================
 project_root = Path(__file__).parent.parent

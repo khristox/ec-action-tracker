@@ -5,6 +5,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import UUID, or_, select, desc
@@ -21,6 +22,10 @@ from app.schemas.recurring_meeting_schema import (
     GenerateOccurrencesRequest,
     PreviewOccurrencesRequest, 
     BulkActionRequest
+)
+from app.api.v1.endpoints.action_tracker.meeting_visibility import (
+    build_meeting_access_filter,
+    user_is_admin,
 )
 from app.crud.meetings.recurring_meeting_service import RecurringMeetingService
 
@@ -47,6 +52,23 @@ def safe_iso_format(dt):
         return dt.isoformat()
     return str(dt)
 
+async def can_access_series(db: AsyncSession, user: User, series) -> bool:
+    """Admin, series creator, or any occurrence the shared meeting filter lets this user see."""
+    if await user_is_admin(db, user):
+        return True
+    if str(series.created_by_id) == str(user.id):
+        return True
+    access = await build_meeting_access_filter(db, user)
+    hit = await db.execute(
+        select(Meeting.id)
+        .where(
+            Meeting.recurring_meeting_id == series.id,
+            Meeting.is_active == True,
+            access,
+        )
+        .limit(1)
+    )
+    return hit.first() is not None
 
 # ==================== CRUD Operations ====================
 
@@ -95,22 +117,28 @@ async def get_recurring_meetings(
             recurrence_type_id=recurrence_type_id
         )
         
-        # Filter by access
-        accessible_meetings = []
-        for meeting in all_meetings:
-            # Check if user is creator or superuser
-            if str(meeting.created_by_id) == str(current_user.id) or getattr(current_user, 'is_superuser', False):
-                accessible_meetings.append(meeting)
-            else:
-                # Check if user is a participant in any occurrence
-                result = await db.execute(
-                    select(Meeting).where(
-                        Meeting.recurring_meeting_id == meeting.id,
-                        Meeting.participants.any(MeetingParticipant.email == current_user.email)
+        # Filter by access (same department rules as the meetings list)
+        if await user_is_admin(db, current_user):
+            accessible_meetings = list(all_meetings)
+        else:
+            series_ids = [m.id for m in all_meetings]
+            visible = set()
+            if series_ids:
+                access = await build_meeting_access_filter(db, current_user)
+                visible = set((await db.execute(
+                    select(Meeting.recurring_meeting_id)
+                    .where(
+                        Meeting.recurring_meeting_id.in_(series_ids),
+                        Meeting.is_active == True,
+                        access,
                     )
-                )
-                if result.scalar_one_or_none():
-                    accessible_meetings.append(meeting)
+                    .distinct()
+                )).scalars().all())
+
+            accessible_meetings = [
+                m for m in all_meetings
+                if str(m.created_by_id) == str(current_user.id) or m.id in visible
+            ]
         
         # Return as list of dicts
         items = []
@@ -165,25 +193,12 @@ async def get_recurring_meeting(
             )
         
         # ✅ CHECK ACCESS
-        is_creator = str(recurring_meeting.created_by_id) == str(current_user.id)
-        is_superuser = getattr(current_user, 'is_superuser', False)
-        
-        if not (is_creator or is_superuser):
-            # Check if user is a participant
-            result = await db.execute(
-                select(Meeting).where(
-                    Meeting.recurring_meeting_id == meeting_id,
-                    Meeting.participants.any(MeetingParticipant.email == current_user.email)
-                )
+        if not await can_access_series(db, current_user, recurring_meeting):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this recurring meeting"
             )
-            is_participant = result.scalar_one_or_none() is not None
-            
-            if not is_participant:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You don't have access to this recurring meeting"
-                )
-        
+    
         return {
             "success": True,
             "data": {
@@ -201,10 +216,10 @@ async def get_recurring_meeting(
                 "status": "active" if not getattr(recurring_meeting, 'is_deleted', False) else "inactive",
                 "created_at": safe_iso_format(recurring_meeting.created_at),
                 "updated_at": safe_iso_format(recurring_meeting.updated_at),
-                "created_by_id": safe_str(recurring_meeting.created_by_id),  # ✅ ADD THIS
+                "created_by_id": safe_str(recurring_meeting.created_by_id),
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -212,7 +227,7 @@ async def get_recurring_meeting(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get recurring meeting: {str(e)}"
-        )
+        )            
 
 @router.put("/{meeting_id}")
 async def update_recurring_meeting(
@@ -228,7 +243,7 @@ async def update_recurring_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="Recurring meeting not found")
     
-    if str(meeting.created_by_id) != str(current_user.id) and not getattr(current_user, 'is_superuser', False):
+    if str(meeting.created_by_id) != str(current_user.id) and not await user_is_admin(db, current_user):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     updated = await service.update_recurring_meeting(meeting_id, meeting_data)
@@ -260,7 +275,7 @@ async def delete_recurring_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="Recurring meeting not found")
     
-    if str(meeting.created_by_id) != str(current_user.id) and not getattr(current_user, 'is_superuser', False):
+    if str(meeting.created_by_id) != str(current_user.id) and not await user_is_admin(db, current_user):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     success = await service.delete_recurring_meeting(meeting_id, delete_occurrences)
@@ -293,36 +308,25 @@ async def get_occurrences(
             raise HTTPException(status_code=404, detail="Recurring meeting not found")
 
         # Check access: creator, superuser, or participant
-        is_creator = str(meeting.created_by_id) == str(current_user.id)
-        is_superuser = getattr(current_user, 'is_superuser', False)
-        
-        if not (is_creator or is_superuser):
-            # Check if user is a participant by email
-            result = await db.execute(
-                select(Meeting).where(
-                    Meeting.recurring_meeting_id == meeting_id,
-                    Meeting.participants.any(MeetingParticipant.email == current_user.email)
-                )
-            )
-            is_participant = result.scalar_one_or_none() is not None
-            
-            if not is_participant:
-                raise HTTPException(status_code=403, detail="Not enough permissions")
-        
-        occurrences = await service.get_occurrences_by_meeting(meeting_id)
-        
+        if not await can_access_series(db, current_user, meeting):
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    
+        occurrences = await service.get_occurrences_by_meeting(meeting_id, skip=skip, limit=limit)
+
         # Transform Meeting objects to response dicts
         response_items = []
         for idx, occ in enumerate(occurrences, 1):
             status_name = "scheduled"
             if occ.status:
                 status_name = occ.status.short_name or occ.status.name or "scheduled"
-            
+
             response_items.append({
                 "id": safe_str(occ.id),
                 "recurring_meeting_id": safe_str(meeting_id),
                 "meeting_id": safe_str(occ.id),
-                "occurrence_number": idx,
+                # newest first, so fall back to counting down if the number isn't stored
+                "occurrence_number": occ.occurrence_number or (len(occurrences) - idx + 1),
                 "scheduled_date": safe_iso_format(occ.meeting_date or occ.start_time),
                 "start_time": safe_iso_format(occ.start_time),
                 "end_time": safe_iso_format(occ.end_time),
@@ -330,7 +334,7 @@ async def get_occurrences(
                 "status": status_name,
                 "created_at": safe_iso_format(occ.created_at),
             })
-        
+
         return {
             "success": True,
             "data": response_items,
@@ -340,7 +344,7 @@ async def get_occurrences(
                 "title": meeting.title
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -348,7 +352,7 @@ async def get_occurrences(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get occurrences: {str(e)}"
-        )
+        )        
     
 @router.post("/{meeting_id}/generate-on-demand")
 async def generate_on_demand_occurrence(
@@ -366,7 +370,7 @@ async def generate_on_demand_occurrence(
         if not meeting:
             raise HTTPException(status_code=404, detail="Recurring meeting not found")
         
-        if str(meeting.created_by_id) != str(current_user.id) and not getattr(current_user, 'is_superuser', False):
+        if str(meeting.created_by_id) != str(current_user.id) and not await user_is_admin(db, current_user):
             raise HTTPException(status_code=403, detail="Not enough permissions")
         
         # Calculate next date
@@ -379,14 +383,17 @@ async def generate_on_demand_occurrence(
             id=uuid.uuid4(),
             title=meeting.title,
             description=meeting.description,
-            department_id=meeting.department_id,
+            department_id=getattr(meeting, "department_id", None),
             meeting_date=next_date.date() if hasattr(next_date, 'date') else next_date,
             start_time=next_date if isinstance(next_date, datetime) else meeting.start_time,
             end_time=meeting.end_time,
             location_text=meeting.location_text,
+            visibility=getattr(meeting, "visibility", "open"),
+            restricted_department_id=getattr(meeting, "restricted_department_id", None),
             is_recurring=True,
             recurring_meeting_id=meeting.id,
-            created_by_id=current_user.id,
+            occurrence_number=(meeting.total_occurrences_generated or 0) + 1,
+            created_by_id=meeting.created_by_id,
             created_at=datetime.now(),
             updated_at=datetime.now(),
             is_active=True,
@@ -767,7 +774,7 @@ async def bulk_action(
             results.append({"id": safe_str(meeting_id), "status": "error", "message": "Not found"})
             continue
         
-        if str(meeting.created_by_id) != str(current_user.id) and not getattr(current_user, 'is_superuser', False):
+        if str(meeting.created_by_id) != str(current_user.id) and not await user_is_admin(db, current_user):
             results.append({"id": safe_str(meeting_id), "status": "error", "message": "Permission denied"})
             continue
         
@@ -988,48 +995,3 @@ async def get_recurring_status_attributes(
         }
     
 
-async def check_recurring_meeting_access(
-    meeting_id: uuid.UUID,
-    user_id: uuid.UUID,
-    db: AsyncSession,
-    is_superuser: bool = False
-) -> bool:
-    """
-    Check if user has access to a recurring meeting.
-    Access granted if:
-    1. User is superuser, OR
-    2. User created the meeting, OR
-    3. User is a participant
-    """
-    if is_superuser:
-        return True
-    
-    # Get the recurring meeting
-    result = await db.execute(
-        select(RecurringMeeting).where(RecurringMeeting.id == meeting_id)
-    )
-    meeting = result.scalar_one_or_none()
-    
-    if not meeting:
-        return False
-    
-    # Check if user is creator
-    if str(meeting.created_by_id) == str(user_id):
-        return True
-    
-    # Check if user is a participant in any occurrence
-    # We need to check the Meeting table for participants
-    result = await db.execute(
-        select(Meeting).where(
-            Meeting.recurring_meeting_id == meeting_id,
-            Meeting.participants.any(
-                or_(
-                    MeetingParticipant.email == (await db.execute(select(User.email).where(User.id == user_id))).scalar()
-                    
-                )
-            )
-        )
-    )
-    participant_meeting = result.scalar_one_or_none()
-    
-    return participant_meeting is not None

@@ -16,7 +16,9 @@ import {
   AccessTime as TimeIcon,
   LocationOn as LocationIcon,
   NotificationsActive as NotificationIcon,
-  People as PeopleIcon
+  People as PeopleIcon,
+  Edit as EditIcon, 
+  Check as CheckIcon
 } from '@mui/icons-material';
 
 const platformConfig = {
@@ -68,7 +70,7 @@ const MeetingInfo = ({ meeting, onNotify, onEdit }) => {
               </Tooltip>
               <Tooltip title="Edit Meeting:">
                 <IconButton onClick={onEdit} size="small">
-                  <Edit />
+                  <EditIcon />
                 </IconButton>
               </Tooltip>
             </Stack>

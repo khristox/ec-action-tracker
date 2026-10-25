@@ -207,11 +207,9 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
       {/* Header */}
       <Stack
         direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        sx={{ py: 0.5 }}
+        sx={{ justifyContent: 'space-between', alignItems: 'center', py: 0.5 }}
       >
-        <Stack direction="row" alignItems="center" spacing={1.5}>
+        <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1.5}>
           <RepeatIcon fontSize="small" color={isRecurring ? 'primary' : 'action'} />
           <Box>
             <Typography variant="body2" fontWeight={600}>
@@ -222,7 +220,7 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
             </Typography>
           </Box>
         </Stack>
-        <Stack direction="row" alignItems="center" spacing={1.5}>
+        <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1.5}>
           {isRecurring && (
             <Chip
               size="small"
@@ -418,7 +416,7 @@ export const RecurringMeetingSection = ({ recurrence, setRecurrence }) => {
               ) : previewDates.length > 0 ? (
                 <Stack spacing={0.5} sx={{ mt: 0.5 }}>
                   {previewDates.map((date, idx) => (
-                    <Stack key={idx} direction="row" alignItems="center" spacing={1}>
+                    <Stack key={idx} direction="row" sx={{ alignItems: 'center' }} spacing={1}>
                       <Badge badgeContent={idx + 1} color="primary" />
                       <Typography variant="caption">
                         {date.toLocaleDateString('en-US', {

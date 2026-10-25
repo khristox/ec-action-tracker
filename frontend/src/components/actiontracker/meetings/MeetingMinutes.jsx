@@ -1,7 +1,9 @@
 // src/components/meetings/MeetingMinutes.jsx
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import DOMPurify from 'dompurify';
 import { useDispatch, useSelector } from 'react-redux';
+import { useLater } from '../../../hooks/useLater';
 import {
   Box,
   Typography,
@@ -50,9 +52,11 @@ const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown da
 
 const stripHtmlTags = (html) => {
   if (!html) return '';
-  const tempDiv = document.createElement('div');
+  
+  const doc = new DOMParser().parseFromString(html, 'text/html');
   tempDiv.innerHTML = html;
-  return tempDiv.textContent || tempDiv.innerText || '';
+  return doc.body.textContent || '';
+
 };
 
 const getPlainTextPreview = (html, maxLength = 150) => {
@@ -61,13 +65,19 @@ const getPlainTextPreview = (html, maxLength = 150) => {
   return plainText.substring(0, maxLength) + '...';
 };
 
+const later = useLater();
 // ==================== RTF RENDERER COMPONENT ====================
 
 const RichTextRenderer = ({ content, isDarkMode }) => {
   if (!content) return null;
   
-  // Clean up content - remove any outer <p> tags that might cause extra spacing
-  const cleanedContent = content.trim();
+  // Sanitize untrusted rich-text HTML immediately before rendering.
+  // DOMPurify removes executable content such as scripts, event handlers,
+  // javascript: URLs, and other dangerous markup while preserving normal HTML.
+  const cleanedContent = DOMPurify.sanitize(content.trim(), {
+    USE_PROFILES: { html: true },
+    FORBID_ATTR: ['style'],
+  });
   
   return (
     <Box
@@ -238,12 +248,12 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
-        setTimeout(() => {
+        later(() => {
           fetchAttemptedRef.current = false;
         }, 500);
       }
     }
-  }, [meetingId]);
+  }, [meetingId, later]);
 
   // ==================== EFFECTS ====================
 

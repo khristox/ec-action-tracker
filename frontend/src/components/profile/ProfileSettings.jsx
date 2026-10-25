@@ -227,8 +227,11 @@ const LocationSearch = React.memo(({ value, onChange, onClear }) => {
   const [rootsLoading, setRootsLoading] = useState(false);
   const [rootsLoaded, setRootsLoaded] = useState({ address: false, structure: false });
   
-  const [selectedLocation, setSelectedLocation] = useState(value || null);
+  //const [selectedLocation, setSelectedLocation] = useState(value || null);
   const [locationHierarchy, setLocationHierarchy] = useState([]);
+  const selectedLocation = value ?? null;
+  const selectedLocationRef = useRef(null);
+  useEffect(() => { selectedLocationRef.current = selectedLocation; });
 
   useEffect(() => {
     setRootsLoaded({ address: false, structure: false });
@@ -237,12 +240,29 @@ const LocationSearch = React.memo(({ value, onChange, onClear }) => {
   }, [locationMode]);
 
   useEffect(() => {
-    if (value !== selectedLocation) setSelectedLocation(value);
+    setSelectedLocation(value ?? null);
   }, [value]);
 
   useEffect(() => {
-    if (selectedLocation?.id) loadLocationHierarchy(selectedLocation.id);
-    else setLocationHierarchy([]);
+    const locationId = selectedLocation?.id;
+    if (!locationId) { setLocationHierarchy([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/locations/${locationId}/ancestors`);
+        const ancestors = res.data || [];
+        const selfRes = await api.get(`/locations/${locationId}`);
+        if (!cancelled) {
+          setLocationHierarchy(selfRes.data ? [...ancestors, selfRes.data] : ancestors);
+        }
+      } catch {
+        if (!cancelled) {
+          const current = selectedLocationRef.current;
+          setLocationHierarchy(current ? [current] : []);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
   }, [selectedLocation?.id]);
 
   useEffect(() => {
@@ -306,26 +326,14 @@ const LocationSearch = React.memo(({ value, onChange, onClear }) => {
     return () => clearTimeout(timer);
   }, [searchTerm, locationMode, activeTab]);
 
-  const loadLocationHierarchy = async (locationId) => {
-    try {
-      const res = await api.get(`/locations/${locationId}/ancestors`);
-      const ancestors = res.data || [];
-      const selfRes = await api.get(`/locations/${locationId}`);
-      setLocationHierarchy(selfRes.data ? [...ancestors, selfRes.data] : ancestors);
-    } catch {
-      setLocationHierarchy(selectedLocation ? [selectedLocation] : []);
-    }
-  };
-
+  
   const handleSelect = (location) => {
-    setSelectedLocation(location);
     setSearchTerm('');
     setSearchResults([]);
     onChange(location);
   };
 
   const handleClear = () => {
-    setSelectedLocation(null);
     setLocationHierarchy([]);
     onChange(null);
     if (onClear) onClear();
@@ -436,33 +444,33 @@ const AddressHierarchyDisplay = ({ location }) => {
   const [hierarchy, setHierarchy] = useState([]);
   const [loading, setLoading] = useState(true);
   const theme = useTheme();
+  const locationRef = useRef(location);
+  useEffect(() => { locationRef.current = location; });
 
   useEffect(() => {
-    const loadHierarchy = async () => {
-      if (!location?.id) {
-        setHierarchy([]);
-        setLoading(false);
-        return;
-      }
-
+    const locationId = location?.id;
+    if (!locationId) {
+      setHierarchy([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
       try {
         const [locationRes, ancestorsRes] = await Promise.all([
-          api.get(`/locations/${location.id}`),
-          api.get(`/locations/${location.id}/ancestors`)
+          api.get(`/locations/${locationId}`),
+          api.get(`/locations/${locationId}/ancestors`),
         ]);
-        
-        const currentLocation = locationRes.data;
-        const ancestors = ancestorsRes.data || [];
-        setHierarchy([...ancestors, currentLocation]);
+        if (!cancelled) setHierarchy([...(ancestorsRes.data || []), locationRes.data]);
       } catch (err) {
         console.error('Error loading address hierarchy:', err);
-        setHierarchy(location ? [location] : []);
+        if (!cancelled) setHierarchy(locationRef.current ? [locationRef.current] : []);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    };
-
-    loadHierarchy();
+    })();
+    return () => { cancelled = true; };
   }, [location?.id]);
 
   if (loading) {
@@ -900,7 +908,7 @@ const ProfileSettings = () => {
               {/* Action Buttons */}
               {isEditing && (
                 <Grid size={12}>
-                  <Stack direction="row" sx={{ justifyContent: 'flex-end' }} spacing={2} sx={{ mt: 2 }}>
+                  <Stack direction="row" spacing={2} sx={{ justifyContent: 'flex-end', mt: 2 }}>
                     <Button variant="outlined" onClick={handleCancel} disabled={isUpdating} sx={{ borderRadius: 2 }}>Cancel</Button>
                     <Button type="submit" variant="contained" disabled={isUpdating} sx={{ borderRadius: 2, minWidth: 120 }}>
                       {isUpdating ? <CircularProgress size={20} /> : 'Save Changes'}

@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import api from '../../../../services/api';
+import { useLater } from '../../../../hooks/useLater';
 import {
   fetchParticipantLists,
   addCustomParticipant,
@@ -39,6 +40,7 @@ DEFAULT_START_TIME.setHours(9, 0, 0, 0);
 const DEFAULT_END_TIME = new Date();
 DEFAULT_END_TIME.setHours(10, 0, 0, 0);
 
+const later = useLater();
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -456,7 +458,7 @@ export const useMeetingForm = () => {
           // Set chairperson if exists
           const chair = meeting.participants.find(p => p.is_chairperson);
           if (chair) {
-            setTimeout(() => dispatch(setMeetingChairperson(chair.id)), 150);
+            later(() => dispatch(setMeetingChairperson(chair.id)), 150);
           }
         }
 

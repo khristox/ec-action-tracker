@@ -92,14 +92,14 @@ const RecurringMeetingDetail = () => {
   const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
 
-  const isInitialBootRef = useRef(true);
+  const requestRef = useRef(0);
 
   // Core data states
   const [recurringMeeting, setRecurringMeeting] = useState(null);
   const [occurrences, setOccurrences] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [occurrencesLoading, setOccurrencesLoading] = useState(false);
+  const [occurrencesLoading, setOccurrencesLoading] = useState(true);
   const [error, setError] = useState(null);
   const [locationDetails, setLocationDetails] = useState(null);
 
@@ -122,6 +122,7 @@ const RecurringMeetingDetail = () => {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortOrder, setSortOrder] = useState('asc');
   const [viewMode, setViewMode] = useState('table');
@@ -171,12 +172,13 @@ const RecurringMeetingDetail = () => {
   }, [locationDetails]);
 
   const fetchOccurrences = useCallback(async (opts = {}) => {
-    const currentPage   = opts.page        ?? page;
-    const currentLimit  = opts.rowsPerPage ?? rowsPerPage;
-    const currentSearch = opts.searchTerm  ?? searchTerm;
+    const currentPage   = opts.page         ?? page;
+    const currentLimit  = opts.rowsPerPage  ?? rowsPerPage;
+    const currentSearch = opts.searchTerm   ?? debouncedSearch;
     const currentFilter = opts.filterStatus ?? filterStatus;
-    const currentSort   = opts.sortOrder   ?? sortOrder;
+    const currentSort   = opts.sortOrder    ?? sortOrder;
 
+    const requestId = ++requestRef.current;
     setOccurrencesLoading(true);
     try {
       const params = { page: currentPage, limit: currentLimit, sort_order: currentSort };
@@ -184,19 +186,21 @@ const RecurringMeetingDetail = () => {
       if (currentFilter !== 'all') params.status_filter = currentFilter;
 
       const response = await api.get(`/recurring-meetings/${id}/occurrences`, { params });
+      if (requestId !== requestRef.current) return;      // a newer request superseded this one
       const data  = response.data?.data  || response.data  || [];
       const total = response.data?.total ?? (Array.isArray(data) ? data.length : 0);
 
       setOccurrences(Array.isArray(data) ? data : []);
       setTotalCount(total);
     } catch (err) {
+      if (requestId !== requestRef.current) return;
       console.error('Failed to fetch occurrences:', err);
       setOccurrences([]);
       setTotalCount(0);
     } finally {
-      setOccurrencesLoading(false);
+      if (requestId === requestRef.current) setOccurrencesLoading(false);
     }
-  }, [id, page, rowsPerPage, searchTerm, filterStatus, sortOrder]);
+  }, [id, page, rowsPerPage, debouncedSearch, filterStatus, sortOrder]);
 
   const fetchRecurringMeetingDetails = useCallback(async () => {
     try {
@@ -218,30 +222,29 @@ const RecurringMeetingDetail = () => {
   }, [id]);
 
   useEffect(() => {
-    if (!id) return;
-    const bootstrapWorkspace = async () => {
-      setLoading(true);
-      await fetchRecurringMeetingDetails();
-      await fetchOccurrences({ page: 1, rowsPerPage, searchTerm, filterStatus, sortOrder });
-      setLoading(false);
-      isInitialBootRef.current = false;
-    };
-    bootstrapWorkspace();
-  }, [id]);
-
-  useEffect(() => {
-    if (loading || isInitialBootRef.current) return;
-    fetchOccurrences();
-  }, [page, rowsPerPage, filterStatus, sortOrder]);
-
-  useEffect(() => {
-    if (loading || isInitialBootRef.current) return;
-    const delayTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
       setPage(1);
-      fetchOccurrences({ page: 1, searchTerm });
     }, 400);
-    return () => clearTimeout(delayTimer);
+    return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Series details
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setLoading(true);
+    fetchRecurringMeetingDetails().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [id, fetchRecurringMeetingDetails]);
+
+  // Occurrences: refetch exactly when id/page/size/filter/sort/debounced search change
+  useEffect(() => {
+    if (!id) return;
+    fetchOccurrences();
+  }, [id, fetchOccurrences]);
 
   const handlePageChange = (_, newPage) => {
     setPage(newPage);
@@ -273,16 +276,25 @@ const RecurringMeetingDetail = () => {
 
   const handleGenerateMultiple = useCallback(async (count = 5) => {
     setGenerating(true);
+    let created = 0;
     try {
       for (let i = 0; i < count; i++) {
         await api.post(`/recurring-meetings/${id}/generate-on-demand`);
+        created++;
       }
-      await Promise.all([fetchRecurringMeetingDetails(), fetchOccurrences({ page: 1 })]);
-      setPage(1);
       setSnackbar({ open: true, message: `Generated ${count} occurrences!`, severity: 'success' });
     } catch (err) {
-      setSnackbar({ open: true, message: err.response?.data?.detail || 'Failed to generate', severity: 'error' });
+      const detail = err.response?.data?.detail || 'Failed to generate';
+      setSnackbar({
+        open: true,
+        message: created ? `Generated ${created} of ${count}. ${detail}` : detail,
+        severity: 'error',
+      });
     } finally {
+      if (created > 0) {
+        await Promise.all([fetchRecurringMeetingDetails(), fetchOccurrences({ page: 1, rowsPerPage, searchTerm, filterStatus, sortOrder })]);
+        setPage(1);
+      }
       setGenerating(false);
     }
   }, [id, fetchRecurringMeetingDetails, fetchOccurrences]);

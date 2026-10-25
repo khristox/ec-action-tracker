@@ -1,4 +1,4 @@
-// src/components/actiontracker/meetings/components/EditActionDialog.jsx
+// src/components/actiontracker/meetings/EditActionDialog.jsx
 
 import React, { useState, useEffect } from 'react';
 import {

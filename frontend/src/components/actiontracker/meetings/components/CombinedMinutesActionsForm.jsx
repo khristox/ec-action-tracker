@@ -199,7 +199,7 @@ const CombinedMinutesActionsForm = ({
           bgcolor: isMobile ? 'primary.main' : 'transparent',
           color: isMobile ? 'white' : 'inherit'
         }}>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <DescriptionIcon />
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
               {editingMinutes ? 'Edit Minutes & Actions' : 'Add Minutes & Actions'}
@@ -268,7 +268,7 @@ const CombinedMinutesActionsForm = ({
 
           {/* Actions Section */}
           <Box>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Typography variant="subtitle1" fontWeight={700} color="primary.main">
                 Action Items
               </Typography>
@@ -298,7 +298,7 @@ const CombinedMinutesActionsForm = ({
                         <Typography variant="subtitle2" fontWeight={700} gutterBottom>
                           {action.description}
                         </Typography>
-                        <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" gap={1}>
+                        <Stack direction="row" spacing={1} sx={{ mt: 1, flexwrap: 'wrap', gap: 1 }} >
                           <Chip 
                             label={getPriorityLabel(action.priority)} 
                             size="small"

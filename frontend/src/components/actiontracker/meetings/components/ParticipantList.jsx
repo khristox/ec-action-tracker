@@ -3,7 +3,7 @@ import {
   List, ListItem, ListItemAvatar, Avatar, ListItemText, 
   Typography, Stack, Chip, IconButton, Tooltip, Box,
   CircularProgress, Badge, useTheme, alpha, Fade, Grow,
-  Paper, Collapse, Divider
+  Paper, Collapse, Divider, Grid
 } from '@mui/material';
 import { 
   CheckCircle as ConfirmIcon, 
@@ -65,11 +65,11 @@ const ParticipantList = ({ participants, meetingId, isStarted, onUpdate }) => {
     
     return (
       <Stack 
-        direction="row" 
-        alignItems="center" 
+        direction="row"  
         spacing={1} 
         sx={{ 
           mt: 2, 
+          alignItems: 'center',
           pt: 1.5, 
           borderTop: `1px dashed ${theme.palette.divider}` 
         }}
@@ -189,7 +189,7 @@ const ParticipantList = ({ participants, meetingId, isStarted, onUpdate }) => {
 
                 <ListItemText 
                   primary={
-                    <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                    <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap' }} spacing={1}>
                       <Typography variant="subtitle1" fontWeight={700} color="text.primary">
                         {p.name}
                       </Typography>
@@ -225,7 +225,7 @@ const ParticipantList = ({ participants, meetingId, isStarted, onUpdate }) => {
                   }
                 />
 
-                <Stack direction="row" spacing={0.5} alignItems="center">
+                <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                   {isStarted && (
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
                       <Tooltip title="Attended">
@@ -267,14 +267,14 @@ const ParticipantList = ({ participants, meetingId, isStarted, onUpdate }) => {
               <Collapse in={isExpanded} timeout="auto">
                 <Box sx={{ p: 3, bgcolor: alpha(theme.palette.action.hover, isDark ? 0.2 : 0.03) }}>
                   <Grid container spacing={3}>
-                    <Grid item xs={12} sm={6}>
+                    <Grid size={{ xs: 12, sm: 6 }}>
                       <LabelValue label="Position" value={p.title || 'N/A'} icon={<BusinessIcon fontSize="inherit"/>} />
                     </Grid>
-                    <Grid item xs={12} sm={6}>
+                    <Grid size={{ xs: 12, sm: 6 }}>
                       <LabelValue label="Contact" value={p.telephone || 'No phone'} icon={<PhoneIcon fontSize="inherit"/>} />
                     </Grid>
                     {p.notes && (
-                      <Grid item xs={12}>
+                      <Grid size={12}>
                         <LabelValue label="Notes" value={p.notes} />
                       </Grid>
                     )}
@@ -295,7 +295,7 @@ const LabelValue = ({ label, value, icon }) => (
     <Typography variant="caption" color="text.disabled" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
       {label}
     </Typography>
-    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
       {icon && <Box sx={{ color: 'primary.main', display: 'flex', fontSize: 16 }}>{icon}</Box>}
       <Typography variant="body2" color="text.primary" fontWeight={500}>{value}</Typography>
     </Stack>

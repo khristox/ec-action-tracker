@@ -25,6 +25,20 @@ import CombinedMinutesActionsForm from './CombinedMinutesActionsForm';
 import PersonsImplementingEditor from './PersonsImplementingEditor';
 import { parsePersonsFromAction, buildPersonsPayload } from './personsImplementing';
 
+import pLimit from 'p-limit';
+
+const actionLimit = pLimit(4);
+
+const toActionPayload = (a) => ({
+  description: a.description,
+  persons_implementing: a.persons_implementing,
+  assigned_to_id: a.assigned_to_id,
+  assigned_to_name: a.assigned_to_name,
+  priority: a.priority,
+  due_date: a.due_date,
+  remarks: a.remarks || '',
+});
+
 const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, onUpdate }) => {
   const isStarted = meetingStatus?.toLowerCase().endsWith('started');
   const [filter, setFilter] = useState('active');
@@ -217,32 +231,45 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
         await api.put(`/action-tracker/minutes/${editingMinutes.id}`, {
           topic: data.minutes.topic,
           content: data.minutes.content,
-          summary: data.minutes.summary
+          summary: data.minutes.summary,
         });
-        
-        for (const action of data.actions) {
-          // action already has persons_implementing + assigned_to_id +
-          // assigned_to_name built by CombinedMinutesActionsForm via
-          // buildPersonsPayload() - just pass it straight through instead
-          // of re-deriving from the old single `assigned_to` shape.
-          const actionPayload = {
-            description: action.description,
-            persons_implementing: action.persons_implementing,
-            assigned_to_id: action.assigned_to_id,
-            assigned_to_name: action.assigned_to_name,
-            priority: action.priority,
-            due_date: action.due_date,
-            remarks: action.remarks || ''
-          };
 
-          if (action.id && !action.isNew) {
-            await api.put(`/action-tracker/actions/${action.id}`, actionPayload);
-          } else if (action.description) {
-            await api.post(`/action-tracker/actions/minutes/${editingMinutes.id}/actions`, actionPayload);
+        const isUpdate = (a) => a.id && !a.isNew;
+        const updates = data.actions.filter(isUpdate);
+        const creates = data.actions.filter((a) => !isUpdate(a) && a.description);
+
+        // Updates: distinct rows, safe to run concurrently
+        const updateResults = await Promise.allSettled(
+          updates.map((a) =>
+            actionLimit(() => api.put(`/action-tracker/actions/${a.id}`, toActionPayload(a)))
+          )
+        );
+
+        // Creates: sequential until list ordering is confirmed irrelevant
+        let createFailures = 0;
+        for (const a of creates) {
+          try {
+            await api.post(`/action-tracker/actions/minutes/${editingMinutes.id}/actions`, toActionPayload(a));
+          } catch (err) {
+            console.error('Create action failed', err);
+            createFailures++;
           }
         }
+
+        const failed = updateResults.filter((r) => r.status === 'rejected').length + createFailures;
+        if (failed > 0) {
+          handleRefresh();
+          setFormOpen(false);
+          setEditingMinutes(null);
+          setError(
+            `Minutes saved, but ${failed} of ${updates.length + creates.length} action(s) failed. ` +
+            'Reopen the minutes to review and retry.'
+          );
+          return;
+        }
         setSuccessMsg('Minutes and actions updated successfully');
-      } else {
+      } 
+      else {
         const minutesResponse = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
           topic: data.minutes.topic,
           content: data.minutes.content,
@@ -309,10 +336,8 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
         {/* Header */}
         <Stack 
           direction={{ xs: 'column', md: 'row' }} 
-          justifyContent="space-between" 
-          alignItems={{ xs: 'flex-start', md: 'flex-end' }} 
+          sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'flex-end' }, mb: 4 }} 
           spacing={2} 
-          mb={4}
         >
           <Box>
             <Typography variant="overline" sx={{ fontWeight: 'bold', color: 'text.secondary', ml: 0.5 }}>
@@ -369,7 +394,7 @@ const MinutesAndActions = ({ minutes: initialMinutes, meetingId, meetingStatus, 
 
         {/* Loading indicator for actions */}
         {loadingActions && (
-          <Box display="flex" justifyContent="center" alignItems="center" my={4}>
+          <Box display="flex" sx={{ justifyContent: 'center', alignItems: 'center', mb: 4 }} >
             <CircularProgress size={32} />
             <Typography variant="body2" sx={{ ml: 2 }}>Loading actions...</Typography>
           </Box>

@@ -1,6 +1,7 @@
 // src/components/actiontracker/meetings/components/MinutesList.jsx
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useLater } from '../../../../hooks/useLater';
 import {
   Box,
   Typography,
@@ -24,6 +25,7 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
+import DOMPurify from 'dompurify';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DescriptionIcon from '@mui/icons-material/Description';
 import AddIcon from '@mui/icons-material/Add';
@@ -36,6 +38,8 @@ import { format } from 'date-fns';
 import api from '../../../services/api';
 
 // ==================== HELPER FUNCTIONS ====================
+
+const later = useLater();
 
 const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown date') => {
   if (!dateVal) return fallback;
@@ -53,7 +57,10 @@ const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown da
 const RichTextRenderer = ({ content, isDarkMode }) => {
   if (!content) return null;
   
-  const cleanedContent = content.trim();
+  const cleanedContent = DOMPurify.sanitize(content.trim(), {
+    USE_PROFILES: { html: true },
+    FORBID_ATTR: ['style'],
+  });
   
   return (
     <Box
@@ -404,12 +411,12 @@ const MinutesList = ({
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
-        setTimeout(() => {
+        later(() => {
           fetchAttemptedRef.current = false;
         }, 500);
       }
     }
-  }, [meetingId]);
+    }, [meetingId, later]);
 
   // ==================== EFFECTS ====================
 

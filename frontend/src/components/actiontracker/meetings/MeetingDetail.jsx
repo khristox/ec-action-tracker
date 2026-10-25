@@ -686,7 +686,7 @@ const MeetingDetail = () => {
   const handleJoinMeeting = useCallback(() => {
     if (isOnlineMeeting && hasMeetingLink) {
       const url = hasMeetingLink.startsWith('http') ? hasMeetingLink : `https://${hasMeetingLink}`;
-      window.open(url, '_blank');
+      window.open(url, '_blank', 'noopener,noreferrer');
     } else {
       setSnackbar({ 
         open: true, 

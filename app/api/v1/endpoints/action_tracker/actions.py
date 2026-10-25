@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from typing import Any, List, Optional, Dict
 from uuid import UUID
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from sqlalchemy import and_, or_, func, desc, asc
 
 
@@ -43,20 +44,27 @@ from app.schemas.meeting_minutes.meeting_minutes import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+APP_TZ = ZoneInfo("Africa/Kampala")   # UTC+3, no DST
+# How to read datetimes that come back from the DB without tzinfo.
+# This file writes completed_at/updated_at with datetime.now(timezone.utc)
+# and parse_due_date produces UTC-aware values, so UTC is the likely convention.
+# Change to APP_TZ if your naive values are stored as Kampala wall time.
+NAIVE_DB_TZ = timezone.utc
 
 # ==================== HELPER FUNCTIONS ====================
 
+def to_app_tz(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=NAIVE_DB_TZ)
+    return dt.astimezone(APP_TZ)
+
 def calculate_is_overdue(due_date: Optional[datetime], completed_at: Optional[datetime]) -> bool:
-    """Safely calculate if an action is overdue"""
+    """Overdue = past the due moment, judged in Uganda time."""
     if not due_date or completed_at:
         return False
-
-    # Handle timezone-naive comparison
-    now = datetime.now()
-    if due_date.tzinfo:
-        due_date = due_date.replace(tzinfo=None)
-
-    return due_date < now
+    return to_app_tz(due_date) < datetime.now(APP_TZ)
 
 
 def format_datetime(dt: Optional[datetime]) -> Optional[str]:
@@ -303,7 +311,8 @@ async def get_my_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: Optional[str] = Query(None, description="Search in description"),
-    status_filter: Optional[str] = Query(None, description="Filter by status"),
+    status_filter: Optional[str] = Query(None, alias="status", 
+        description="pending, in_progress, completed, overdue"),
     priority: Optional[int] = Query(None, ge=1, le=4),
     is_overdue: Optional[bool] = Query(None),
     include_completed: bool = Query(False, description="Include completed tasks"),
@@ -732,7 +741,7 @@ async def update_action_progress(
         is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
         if not is_admin and not await meeting_action.can_update_progress(db, action_obj, current_user):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=403,
                 detail="Only the meeting creator or a person implementing this action can update its progress",
             )
 

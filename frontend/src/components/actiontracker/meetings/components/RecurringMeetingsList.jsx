@@ -555,14 +555,14 @@ export const RecurringMeetingsList = ({
         <Stack 
           direction="row" 
           spacing={2} 
-          flexWrap="wrap"
           sx={{ 
             alignItems: 'flex-start',
+            flexwrap: 'wrap',
             justifyContent: 'space-between' 
           }}
         >
           <Box sx={{ flex: 1, minWidth: '200px' }}>
-            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 0.75, alignItems: 'center' }}>
+            <Stack direction="row" spacing={1} sx={{ mb: 0.75, flexwrap: 'wrap', alignItems: 'center' }}>
               <Typography variant="subtitle2" fontWeight={700}>{meeting.title}</Typography>
               <Chip 
                 label={meeting.status || 'Active'} 

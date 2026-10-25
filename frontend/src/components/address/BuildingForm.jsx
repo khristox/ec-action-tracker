@@ -110,7 +110,7 @@ const generateCodeFromName = (name) => {
     .replace(/^-|-$/g, '');
 };
 
-const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }) => {
+const BuildingFormBodym = ({ onClose, onSuccess, initialData, mode = 'create', addressOptions, setAddressOptions }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
 
@@ -124,7 +124,6 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [addressHierarchy, setAddressHierarchy] = useState([]);
   const [addressSearchTerm, setAddressSearchTerm] = useState('');
-  const [addressOptions, setAddressOptions] = useState([]);
   const [loadingAddresses, setLoadingAddresses] = useState(false);
   const [addressSearchResults, setAddressSearchResults] = useState([]);
 
@@ -153,6 +152,8 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
   const hierarchyRef = useRef(hierarchy);
   const activeStepRef = useRef(activeStep);
   const createModeRef = useRef(createMode);
+  const editModeRef = useRef(editMode);
+  useEffect(() => { editModeRef.current = editMode; }, [editMode]);
   useEffect(() => { hierarchyRef.current = hierarchy; }, [hierarchy]);
   useEffect(() => { activeStepRef.current = activeStep; }, [activeStep]);
   useEffect(() => { createModeRef.current = createMode; }, [createMode]);
@@ -332,27 +333,24 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
 
   // Build address tree once when panel opens
   useEffect(() => {
-    if (showAddressSearch && addressOptions.length === 0) {
-      buildAddressTree();
-    }
-  }, [showAddressSearch]); // intentionally omit buildAddressTree/addressOptions to fire once
+    if (showAddressSearch && addressOptions.length === 0) buildAddressTree();
+  }, [showAddressSearch, addressOptions.length, buildAddressTree]);
 
   // Load options only when the dialog opens fresh (not in create/edit mode) or step changes
   // We use a ref gate so this doesn't fire when createMode/editMode flip
-  const shouldLoadOptions = open && !isEdit && !createMode && !editMode;
-  const shouldLoadRef = useRef(shouldLoadOptions);
   useEffect(() => {
-    shouldLoadRef.current = shouldLoadOptions;
-  });
+    if (isEdit || createModeRef.current || editModeRef.current) return;
+    loadOptions(activeStep);
+  }, [activeStep, isEdit, loadOptions]);
 
   useEffect(() => {
-    if (!open || isEdit || createMode || editMode) return;
+    if (isEdit || createMode || editMode) return;
     loadOptions(activeStep);
-  }, [activeStep, open, isEdit]); // createMode/editMode deliberately excluded — handled by the gate above
+  }, [activeStep, isEdit]); // createMode/editMode deliberately excluded — handled by the gate above
 
   // Load existing hierarchy when editing
   useEffect(() => {
-    if (open && isEdit && initialData) {
+    if (isEdit && initialData) {
       const loadHierarchy = async () => {
         setLoading(true);
         try {
@@ -382,30 +380,9 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
       };
       loadHierarchy();
     }
-  }, [open, isEdit, initialData]);
+  }, [isEdit, initialData]);
 
-  // Reset form when dialog opens fresh
-  useEffect(() => {
-    if (open && !isEdit) {
-      setHierarchy({});
-      setActiveStep(0);
-      setCompletedSteps({});
-      setStopLevel(null);
-      setCreateMode(false);
-      setEditMode(false);
-      setEditingLevel(null);
-      setSelectedAddress(null);
-      setAddressHierarchy([]);
-      setShowAddressSearch(false);
-      setCurrentFormData(EMPTY_FORM);
-      setSelectedExisting(null);
-      setError(null);
-      setValidationErrors({});
-      setCodeAvailable(null);
-      setSuccess(false);
-    }
-  }, [open]); // only fires when dialog opens/closes
-
+  
   // ─── Handlers ─────────────────────────────────────────────────────────────
 
   const handleSelectExisting = (event, value) => {
@@ -1079,15 +1056,7 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth
-      PaperProps={{
-        sx: {
-          bgcolor: 'background.paper', borderRadius: 2,
-          border: `1px solid ${theme.palette.divider}`,
-          backgroundImage: 'none', maxHeight: '90vh'
-        }
-      }}
-    >
+    <>
       <DialogTitle sx={{ pb: 2, borderBottom: `1px solid ${theme.palette.divider}`, bgcolor: 'background.default' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={1.5} alignItems="center">
@@ -1176,6 +1145,28 @@ const BuildingForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }
 
         {success && <Button variant="contained" onClick={handleFinish}>Finish</Button>}
       </DialogActions>
+    </>
+  );
+};
+
+const BuildingForm = ({ open, onClose, ...rest }) => {
+  const theme = useTheme();
+  const [addressOptions, setAddressOptions] = useState([]);   // survives open/close, so the tree isn't rebuilt each time
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: 'background.paper', borderRadius: 2,
+          border: `1px solid ${theme.palette.divider}`,
+          backgroundImage: 'none', maxHeight: '90vh',
+        },
+      }}
+    >
+      <BuildingFormBody onClose={onClose} addressOptions={addressOptions} setAddressOptions={setAddressOptions} {...rest} />
     </Dialog>
   );
 };

@@ -193,7 +193,7 @@ const PersonsImplementingEditor = ({
                       />
                       {isPrivate && (
                         <Tooltip title="This person was assigned from the System Users list, so their identity is hidden from this record for privacy.">
-                          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
+                          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mt: 0.5 }}>
                             <LockIcon sx={{ fontSize: 12, color: colors.textSecondary }} />
                             <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.65rem' }}>
                               Identity private
@@ -204,7 +204,7 @@ const PersonsImplementingEditor = ({
                     </TableCell>
                     <TableCell sx={{ minWidth: 140 }}>
                       {isPrivate ? (
-                        <Stack direction="row" spacing={1} alignItems="center">
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <Box
                             sx={{
                               px: 1.5,
@@ -237,7 +237,7 @@ const PersonsImplementingEditor = ({
                     </TableCell>
                     <TableCell sx={{ minWidth: 180 }}>
                       {isPrivate ? (
-                        <Stack direction="row" spacing={1} alignItems="center">
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <Box
                             sx={{
                               px: 1.5,
@@ -343,15 +343,15 @@ const PersonsImplementingEditor = ({
               }}
             >
               <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <PersonIcon fontSize="small" sx={{ color: colors.primary }} />
                     <Typography variant="caption" fontWeight={600} sx={{ color: colors.textSecondary }}>
                       Implementer {idx + 1}
                     </Typography>
                     {isPrivate && (
                       <Tooltip title="This person was assigned from the System Users list, so their identity is hidden from this record for privacy.">
-                        <Stack direction="row" spacing={0.3} alignItems="center">
+                        <Stack direction="row" spacing={0.3} sx={{ alignItems: 'center' }}>
                           <LockIcon sx={{ fontSize: 12, color: colors.textSecondary }} />
                           <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '0.65rem' }}>
                             Private
@@ -386,10 +386,10 @@ const PersonsImplementingEditor = ({
                     <>
                       <Stack 
                         direction="row" 
-                        spacing={1.5} 
-                        alignItems="center" 
+                        spacing={1.5}  
                         sx={{ 
                           p: 1.5, 
+                          alignItems: 'center',
                           bgcolor: alpha(colors.border, 0.2), 
                           borderRadius: 1.5,
                           border: `1px solid ${alpha(colors.border, 0.3)}`,
@@ -418,10 +418,10 @@ const PersonsImplementingEditor = ({
                       </Stack>
                       <Stack 
                         direction="row" 
-                        spacing={1.5} 
-                        alignItems="center" 
+                        spacing={1.5}  
                         sx={{ 
                           p: 1.5, 
+                          alignItems: 'center',
                           bgcolor: alpha(colors.border, 0.2), 
                           borderRadius: 1.5,
                           border: `1px solid ${alpha(colors.border, 0.3)}`,

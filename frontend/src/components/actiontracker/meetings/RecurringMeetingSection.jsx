@@ -35,6 +35,7 @@ import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { addDays, addWeeks, addMonths, addYears, getDaysInMonth, format } from 'date-fns';
 import api from '../../../services/api';
+import { useLater } from '../../../hooks/useLater';
 
 // Store imports
 import {
@@ -71,6 +72,8 @@ const useDebounce = (value, delay = 400) => {
   }, [value, delay]);
   return debouncedValue;
 };
+
+const later = useLater();
 
 const useAutoSave = (formData, recurrence, isEditMode, formDirty, saveState) => {
   useEffect(() => {
@@ -267,7 +270,7 @@ const MeetingForm = () => {
             id: p.id || `p-${Date.now()}-${Math.random()}`,
           })));
           const chair = meeting.participants.find(p => p.is_chairperson);
-          if (chair) setTimeout(() => dispatch(setMeetingChairperson(chair.id)), 150);
+          if (chair) later(() => dispatch(setMeetingChairperson(chair.id)), 150);
         }
         if (meeting.recurrence) setRecurrence(meeting.recurrence);
       })

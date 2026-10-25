@@ -122,7 +122,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
       }}
     >
       <DialogTitle sx={{ pb: 1.5, pt: 2.5 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6" fontWeight={700} color={isDarkMode ? '#f3f4f6' : 'text.primary'}>
             Edit Action Item
           </Typography>
@@ -162,7 +162,7 @@ const EditActionDialog = ({ open, action, onClose, onSave }) => {
             boxShadow: isDarkMode ? 'inset 0 1px 1px rgba(255,255,255,0.03)' : 'none'
           }}
         >
-          <Stack direction="row" spacing={2} alignItems="flex-start">
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
             <AssignmentIcon 
               sx={{ 
                 mt: 0.5, 

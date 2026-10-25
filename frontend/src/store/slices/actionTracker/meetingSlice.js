@@ -663,7 +663,7 @@ export const updateMeetingMinutes = createAsyncThunk(
 
 // Fetch Meeting Participants with deduplication
 export const fetchMeetingParticipants = createAsyncThunk(
-  'notifications/fetchMeetingParticipants',
+  'meetings/fetchMeetingParticipants',
   async (meetingId, { getState, rejectWithValue, signal }) => {
     try {
       // ✅ Try to get participants from current meeting first

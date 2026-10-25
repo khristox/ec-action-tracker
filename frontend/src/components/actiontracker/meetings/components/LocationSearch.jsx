@@ -21,6 +21,7 @@ import {
   Apartment as ApartmentIcon,
   MeetingRoom as MeetingRoomIcon,
   EventSeat as EventSeatIcon,
+  Close as CloseIcon,
   DomainOutlined as StructureIcon
 } from '@mui/icons-material';
 import api from '../../../../services/api';
@@ -257,8 +258,8 @@ export const LocationSearch = React.memo(({ value, onChange, onClear, error, hel
     <Card variant="outlined" sx={{ borderRadius: 2, borderColor: error ? 'error.main' : 'divider' }}>
       <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
         <Stack spacing={2}>
-          <Stack direction="row" alignItems="center" sx={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-            <Stack direction="row" alignItems="center" spacing={1}>
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <LocationIcon sx={{ color: error ? 'error.main' : 'primary.main' }} />
               <Typography variant="subtitle1" fontWeight={600}>Meeting Location</Typography>
             </Stack>
@@ -268,7 +269,7 @@ export const LocationSearch = React.memo(({ value, onChange, onClear, error, hel
                 size="small" 
                 color="success" 
                 onDelete={handleClear}
-                deleteIcon={<Close />}
+                deleteIcon={<CloseIcon />}
               />
             )}
           </Stack>

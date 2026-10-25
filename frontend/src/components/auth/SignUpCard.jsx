@@ -327,7 +327,7 @@ const SignUpCard = () => {
   }, [isRegistering]);
 
   useEffect(() => {
-    if (registrationSuccess) {
+    if (!registrationSuccess) return;
       setIsSubmitting(false);
       setRegisteredEmail(formData.email.trim().toLowerCase());
       
@@ -340,16 +340,20 @@ const SignUpCard = () => {
       });
       
       // Open verification dialog after a short delay
-      setTimeout(() => {
+      const dialogTimer = setTimeout(() => {
         setVerificationDialogOpen(true);
       }, 1500);
       
-      const timer = setTimeout(() => {
+      const resetTimer = setTimeout(() => {
         dispatch(resetRegistrationSuccess());
       }, 5000);
       
-      return () => clearTimeout(timer);
-    }
+      return () => {
+        clearTimeout(dialogTimer);
+        clearTimeout(resetTimer);
+        dispatch(resetRegistrationSuccess()); // keep the old behaviour: the flag never lingers
+      };
+    
   }, [registrationSuccess, dispatch]);
 
   // ─── HANDLERS ──────────────────────────────────────────────────────────────

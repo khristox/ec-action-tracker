@@ -29,6 +29,7 @@ import {
   resetUserPassword, updateUserRoles,
 } from '../../store/slices/adminSlice';
 import { fetchRoles, selectAllRoles } from '../../store/slices/roleSlice';
+import { settleAll } from '../../utils/settleAll';
 import api from '../../services/api';
 import UserDetailPanel from './UserDetailPanel';
 
@@ -945,9 +946,24 @@ const DepartmentDialog = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [selectedMap, setSelectedMap] = useState({});
+  return (
+    <Dialog
+      open={open}
+      onClose={() => !saving && onClose()}
+      maxWidth="sm" fullWidth fullScreen={isMobile}
+      TransitionComponent={Fade}
+      PaperProps={{ sx: { borderRadius: isMobile ? 0 : 2.5, overflow: 'hidden', maxHeight: '90vh' } }}
+    >
+      <DepartmentDialogBody key={ready ? 'ready' : 'loading'} onClose={onClose} saving={saving} isMobile={isMobile} {...rest} />
+    </Dialog>
+  );
+
+  const [selectedMap, setSelectedMap] = useState(() => {
+    const initial = {};
+    currentAssignments.forEach((a) => { initial[a.department_id] = a.role || 'member'; });
+    return initial;
+  });
   const [search, setSearch] = useState('');
-  const searchRef = useRef(null);
 
   const activeDepartments = useMemo(() => {
     return departments.filter(dept => dept.is_active !== false);
@@ -969,16 +985,16 @@ const DepartmentDialog = ({
     return map;
   }, [deptTree]);
 
-  useEffect(() => {
-    if (open) {
-      const initial = {};
-      currentAssignments.forEach((a) => {
-        initial[a.department_id] = a.role || 'member';
-      });
-      setSelectedMap(initial);
-      setSearch('');
-      setTimeout(() => searchRef.current?.focus(), 120);
-    }
+    useEffect(() => {
+    if (!open) return;
+    const initial = {};
+    currentAssignments.forEach((a) => {
+      initial[a.department_id] = a.role || 'member';
+    });
+    setSelectedMap(initial);
+    setSearch('');
+    const focusTimer = setTimeout(() => searchRef.current?.focus(), 120);
+    return () => clearTimeout(focusTimer);
   }, [open, currentAssignments]);
 
   const filteredTree = useMemo(() => {
@@ -1406,41 +1422,61 @@ const UserManagement = () => {
     setSnackbar({ open: true, message: 'Data refreshed', severity: 'success' });
   };
 
+  const errorDetail = (e) => {
+    const d = e?.response?.data?.detail;
+    return typeof d === 'string' ? d : null;   // FastAPI 422 detail can be an array
+  };
+
   const handleSaveDepartments = async ({ addEntries, changeEntries, removeIds }) => {
     if (!deptDialogUser) return;
+    const userId = deptDialogUser.id;
     setSavingDepts(true);
     try {
-      for (const { id, role } of addEntries) {
-        await api.post(`/users/${deptDialogUser.id}/departments`, {
-          department_ids: [id],
-          role,
+      // 1. Adds: one POST per distinct role
+      const idsByRole = {};
+      addEntries.forEach(({ id, role }) => { (idsByRole[role] ||= []).push(id); });
+      const addResults = await settleAll(Object.entries(idsByRole), ([role, ids]) =>
+        api.post(`/users/${userId}/departments`, { department_ids: ids, role })
+      );
+
+      // 2. Role changes
+      const changeResults = await settleAll(changeEntries, ({ id, role }) =>
+        api.patch(`/users/${userId}/departments/${id}`, { role })
+      );
+
+      // 3. Removals
+      const removeResults = await settleAll(removeIds, (deptId) =>
+        api.delete(`/users/${userId}/departments/${deptId}`)
+      );
+
+      const total = addEntries.length + changeEntries.length + removeIds.length;
+      const failedAdds = addResults.filter((r) => !r.ok);
+      const failedCount =
+        failedAdds.reduce((n, r) => n + r.item[1].length, 0) +
+        changeResults.filter((r) => !r.ok).length +
+        removeResults.filter((r) => !r.ok).length;
+
+      if (failedCount === 0) {
+        setSnackbar({
+          open: true,
+          message: `Department access updated (${total} change${total !== 1 ? 's' : ''})`,
+          severity: 'success',
+        });
+        setDeptDialogOpen(false);
+      } else {
+        const firstError = [...addResults, ...changeResults, ...removeResults].find((r) => !r.ok);
+        const detail = errorDetail(firstError?.error);
+        setSnackbar({
+          open: true,
+          message:
+            `${total - failedCount} of ${total} change${total !== 1 ? 's' : ''} saved, ${failedCount} failed` +
+            (detail ? `: ${detail}` : ''),
+          severity: failedCount === total ? 'error' : 'warning',
         });
       }
-
-      for (const { id, role } of changeEntries) {
-        await api.patch(`/users/${deptDialogUser.id}/departments/${id}`, { role });
-      }
-
-      for (const deptId of removeIds) {
-        await api.delete(`/users/${deptDialogUser.id}/departments/${deptId}`);
-      }
-
-      await fetchUserDepts(deptDialogUser.id, true);
-
-      const totalChanges = addEntries.length + changeEntries.length + removeIds.length;
-      setSnackbar({
-        open: true,
-        message: `Department access updated (${totalChanges} change${totalChanges !== 1 ? 's' : ''})`,
-        severity: 'success',
-      });
-      setDeptDialogOpen(false);
-    } catch (e) {
-      setSnackbar({
-        open: true,
-        message: e.response?.data?.detail || 'Failed to update departments',
-        severity: 'error',
-      });
     } finally {
+      // Always resync, even after partial failure, so the dialog diff reflects the server
+      await fetchUserDepts(userId, true);
       setSavingDepts(false);
     }
   };
@@ -1786,10 +1822,15 @@ const UserManagement = () => {
           if (toAdd.length) {
             await api.post(`/users/${selectedUser.id}/departments`, { department_ids: toAdd, role: 'member' });
           }
-          for (const dId of toRm) {
-            await api.delete(`/users/${selectedUser.id}/departments/${dId}`);
-          }
+          const rmResults = await settleAll(toRm, (dId) =>
+            api.delete(`/users/${selectedUser.id}/departments/${dId}`)
+          );
           await fetchUserDepts(selectedUser.id, true);
+
+          const rmFailed = rmResults.filter((r) => !r.ok).length;
+          if (rmFailed) {
+            throw new Error(`User saved, but ${rmFailed} department removal${rmFailed !== 1 ? 's' : ''} failed`);
+          }
         }
         setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
       } else if (dialogMode === 'delete') {
@@ -1806,6 +1847,7 @@ const UserManagement = () => {
       setDialogOpen(false);
       loadUsers();
     } catch (err) {
+      loadUsers();
       setSnackbar({ 
         open: true, 
         message: err.message || `${dialogMode} action failed`, 

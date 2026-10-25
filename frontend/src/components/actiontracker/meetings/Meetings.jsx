@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
+import { useLater } from '../../../hooks/useLater';
 import {
   Box, Typography, Button, Paper, Stack, Fab, Tabs, Tab,
   Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
@@ -47,6 +48,16 @@ const SESSION_KEYS = {
   SCROLL_POSITION: 'meetings_scroll_position_session'
 };
 
+const later = useLater();
+
+const restoreScrollPosition = useCallback(() => {
+  let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
+                    localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
+  if (savedScroll) {
+    later(() => window.scrollTo({ top: parseInt(savedScroll, 10), behavior: 'auto' }), 100);
+  }
+}, [later]);
+
 // ==================== DARK MODE COLORS ====================
 const DARK_MODE = {
   background: '#0F172A',      // Slate 900
@@ -79,6 +90,8 @@ const Meetings = () => {
   
   // ==================== REDUX SELECTORS ====================
   const statusOptions = useSelector(selectMeetingStatusOptions);
+
+  
   
   // ==================== LOCAL STATE ====================
   const [meetings, setMeetings] = useState([]);

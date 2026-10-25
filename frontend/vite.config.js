@@ -39,25 +39,50 @@ export default defineConfig(({ mode }) => {
     
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      sourcemap: 'hidden',
       rollupOptions: {
         output: {
           manualChunks: (id) => {
-            if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
-                return 'react-vendor';
-              }
-              if (id.includes('@mui') || id.includes('@emotion')) {
-                return 'mui-vendor';
-              }
-              if (id.includes('@reduxjs') || id.includes('react-redux')) {
-                return 'redux-vendor';
-              }
-              if (id.includes('axios') || id.includes('notistack')) {
-                return 'utils-vendor';
-              }
-              return 'vendor';
+            if (!id.includes('node_modules')) {
+              return;
             }
+
+            // React core and routing
+            if (
+              id.includes('/node_modules/react/') ||
+              id.includes('/node_modules/react-dom/') ||
+              id.includes('/node_modules/react-router/') ||
+              id.includes('/node_modules/react-router-dom/')
+            ) {
+              return 'react-vendor';
+            }
+
+            // Redux
+            if (
+              id.includes('/node_modules/@reduxjs/') ||
+              id.includes('/node_modules/react-redux/')
+            ) {
+              return 'redux-vendor';
+            }
+
+            // MUI and Emotion
+            if (
+              id.includes('/node_modules/@mui/') ||
+              id.includes('/node_modules/@emotion/')
+            ) {
+              return 'mui-vendor';
+            }
+
+            // Networking / notifications
+            if (
+              id.includes('/node_modules/axios/') ||
+              id.includes('/node_modules/notistack/')
+            ) {
+              return 'utils-vendor';
+            }
+
+            // Everything else
+            //return 'vendor';
           },
         },
       },

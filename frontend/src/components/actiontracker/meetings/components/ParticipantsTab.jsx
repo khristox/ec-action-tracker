@@ -36,6 +36,22 @@ import {
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import api from '../../../../services/api';
+import pLimit from 'p-limit';
+
+const addMemberLimit = pLimit(4);
+
+const toMemberPayload = (p) => ({
+  user_id: p.user_id || null,
+  name: p.name || null,
+  email: p.email || null,
+  telephone: p.telephone ? String(p.telephone) : null,
+  title: p.title || null,
+  organization: p.organization || null,
+  is_chairperson: p.is_chairperson || false,
+  is_secretary: p.is_secretary || false,
+  attendance_status: p.attendance_status || 'pending',
+  apology_comment: p.apology_comment || null,
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,7 +168,7 @@ const RemoveParticipantDialog = memo(({ open, onClose, onConfirm, participantNam
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Delete color="error" fontSize="small" />
           <Typography variant="subtitle1" fontWeight={700}>Remove Participant</Typography>
         </Stack>
@@ -197,8 +213,8 @@ const ApologyDialog = memo(({ open, onClose, onSubmit, participantName, initialM
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <MessageIcon color="warning" fontSize="small" />
             <Typography variant="subtitle1" fontWeight={700}>Absent with Apology</Typography>
           </Stack>
@@ -839,53 +855,58 @@ const ParticipantsTab = ({
   const handleAddParticipants = async (newParticipants) => {
     setLoading(true);
     try {
+      // Drop duplicates within the batch (same user or same email)
+      const seen = new Set();
+      const batch = newParticipants.filter((p) => {
+        const key = p.user_id
+          ? `u:${p.user_id}`
+          : p.email ? `e:${p.email.toLowerCase()}` : null;
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      const results = await Promise.allSettled(
+        batch.map((p) =>
+          addMemberLimit(() =>
+            api.post(`/action-tracker/meetings/${meetingId}/members`, toMemberPayload(p))
+          )
+        )
+      );
+
       const addedList = [];
-      for (const p of newParticipants) {
-        const payload = {
-          user_id: p.user_id || null,
-          name: p.name || null,
-          email: p.email || null,
-          telephone: p.telephone ? String(p.telephone) : null,
-          title: p.title || null,
-          organization: p.organization || null,
-          is_chairperson: p.is_chairperson || false,
-          is_secretary: p.is_secretary || false,
-          attendance_status: p.attendance_status || "pending",
-          apology_comment: p.apology_comment || null,
-        };
-        
-        Object.keys(payload).forEach(key => {
-          if (payload[key] === undefined) {
-            delete payload[key];
-          }
-        });
-        
-        const res = await api.post(
-          `/action-tracker/meetings/${meetingId}/members`, 
-          payload
-        );
-        if (res?.data) {
-          addedList.push(res.data);
+      const failed = [];
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          if (r.value?.data) addedList.push(r.value.data);
+        } else {
+          failed.push({ participant: batch[i], reason: r.reason });
         }
-      }
+      });
 
-      // Optimistically update local state so UI updates instantly without relying completely on laggy parent re-fetches
       if (addedList.length > 0) {
-        setParticipants(prev => {
-          const combined = [...ensureArray(prev), ...addedList];
-          return combined;
-        });
+        setParticipants((prev) => [...ensureArray(prev), ...addedList]);
       }
 
-      showSnack(`Added ${newParticipants.length} participant(s) successfully`);
-      
-      // Trigger parent refresh if provided
-      if (typeof onRefresh === 'function') {
-        onRefresh();
+      if (failed.length === 0) {
+        showSnack(`Added ${addedList.length} participant(s) successfully`);
+      } else {
+        const names = failed
+          .map(({ participant }) => participant.name || participant.email || 'participant')
+          .join(', ');
+        const detail = failed[0].reason?.response?.data?.detail;
+        showSnack(
+          `${addedList.length} added, ${failed.length} failed (${names})` +
+            (typeof detail === 'string' ? `: ${detail}` : ''),
+          addedList.length > 0 ? 'warning' : 'error'
+        );
       }
+
+      if (addedList.length > 0 && typeof onRefresh === 'function') onRefresh();
     } catch (error) {
       console.error('Error adding participants:', error);
-      showSnack(error.response?.data?.detail || 'Failed to add participants', 'error');
+      showSnack('Failed to add participants', 'error');
     } finally {
       setLoading(false);
     }

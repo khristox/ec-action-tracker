@@ -60,7 +60,7 @@ const ADDRESS_LEVELS = [
 
 const MAX_LEVEL = 7;
 
-const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' }) => {
+const AddressFormBody = ({ onClose, onSuccess, initialData, mode = 'create' }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   
@@ -134,7 +134,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
   
   // Load existing hierarchy when editing
   useEffect(() => {
-    if (open && isEdit && initialData) {
+    if (isEdit && initialData) {
       const loadHierarchy = async () => {
         setLoading(true);
         try {
@@ -168,44 +168,16 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
       };
       loadHierarchy();
     }
-  }, [open, isEdit, initialData]);
+  }, [isEdit, initialData]);
   
   // Load options when step changes
   useEffect(() => {
-    if (open && !isEdit && !createMode && !editMode) {
+    if (!isEdit && !createMode && !editMode) {
       loadOptions();
     }
-  }, [activeStep, open, isEdit, createMode, editMode, loadOptions]);
+  }, [isEdit, createMode, editMode, loadOptions]);
   
-  // Reset form when opening
-  useEffect(() => {
-    if (open && !isEdit && !createMode && !editMode) {
-      setHierarchy({});
-      setActiveStep(0);
-      setCompletedSteps({});
-      setStopLevel(null);
-      setCreateMode(false);
-      setEditMode(false);
-      setEditingLevel(null);
-      setCurrentFormData({
-        code: '',
-        name: '',
-        short_name: '',
-        native_name: '',
-        full_name: '',
-        latitude: '',
-        longitude: '',
-        population: '',
-        area: '',
-        postal_code: ''
-      });
-      setSelectedExisting(null);
-      setError(null);
-      setSuccess(false);
-      setCodeAvailable(null);
-    }
-  }, [open, isEdit, createMode, editMode]);
-  
+    
   // Handle selecting an existing location
   const handleSelectExisting = (event, value) => {
     setSelectedExisting(value);
@@ -811,21 +783,7 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
   };
   
   return (
-    <Dialog 
-      open={open} 
-      onClose={onClose} 
-      maxWidth="md" 
-      fullWidth
-      PaperProps={{
-        sx: {
-          bgcolor: 'background.paper',
-          borderRadius: 2,
-          border: `1px solid ${theme.palette.divider}`,
-          backgroundImage: 'none',
-          maxHeight: '90vh'
-        }
-      }}
-    >
+    <>
       <DialogTitle sx={{
         pb: 2,
         borderBottom: `1px solid ${theme.palette.divider}`,
@@ -963,6 +921,29 @@ const AddressForm = ({ open, onClose, onSuccess, initialData, mode = 'create' })
           </Button>
         )}
       </DialogActions>
+    </>
+  );
+};
+
+const AddressForm = ({ open, onClose, ...rest }) => {
+  const theme = useTheme();
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: 'background.paper',
+          borderRadius: 2,
+          border: `1px solid ${theme.palette.divider}`,
+          backgroundImage: 'none',
+          maxHeight: '90vh',
+        },
+      }}
+    >
+      <AddressFormBody onClose={onClose} {...rest} />
     </Dialog>
   );
 };

@@ -577,7 +577,7 @@ const AddActionDialog = ({
           flexShrink: 0,
           width: '100%',
         }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Box sx={{
               p: 0.75,
               borderRadius: 1.5,
@@ -698,7 +698,7 @@ const AddActionDialog = ({
                   >
                     {minutes.map((minute) => (
                       <MenuItem key={minute.id} value={minute.id}>
-                        <Stack direction="row" spacing={1} alignItems="center">
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <DescriptionIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
                           <Typography variant="body2">
                             {minute.topic || minute.title || 'Untitled Minute'}
@@ -724,7 +724,7 @@ const AddActionDialog = ({
               border: `1px solid ${alpha(colors.accent, 0.1)}`,
               width: '100%',
             }}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <DescriptionIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
                 <Typography variant="body2" fontWeight={500}>
                   {selectedMinute.topic || selectedMinute.title || 'Untitled Minute'}
@@ -779,7 +779,7 @@ const AddActionDialog = ({
                 >
                   {PRIORITY_OPTIONS.map((opt) => (
                     <MenuItem key={opt.value} value={opt.value}>
-                      <Stack direction="row" spacing={1} alignItems="center">
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <Typography>{opt.emoji}</Typography>
                         <Typography variant="body2">{opt.label}</Typography>
                       </Stack>
@@ -819,7 +819,7 @@ const AddActionDialog = ({
                 />
               }
               label={
-                <Stack direction="row" spacing={1} alignItems="center">
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                   <LightbulbIcon sx={{ 
                     fontSize: 16, 
                     color: formData.is_key_action ? '#F59E0B' : colors.textSecondary 

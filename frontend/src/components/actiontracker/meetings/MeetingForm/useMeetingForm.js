@@ -40,7 +40,7 @@ DEFAULT_START_TIME.setHours(9, 0, 0, 0);
 const DEFAULT_END_TIME = new Date();
 DEFAULT_END_TIME.setHours(10, 0, 0, 0);
 
-const later = useLater();
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -145,6 +145,7 @@ export const useMeetingForm = () => {
   const location = useLocation();
   const { id } = useParams();
   const dispatch = useDispatch();
+  const later = useLater();
   
   const isEditMode = Boolean(id);
   const returnPath = location.state?.from || '/meetings';
@@ -475,7 +476,7 @@ export const useMeetingForm = () => {
           setFormLoading(false);
         }
       });
-  }, [isEditMode, id, dispatch, fetchUserDepartments]);
+  }, [isEditMode, id, dispatch, fetchUserDepartments, later]);
 
   // Initialize participant lists on mount
   useEffect(() => {

@@ -1,17 +1,19 @@
 # app/crud/recurring_meeting_service.py
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import HTTPException, status
 import uuid
 import json
 
-from sqlalchemy import desc, select, update, delete
+from sqlalchemy import desc, select, update, delete, func
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.meetings.action_tracker import Meeting
+from app.models.meetings.action_tracker import Meeting, MeetingParticipant
 from app.models.address.location import Location
+from app.models.user import User
 from app.models.general.dynamic_attribute import Attribute, AttributeGroup
 from app.models.meetings.recurring_meeting import RecurringMeeting, RecurringMeetingOccurrence
 from app.schemas.recurring_meeting_schema import RecurringMeetingCreate, RecurringMeetingUpdate, PreviewOccurrencesRequest
@@ -29,7 +31,7 @@ def ensure_naive_datetime(dt: Optional[datetime]) -> Optional[datetime]:
         return None
     if dt.tzinfo is not None:
         # Convert to UTC and remove timezone info
-        return dt.astimezone().replace(tzinfo=None)
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
 
 def get_utc_now() -> datetime:
@@ -382,6 +384,8 @@ class RecurringMeetingService:
                 updated_at=now
             )
             self.db.add(occurrence)
+            await self.db.flush()
+            await self._seed_participants(recurring, first_meeting)
             
             # Update recurring meeting with naive datetimes
             recurring.occurrences_count = 1
@@ -775,112 +779,248 @@ class RecurringMeetingService:
             logger.error(f"Error getting occurrence records for recurring meeting {recurring_meeting_id}: {e}", exc_info=True)
             return []
     
+    # ---- ONE code path for the Generate buttons and the scheduler ----------
+
+    _PARTICIPANT_COPY_FIELDS = (
+        "user_id", "name", "email", "telephone", "title",
+        "organization", "is_chairperson", "is_secretary",
+    )
+
+    @staticmethod
+    def _limit_reached(recurring: RecurringMeeting, when: datetime) -> bool:
+        end = ensure_naive_datetime(recurring.recurrence_end_date)
+        if end and when.date() > end.date():
+            return True
+        caps = [c for c in (recurring.recurrence_max_occurrences,
+                            recurring.recurrence_end_after_occurrences) if c]
+        return bool(caps) and (recurring.total_occurrences_generated or 0) >= min(caps)
+
+    async def _date_taken(self, recurring_id: uuid.UUID, when: datetime) -> bool:
+        result = await self.db.execute(
+            select(RecurringMeetingOccurrence.id).where(
+                RecurringMeetingOccurrence.recurring_meeting_id == recurring_id,
+                RecurringMeetingOccurrence.scheduled_date == when,
+                RecurringMeetingOccurrence.status != "cancelled",
+            ).limit(1)
+        )
+        return result.first() is not None
+
+    async def create_next_occurrence(
+        self,
+        recurring_meeting_id: uuid.UUID,
+        *,
+        automatic: bool = False,
+        target_date: Optional[datetime] = None,
+    ) -> Optional[Meeting]:
+        """
+        Create the next occurrence of a series. Returns the new Meeting, or None
+        when nothing was created.
+
+        automatic=True (scheduler): does nothing until the latest generated
+        occurrence has started, skips a series another worker is already
+        processing, and skips dates that passed while nothing was running.
+        automatic=False (Generate buttons): always creates the next one.
+        """
+        now = get_utc_now()
+
+        stmt = (
+            select(RecurringMeeting)
+            .where(RecurringMeeting.id == recurring_meeting_id,
+                   RecurringMeeting.is_deleted == False)  # noqa: E712
+            .with_for_update(of=RecurringMeeting, skip_locked=automatic)
+            .execution_options(populate_existing=True)
+        )
+        recurring = (await self.db.execute(stmt)).unique().scalar_one_or_none()
+        if recurring is None:
+            await self.db.rollback()
+            return None
+
+        last = ensure_naive_datetime(recurring.last_occurrence_date)
+        if automatic and last and last > now:
+            await self.db.rollback()
+            return None
+
+        # ---- which date? ----
+        if target_date:
+            when = ensure_naive_datetime(target_date)
+        else:
+            when = ensure_naive_datetime(recurring.next_occurrence_date)
+            if when is None:
+                base = last or ensure_naive_datetime(recurring.start_time)
+                when = await self._calculate_next_occurrence_date(recurring, base) if base else None
+
+            # Never create the same date twice (this also repairs series hit by
+            # the old bug), and in automatic mode skip dates already in the past.
+            for _ in range(1000):
+                if when is None:
+                    break
+                if (automatic and when <= now) or await self._date_taken(recurring.id, when):
+                    when = await self._calculate_next_occurrence_date(recurring, when)
+                else:
+                    break
+
+        if when is None or (not target_date and self._limit_reached(recurring, when)):
+            recurring.next_occurrence_date = None   # series finished: scheduler stops looking at it
+            recurring.updated_at = now
+            await self.db.commit()
+            return None
+
+        # ---- build the meeting ----
+        template_start = ensure_naive_datetime(recurring.start_time)
+        template_end = ensure_naive_datetime(recurring.end_time)
+        if recurring.duration_minutes:
+            duration = timedelta(minutes=recurring.duration_minutes)
+        elif template_start and template_end and template_end > template_start:
+            duration = template_end - template_start
+        else:
+            duration = timedelta(hours=1)
+
+        highest = (await self.db.execute(
+            select(func.max(Meeting.occurrence_number)).where(
+                Meeting.recurring_meeting_id == recurring.id)
+        )).scalar() or 0
+        number = max(highest, recurring.total_occurrences_generated or 0) + 1
+
+        meeting = Meeting(
+            id=uuid.uuid4(),
+            title=recurring.title,
+            description=recurring.description,
+            department_id=getattr(recurring, "department_id", None),
+            meeting_date=when.date(),
+            start_time=when,
+            end_time=when + duration,
+            duration_minutes=int(duration.total_seconds() // 60),
+            location_id=recurring.location_id,
+            location_text=recurring.location_text,
+            platform=recurring.platform,
+            meeting_link=recurring.meeting_link,
+            chairperson_id=recurring.chairperson_id,
+            secretary_id=recurring.secretary_id,
+            facilitator=recurring.facilitator,
+            agenda=recurring.agenda,
+            visibility=getattr(recurring, "visibility", "open"),
+            restricted_department_id=getattr(recurring, "restricted_department_id", None),
+            status_id=await self._get_default_meeting_status(),
+            is_recurring=True,
+            recurring_meeting_id=recurring.id,
+            occurrence_number=number,
+            created_by_id=recurring.created_by_id,
+            created_at=now,
+            updated_at=now,
+            is_active=True,
+            is_deleted=False,
+        )
+        self.db.add(meeting)
+        await self.db.flush()
+        self.db.add(RecurringMeetingOccurrence(
+            id=uuid.uuid4(),
+            recurring_meeting_id=recurring.id,
+            meeting_id=meeting.id,
+            occurrence_number=number,
+            scheduled_date=when,
+            status="scheduled",
+            created_at=now,
+            updated_at=now,
+        ))
+        copied = await self._seed_participants(recurring, meeting)
+
+        # ---- move the pointers forward ----
+        newest = max(d for d in (last, when) if d)
+        recurring.last_occurrence_date = newest
+        recurring.total_occurrences_generated = (recurring.total_occurrences_generated or 0) + 1
+        recurring.occurrences_count = (recurring.occurrences_count or 0) + 1
+        upcoming = await self._calculate_next_occurrence_date(recurring, newest)
+        if upcoming is not None and self._limit_reached(recurring, upcoming):
+            upcoming = None
+        recurring.next_occurrence_date = upcoming
+        recurring.updated_at = now
+
+        await self.db.commit()
+        await self.db.refresh(meeting)
+        logger.info("Generated occurrence #%s (%s) for recurring meeting %s with %s participant(s)",
+                    number, when, recurring.id, copied)
+        return meeting
+
+    async def _seed_participants(self, recurring: RecurringMeeting, meeting: Meeting) -> int:
+        """
+        Give a new occurrence its participants: the previous occurrence's list,
+        or, if that has none (the first one), the series' default participants
+        plus its chairperson and secretary. Everyone starts as 'pending'.
+        Runs in a savepoint and never raises, so a problem here can never stop
+        the meeting from being created.
+        """
+        try:
+            async with self.db.begin_nested():
+                known = {a.key for a in sa_inspect(MeetingParticipant).column_attrs}
+
+                previous = (await self.db.execute(
+                    select(Meeting)
+                    .where(Meeting.recurring_meeting_id == recurring.id,
+                           Meeting.id != meeting.id,
+                           Meeting.is_deleted == False)  # noqa: E712
+                    .options(selectinload(Meeting.participants))
+                    .order_by(desc(Meeting.start_time))
+                    .limit(1)
+                )).unique().scalar_one_or_none()
+
+                if previous is not None and previous.participants:
+                    rows = [{f: getattr(p, f, None) for f in self._PARTICIPANT_COPY_FIELDS}
+                            for p in previous.participants]
+                else:
+                    rows = await self._default_participant_rows(recurring)
+
+                for row in rows:
+                    values = {k: v for k, v in row.items() if k in known}
+                    if "id" in known:
+                        values["id"] = uuid.uuid4()
+                    if "attendance_status" in known:
+                        values["attendance_status"] = "pending"
+                    self.db.add(MeetingParticipant(meeting_id=meeting.id, **values))
+                await self.db.flush()
+                return len(rows)
+        except Exception:
+            logger.warning("Participants were not copied to occurrence %s", meeting.id, exc_info=True)
+            return 0
+
+    async def _default_participant_rows(self, recurring: RecurringMeeting) -> list:
+        ids = []
+        for raw in (recurring.default_participant_ids or []):
+            try:
+                ids.append(uuid.UUID(str(raw)))
+            except ValueError:
+                continue
+        for extra in (recurring.chairperson_id, recurring.secretary_id):
+            if extra and extra not in ids:
+                ids.append(extra)
+        if not ids:
+            return []
+
+        users = (await self.db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+        by_id = {u.id: u for u in users}
+        rows = []
+        for uid in ids:
+            u = by_id.get(uid)
+            if not u:
+                continue
+            name = (getattr(u, "full_name", None)
+                    or " ".join(filter(None, [getattr(u, "first_name", None), getattr(u, "last_name", None)]))
+                    or getattr(u, "username", None))
+            rows.append({
+                "user_id": u.id, "name": name, "email": getattr(u, "email", None),
+                "telephone": getattr(u, "phone", None), "title": None, "organization": None,
+                "is_chairperson": uid == recurring.chairperson_id,
+                "is_secretary": uid == recurring.secretary_id,
+            })
+        return rows
+
     async def generate_on_demand_occurrence(
-        self, 
+        self,
         recurring_meeting_id: uuid.UUID,
         target_date: Optional[datetime] = None
     ) -> Optional[Meeting]:
-        """Generate a single occurrence on demand"""
+        """Generate one occurrence now. Same code path as the scheduler."""
         try:
-            # Get the recurring meeting
-            recurring = await self.get_recurring_meeting(recurring_meeting_id)
-            if not recurring:
-                logger.warning(f"Recurring meeting {recurring_meeting_id} not found for on-demand generation")
-                return None
-            
-            # Get default status for meetings
-            status_id = await self._get_default_meeting_status()
-            
-            now = get_utc_now()
-            
-            # === FIX: Ensure datetimes are naive ===
-            if target_date:
-                meeting_datetime = ensure_naive_datetime(target_date)
-            elif recurring.next_occurrence_date:
-                meeting_datetime = ensure_naive_datetime(recurring.next_occurrence_date)
-            elif recurring.start_time:
-                meeting_datetime = ensure_naive_datetime(recurring.start_time)
-            else:
-                # Default to current time
-                meeting_datetime = now
-            
-            if not meeting_datetime:
-                meeting_datetime = now
-            
-            # Extract date and time components
-            meeting_date = meeting_datetime.date()
-            start_time = meeting_datetime
-            
-            # Calculate end time
-            end_time = ensure_naive_datetime(recurring.end_time)
-            if not end_time:
-                end_time = start_time + timedelta(hours=1)
-            
-            # Ensure end_time is after start_time
-            if end_time <= start_time:
-                end_time = start_time + timedelta(hours=1)
-            
-            # Convert JSON fields to ensure they're JSON serializable
-            default_participants = recurring.default_participant_ids
-            if default_participants and isinstance(default_participants, list):
-                default_participants = [str(pid) for pid in default_participants if pid]
-            
-            # Create the meeting occurrence with naive datetimes
-            meeting = Meeting(
-                id=uuid.uuid4(),
-                title=recurring.title,
-                description=recurring.description,
-                department_id=getattr(recurring, "department_id", None),
-                meeting_date=meeting_date,
-                start_time=start_time,
-                end_time=end_time,
-                duration_minutes=recurring.duration_minutes or 60,
-                location_id=recurring.location_id,
-                location_text=recurring.location_text,
-                platform=recurring.platform,
-                meeting_link=recurring.meeting_link,
-                chairperson_id=recurring.chairperson_id,
-                secretary_id=recurring.secretary_id,
-                facilitator=recurring.facilitator,
-                agenda=recurring.agenda,
-                visibility=getattr(recurring, "visibility", "open"),
-                restricted_department_id=getattr(recurring, "restricted_department_id", None),
-                status_id=status_id,
-                is_recurring=True,
-                recurring_meeting_id=recurring.id,
-                occurrence_number=(recurring.total_occurrences_generated or 0) + 1,
-                created_by_id=recurring.created_by_id,
-                created_at=now,
-                updated_at=now,
-                is_active=True,
-                is_deleted=False
-            )
-            
-            self.db.add(meeting)
-            await self.db.flush()
-            self.db.add(RecurringMeetingOccurrence(
-                id=uuid.uuid4(),
-                recurring_meeting_id=recurring.id,
-                meeting_id=meeting.id,
-                occurrence_number=meeting.occurrence_number,
-                scheduled_date=start_time,
-                status="scheduled",
-                created_at=now,
-                updated_at=now,
-            ))
-            
-            # Update recurring meeting counts with naive datetimes
-            recurring.total_occurrences_generated = (recurring.total_occurrences_generated or 0) + 1
-            recurring.occurrences_count = (recurring.occurrences_count or 0) + 1
-            recurring.last_occurrence_date = ensure_naive_datetime(meeting_datetime)
-            recurring.updated_at = now
-            
-            await self.db.commit()
-            await self.db.refresh(meeting)
-            
-            logger.info(f"Generated on-demand occurrence {meeting.id} for recurring meeting {recurring_meeting_id}")
-            return meeting
-            
+            return await self.create_next_occurrence(recurring_meeting_id, target_date=target_date)
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error generating on-demand occurrence: {e}", exc_info=True)

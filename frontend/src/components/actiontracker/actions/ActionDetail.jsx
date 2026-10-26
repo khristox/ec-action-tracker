@@ -211,46 +211,60 @@ const PriorityStars = ({ priority }) => {
 // ==================== COMPACT FIELD ITEM ====================
 
 const DetailField = ({ label, value, icon, isDarkMode }) => (
-  <Box sx={{
-    display: 'flex',
-    alignItems: 'center',
-    gap: 1.5,
-    py: 1,
-    borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#F3F4F6'}`,
-    '&:last-child': { borderBottom: 'none' }
-  }}>
-    <Box sx={{
-      color: isDarkMode ? 'rgba(255,255,255,0.4)' : '#9CA3AF',
+  <Box
+    sx={{
       display: 'flex',
       alignItems: 'center',
-      minWidth: 20
-    }}>
-      {icon ? React.cloneElement(icon, { fontSize: 'small' }) : <Info fontSize="small" />}
+      gap: 1.5,
+      py: 1,
+      borderBottom: `1px solid ${
+        isDarkMode ? 'rgba(255,255,255,0.06)' : '#F3F4F6'
+      }`,
+      '&:last-child': {
+        borderBottom: 'none',
+      },
+    }}
+  >
+    <Box
+      sx={{
+        color: isDarkMode ? 'rgba(255,255,255,0.4)' : '#9CA3AF',
+        display: 'flex',
+        alignItems: 'center',
+        minWidth: 20,
+      }}
+    >
+      {icon
+        ? React.cloneElement(icon, { fontSize: 'small' })
+        : <Info fontSize="small" />}
     </Box>
+
     <Typography
       variant="body2"
+      component="span"
       sx={{
         color: isDarkMode ? 'rgba(255,255,255,0.5)' : '#6B7280',
         fontWeight: 500,
         minWidth: 100,
         flexShrink: 0,
-        fontSize: '0.8rem'
+        fontSize: '0.8rem',
       }}
     >
       {label}
     </Typography>
-    <Typography
-      variant="body2"
+
+    <Box
+      component="div"
       sx={{
         color: isDarkMode ? '#FFFFFF' : '#111827',
         fontWeight: 500,
         wordBreak: 'break-word',
         flex: 1,
-        fontSize: '0.85rem'
+        fontSize: '0.85rem',
+        minWidth: 0,
       }}
     >
       {value || '—'}
-    </Typography>
+    </Box>
   </Box>
 );
 
@@ -861,7 +875,7 @@ const ActionDetail = () => {
         <Box sx={{ p: { xs: 2, sm: 3 } }}>
           <Grid container spacing={3}>
             {/* LEFT COLUMN — Details (with History below Tags) */}
-            <Grid item xs={12} md={6}>
+            <Grid xs={12} md={6}>
               <Typography
                 variant="subtitle2"
                 fontWeight={600}
@@ -1097,7 +1111,7 @@ const ActionDetail = () => {
             </Grid>
 
             {/* RIGHT COLUMN — Implementers */}
-            <Grid item xs={12} md={6}>
+            <Grid xs={12} md={6}>
               <Typography
                 variant="subtitle2"
                 fontWeight={600}

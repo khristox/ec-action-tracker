@@ -1,3 +1,4 @@
+# ~/ec-action-tracker/docker-compose.yml
 services:
   postgres:
     image: postgres:16
@@ -49,7 +50,7 @@ services:
       - ec_network
 
   app:
-    image: wags/ec-action-tracker:latest
+    image: wagambula/ec-action-tracker:2026-10-26
     build: .
     container_name: ec_app
     restart: unless-stopped
@@ -68,8 +69,8 @@ services:
     environment:
       # We construct the URL dynamically using variables from .env
       IN_DOCKER: "True"
-      DATABASE_URL: "postgresql+asyncpg://ec_user:ec_password@localhost:5432/ec_action_tracker"
-      REDIS_URL: "redis://localhost:6379/0"
+      DATABASE_URL: "postgresql+asyncpg://ec_user:ec_password@ec_postgres:5432/ec_action_tracker"  # Changed from @localhost
+      REDIS_URL: "redis://ec_redis:6379/0"
       MINIO_ENDPOINT: "minio:9000"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "minioadmin"

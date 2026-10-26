@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import DOMPurify from 'dompurify';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { useLater } from '../../../hooks/useLater';
 import {
   Box,
@@ -54,18 +54,11 @@ const stripHtmlTags = (html) => {
   if (!html) return '';
   
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  tempDiv.innerHTML = html;
   return doc.body.textContent || '';
 
 };
 
-const getPlainTextPreview = (html, maxLength = 150) => {
-  const plainText = stripHtmlTags(html);
-  if (plainText.length <= maxLength) return plainText;
-  return plainText.substring(0, maxLength) + '...';
-};
 
-const later = useLater();
 // ==================== RTF RENDERER COMPONENT ====================
 
 const RichTextRenderer = ({ content, isDarkMode }) => {
@@ -182,9 +175,9 @@ const RichTextRenderer = ({ content, isDarkMode }) => {
 // ==================== MAIN COMPONENT ====================
 
 const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
-  const dispatch = useDispatch();
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
+  const later = useLater();
 
   // ==================== REDUX SELECTORS ====================
   const minutesList = useSelector(selectMeetingMinutes);
@@ -473,7 +466,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
             return (
               <Paper
-                key={minute.id || minute.tempId || Math.random().toString(36)}
+                key={minute.id || minute.tempId }
                 sx={{
                   borderRadius: 2,
                   overflow: 'hidden',

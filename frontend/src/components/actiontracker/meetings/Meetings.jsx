@@ -48,15 +48,7 @@ const SESSION_KEYS = {
   SCROLL_POSITION: 'meetings_scroll_position_session'
 };
 
-const later = useLater();
 
-const restoreScrollPosition = useCallback(() => {
-  let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
-                    localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
-  if (savedScroll) {
-    later(() => window.scrollTo({ top: parseInt(savedScroll, 10), behavior: 'auto' }), 100);
-  }
-}, [later]);
 
 // ==================== DARK MODE COLORS ====================
 const DARK_MODE = {
@@ -83,6 +75,7 @@ const Meetings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch();
+  const later = useLater();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const isDarkMode = theme.palette.mode === 'dark';
@@ -197,12 +190,22 @@ const Meetings = () => {
   }, []);
   
   const restoreScrollPosition = useCallback(() => {
-    let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
-                      localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
+    const savedScroll =
+      sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
+      localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
+
     if (savedScroll) {
-      setTimeout(() => window.scrollTo({ top: parseInt(savedScroll), behavior: 'auto' }), 100);
+      later(
+        () => {
+          window.scrollTo({
+            top: parseInt(savedScroll, 10),
+            behavior: 'auto',
+          });
+        },
+        100
+      );
     }
-  }, []);
+  }, [later]);
 
   // ==================== DATA FETCHING ====================
   const loadMeetings = useCallback(async (params = {}) => {

@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
   // For production: use VITE_BASE_URL from .env.production or default to '/ec/'
   // For development: use '/'
   const base = mode === 'production' 
-    ? (env.VITE_BASE_URL || '/ec/')  // Production subfolder
+    ? (env.VITE_BASE_URL || '/')  // Production subfolder
     : '/';  // Development always uses root
   
   console.log(`Building for ${mode} mode with base: ${base}`);

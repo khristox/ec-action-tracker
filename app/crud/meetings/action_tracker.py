@@ -1233,31 +1233,73 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
 
         raise ValueError("Unknown action status. Reload the page and pick a status again.")
 
-    async def can_update_progress(self, db: AsyncSession, action: MeetingAction, user: User) -> bool:
-        """Superuser, the meeting's creator, or someone implementing this action."""
+    async def can_update_progress(
+        self,
+        db: AsyncSession,
+        action: MeetingAction,
+        user: User
+    ) -> bool:
+        """Superuser, meeting creator, or action implementer."""
+
         if getattr(user, "is_superuser", False):
             return True
 
-        meeting = action.minutes.meeting if action.minutes else None
+        # ---------------------------------------------------------
+        # 1. Meeting creator
+        # ---------------------------------------------------------
+        meeting = None
+
+        if action.minutes:
+            meeting = action.minutes.meeting
+
         if meeting and meeting.created_by_id == user.id:
             return True
 
+        # ---------------------------------------------------------
+        # 2. Direct/legacy assignment
+        # ---------------------------------------------------------
         if action.assigned_to_id == user.id:
             return True
 
+        # ---------------------------------------------------------
+        # 3. Linked implementer
+        # ---------------------------------------------------------
+        result = await db.execute(
+            select(ActionImplementer).where(
+                ActionImplementer.action_id == action.id
+            )
+        )
+
+        implementers = result.scalars().all()
+
         email = normalize_email(user.email) if user.email else None
-        raw_phone = getattr(user, "phone", None) or getattr(user, "telephone", None)
+
+        raw_phone = (
+            getattr(user, "phone", None)
+            or getattr(user, "telephone", None)
+        )
+
         phone = normalize_phone(raw_phone) if raw_phone else None
 
-        for imp in action.implementers or []:
-            if imp.user_id:
-                if imp.user_id == user.id:
+        for imp in implementers:
+            if imp.user_id and imp.user_id == user.id:
+                return True
+
+            if not imp.user_id:
+                if (
+                    email
+                    and imp.email
+                    and normalize_email(imp.email) == email
+                ):
                     return True
-            else:
-                if email and imp.email and normalize_email(imp.email) == email:
+
+                if (
+                    phone
+                    and imp.phone
+                    and normalize_phone(imp.phone) == phone
+                ):
                     return True
-                if phone and imp.phone and normalize_phone(imp.phone) == phone:
-                    return True
+
         return False
 
     

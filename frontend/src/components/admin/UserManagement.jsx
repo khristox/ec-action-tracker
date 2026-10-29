@@ -945,18 +945,7 @@ const DepartmentDialog = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-
-  return (
-    <Dialog
-      open={open}
-      onClose={() => !saving && onClose()}
-      maxWidth="sm" fullWidth fullScreen={isMobile}
-      TransitionComponent={Fade}
-      PaperProps={{ sx: { borderRadius: isMobile ? 0 : 2.5, overflow: 'hidden', maxHeight: '90vh' } }}
-    >
-      <DepartmentDialogBody key={ready ? 'ready' : 'loading'} onClose={onClose} saving={saving} isMobile={isMobile} {...rest} />
-    </Dialog>
-  );
+  const searchRef = useRef(null);
 
   const [selectedMap, setSelectedMap] = useState(() => {
     const initial = {};

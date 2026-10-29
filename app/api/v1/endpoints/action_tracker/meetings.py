@@ -1738,186 +1738,352 @@ async def patch_meeting(
     meeting_update: MeetingUpdate,
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
-    request: Request = None,  # ✅ ADDED for audit
+    request: Request = None,
 ):
     """
-    Partial update meeting (PATCH).
-    Only updates the fields provided in the request.
-    ✅ Logs changes to audit_logs
+    Partial update meeting.
+
+    Supports:
+    - Meeting field updates
+    - Chairperson assignment
+    - Secretary assignment
+    - Participant role synchronization
+    - Audit logging
     """
-    
+
     try:
-        # Check permission
+        # ============================================================
+        # 1. CHECK PERMISSION
+        # ============================================================
+
         permission = await PermissionChecker.get_user_permission(
-            db, meeting_id, current_user.id,
-            is_admin_user(current_user)
+            db,
+            meeting_id,
+            current_user.id,
+            is_admin_user(current_user),
         )
-        
+
         if permission != MeetingPermission.OWNER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the meeting owner can update this meeting"
+                detail="Only the meeting owner can update this meeting",
             )
-        
-        # Fetch meeting
-        result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+
+        # ============================================================
+        # 2. FETCH MEETING + PARTICIPANTS
+        # ============================================================
+
+        result = await db.execute(
+            select(Meeting)
+            .options(
+                selectinload(Meeting.participants),
+            )
+            .where(Meeting.id == meeting_id)
+        )
+
         meeting = result.scalar_one_or_none()
 
-        # Chairperson / secretary assignment
-        _provided = meeting_update.model_dump(exclude_unset=True)
-        for role, flag in (("chairperson_id", "is_chairperson"), ("secretary_id", "is_secretary")):
-            if role in _provided:
-                raw = _provided[role]
-                target_id = UUID(str(raw)) if raw else None
-                target = next(
-                    (p for p in meeting.participants if p.id == target_id and p.is_active),
-                    None,
-                )
-                if target_id and not target:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"{role} is not an active participant of this meeting",
-                    )
-                setattr(meeting, role, target_id)
-                for p in meeting.participants:
-                    setattr(p, flag, p.id == target_id)
-                if role == "chairperson_id":
-                    meeting.chairperson_name = target.name if target else None
-        
         if not meeting:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Meeting not found"
+                detail="Meeting not found",
             )
-        
-        # ✅ Capture old values
+
+        # ============================================================
+        # 3. CAPTURE OLD VALUES BEFORE ANY MODIFICATION
+        # ============================================================
+
         old_values = {
             "title": meeting.title,
             "description": meeting.description,
-            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
-            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
-            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "meeting_date": (
+                meeting.meeting_date.isoformat()
+                if meeting.meeting_date else None
+            ),
+            "start_time": (
+                meeting.start_time.isoformat()
+                if meeting.start_time else None
+            ),
+            "end_time": (
+                meeting.end_time.isoformat()
+                if meeting.end_time else None
+            ),
             "location_text": meeting.location_text,
-            "location_id": str(meeting.location_id) if meeting.location_id else None,
+            "location_id": (
+                str(meeting.location_id)
+                if meeting.location_id else None
+            ),
             "agenda": meeting.agenda,
             "facilitator": meeting.facilitator,
+            "chairperson_id": (
+                str(meeting.chairperson_id)
+                if meeting.chairperson_id else None
+            ),
+            "secretary_id": (
+                str(meeting.secretary_id)
+                if meeting.secretary_id else None
+            ),
             "chairperson_name": meeting.chairperson_name,
-            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "status_id": (
+                str(meeting.status_id)
+                if meeting.status_id else None
+            ),
             "visibility": meeting.visibility,
-            "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+            "restricted_department_id": (
+                str(meeting.restricted_department_id)
+                if meeting.restricted_department_id else None
+            ),
             "is_recurring": meeting.is_recurring,
             "platform": meeting.platform,
-            "meeting_link": meeting.meeting_link
+            "meeting_link": meeting.meeting_link,
         }
-                        
-        # Get update data
+
+        # ============================================================
+        # 4. GET ONLY FIELDS ACTUALLY PROVIDED
+        # ============================================================
+
         update_data = meeting_update.model_dump(exclude_unset=True)
-        logger.info(f"📝 PATCH update data for meeting {meeting_id}: {update_data}")
-        
-        # Helper function to convert string to UUID
+
+        logger.info(
+            f"📝 PATCH update data for meeting {meeting_id}: "
+            f"{update_data}"
+        )
+
+        # ============================================================
+        # 5. HELPER FOR UUID FIELDS
+        # ============================================================
+
         def to_uuid(value):
-            if value is None or value == '':
+            if value is None or value == "":
                 return None
+
             if isinstance(value, UUID):
                 return value
+
             if isinstance(value, str):
                 try:
                     return UUID(value)
                 except ValueError:
                     return None
+
             return value
-        
-        # Update each field
-        if 'title' in update_data:
-            meeting.title = update_data['title']
-            logger.info(f"   📝 Updated title to: {update_data['title']}")
-        if 'description' in update_data:
-            meeting.description = update_data['description']
-            logger.info(f"   📝 Updated description")
-        if 'meeting_date' in update_data:
-            meeting.meeting_date = update_data['meeting_date']
-            logger.info(f"   📝 Updated meeting_date to: {update_data['meeting_date']}")
-        if 'start_time' in update_data:
-            meeting.start_time = update_data['start_time']
-            logger.info(f"   📝 Updated start_time to: {update_data['start_time']}")
-        if 'end_time' in update_data:
-            meeting.end_time = update_data['end_time']
-            logger.info(f"   📝 Updated end_time to: {update_data['end_time']}")
-        if 'location_text' in update_data:
-            meeting.location_text = update_data['location_text']
-            logger.info(f"   📝 Updated location_text to: {update_data['location_text']}")
-        if 'location_id' in update_data:
-            meeting.location_id = to_uuid(update_data['location_id'])
-            logger.info(f"   📝 Updated location_id to: {meeting.location_id}")
-        if 'agenda' in update_data:
-            meeting.agenda = update_data['agenda']
-            logger.info(f"   📝 Updated agenda")
-        if 'facilitator' in update_data:
-            meeting.facilitator = update_data['facilitator']
-            logger.info(f"   📝 Updated facilitator to: {update_data['facilitator']}")
-        if 'chairperson_name' in update_data:
-            meeting.chairperson_name = update_data['chairperson_name']
-            logger.info(f"   📝 Updated chairperson_name to: {update_data['chairperson_name']}")
-        if 'status_id' in update_data:
-            val = update_data['status_id']
-            if val is None or val == '':
-                meeting.status_id = None
-                logger.info(f"   📝 Cleared status_id")
-            else:
-                status_uuid = to_uuid(val)
-                if status_uuid:
-                    meeting.status_id = status_uuid
-                    logger.info(f"   📝 Updated status_id to: {status_uuid}")
-                else:
+
+        # ============================================================
+        # 6. CHAIRPERSON / SECRETARY ASSIGNMENT
+        # ============================================================
+
+        for role, flag in (
+            ("chairperson_id", "is_chairperson"),
+            ("secretary_id", "is_secretary"),
+        ):
+            if role not in update_data:
+                continue
+
+            raw_value = update_data[role]
+            target_id = to_uuid(raw_value)
+
+            if raw_value not in (None, "") and target_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid {role}. Expected a UUID.",
+                )
+
+            # Find the selected participant
+            target = None
+
+            if target_id:
+                target = next(
+                    (
+                        participant
+                        for participant in meeting.participants
+                        if participant.id == target_id
+                        and participant.is_active
+                    ),
+                    None,
+                )
+
+                if not target:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid status_id format. Expected UUID, got: {val}"
+                        detail=(
+                            f"{role} is not an active participant "
+                            f"of this meeting"
+                        ),
                     )
-        if 'visibility' in update_data:
-            meeting.visibility = update_data['visibility']
-            logger.info(f"   📝 Updated visibility to: {update_data['visibility']}")
-        if 'restricted_department_id' in update_data:
-            meeting.restricted_department_id = to_uuid(update_data['restricted_department_id'])
-            logger.info(f"   📝 Updated restricted_department_id to: {meeting.restricted_department_id}")
-        if 'is_recurring' in update_data:
-            meeting.is_recurring = bool(update_data['is_recurring'])
-            logger.info(f"   📝 Updated is_recurring to: {meeting.is_recurring}")
-        if 'platform' in update_data:
-            meeting.platform = update_data['platform']
-            logger.info(f"   📝 Updated platform to: {update_data['platform']}")
-        if 'meeting_link' in update_data:
-            meeting.meeting_link = update_data['meeting_link']
-            logger.info(f"   📝 Updated meeting_link")
-        
+
+            # Synchronize participant convenience flag
+            for participant in meeting.participants:
+                setattr(
+                    participant,
+                    flag,
+                    participant.id == target_id,
+                )
+
+            # Synchronize authoritative Meeting FK
+            setattr(
+                meeting,
+                role,
+                target_id,
+            )
+
+            # Keep denormalized chairperson name synchronized
+            if role == "chairperson_id":
+                meeting.chairperson_name = (
+                    target.name if target else None
+                )
+
+            logger.info(
+                f"   👤 {role} updated to {target_id}"
+            )
+
+        # ============================================================
+        # 7. UPDATE ORDINARY MEETING FIELDS
+        # ============================================================
+
+        if "title" in update_data:
+            meeting.title = update_data["title"]
+
+        if "description" in update_data:
+            meeting.description = update_data["description"]
+
+        if "meeting_date" in update_data:
+            meeting.meeting_date = update_data["meeting_date"]
+
+        if "start_time" in update_data:
+            meeting.start_time = update_data["start_time"]
+
+        if "end_time" in update_data:
+            meeting.end_time = update_data["end_time"]
+
+        if "location_text" in update_data:
+            meeting.location_text = update_data["location_text"]
+
+        if "location_id" in update_data:
+            meeting.location_id = to_uuid(
+                update_data["location_id"]
+            )
+
+        if "agenda" in update_data:
+            meeting.agenda = update_data["agenda"]
+
+        if "facilitator" in update_data:
+            meeting.facilitator = update_data["facilitator"]
+
+        # Only manually update the denormalized name when the
+        # chairperson itself was NOT changed.
+        if (
+            "chairperson_name" in update_data
+            and "chairperson_id" not in update_data
+        ):
+            meeting.chairperson_name = update_data["chairperson_name"]
+
+        if "status_id" in update_data:
+            value = update_data["status_id"]
+
+            if value in (None, ""):
+                meeting.status_id = None
+            else:
+                status_uuid = to_uuid(value)
+
+                if not status_uuid:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Invalid status_id format. "
+                            f"Expected UUID, got: {value}"
+                        ),
+                    )
+
+                meeting.status_id = status_uuid
+
+        if "visibility" in update_data:
+            meeting.visibility = update_data["visibility"]
+
+        if "restricted_department_id" in update_data:
+            meeting.restricted_department_id = to_uuid(
+                update_data["restricted_department_id"]
+            )
+
+        if "is_recurring" in update_data:
+            meeting.is_recurring = bool(
+                update_data["is_recurring"]
+            )
+
+        if "platform" in update_data:
+            meeting.platform = update_data["platform"]
+
+        if "meeting_link" in update_data:
+            meeting.meeting_link = update_data["meeting_link"]
+
+        # ============================================================
+        # 8. AUDIT FIELDS
+        # ============================================================
+
         meeting.updated_by_id = current_user.id
         meeting.updated_at = datetime.now()
-        
+
+        # ============================================================
+        # 9. COMMIT
+        # ============================================================
+
         await db.commit()
+
+        # Reload the meeting after commit
         await db.refresh(meeting)
-        
-        # ✅ Capture new values after update
+
+        # ============================================================
+        # 10. NEW VALUES
+        # ============================================================
+
         new_values = {
             "title": meeting.title,
             "description": meeting.description,
-            "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
-            "start_time": meeting.start_time.isoformat() if meeting.start_time else None,
-            "end_time": meeting.end_time.isoformat() if meeting.end_time else None,
+            "meeting_date": (
+                meeting.meeting_date.isoformat()
+                if meeting.meeting_date else None
+            ),
+            "start_time": (
+                meeting.start_time.isoformat()
+                if meeting.start_time else None
+            ),
+            "end_time": (
+                meeting.end_time.isoformat()
+                if meeting.end_time else None
+            ),
             "location_text": meeting.location_text,
-            "location_id": str(meeting.location_id) if meeting.location_id else None,
+            "location_id": (
+                str(meeting.location_id)
+                if meeting.location_id else None
+            ),
             "agenda": meeting.agenda,
             "facilitator": meeting.facilitator,
+            "chairperson_id": (
+                str(meeting.chairperson_id)
+                if meeting.chairperson_id else None
+            ),
+            "secretary_id": (
+                str(meeting.secretary_id)
+                if meeting.secretary_id else None
+            ),
             "chairperson_name": meeting.chairperson_name,
-            "status_id": str(meeting.status_id) if meeting.status_id else None,
+            "status_id": (
+                str(meeting.status_id)
+                if meeting.status_id else None
+            ),
             "visibility": meeting.visibility,
-            "restricted_department_id": str(meeting.restricted_department_id) if meeting.restricted_department_id else None,
+            "restricted_department_id": (
+                str(meeting.restricted_department_id)
+                if meeting.restricted_department_id else None
+            ),
             "is_recurring": meeting.is_recurring,
             "platform": meeting.platform,
-            "meeting_link": meeting.meeting_link
+            "meeting_link": meeting.meeting_link,
         }
-        
-        # ✅ LOG TO AUDIT LOGS
-        logger.info("📝 Creating audit log for PATCH...")
-        
+
+        # ============================================================
+        # 11. AUDIT LOG
+        # ============================================================
+
         await log_audit(
             db=db,
             action="PATCH",
@@ -1927,38 +2093,66 @@ async def patch_meeting(
             old_values=old_values,
             new_values=new_values,
             status="success",
-            ip_address=request.client.host if hasattr(request, 'client') else None,
-            user_agent=request.headers.get("user-agent") if hasattr(request, 'headers') else None,
+            ip_address=(
+                request.client.host
+                if request and request.client
+                else None
+            ),
+            user_agent=(
+                request.headers.get("user-agent")
+                if request
+                else None
+            ),
             endpoint=f"/api/v1/meetings/{meeting_id}",
             extra_data={
                 "meeting_title": meeting.title,
-                "updated_fields": list(update_data.keys())
-            }
+                "updated_fields": list(update_data.keys()),
+            },
         )
-        
-        logger.info("   ✅ Audit log created")
-        
-        # Invalidate caches
-        await _stats_cache.delete(f"meeting_stats:user_{current_user.id}")
+
+        # ============================================================
+        # 12. CACHE INVALIDATION
+        # ============================================================
+
+        await _stats_cache.delete(
+            f"meeting_stats:user_{current_user.id}"
+        )
+
         if meeting.created_by_id:
-            await _stats_cache.delete(f"meeting_stats:user_{meeting.created_by_id}")
-        
-        logger.info(f"✅ Meeting {meeting_id} partially updated by user {current_user.id}")
-        logger.info(f"   Updated fields: {list(update_data.keys())}")
-        
+            await _stats_cache.delete(
+                f"meeting_stats:user_{meeting.created_by_id}"
+            )
+
+        logger.info(
+            f"✅ Meeting {meeting_id} partially updated "
+            f"by user {current_user.id}"
+        )
+
+        # ============================================================
+        # 13. RESPONSE
+        # ============================================================
+
         response = await build_meeting_response(meeting)
-        response["user_permission"] = permission.value
-        
+
+        if isinstance(response, dict):
+            response["user_permission"] = permission.value
+
         return response
-        
+
     except HTTPException:
         raise
+
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error patching meeting: {e}", exc_info=True)
+
+        logger.error(
+            f"Error patching meeting: {e}",
+            exc_info=True,
+        )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update meeting: {str(e)}"
+            detail=f"Failed to update meeting: {str(e)}",
         )
 
 

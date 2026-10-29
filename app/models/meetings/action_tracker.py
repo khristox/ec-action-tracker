@@ -299,17 +299,17 @@ class Meeting(Base):
     chairperson = relationship(
         "MeetingParticipant",
         foreign_keys=[chairperson_id],
-        remote_side="MeetingParticipant.id",
         back_populates="chairperson_of",
-        lazy="selectin"
+        lazy="selectin",
+        post_update=True
     )
     
     secretary = relationship(
         "MeetingParticipant",
         foreign_keys=[secretary_id],
-        remote_side="MeetingParticipant.id",
         back_populates="secretary_of",
-        lazy="selectin"
+        lazy="selectin",
+        post_update=True
     )
     
     minutes = relationship(

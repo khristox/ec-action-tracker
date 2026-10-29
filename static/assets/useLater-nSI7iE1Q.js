@@ -1,0 +1,1 @@
+import{a as e}from"./rolldown-runtime-BWaJ3C7D.js";import{Ts as t}from"./mui-vendor-62gOHxLK.js";var n=e(t(),1),r=()=>{let e=(0,n.useRef)(new Set);return(0,n.useEffect)(()=>{let t=e.current;return()=>{t.forEach(clearTimeout),t.clear()}},[]),(0,n.useCallback)((t,n)=>{let r=setTimeout(()=>{e.current.delete(r),t()},n);return e.current.add(r),r},[])};export{r as t};

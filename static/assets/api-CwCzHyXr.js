@@ -1,1 +1,0 @@
-import{t as e}from"./apiClient-CMligxra.js";var t={},n=e;export{t as n,n as t};

@@ -38,9 +38,6 @@ uploads/
 uploads/*
 media/
 media/*
-static/
-static/*
-!static/.gitkeep
 
 # ============================================
 # DOCKER FILES
@@ -186,8 +183,7 @@ LICENSE.txt
 # STATIC SOURCE (keep compiled static)
 # ============================================
 static_src/
-!static/
-!static/.gitkeep
+
 
 # ============================================
 # CONFIGURATION FILES (Optional)

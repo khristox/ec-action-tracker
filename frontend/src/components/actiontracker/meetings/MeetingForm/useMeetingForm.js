@@ -58,6 +58,7 @@ const getErrorMessage = (error) => {
   return error.message || 'An unexpected error occurred';
 };
 
+
 /**
  * Safe date parsing - handles string, Date, and ISO formats
  */
@@ -84,11 +85,41 @@ const safeParseDate = (date) => {
 /**
  * Format Date for API (YYYY-MM-DDTHH:mm:ss ISO format)
  */
+/**
+ * Format Date for regular meeting API fields.
+ *
+ * Regular meetings are stored in PostgreSQL timestamptz columns,
+ * so preserve the existing UTC/ISO behavior.
+ */
 const formatDateForAPI = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
     return null;
   }
   return date.toISOString();
+};
+
+/**
+ * Format a datetime as Uganda-local wall-clock time.
+ *
+ * Recurring meeting templates use PostgreSQL timestamp WITHOUT
+ * time zone columns. These values represent the actual meeting
+ * time in Uganda, so do NOT convert them to UTC.
+ *
+ * Example:
+ *   2026-10-29 20:00 Uganda
+ *   -> "2026-10-29T20:00:00"
+ */
+const formatLocalDateTimeForAPI = (date) => {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return null;
+  }
+
+  const pad = (value) => String(value).padStart(2, '0');
+
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join('T');
 };
 
 /**
@@ -102,6 +133,51 @@ const formatDateForDisplay = (date) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+/**
+ * Build meeting start/end Date objects from the selected meeting date
+ * and time fields.
+ *
+ * The Date objects represent the user's local wall-clock time.
+ * We intentionally do not serialize them here.
+ */
+const buildMeetingDateTimes = (meetingDate, startTime, endTime) => {
+  let startDateTime = null;
+  let endDateTime = null;
+
+  if (meetingDate && startTime) {
+    startDateTime = new Date(meetingDate);
+
+    startDateTime.setHours(
+      startTime.getHours(),
+      startTime.getMinutes(),
+      startTime.getSeconds(),
+      0
+    );
+  }
+
+  if (meetingDate && endTime) {
+    endDateTime = new Date(meetingDate);
+
+    endDateTime.setHours(
+      endTime.getHours(),
+      endTime.getMinutes(),
+      endTime.getSeconds(),
+      0
+    );
+
+    // If the end time is earlier than or equal to the start time,
+    // treat it as an overnight meeting.
+    if (startDateTime && endDateTime <= startDateTime) {
+      endDateTime.setDate(endDateTime.getDate() + 1);
+    }
+  }
+
+  return {
+    startDateTime,
+    endDateTime,
+  };
 };
 
 /**
@@ -250,7 +326,13 @@ export const useMeetingForm = () => {
   );
 
   const selectedParticipantIds = useMemo(
-    () => meetingParticipants.map(p => p.id),
+    () => [
+      ...new Set(
+        meetingParticipants
+          .map(p => p.user_id || (p.is_existing ? p.id : null))
+          .filter(Boolean)
+      )
+    ],
     [meetingParticipants]
   );
 
@@ -677,26 +759,11 @@ export const useMeetingForm = () => {
       return participant;
     });
 
-    // Build datetime - combine date and time
-    let startDateTime = null;
-    let endDateTime = null;
-
-    if (formData.meeting_date && formData.start_time) {
-      startDateTime = new Date(formData.meeting_date);
-      const startTime = formData.start_time;
-      startDateTime.setHours(startTime.getHours(), startTime.getMinutes(), startTime.getSeconds());
-    }
-
-    if (formData.meeting_date && formData.end_time) {
-      endDateTime = new Date(formData.meeting_date);
-      const endTime = formData.end_time;
-      endDateTime.setHours(endTime.getHours(), endTime.getMinutes(), endTime.getSeconds());
-      
-      // If end time is before start time, add a day
-      if (endDateTime <= startDateTime) {
-        endDateTime.setDate(endDateTime.getDate() + 1);
-      }
-    }
+    const { startDateTime, endDateTime } = buildMeetingDateTimes(
+      formData.meeting_date,
+      formData.start_time,
+      formData.end_time
+    );
 
     // Only a department-restricted meeting carries a department. If the user
     // switched back to "Open to All", a department picked earlier is not sent.
@@ -726,12 +793,64 @@ export const useMeetingForm = () => {
     return buildCleanPayload(payload);
   }, [formData, gpsEnabled, meetingParticipants, visibility, restrictedDepartmentId]);
 
+  const buildLocalMeetingDateTimes = useCallback(() => {
+    if (!formData.meeting_date) {
+      return {
+        startDateTime: null,
+        endDateTime: null,
+      };
+    }
+
+    let startDateTime = null;
+    let endDateTime = null;
+
+    if (formData.start_time) {
+      startDateTime = new Date(formData.meeting_date);
+
+      startDateTime.setHours(
+        formData.start_time.getHours(),
+        formData.start_time.getMinutes(),
+        formData.start_time.getSeconds(),
+        0
+      );
+    }
+
+    if (formData.end_time) {
+      endDateTime = new Date(formData.meeting_date);
+
+      endDateTime.setHours(
+        formData.end_time.getHours(),
+        formData.end_time.getMinutes(),
+        formData.end_time.getSeconds(),
+        0
+      );
+
+      // Preserve overnight meetings.
+      if (startDateTime && endDateTime <= startDateTime) {
+        endDateTime.setDate(endDateTime.getDate() + 1);
+      }
+    }
+
+    return {
+      startDateTime,
+      endDateTime,
+    };
+  }, [
+    formData.meeting_date,
+    formData.start_time,
+    formData.end_time,
+  ]);
+
   const buildRecurringPayload = useCallback((basePayload) => {
     if (!recurrence || !recurrence.enabled) return basePayload;
 
-    const recurrenceTypeId = attributeMappings.recurrenceTypes[recurrence.type];
+    const recurrenceTypeId =
+      attributeMappings.recurrenceTypes[recurrence.type];
+
     if (!recurrenceTypeId) {
-      throw new Error(`Recurrence type "${recurrence.type}" is not configured`);
+      throw new Error(
+        `Recurrence type "${recurrence.type}" is not configured`
+      );
     }
 
     const recurrenceDayIds = (recurrence.days || [])
@@ -740,17 +859,61 @@ export const useMeetingForm = () => {
 
     const statusId = attributeMappings.statuses?.active;
 
+    const { startDateTime, endDateTime } = buildMeetingDateTimes(
+      formData.meeting_date,
+      formData.start_time,
+      formData.end_time
+    );
+
     return {
       ...basePayload,
+
+      // ------------------------------------------------------------
+      // Meeting date/time
+      // ------------------------------------------------------------
+      meeting_date: formatDateForDisplay(formData.meeting_date),
+      start_time: formatLocalDateTimeForAPI(startDateTime),
+      end_time: formatLocalDateTimeForAPI(endDateTime),
+
+      // ------------------------------------------------------------
+      // Recurrence
+      // ------------------------------------------------------------
       recurrence_type_id: recurrenceTypeId,
+
       recurrence_interval: recurrence.interval || 1,
-      recurrence_days: recurrenceDayIds.length > 0 ? recurrenceDayIds : [],
-      recurrence_day_of_month: recurrence.day_of_month === 'last' ? -1 : (recurrence.day_of_month || null),
-      recurrence_end_date: recurrence.end_date ? formatDateForAPI(recurrence.end_date) : null,
-      recurrence_max_occurrences: recurrence.max_occurrences || null,
+
+      recurrence_days:
+        recurrenceDayIds.length > 0
+          ? recurrenceDayIds
+          : [],
+
+      recurrence_day_of_month:
+        recurrence.day_of_month === 'last'
+          ? -1
+          : (recurrence.day_of_month || null),
+
+      recurrence_end_date: recurrence.end_date
+        ? formatLocalDateTimeForAPI(recurrence.end_date)
+        : null,
+
+      recurrence_max_occurrences:
+        recurrence.max_occurrences || null,
+
       status_id: statusId,
+
+      // ------------------------------------------------------------
+      // Participants used as the template for future occurrences
+      // ------------------------------------------------------------
+      default_participant_ids: selectedParticipantIds,
     };
-  }, [recurrence, attributeMappings]);
+  }, [
+    recurrence,
+    attributeMappings,
+    formData.meeting_date,
+    formData.start_time,
+    formData.end_time,
+    selectedParticipantIds,
+  ]);
 
   const handleSubmit = useCallback(async () => {
     // Validation
@@ -799,7 +962,14 @@ export const useMeetingForm = () => {
         }
 
         console.log('📤 Submitting recurring meeting');
+
         const recurringPayload = buildRecurringPayload(basePayload);
+
+        console.log('📦 Recurring meeting payload:', {
+          ...recurringPayload,
+          default_participant_ids: recurringPayload.default_participant_ids,
+        });
+
         await api.post('/recurring-meetings/', recurringPayload);
         setSnackbar({
           open: true,

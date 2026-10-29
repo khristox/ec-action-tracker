@@ -357,62 +357,41 @@ async def get_occurrences(
 @router.post("/{meeting_id}/generate-on-demand")
 async def generate_on_demand_occurrence(
     meeting_id: uuid.UUID,
-    db: AsyncSession = Depends(deps.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
     """Generate the next occurrence for a recurring meeting."""
     try:
-        from datetime import timedelta
-        
         service = RecurringMeetingService(db)
+
         meeting = await service.get_recurring_meeting(meeting_id)
 
         if not meeting:
-            raise HTTPException(status_code=404, detail="Recurring meeting not found")
-        
-        if str(meeting.created_by_id) != str(current_user.id) and not await user_is_admin(db, current_user):
-            raise HTTPException(status_code=403, detail="Not enough permissions")
-        
-        # Calculate next date
-        next_date = meeting.next_occurrence_date or meeting.start_time
-        if not next_date:
-            next_date = datetime.now()
-        
-        # Create meeting occurrence
-        new_meeting = Meeting(
-            id=uuid.uuid4(),
-            title=meeting.title,
-            description=meeting.description,
-            department_id=getattr(meeting, "department_id", None),
-            meeting_date=next_date.date() if hasattr(next_date, 'date') else next_date,
-            start_time=next_date if isinstance(next_date, datetime) else meeting.start_time,
-            end_time=meeting.end_time,
-            location_text=meeting.location_text,
-            visibility=getattr(meeting, "visibility", "open"),
-            restricted_department_id=getattr(meeting, "restricted_department_id", None),
-            is_recurring=True,
-            recurring_meeting_id=meeting.id,
-            occurrence_number=(meeting.total_occurrences_generated or 0) + 1,
-            created_by_id=meeting.created_by_id,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            is_active=True,
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recurring meeting not found"
+            )
+
+        if (
+            str(meeting.created_by_id) != str(current_user.id)
+            and not await user_is_admin(db, current_user)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions"
+            )
+
+        new_meeting = await service.create_next_occurrence(
+            meeting_id,
+            automatic=False,
         )
-        
-        db.add(new_meeting)
-        
-        # Update recurring meeting
-        meeting.total_occurrences_generated = (meeting.total_occurrences_generated or 0) + 1
-        meeting.last_occurrence_date = next_date
-        meeting.updated_at = datetime.now()
-        
-        # Calculate next occurrence (weekly by default)
-        if meeting.recurrence_interval:
-            meeting.next_occurrence_date = next_date + timedelta(weeks=meeting.recurrence_interval)
-        
-        await db.commit()
-        await db.refresh(new_meeting)
-        
+
+        if not new_meeting:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No occurrence could be generated"
+            )
+
         return {
             "success": True,
             "message": "Occurrence generated successfully",
@@ -420,14 +399,21 @@ async def generate_on_demand_occurrence(
                 "meeting_id": safe_str(new_meeting.id),
                 "meeting_title": new_meeting.title,
                 "meeting_date": safe_iso_format(new_meeting.meeting_date),
+                "occurrence_number": new_meeting.occurrence_number,
             }
         }
-        
+
     except HTTPException:
         raise
+
     except Exception as e:
-        logger.error(f"Error generating occurrence: {str(e)}")
+        logger.error(
+            f"Error generating occurrence for recurring meeting "
+            f"{meeting_id}: {e}",
+            exc_info=True
+        )
         await db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate occurrence: {str(e)}"

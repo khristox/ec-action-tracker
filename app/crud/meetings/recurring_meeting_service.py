@@ -24,14 +24,21 @@ logger = logging.getLogger(__name__)
 
 def ensure_naive_datetime(dt: Optional[datetime]) -> Optional[datetime]:
     """
-    Ensure datetime is timezone-naive (UTC).
-    This fixes the "can't subtract offset-naive and offset-aware datetimes" error.
+    Preserve the local wall-clock time for Uganda-based meeting scheduling.
+
+    Example:
+        20:00+03:00 -> 20:00
+        20:00       -> 20:00
+
+    Meeting times are treated as Africa/Kampala local time throughout
+    the application.
     """
     if dt is None:
         return None
+
     if dt.tzinfo is not None:
-        # Convert to UTC and remove timezone info
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.replace(tzinfo=None)
+
     return dt
 
 def get_utc_now() -> datetime:
@@ -253,6 +260,15 @@ class RecurringMeetingService:
             start_time = ensure_naive_datetime(meeting_data.start_time)
             end_time = ensure_naive_datetime(meeting_data.end_time)
             recurrence_end_date = ensure_naive_datetime(meeting_data.recurrence_end_date)
+
+            logger.info(
+                "Creating recurring meeting '%s': default_participant_ids=%s, "
+                "chairperson_id=%s, secretary_id=%s",
+                meeting_data.title,
+                meeting_data.default_participant_ids,
+                meeting_data.chairperson_id,
+                meeting_data.secretary_id,
+            )
             
             # Create recurring meeting record with naive datetimes
             db_meeting = RecurringMeeting(
@@ -411,34 +427,33 @@ class RecurringMeetingService:
             raise
     
     async def _get_default_meeting_status(self) -> Optional[uuid.UUID]:
-        """Get default meeting status UUID"""
-        # Try to get 'scheduled' status first
+        """
+        Get the valid initial Meeting status for a newly generated occurrence.
+
+        Recurring occurrences must start as MEETING_STATUS_PENDING because
+        meeting_status_scheduler.py transitions:
+
+            PENDING -> STARTED -> ENDED
+
+        Do not fall back to arbitrary attributes or recurring-series statuses.
+        """
         result = await self.db.execute(
             select(Attribute).where(
-                Attribute.code == "MEETING_STATUS_SCHEDULED",
-                Attribute.is_active == True
+                Attribute.code == "MEETING_STATUS_PENDING",
+                Attribute.is_active.is_(True),
             )
         )
+
         status_attr = result.scalar_one_or_none()
-        
-        # If not found, try any meeting status
+
         if not status_attr:
-            result = await self.db.execute(
-                select(Attribute).where(
-                    Attribute.group.has(code="MEETING_STATUS"),
-                    Attribute.is_active == True
-                ).limit(1)
+            logger.error(
+                "Required meeting status MEETING_STATUS_PENDING was not found "
+                "or is inactive."
             )
-            status_attr = result.scalar_one_or_none()
-        
-        # If still not found, try RECURRING_STATUS_ACTIVE
-        if not status_attr:
-            result = await self.db.execute(
-                select(Attribute).where(Attribute.code == "RECURRING_STATUS_ACTIVE")
-            )
-            status_attr = result.scalar_one_or_none()
-        
-        return status_attr.id if status_attr else None
+            return None
+
+        return status_attr.id
     
     async def _calculate_next_occurrence_date(self, recurring: RecurringMeeting, last_date: datetime) -> Optional[datetime]:
         """Calculate the next occurrence date based on recurrence pattern"""
@@ -983,6 +998,15 @@ class RecurringMeetingService:
             return 0
 
     async def _default_participant_rows(self, recurring: RecurringMeeting) -> list:
+        logger.info(
+            "Seeding default participants for recurring meeting %s: "
+            "default_participant_ids=%s, chairperson_id=%s, secretary_id=%s",
+            recurring.id,
+            recurring.default_participant_ids,
+            recurring.chairperson_id,
+            recurring.secretary_id,
+        )
+
         ids = []
         for raw in (recurring.default_participant_ids or []):
             try:
@@ -992,10 +1016,22 @@ class RecurringMeetingService:
         for extra in (recurring.chairperson_id, recurring.secretary_id):
             if extra and extra not in ids:
                 ids.append(extra)
+        logger.info(
+            "Resolved participant user IDs for recurring meeting %s: %s",
+            recurring.id,
+            ids,
+        )
+
         if not ids:
             return []
 
         users = (await self.db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+        logger.info(
+            "Found %d/%d users for recurring meeting %s",
+            len(users),
+            len(ids),
+            recurring.id,
+        )
         by_id = {u.id: u for u in users}
         rows = []
         for uid in ids:

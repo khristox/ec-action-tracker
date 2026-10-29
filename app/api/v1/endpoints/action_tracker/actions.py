@@ -19,6 +19,7 @@ from app.api import deps
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
 from app.models.meetings.action_tracker import ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment
 from app.models.user import User
+from app.core.meeting_permissions import can_edit_action
 from app.services.implementer_linking import (
     build_implementers,
     normalize_email,
@@ -101,6 +102,12 @@ async def check_action_permission(
                 )
     return True
 
+async def ensure_can_edit_action(db: AsyncSession, action: MeetingAction, current_user: User) -> None:
+    if not await can_edit_action(db, action, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the assigned user, the meeting's creator or an admin can edit this action",
+        )
 
 def parse_due_date(due_date: Optional[str]) -> Optional[datetime]:
     """Parse due date string to datetime"""
@@ -691,7 +698,7 @@ async def update_action(
         action_obj = await get_action_or_404(db, action_id)
 
         # Check permission
-        await check_action_permission(action_obj, current_user, require_ownership=True)
+        await ensure_can_edit_action(db, action_obj, current_user)
 
         # Validate assigned_to_id if it is being changed
         if getattr(action_in, "assigned_to_id", None):
@@ -1008,7 +1015,7 @@ async def delete_action(
         action_obj = await get_action_or_404(db, action_id)
 
         # Check permission
-        await check_action_permission(action_obj, current_user, require_ownership=True)
+        await ensure_can_edit_action(db, action_obj, current_user)
 
         # Soft delete
         await meeting_action.soft_delete(db, action_id, current_user.id)

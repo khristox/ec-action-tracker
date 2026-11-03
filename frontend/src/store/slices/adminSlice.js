@@ -108,6 +108,7 @@ export const fetchUsers = createAsyncThunk(
     search = '', 
     is_active = null, 
     role = null, 
+    department_id = null,
     is_superuser = null 
   }, { rejectWithValue }) => {
     try {
@@ -116,10 +117,24 @@ export const fetchUsers = createAsyncThunk(
       
       if (search && search.length >= 2) params.search = search;
       if (is_active !== null) params.is_active = is_active;
-      if (role) params.role = role;
+      if (role && role !== 'all') {
+        params.role = role;
+      }
       if (is_superuser !== null) params.is_superuser = is_superuser;
+      if (department_id && department_id !== 'all') {
+        params.department_id = department_id;
+      }
       
       const response = await apiClient.get('/admin/users', { params });
+
+      console.log('========== ADMIN USERS API ==========');
+      console.log('URL:', response.config?.url);
+      console.log('STATUS:', response.status);
+      console.log('DATA:', response.data);
+      console.log('IS ARRAY:', Array.isArray(response.data));
+      console.log('DATA TYPE:', typeof response.data);
+      console.log('====================================');
+
       return response.data;
     } catch (error) {
       const errorMessage = extractErrorMessage(error);
@@ -433,15 +448,42 @@ const adminSlice = createSlice({
         state.error = null;
       })
       .addCase(fetchUsers.fulfilled, (state, action) => {
+        console.log('========== FETCH USERS FULFILLED ==========');
+        console.log('payload:', action.payload);
+        console.log('payload is array:', Array.isArray(action.payload));
+        console.log('payload type:', typeof action.payload);
+        console.log('============================================');
+
         state.isLoading = false;
-        // Handle both array and paginated responses
-        if (Array.isArray(action.payload)) {
-          state.users = action.payload;
-          state.total = action.payload.length;
+
+        const payload = action.payload;
+
+        if (Array.isArray(payload)) {
+          // API returned a plain array
+          state.users = payload;
+          state.total = payload.length;
+        } else if (payload && typeof payload === 'object') {
+          // API returned a paginated/object response
+          const users =
+            Array.isArray(payload.items)
+              ? payload.items
+              : Array.isArray(payload.users)
+                ? payload.users
+                : Array.isArray(payload.data)
+                  ? payload.data
+                  : [];
+
+          state.users = users;
+          state.total =
+            typeof payload.total === 'number'
+              ? payload.total
+              : users.length;
         } else {
-          state.users = action.payload.items || action.payload || [];
-          state.total = action.payload.total || state.users.length;
+          // Unexpected response shape
+          state.users = [];
+          state.total = 0;
         }
+
         state.error = null;
       })
       .addCase(fetchUsers.rejected, (state, action) => {

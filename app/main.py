@@ -250,6 +250,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.error(f"❌ Database connection failed: {db_health.get('error', 'Unknown error')}")
 
+    if settings.IS_PRODUCTION and (settings.DEV_CORS_ALLOW_ALL or cors_origins == ["*"] or settings.DEBUG):
+    raise RuntimeError("Unsafe production config: wildcard CORS or DEBUG enabled")
+
     # Initialize Redis
     await init_redis()
     logger.info("✅ Redis initialized")
@@ -805,10 +808,14 @@ if not settings.DEBUG:
                 raise HTTPException(status_code=404)
 
             # Serve an actual frontend file if it exists.
-            requested_file = frontend_dist / check_path
-
-            if requested_file.exists() and requested_file.is_file():
+            requested_file = (frontend_dist / check_path).resolve()
+            if (
+                requested_file.is_file()
+                and requested_file.is_relative_to(frontend_dist)
+                and not requested_file.name.startswith(".")
+            ):
                 return FileResponse(requested_file)
+            return FileResponse(index_file)
 
             # Otherwise let React Router handle the route.
             return FileResponse(index_file)

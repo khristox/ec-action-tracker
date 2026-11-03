@@ -52,6 +52,23 @@ const initials = (u) =>
 const fullName = (u) =>
   [u?.first_name, u?.last_name].filter(Boolean).join(' ') || u?.username || '—';
 
+const adminState = useSelector((state) => state.admin);
+
+console.log('========== USER MANAGEMENT ==========');
+console.log('admin state:', adminState);
+console.log('admin.users:', adminState?.users);
+console.log('users is array:', Array.isArray(adminState?.users));
+console.log('users type:', typeof adminState?.users);
+console.log('=====================================');
+
+const rawUsers = adminState?.users;
+const users = Array.isArray(rawUsers) ? rawUsers : [];
+
+const {
+    isLoading,
+    total
+} = adminState || {};
+
 const buildDeptTree = (departments = []) => {
   if (!departments.length) return [];
 
@@ -1310,9 +1327,19 @@ const UserManagement = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const dispatch = useDispatch();
-  const { users, isLoading, total } = useSelector((s) => s.admin);
+  const adminState = useSelector((s) => s.admin);
+
+  const rawUsers = adminState?.users;
+  const users = Array.isArray(rawUsers) ? rawUsers : [];
+
+  const isLoading = adminState?.isLoading ?? false;
+  const total = adminState?.total ?? 0;
   const { user: currentUser } = useSelector((s) => s.auth);
-  const rolesList = useSelector(selectAllRoles);
+  const rawRolesList = useSelector(selectAllRoles);
+
+  const rolesList = Array.isArray(rawRolesList)
+    ? rawRolesList
+    : [];
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 5 : 10);
@@ -1355,7 +1382,20 @@ const UserManagement = () => {
   const fetchDepartments = useCallback(async () => {
     try {
       const r = await api.get('/departments');
-      setDepartments(r.data || []);
+      const data = r.data;
+
+      const departmentList =
+        Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data?.departments)
+                ? data.departments
+                : [];
+
+      setDepartments(departmentList);
     } catch {
       setDepartments([]);
     }
@@ -1849,11 +1889,11 @@ const UserManagement = () => {
 
   // ── Stats ────────────────────────────────────────────────────────────────────
   const stats = useMemo(() => ({
-    total: total || 0,
-    active: users?.filter((u) => u.is_active).length || 0,
-    verified: users?.filter((u) => u.is_verified).length || 0,
-    admins: users?.filter((u) => u.roles?.includes('admin')).length || 0,
-    superadmins: users?.filter((u) => u.is_superuser).length || 0,
+    total,
+    active: users.filter((u) => u.is_active).length,
+    verified: users.filter((u) => u.is_verified).length,
+    admins: users.filter((u) => u.roles?.includes('admin')).length,
+    superadmins: users.filter((u) => u.is_superuser).length,
   }), [users, total]);
 
   const STAT_CARDS = [

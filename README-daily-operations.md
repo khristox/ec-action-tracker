@@ -384,6 +384,8 @@ docker build -t wagambula/ec-action-tracker:YYYY-MM-DD -t wagambula/ec-action-tr
 docker login
 docker push wagambula/ec-action-tracker:YYYY-MM-DD
 docker push wagambula/ec-action-tracker:latest
+# Verify
+docker images | grep ec-action-tracker
 ```
 
 `docker/dockerpush.sh` wraps the push step. If `installer.sh` complains about a missing folder, create it: `mkdir -p static frontend/dist`.

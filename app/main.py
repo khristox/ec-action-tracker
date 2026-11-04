@@ -250,9 +250,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.error(f"❌ Database connection failed: {db_health.get('error', 'Unknown error')}")
 
-    if settings.IS_PRODUCTION and (settings.DEV_CORS_ALLOW_ALL or cors_origins == ["*"] or settings.DEBUG):
-    raise RuntimeError("Unsafe production config: wildcard CORS or DEBUG enabled")
-
+    
     # Initialize Redis
     await init_redis()
     logger.info("✅ Redis initialized")

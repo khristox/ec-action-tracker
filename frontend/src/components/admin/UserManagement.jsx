@@ -52,23 +52,6 @@ const initials = (u) =>
 const fullName = (u) =>
   [u?.first_name, u?.last_name].filter(Boolean).join(' ') || u?.username || '—';
 
-const adminState = useSelector((state) => state.admin);
-
-console.log('========== USER MANAGEMENT ==========');
-console.log('admin state:', adminState);
-console.log('admin.users:', adminState?.users);
-console.log('users is array:', Array.isArray(adminState?.users));
-console.log('users type:', typeof adminState?.users);
-console.log('=====================================');
-
-const rawUsers = adminState?.users;
-const users = Array.isArray(rawUsers) ? rawUsers : [];
-
-const {
-    isLoading,
-    total
-} = adminState || {};
-
 const buildDeptTree = (departments = []) => {
   if (!departments.length) return [];
 
@@ -960,20 +943,24 @@ const RoleChip = ({ role, onChange, disabled }) => {
 const DepartmentDialog = ({
   open, onClose, user, departments, currentAssignments, onSave, saving,
 }) => {
+  const safeDepartments = Array.isArray(departments) ? departments : [];
+  const safeAssignments = Array.isArray(currentAssignments) ? currentAssignments : [];
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const searchRef = useRef(null);
 
   const [selectedMap, setSelectedMap] = useState(() => {
     const initial = {};
-    currentAssignments.forEach((a) => { initial[a.department_id] = a.role || 'member'; });
+    safeAssignments.forEach((a) => {
+      initial[a.department_id] = a.role || 'member';
+    });
     return initial;
   });
   const [search, setSearch] = useState('');
 
   const activeDepartments = useMemo(() => {
-    return departments.filter(dept => dept.is_active !== false);
-  }, [departments]);
+    return safeDepartments.filter(dept => dept.is_active !== false);
+  }, [safeDepartments]);
 
   const deptTree = useMemo(() => buildDeptTree(activeDepartments), [activeDepartments]);
 
@@ -1402,15 +1389,43 @@ const UserManagement = () => {
   }, []);
 
   const fetchUserDepts = useCallback(async (userId, force = false) => {
-    if (!force && (userDepartmentsMap[userId] || loadingUserDepts[userId])) return;
+    if (!force && (userDepartmentsMap[userId] || loadingUserDepts[userId])) {
+      return;
+    }
+
     setLoadingUserDepts((p) => ({ ...p, [userId]: true }));
+
     try {
       const r = await api.get(`/users/${userId}/departments`);
-      setUserDeptMap((p) => ({ ...p, [userId]: r.data || [] }));
-    } catch {
-      setUserDeptMap((p) => ({ ...p, [userId]: [] }));
+      const data = r.data;
+
+      const assignments =
+        Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data?.departments)
+                ? data.departments
+                : [];
+
+      setUserDeptMap((p) => ({
+        ...p,
+        [userId]: assignments,
+      }));
+    } catch (error) {
+      console.error(`Failed to load departments for user ${userId}:`, error);
+
+      setUserDeptMap((p) => ({
+        ...p,
+        [userId]: [],
+      }));
     } finally {
-      setLoadingUserDepts((p) => ({ ...p, [userId]: false }));
+      setLoadingUserDepts((p) => ({
+        ...p,
+        [userId]: false,
+      }));
     }
   }, [userDepartmentsMap, loadingUserDepts]);
 

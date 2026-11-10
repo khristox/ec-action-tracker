@@ -46,7 +46,7 @@ api_router.include_router(auth_router, prefix="/auth", tags=["authentication"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(roles_router, prefix="/roles", tags=["roles"])
 api_router.include_router(permissions_router, prefix="/permissions", tags=["permissions"])
-api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
+api_router.include_router(admin_router, prefix="/manage", tags=["admin"])
 api_router.include_router(users_dep_router, prefix="/departments", tags=["departments"])
 
 # System & Audit

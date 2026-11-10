@@ -584,6 +584,7 @@ class MeetingMinutes(Base):
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     meeting_id = Column(CustomUUID, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False)
+    is_system = Column(Boolean, default=False, nullable=False, server_default='false')
     
     topic = Column(String(500), nullable=False)
     discussion = Column(Text, nullable=True)
@@ -710,7 +711,7 @@ class MeetingAction(Base):
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
-    minute_id = Column(CustomUUID, ForeignKey("meeting_minutes.id", ondelete='CASCADE'), nullable=False)
+    minute_id = Column(CustomUUID, ForeignKey("meeting_minutes.id", ondelete='CASCADE'), nullable=True)
     description = Column(Text, nullable=False)
     
     # Backward compatibility fields

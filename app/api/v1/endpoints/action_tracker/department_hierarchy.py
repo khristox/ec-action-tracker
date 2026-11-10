@@ -85,3 +85,23 @@ async def user_can_access_department(
     if department_id is None:
         return False
     return department_id in await get_accessible_department_ids(db, user_id)
+
+async def user_can_manage_department(
+    db: AsyncSession,
+    user_id: UUID,
+    department_id: UUID,
+) -> bool:
+    """
+    True when the user's department is the same as, or an ancestor of,
+    the target department.
+
+    This determines whether the user may have management authority
+    (OWNER/ORGANIZER) over meetings belonging to that department.
+    """
+    if department_id is None:
+        return False
+
+    return department_id in await get_accessible_department_ids(
+        db,
+        user_id,
+    )

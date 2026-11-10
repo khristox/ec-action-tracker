@@ -380,7 +380,8 @@ rm -rf node_modules/.vite && npm run dev
 cd docker
 ./installer.sh                       # builds the frontend and refreshes static/
 cd ..
-docker build -t wagambula/ec-action-tracker:YYYY-MM-DD -t wagambula/ec-action-tracker:latest .
+docker build --no-cache -t wagambula/ec-action-tracker:YYYY-MM-DD .
+docker tag wagambula/ec-action-tracker:YYYY-MM-DD wagambula/ec-action-tracker:latest
 docker login
 docker push wagambula/ec-action-tracker:YYYY-MM-DD
 docker push wagambula/ec-action-tracker:latest

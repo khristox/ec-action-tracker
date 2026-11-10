@@ -332,7 +332,7 @@ def build_minutes_list(meeting_obj: Meeting) -> List[MeetingMinutesResponse]:
         return minutes
     
     for m in meeting_obj.minutes:
-        if not m.is_active:
+        if not m.is_active or m.is_system:
             continue
         
         minutes.append(MeetingMinutesResponse(
@@ -504,8 +504,9 @@ async def build_meeting_response(
             
             # Counts
             "participants_count": len(meeting_obj.participants) if hasattr(meeting_obj, 'participants') and meeting_obj.participants else 0,
-            "minutes_count": len(meeting_obj.minutes) if hasattr(meeting_obj, 'minutes') and meeting_obj.minutes else 0,
+            "minutes_count": len([m for m in (meeting_obj.minutes or []) if m.is_active and not m.is_system]),
             "documents_count": len(meeting_obj.documents) if hasattr(meeting_obj, 'documents') and meeting_obj.documents else 0,
+            
         }
         
         # ========== Resolve Department Names ==========
@@ -599,7 +600,7 @@ async def build_meeting_response(
                     "created_at": safe_isoformat(m.created_at),
                     "updated_at": safe_isoformat(m.updated_at),
                 }
-                for m in (meeting_obj.minutes or []) if m.is_active
+                for m in (meeting_obj.minutes or []) if m.is_active and not m.is_system
             ]
             
             response["documents"] = [

@@ -1,6 +1,5 @@
 # app/api/v1/endpoints/action_tracker/actions.py
 
-from operator import or_
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +16,9 @@ import logging
 
 from app.api import deps
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
-from app.models.meetings.action_tracker import ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment
+from app.models.meetings.action_tracker import (
+    ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment, ActionStatus,
+)
 from app.models.user import User
 from app.core.meeting_permissions import can_edit_action
 from app.services.implementer_linking import (
@@ -25,6 +26,10 @@ from app.services.implementer_linking import (
     normalize_email,
     normalize_phone,
     resolve_implementer_user_id,
+)
+
+from app.api.v1.endpoints.action_tracker.action_visibility import (
+    build_action_access_filter, ensure_can_view_action,
 )
 
 from app.schemas.action_tracker import (
@@ -106,7 +111,7 @@ async def ensure_can_edit_action(db: AsyncSession, action: MeetingAction, curren
     if not await can_edit_action(db, action, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the assigned user, the meeting's creator or an admin can edit this action",
+            detail="Only the action's creator, the assigned user, the meeting's creator or an admin can edit this action",
         )
 
 def parse_due_date(due_date: Optional[str]) -> Optional[datetime]:
@@ -264,24 +269,8 @@ async def ensure_minute_exists(
             detail=f"Meeting with id {meeting_id} not found"
         )
 
-    # Check for existing minutes
-    existing_minutes = await meeting_minutes.get_minutes_by_meeting(
-        db=db,
-        meeting_id=meeting_id,
-        limit=1
-    )
-
-    if existing_minutes:
-        return existing_minutes[0].id
-
-    # Create default minute
-    default_minute = await meeting_minutes.create_default_minute(
-        db=db,
-        meeting_id=meeting_id,
-        action_description=description,
-        user_id=user_id
-    )
-    return default_minute.id
+    minute = await meeting_minutes.get_or_create_system_minute(db, meeting_id, user_id)
+    return minute.id
 
 
 # ==================== TEST ROUTES (Development Only) ====================
@@ -308,6 +297,18 @@ async def test_router():
         ]
     }
 
+@router.get("/statuses")
+async def list_action_statuses(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """All active action statuses, the same table actions store their status in."""
+    rows = (await db.execute(
+        select(ActionStatus)
+        .where(ActionStatus.is_active == True)
+        .order_by(ActionStatus.sort_order)
+    )).scalars().all()
+    return [s.to_dict() for s in rows]
 
 # ==================== USER TASK ROUTES ====================
 
@@ -318,8 +319,7 @@ async def get_my_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: Optional[str] = Query(None, description="Search in description"),
-    status_filter: Optional[str] = Query(None, alias="status", 
-        description="pending, in_progress, completed, overdue"),
+    status_filter: Optional[str] = Query(None, alias="status", description="pending, in_progress, completed, overdue"),
     priority: Optional[int] = Query(None, ge=1, le=4),
     is_overdue: Optional[bool] = Query(None),
     include_completed: bool = Query(False, description="Include completed tasks"),
@@ -404,7 +404,7 @@ async def get_actions(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: Optional[str] = Query(None, description="Search in description and title"),
-    status: Optional[str] = Query(None, description="pending, in_progress, completed, overdue"),
+    status_filter: Optional[str] = Query(None, description="pending, in_progress, completed, overdue"),
     status_id: Optional[UUID] = Query(None, description="Filter by status ID"),
     priority: Optional[int] = Query(None, ge=1, le=4, description="Filter by priority (1-4)"),
     assigned_to_id: Optional[UUID] = Query(None, description="Filter by assigned user"),
@@ -412,7 +412,10 @@ async def get_actions(
     """Get all actions with optional filtering and pagination."""
     try:
         # Start with base query
-        query = select(MeetingAction).where(MeetingAction.is_active == True)
+        query = select(MeetingAction).where(
+            MeetingAction.is_active == True,
+            await build_action_access_filter(db, current_user),
+        )
         
         # Apply search filter
         if search:
@@ -426,29 +429,30 @@ async def get_actions(
             )
         
         # Apply status string filter
-        if status:
-            if status == "pending":
+        if status_filter:
+            if status_filter == "pending":
                 query = query.where(
                     MeetingAction.completed_at.is_(None),
                     MeetingAction.overall_progress_percentage == 0
                 )
-            elif status == "in_progress":
+            elif status_filter == "in_progress":
                 query = query.where(
                     MeetingAction.completed_at.is_(None),
                     MeetingAction.overall_progress_percentage > 0,
                     MeetingAction.overall_progress_percentage < 100
                 )
-            elif status == "completed":
+            elif status_filter == "completed":
                 query = query.where(
                     or_(
                         MeetingAction.completed_at.is_not(None),
                         MeetingAction.overall_progress_percentage == 100
                     )
                 )
-            elif status == "overdue":
+            elif status_filter == "overdue":
                 query = query.where(
                     MeetingAction.completed_at.is_(None),
-                    MeetingAction.is_overdue == True
+                    MeetingAction.due_date.is_not(None),
+                    MeetingAction.due_date < datetime.now(timezone.utc),
                 )
         
         # Apply status_id filter
@@ -504,15 +508,19 @@ async def create_action(
     If no minute_id is provided, automatically create a default minute.
     """
     try:
-        # Ensure minute exists
-        minute_id = await ensure_minute_exists(
-            db=db,
-            minute_id=action_in.minute_id,
-            meeting_id=action_in.meeting_id,
-            description=action_in.description,
-            user_id=current_user.id
-        )
-        action_in.minute_id = minute_id
+        minute_id = action_in.minute_id
+
+        # Only look up or create minutes when the request points at a minute or a meeting.
+        # With neither, the action is standalone and minute_id stays None.
+        if minute_id or getattr(action_in, "meeting_id", None):
+            minute_id = await ensure_minute_exists(
+                db=db,
+                minute_id=action_in.minute_id,
+                meeting_id=action_in.meeting_id,
+                description=action_in.description,
+                user_id=current_user.id,
+            )
+        action_in.minute_id = minute_id        # may be None
 
         # Validate assigned_to_id against the users table so stale ids
         # degrade to name-only assignment instead of an FK violation.
@@ -524,9 +532,9 @@ async def create_action(
         # Create the action
         action = await meeting_action.create_action(
             db=db,
-            minute_id=action_in.minute_id,
+            minute_id=minute_id,
             action_in=action_in,
-            assigned_by_id=current_user.id
+            assigned_by_id=current_user.id,
         )
 
         logger.info(f"Action created by user {current_user.id}: {action.id}")
@@ -637,12 +645,12 @@ async def get_action_history(
     try:
         # Check if action exists
         action = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action, current_user)
 
         # Check permission (view history)
         await check_action_permission(action, current_user, require_ownership=False)
 
 
-        print('Ch..')
         # Get history
         history = await meeting_action.get_status_history(db, action_id, skip, limit)
 
@@ -670,6 +678,7 @@ async def get_action(
     """Get action by ID with permission check."""
     try:
         action = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action, current_user)
         await check_action_permission(action, current_user, require_ownership=False)
 
         logger.info(f"Action {action_id} retrieved by user {current_user.id}")
@@ -836,6 +845,7 @@ async def assign_action(
     try:
         # Check if action exists
         action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_edit_action(db, action_obj, current_user)     # Only the action's creator, the assigned user, the meeting's creator, or an admin can assign actions
 
         # Verify the target user exists (avoid FK violation)
         resolved_id = await resolve_implementer_user_id(db, user_id=user_id)
@@ -878,7 +888,8 @@ async def add_action_comment(
     """Add a comment to an action item."""
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action_obj, current_user)
 
         # Add comment
         comment = await meeting_action.add_comment(db, action_id, comment_in, current_user.id)
@@ -908,7 +919,8 @@ async def get_action_comments(
     """Get all comments for an action with pagination."""
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action_obj, current_user)
 
         # Get comments directly with SQLAlchemy
         query = select(ActionComment).where(
@@ -1050,7 +1062,8 @@ async def get_action_implementers(
     """
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action_obj, current_user)
 
         # Get implementers
         result = await db.execute(
@@ -1093,7 +1106,8 @@ async def add_action_implementers(
     """
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)            
+        await ensure_can_edit_action(db, action_obj, current_user)     
 
         # Delete existing implementers
         await db.execute(
@@ -1146,7 +1160,8 @@ async def delete_action_implementer(
     """
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)            
+        await ensure_can_edit_action(db, action_obj, current_user)
 
         # Find and delete the implementer
         result = await db.execute(

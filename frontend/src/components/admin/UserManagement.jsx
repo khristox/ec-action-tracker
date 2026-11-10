@@ -981,14 +981,14 @@ const DepartmentDialog = ({
     useEffect(() => {
     if (!open) return;
     const initial = {};
-    currentAssignments.forEach((a) => {
+    safeAssignments.forEach((a) => {
       initial[a.department_id] = a.role || 'member';
     });
     setSelectedMap(initial);
     setSearch('');
     const focusTimer = setTimeout(() => searchRef.current?.focus(), 120);
     return () => clearTimeout(focusTimer);
-  }, [open, currentAssignments]);
+  }, [open, safeAssignments]);
 
   const filteredTree = useMemo(() => {
     if (!search.trim()) return deptTree;
@@ -1169,10 +1169,10 @@ const DepartmentDialog = ({
           })}
         </Box>
 
-        {activeDepartments.length !== departments.length && (
+        {activeDepartments.length !== safeDepartments.length && (
           <Box sx={{ px: 2.5, pb: 1.5 }}>
             <Alert severity="info" icon={<BusinessOutlined />} sx={{ py: 0, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
-              Showing only active departments ({activeDepartments.length} of {departments.length})
+              Showing only active departments ({activeDepartments.length} of {safeDepartments.length})
             </Alert>
           </Box>
         )}
@@ -1321,6 +1321,7 @@ const UserManagement = () => {
 
   const isLoading = adminState?.isLoading ?? false;
   const total = adminState?.total ?? 0;
+  const adminError = adminState?.listError;
   const { user: currentUser } = useSelector((s) => s.auth);
   const rawRolesList = useSelector(selectAllRoles);
 
@@ -1350,6 +1351,7 @@ const UserManagement = () => {
   const [savingDepts, setSavingDepts] = useState(false);
 
   const [departments, setDepartments] = useState([]);
+  const [deptError, setDeptError] = useState(null);
   const [userDepartmentsMap, setUserDeptMap] = useState({});
   const [loadingUserDepts, setLoadingUserDepts] = useState({});
 
@@ -1368,6 +1370,8 @@ const UserManagement = () => {
   // ── Data fetching ────────────────────────────────────────────────────────────
   const fetchDepartments = useCallback(async () => {
     try {
+      setDeptError(null);
+
       const r = await api.get('/departments');
       const data = r.data;
 
@@ -1383,8 +1387,15 @@ const UserManagement = () => {
                 : [];
 
       setDepartments(departmentList);
-    } catch {
+    } catch (error) {
       setDepartments([]);
+
+      setDeptError(
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to load departments.'
+      );
     }
   }, []);
 
@@ -2159,6 +2170,57 @@ const UserManagement = () => {
           </Button>
         </Box>
       </Box>
+
+      {(adminError || deptError) && (
+        <Stack spacing={1.5} sx={{ mb: 3 }}>
+          {adminError && (
+            <Alert
+              severity={adminError.blocked ? 'error' : 'warning'}
+              icon={<WarningAmberOutlined />}
+              sx={{ borderRadius: 2 }}
+            >
+              <Typography variant="body2" fontWeight={600}>
+                {adminError.blocked
+                  ? 'Users could not be loaded'
+                  : 'Unable to load users'}
+              </Typography>
+
+              <Typography variant="body2">
+                {adminError.message ||
+                  'An error occurred while loading the users list.'}
+              </Typography>
+
+              {adminError.status && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  HTTP status: {adminError.status}
+                </Typography>
+              )}
+            </Alert>
+          )}
+
+          {deptError && (
+            <Alert
+              severity="warning"
+              icon={<BusinessOutlined />}
+              sx={{ borderRadius: 2 }}
+            >
+              <Typography variant="body2" fontWeight={600}>
+                Departments could not be loaded
+              </Typography>
+
+              <Typography variant="body2">
+                {typeof deptError === 'string'
+                  ? deptError
+                  : 'Unable to load department information.'}
+              </Typography>
+            </Alert>
+          )}
+        </Stack>
+      )}
 
       {/* Improved Stats */}
       <Box sx={{ mb: 3 }}>

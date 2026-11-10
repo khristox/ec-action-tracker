@@ -456,7 +456,6 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             await db.flush()
             
             # Assign roles
-            # Assign roles
             if roles:
                 logger.info(
                     f"Assigning roles to user '{username}': {roles}"
@@ -492,11 +491,30 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
                         f"✅ Successfully assigned role "
                         f"'{role_name}' to '{username}'"
                     )
-            
+
+            # IMPORTANT: return the newly created user
+            logger.info(
+                f"CREATE USER CRUD: returning user "
+                f"id={user.id}, username={user.username}"
+            )
+
+            return user
+
         except SQLAlchemyError as e:
             await db.rollback()
-            logger.error(f"Error creating user: {e}")
+            logger.error(
+                f"Error creating user '{username}': {e}",
+                exc_info=True
+            )
             return None
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(
+                f"Unexpected error creating user '{username}': {e}",
+                exc_info=True
+            )
+            raise
         
     # ==================== USER UPDATES ====================
     

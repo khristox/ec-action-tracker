@@ -22,6 +22,7 @@ from typing import List, Optional, Dict, Any, Callable, TypeVar, Tuple
 from uuid import UUID
 from pydantic import BaseModel
 
+from app.api.v1.endpoints.action_tracker.meeting_visibility import user_can_view_meeting
 from app.api.v1.endpoints.action_tracker.meetings_access_control import AccessLevel, DepartmentAccessControl, check_meeting_access_or_403
 from app.api.v1.endpoints.action_tracker.utils import build_meeting_response
 from app.api.v1.endpoints.action_tracker.audit_logger import log_audit  # ✅ ADDED
@@ -86,64 +87,6 @@ def _norm_email(value: Optional[str]) -> str:
     """Normalize an email for comparison (trim + lowercase)."""
     return (value or "").strip().lower()
 
-
-class AccessControl:
-    """
-    Check if user has access to a meeting.
-    Note: This is about VISIBILITY, not ACTIONS.
-    """
-
-    @staticmethod
-    async def can_access_meeting(
-        db: AsyncSession,
-        meeting_id: UUID,
-        user_id: UUID,
-        user_email: str,
-        is_superuser: bool = False
-    ) -> bool:
-        """
-        Check if user can ACCESS (view) a meeting.
-        
-        User can access if:
-        1. Is superuser
-        2. Created the meeting
-        3. Is a participant (by email, case-insensitive)
-        4. Meeting is open/public
-        """
-        
-        if is_superuser:
-            return True
-        
-        try:
-            result = await db.execute(
-                select(Meeting).options(
-                    selectinload(Meeting.participants)
-                ).where(Meeting.id == meeting_id)
-            )
-            meeting = result.scalar_one_or_none()
-            
-            if not meeting:
-                return False
-            
-            # Creator always has access
-            if meeting.created_by_id == user_id:
-                return True
-            
-            # Check if participant
-            if meeting.participants:
-                email_norm = _norm_email(user_email)
-                for participant in meeting.participants:
-                    if (_norm_email(participant.email) == email_norm and 
-                        participant.is_active):
-                        return True
-            
-            # Check visibility
-            visibility = getattr(meeting, 'visibility', 'open')
-            return visibility == 'open'
-            
-        except Exception as e:
-            logger.error(f"Error checking meeting access: {e}")
-            return False
 
 
 class PermissionChecker:
@@ -497,10 +440,10 @@ class StatsComputer:
             
             # Compute stats from meeting data
             total = len(meetings)
-            upcoming = sum(1 for m in meetings if m.meeting_date and m.meeting_date >= today)
+            upcoming = sum(1 for m in meetings if m.meeting_date.date() and m.meeting_date.date() >= today)
             in_progress = sum(1 for m in meetings if m.status_id in in_progress_statuses)
             completed = sum(1 for m in meetings if m.status_id == status_map.get('completed'))
-            today_count = sum(1 for m in meetings if m.meeting_date and m.meeting_date == today)
+            today_count = sum(1 for m in meetings if m.meeting_date.date() and m.meeting_date.date() == today)
             
             return {
                 "total": total,
@@ -565,6 +508,50 @@ async def _get_member(db, meeting_id: UUID, member_id: UUID) -> MeetingParticipa
         raise HTTPException(404, "Member not found")
     return member
 
+@router.get("/{meeting_id}/actions")
+async def get_meeting_actions(
+    meeting_id: UUID,
+    include_completed: bool = Query(True),
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """All actions of one meeting, including actions on the hidden system minute."""
+    if not await user_can_view_meeting(db, current_user, meeting_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You don't have access to this meeting")
+
+    query = (
+        select(MeetingAction)
+        .join(MeetingMinutes, MeetingAction.minute_id == MeetingMinutes.id)
+        .where(
+            MeetingMinutes.meeting_id == meeting_id,
+            MeetingMinutes.is_active == True,
+            MeetingAction.is_active == True,
+        )
+        .options(
+            selectinload(MeetingAction.implementers),
+            selectinload(MeetingAction.overall_status),
+            selectinload(MeetingAction.assigned_to),
+            selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+        )
+        .order_by(MeetingAction.due_date.asc().nulls_last(), MeetingAction.created_at.desc())
+    )
+    if not include_completed:
+        query = query.where(MeetingAction.completed_at.is_(None))
+
+    actions = (await db.execute(query)).scalars().all()
+
+    items = []
+    for a in actions:
+        d = a.to_dict(include_relationships=True)
+        m = a.minutes.meeting if a.minutes else None
+        d["meeting_id"] = str(m.id) if m else None
+        d["meeting_title"] = m.title if m else None
+        d["meeting_date"] = m.meeting_date.isoformat() if m and m.meeting_date else None
+        d["occurrence_number"] = m.occurrence_number if m else None
+        items.append(d)
+
+    return {"items": items, "total": len(items)}
+
 @router.get("/series/{recurring_meeting_id}/actions")
 async def get_series_actions(
     recurring_meeting_id: UUID,
@@ -583,6 +570,7 @@ async def get_series_actions(
             Meeting.recurring_meeting_id == recurring_meeting_id,
             Meeting.is_active == True,
             MeetingMinutes.is_active == True,
+            MeetingMinutes.is_system == False,
             MeetingAction.is_active == True,
             access,
         )
@@ -678,7 +666,8 @@ async def list_members(
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    await _require_manage(db, meeting_id, current_user)   # or a looser check
+    if not await user_can_view_meeting(db, current_user, meeting_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You don't have access to this meeting")
     rows = (await db.execute(
         select(MeetingParticipant).where(
             MeetingParticipant.meeting_id == meeting_id,
@@ -1261,21 +1250,7 @@ async def get_meeting(
     """
     
     try:
-        # ✅ Step 1: Check access
-        access_level = await DepartmentAccessControl.get_access_level(
-            db, meeting_id, current_user.id, current_user.email,
-            is_admin_user(current_user)
-        )
-        
-        logger.info(f"📊 User {current_user.id} access level: {access_level.value}")
-        
-        if access_level == AccessLevel.NONE:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to this meeting"
-            )
-        
-        # ✅ Step 2: Fetch meeting
+        # Step 1: Fetch the meeting
         result = await db.execute(
             select(Meeting).options(
                 selectinload(Meeting.participants),
@@ -1283,7 +1258,44 @@ async def get_meeting(
                 selectinload(Meeting.status),
             ).where(Meeting.id == meeting_id)
         )
+
         meeting = result.scalar_one_or_none()
+
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
+
+        # Step 2: Enforce the same hierarchical visibility rule
+        access_filter = await build_meeting_access_filter(db, current_user)
+
+        access_result = await db.execute(
+            select(Meeting.id).where(
+                Meeting.id == meeting_id,
+                Meeting.is_active == True,
+                access_filter,
+            )
+        )
+
+        if access_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this meeting"
+            )
+
+        # Step 3: Determine the UI access level
+        access_level = await DepartmentAccessControl.get_access_level(
+            db,
+            meeting_id,
+            current_user.id,
+            current_user.email,
+            is_admin_user(current_user),
+        )
+
+        logger.info(
+            f"User {current_user.id} access level: {access_level.value}"
+        )
         
         if not meeting:
             raise HTTPException(
@@ -2176,7 +2188,8 @@ async def get_meeting_minutes(
         result = await db.execute(
             select(MeetingMinutes).where(
                 MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
+                MeetingMinutes.is_active == True,
+                MeetingMinutes.is_system == False
             ).order_by(desc(MeetingMinutes.timestamp))
         )
         minutes = result.scalar_one_or_none()
@@ -2210,10 +2223,7 @@ async def create_meeting_minutes(
     
     try:
         # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            is_admin_user(current_user)
-        )
+        can_access = await user_can_view_meeting(db, current_user, meeting_id)
         
         if not can_access:
             raise HTTPException(
@@ -2250,7 +2260,8 @@ async def create_meeting_minutes(
         existing_result = await db.execute(
             select(MeetingMinutes).where(
                 MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
+                MeetingMinutes.is_active == True,
+                MeetingMinutes.is_system == False
             )
         )
         existing_minutes = existing_result.scalar_one_or_none()
@@ -2373,10 +2384,7 @@ async def delete_meeting_minutes(
     
     try:
         # Check access
-        can_access = await AccessControl.can_access_meeting(
-            db, meeting_id, current_user.id, current_user.email,
-            is_admin_user(current_user)
-        )
+        can_access = await user_can_view_meeting(db, current_user, meeting_id)
         
         if not can_access:
             raise HTTPException(
@@ -2400,7 +2408,8 @@ async def delete_meeting_minutes(
         result = await db.execute(
             select(MeetingMinutes).where(
                 MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
+                MeetingMinutes.is_active == True,
+                MeetingMinutes.is_system == False
             )
         )
         minutes = result.scalar_one_or_none()

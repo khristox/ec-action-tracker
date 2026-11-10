@@ -44,20 +44,6 @@ const normalizeError = (detail, fallback = 'Something went wrong') => {
   return String(detail);
 };
 
-const buildStatusOptions = (attributes) => {
-  const list = attributes?.items || attributes?.data || attributes || [];
-  return list
-    .filter((attr) => attr.code && attr.code.startsWith('ACTION_STATUS_') && attr.is_active !== false)
-    .map((attr) => ({
-      id: attr.id,
-      value: (attr.short_name || attr.code).toLowerCase().replace('action_status_', ''),
-      label: attr.name?.replace('Action Status - ', '') || attr.name,
-      code: attr.code,
-      short_name: attr.short_name,
-      sort_order: attr.sort_order,
-    }))
-    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-};
 
 const normalizeStatusOptions = (raw) => {
   if (!Array.isArray(raw)) return [];
@@ -148,6 +134,19 @@ const UpdateProgress = forwardRef(({
     return normalizeStatusOptions(FALLBACK_STATUSES);
   }, [statusOptions, fetchedStatuses]);
 
+  // The action's own saved status is always shown/selectable, even if the options list lacks it
+  const menuStatuses = useMemo(() => {
+    if (action?.overall_status_id && !effectiveStatuses.some((s) => s.id === action.overall_status_id)) {
+      const name = action.overall_status_name || action.status_display || 'Current status';
+      return [
+        ...effectiveStatuses,
+        { id: action.overall_status_id, value: name.toLowerCase(), label: name,
+          code: null, short_name: null, sort_order: 999 },
+      ];
+    }
+    return effectiveStatuses;
+  }, [effectiveStatuses, action]);
+
   // ------------------------------------------------
   // Find the option id matching a status reference
   // ------------------------------------------------
@@ -187,38 +186,32 @@ const UpdateProgress = forwardRef(({
   // Fetch statuses from backend if parent didn't give real UUIDs
   // ------------------------------------------------
   useEffect(() => {
-    const parentHasRealIds =
-      Array.isArray(statusOptions) &&
-      statusOptions.length > 0 &&
-      statusOptions.some((o) => isValidUuid(o?.id));
-
-    if (parentHasRealIds) return;
-
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
-        const opts = buildStatusOptions(res.data);
+        const res = await api.get('/action-tracker/actions/statuses');
+        const opts = (res.data || []).map((s) => ({
+          id: s.id,
+          value: (s.short_name || s.code || '').toLowerCase(),
+          label: s.name,
+          code: s.code,
+          short_name: s.short_name,
+          sort_order: s.sort_order,
+        }));
         if (!cancelled && opts.length > 0) setFetchedStatuses(opts);
       } catch (err) {
-        console.warn('Could not fetch status options, using fallback:', err);
-      }finally {
+        console.warn('Could not fetch status options, using parent options:', err);
+      } finally {
         if (!cancelled) setStatusLoadDone(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [statusOptions]);
+  }, []);
 
   useEffect(() => {
-    if (statusLoadDone && effectiveStatuses.length === 0) setFetching(false);
-  }, [statusLoadDone, effectiveStatuses]);
-  // ------------------------------------------------
-  // Load action data (re-runs when effectiveStatuses changes)
-  // ------------------------------------------------
-  useEffect(() => {
-    if (actionId && effectiveStatuses.length > 0) fetchActionData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actionId, effectiveStatuses]);
+    if (!actionId) { setFetching(false); return; }
+    if (statusLoadDone) fetchActionData();
+  }, [actionId, statusLoadDone]);
 
   
 
@@ -238,7 +231,7 @@ const UpdateProgress = forwardRef(({
         actionData.overall_status_short_name ||
         actionData.status
       );
-      const defaultStatusId = matchedId;  // Pending action: nothing preselected, use picks
+      const defaultStatusId = matchedId || actionData.overall_status_id || '';
 
       setFormData({
         overall_progress_percentage: actionData.overall_progress_percentage || 0,
@@ -246,18 +239,7 @@ const UpdateProgress = forwardRef(({
         remarks: actionData.remarks || '',
       });
 
-      const isPendingName = /^(pending|not[\s_-]?started)$/i.test(
-        String(actionData.overall_status_name || '').trim()
-      );
-
-      const hadStatus = Boolean(
-        actionData.overall_status_id ||
-        (actionData.overall_status_name && !isPendingName) ||
-        actionData.status
-      );
-      if (hadStatus && !matchedId && !embedded) {
-        setError('The current status could not be matched to an available option.');
-      }
+      
     } catch (err) {
       console.error('Fetch error:', err);
       if (!embedded) {
@@ -338,7 +320,7 @@ const UpdateProgress = forwardRef(({
 
   const getStatusConfig = (statusId) => {
     if (!statusId) return null;
-    const status = effectiveStatuses.find((s) => s.id === statusId);
+    const status = menuStatuses.find((s) => s.id === statusId);
     if (!status) return null;
     const key =
       status.value?.toLowerCase() ||
@@ -351,10 +333,7 @@ const UpdateProgress = forwardRef(({
 
   const priorityConfig = action ? PRIORITY_CONFIG[action.priority] || PRIORITY_CONFIG[2] : null;
   const previousStatusObj = action
-    ? effectiveStatuses.find((s) => s.id === action.overall_status_id) ||
-      effectiveStatuses.find((s) =>
-        s.id === findMatchingStatusId(action.overall_status_id, action.overall_status_name)
-      )
+    ? menuStatuses.find((s) => s.id === action.overall_status_id)
     : null;
   const previousStatusConfig = getStatusConfig(previousStatusObj?.id);
 
@@ -364,8 +343,10 @@ const UpdateProgress = forwardRef(({
   };
 
   const noStatuses = effectiveStatuses.length === 0;
-  const shownStatusConfig = previousStatusConfig || (action ? STATUS_CONFIG.pending : null);
-  const shownStatusLabel = previousStatusObj?.label || previousStatusObj?.name || 'Pending';
+
+  const nameKey = String(action?.overall_status_name || 'pending').toLowerCase().replace(/[\s_-]/g, '');
+  const shownStatusConfig = previousStatusConfig || (action ? (STATUS_CONFIG[nameKey] || STATUS_CONFIG.pending) : null);
+  const shownStatusLabel = action?.overall_status_name || previousStatusObj?.label || 'Pending';
 
   if (fetching) {    
     return (
@@ -631,35 +612,37 @@ const UpdateProgress = forwardRef(({
                         },
                         '& .MuiFormHelperText-root': { fontSize: '0.7rem', mt: 0.25, mx: 0 },
                       }}
-                      SelectProps={{
-                        renderValue: (selected) => {
-                          if (!selected) {
+                      slotProps={{
+                        select: {
+                          renderValue: (selected) => {
+                            if (!selected) {
+                              return (
+                                <Typography color="text.secondary" sx={{ fontSize: '0.85rem' }}>
+                                  Select Status
+                                </Typography>
+                              );
+                            }
+                            const config = getStatusConfig(selected);
+                            const status = menuStatuses.find((s) => s.id === selected);
                             return (
-                              <Typography color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                                Select Status
-                              </Typography>
+                              <Stack direction="row" alignItems="center" spacing={1}>
+                                {config?.icon}
+                                <Typography
+                                  fontWeight={600}
+                                  sx={{
+                                    color: isDarkMode ? '#F8FAFC' : 'inherit',
+                                    fontSize: '0.85rem',
+                                  }}
+                                >
+                                  {status?.label || status?.name || status?.short_name || 'Select Status'}
+                                </Typography>
+                              </Stack>
                             );
-                          }
-                          const config = getStatusConfig(selected);
-                          const status = effectiveStatuses.find((s) => s.id === selected);
-                          return (
-                            <Stack direction="row" alignItems="center" spacing={1}>
-                              {config?.icon}
-                              <Typography
-                                fontWeight={600}
-                                sx={{
-                                  color: isDarkMode ? '#F8FAFC' : 'inherit',
-                                  fontSize: '0.85rem',
-                                }}
-                              >
-                                {status?.label || status?.name || status?.short_name || 'Select Status'}
-                              </Typography>
-                            </Stack>
-                          );
+                          },
                         },
                       }}
                     >
-                      {effectiveStatuses.map((status) => {
+                      {menuStatuses.map((status) => {
                         const config = getStatusConfig(status.id);
                         return (
                           <MenuItem key={status.id} value={status.id} sx={{ py: 0.75 }}>
@@ -820,20 +803,22 @@ const UpdateProgress = forwardRef(({
                         setFormData((prev) => ({ ...prev, remarks: e.target.value }));
                         setTouched(true);
                       }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment
-                            position="start"
-                            sx={{ alignSelf: 'flex-start', mt: 0.75 }}
-                          >
-                            <Comment
-                              sx={{
-                                color: isDarkMode ? '#94A3B8' : 'text.secondary',
-                                fontSize: 14,
-                              }}
-                            />
-                          </InputAdornment>
-                        ),
+                      slotProps={{
+                        input: {
+                          startAdornment: (
+                            <InputAdornment
+                              position="start"
+                              sx={{ alignSelf: 'flex-start', mt: 0.75 }}
+                            >
+                              <Comment
+                                sx={{
+                                  color: isDarkMode ? '#94A3B8' : 'text.secondary',
+                                  fontSize: 14,
+                                }}
+                              />
+                            </InputAdornment>
+                          ),
+                        },
                       }}
                       sx={{
                         '& .MuiOutlinedInput-root': {

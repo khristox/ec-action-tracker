@@ -148,7 +148,7 @@ const ActionStatusChip = ({ action, statusOptions, isDarkMode }) => {
 
   const status = statusOptions.find(s => s.id === action.overall_status_id);
 
-  let statusLabel = status?.label || status?.name?.replace('Action Status - ', '') || 'Pending';
+  let statusLabel = action.overall_status_name || status?.label || status?.name?.replace('Action Status - ', '') || 'Pending';
   let statusColor = status?.color || '#F59E0B';
 
   if (isOverdue) {
@@ -287,7 +287,7 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
 
   // ==================== COMPUTED VALUES ====================
   const canEdit = useMemo(() => canEditActions(meetingStatus), [meetingStatus]);
-  const hasNoMinutes = (isSeries ? actions.length === 0 : minutesList.length === 0) && !loading;
+  const hasNoActions = actions.length === 0 && !loading;
   const statusMessage = useMemo(() => getStatusMessage(meetingStatus), [meetingStatus]);
 
   const tagSuggestions = useMemo(() => {
@@ -393,20 +393,23 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
 
  
 
-  const fetchSeriesActions = useCallback(async () => {
-    if (!recurringMeetingId || !isMountedRef.current) return;
+  const fetchActions = useCallback(async () => {
+    if (!meetingId || !isMountedRef.current) return;
     try {
-      const res = await api.get(`/action-tracker/meetings/series/${recurringMeetingId}/actions`);
+      const url = recurringMeetingId
+        ? `/action-tracker/meetings/series/${recurringMeetingId}/actions`
+        : `/action-tracker/meetings/${meetingId}/actions`;
+      const res = await api.get(url);
       if (!isMountedRef.current) return;
       const items = res.data?.items || [];
       previousMinutesStringRef.current = JSON.stringify(items);
       setActions(items);
       setError(null);
     } catch (err) {
-      console.error('Error loading series actions:', err);
+      console.error('Error loading actions:', err);
       if (isMountedRef.current) setError(extractErrorMessage(err));
     }
-  }, [recurringMeetingId]);
+  }, [meetingId, recurringMeetingId]);
   
   const fetchMinutes = useCallback(() => {
     if (!isFullAccess) {
@@ -420,11 +423,11 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
 
     isFetchingRef.current = true;
     return dispatch(fetchMeetingMinutes(meetingId))
-      .then(() => (recurringMeetingId ? fetchSeriesActions() : undefined))
+      .then(() => fetchActions())
       .finally(() => {
         isFetchingRef.current = false;
       });
-  }, [dispatch, meetingId, isFullAccess, recurringMeetingId, fetchSeriesActions]);
+  }, [dispatch, meetingId, isFullAccess, recurringMeetingId, fetchActions]);
 
   const fetchAttributes = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -520,12 +523,7 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
     };
   }, [meetingId, fetchMinutes, fetchAttributes, isFullAccess]);
 
-  useEffect(() => {
-    if (minutesList && isMountedRef.current && !recurringMeetingId) {
-      extractActionsFromMinutes();
-    }
-  }, [minutesList, extractActionsFromMinutes, recurringMeetingId]);
-
+  
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
@@ -669,27 +667,11 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
     if (isFetchingRef.current) return;
 
     try {
-      let minuteId = payload.minute_id;
-      if (!minuteId && minutesList && minutesList.length > 0) {
-        minuteId = minutesList[0]?.id;
-      }
-
-      if (!minuteId) {
-        const response = await api.post(`/action-tracker/meetings/${meetingId}/minutes`, {
-          title: 'General',
-          content: '',
-        });
-        minuteId = response.data?.id;
-        if (!minuteId) {
-          throw new Error('Failed to create default minute');
-        }
-        await fetchMinutes();
-      }
-
+      
       const actionResponse = await api.post(
         '/action-tracker/actions/',
         {
-          minute_id: minuteId,
+          minute_id: payload.minute_id || null,
           meeting_id: meetingId,
           description: payload.description,
           due_date: payload.due_date || null,
@@ -885,7 +867,7 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
         )}
 
         {/* ==================== NO ACTIONS STATE ==================== */}
-        {hasNoMinutes ? (
+        {hasNoActions ? (
           <Grow in timeout={500}>
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <AssignmentIcon sx={{ fontSize: 64, color: isDarkMode ? '#6B7280' : 'action.disabled', mb: 2 }} />
@@ -893,7 +875,7 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
                 No action items found for this meeting.
               </Typography>
               <Typography variant="body2" sx={{ color: isDarkMode ? '#9CA3AF' : 'text.secondary', mb: 2 }}>
-                Use "Add Action" above to create your first one — we'll set up the meeting minutes for you automatically.
+                Use "Add Action" above to create your first one.
               </Typography>
               <Button
                 variant="outlined"
@@ -1410,7 +1392,7 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
             }
           }}
         >
-          <DialogTitle sx={{
+          <DialogTitle component="div" sx={{
             pb: 1.5,
             pt: 2.5,
             px: 3,
@@ -1419,7 +1401,7 @@ const MeetingActionsList = ({ meetingId, recurringMeetingId, meetingStatus, onRe
             justifyContent: 'space-between',
             color: isDarkMode ? '#FFFFFF' : 'inherit',
           }}>
-            <Typography variant="h6" fontWeight={600}>Update Progress</Typography>
+            <Typography variant="h6" component="span" fontWeight={600}>Update Progress</Typography>
             <IconButton onClick={() => setShowProgressDialog(false)} size="small">
               <Close />
             </IconButton>

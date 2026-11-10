@@ -8,7 +8,10 @@ actions, whether or not they are one of its participants. Admins can too.
 Keep this logic in one place and call it from every endpoint that edits a
 meeting or an action, so the rule cannot drift between endpoints.
 """
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import Any, Optional
+from app.models.user import User
 
 # Adjust this import if is_admin_user lives in another module:
 #   grep -rn "def is_admin_user" app
@@ -25,11 +28,29 @@ def is_meeting_creator(meeting: Any, user: Any) -> bool:
     )
 
 
-async def can_manage_meeting(db, meeting: Any, user: Any) -> bool:
-    """Creator or admin: may edit the meeting, its participants, minutes and documents."""
-    if is_meeting_creator(meeting, user):
+async def _is_admin(db, user) -> bool:
+    """Sync flag check first, then roles loaded from the database."""
+    if is_admin_user(user):
         return True
-    return await is_admin_user(db, user)
+    row = await db.execute(
+        select(User).where(User.id == user.id).options(selectinload(User.roles))
+    )
+    loaded = row.scalar_one_or_none()
+    return bool(loaded) and any(r.code in ("admin", "super_admin") for r in loaded.roles)
+
+
+async def can_manage_meeting(db, meeting, user) -> bool:
+    return is_meeting_creator(meeting, user) or await _is_admin(db, user)
+
+
+async def can_edit_action(db, action, user) -> bool:
+    if action.created_by_id == user.id:          # needed for actions with no meeting
+        return True
+    if action.assigned_to_id == user.id:
+        return True
+    if await is_creator_of_action_meeting(db, action, user):
+        return True
+    return await _is_admin(db, user)
 
 
 def _creator_id_of_action_meeting(sync_session, action) -> Optional[Any]:
@@ -45,18 +66,3 @@ async def is_creator_of_action_meeting(db, action: Any, user: Any) -> bool:
     return creator_id is not None and creator_id == user.id
 
 
-async def can_edit_action(db, action: Any, user: Any) -> bool:
-    """
-    Who may edit or delete an action:
-      - anyone, while the action has no assignee (unchanged behaviour)
-      - the assigned user
-      - the creator of the meeting the action belongs to (participant or not)
-      - admins
-    """
-    if not action.assigned_to_id:
-        return True
-    if action.assigned_to_id == user.id:
-        return True
-    if await is_creator_of_action_meeting(db, action, user):
-        return True
-    return await is_admin_user(db, user)

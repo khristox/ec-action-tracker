@@ -84,19 +84,22 @@ async def user_is_admin(db: AsyncSession, user) -> bool:
 
 
 async def build_meeting_access_filter(db: AsyncSession, user):
-    """SQLAlchemy condition for 'meetings this user is allowed to see'."""
     if await user_is_admin(db, user):
-        return true()                # admins see every meeting
+        return true()
 
     accessible = await get_accessible_department_ids(db, user.id)
 
-    clauses = [
-        Meeting.visibility == "open",
-        Meeting.created_by_id == user.id,
-        participant_clause(user),
-    ]
+    clauses = [Meeting.created_by_id == user.id]        # you always see your own meetings
     if accessible:
-        clauses.append(department_scope_clause(accessible))
+        clauses.append(and_(
+            department_scope_clause(accessible),        # outer boundary: your departments and below
+            or_(
+                Meeting.visibility.in_(("open", "department")),
+                participant_clause(user),               # 'private' = creator + participants only
+            ),
+        ))
+    # To let invited people always open their meeting, even outside their department scope,
+    # add this line to the clauses list:  clauses.append(participant_clause(user))
     return or_(*clauses)
 
 
@@ -124,3 +127,10 @@ async def build_department_filter(
     else:
         ids = {department_id}
     return department_scope_clause(ids)
+
+async def user_can_view_meeting(db: AsyncSession, user, meeting_id: UUID) -> bool:
+    cond = await build_meeting_access_filter(db, user)
+    row = await db.execute(
+        select(Meeting.id).where(Meeting.id == meeting_id, Meeting.is_active == True, cond).limit(1)  # noqa: E712
+    )
+    return row.first() is not None

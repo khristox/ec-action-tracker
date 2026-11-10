@@ -52,120 +52,58 @@ const PRIORITY = {
   4: { label: 'Low', color: 'success', icon: <CheckCircle />, stars: 1 },
 };
 
+
 const STATUS_CONFIG = {
   pending: {
     label: 'Pending',
-    color: '#F59E0B',
-    bgColor: 'rgba(245, 158, 11, 0.15)',
-    borderColor: '#F59E0B',
-    icon: <HourglassEmpty fontSize="small" />,
-    muiColor: 'warning'
+    color: '#FFC107',
   },
-  started: {
-    label: 'Started',
-    color: '#60A5FA',
-    bgColor: 'rgba(96, 165, 250, 0.15)',
-    borderColor: '#60A5FA',
-    icon: <PlayCircle fontSize="small" />,
-    muiColor: 'info'
-  },
+
   in_progress: {
     label: 'In Progress',
-    color: '#60A5FA',
-    bgColor: 'rgba(96, 165, 250, 0.15)',
-    borderColor: '#60A5FA',
-    icon: <Pending fontSize="small" />,
-    muiColor: 'info'
+    color: '#2196F3',
   },
-  awaiting: {
-    label: 'Awaiting',
-    color: '#A78BFA',
-    bgColor: 'rgba(167, 139, 250, 0.15)',
-    borderColor: '#A78BFA',
-    icon: <WatchLater fontSize="small" />,
-    muiColor: 'secondary'
-  },
-  awaiting_approval: {
-    label: 'Awaiting Approval',
-    color: '#A78BFA',
-    bgColor: 'rgba(167, 139, 250, 0.15)',
-    borderColor: '#A78BFA',
-    icon: <Pending fontSize="small" />,
-    muiColor: 'secondary'
-  },
-  in_review: {
-    label: 'In Review',
-    color: '#818CF8',
-    bgColor: 'rgba(129, 140, 248, 0.15)',
-    borderColor: '#818CF8',
-    icon: <CheckCircleOutlined fontSize="small" />,
-    muiColor: 'secondary'
-  },
-  on_hold: {
-    label: 'On Hold',
-    color: '#9CA3AF',
-    bgColor: 'rgba(156, 163, 175, 0.15)',
-    borderColor: '#9CA3AF',
-    icon: <PauseCircle fontSize="small" />,
-    muiColor: 'default'
-  },
-  blocked: {
-    label: 'Blocked',
-    color: '#F87171',
-    bgColor: 'rgba(248, 113, 113, 0.15)',
-    borderColor: '#F87171',
-    icon: <CancelOutlined fontSize="small" />,
-    muiColor: 'error'
-  },
+
   completed: {
     label: 'Completed',
-    color: '#34D399',
-    bgColor: 'rgba(52, 211, 153, 0.15)',
-    borderColor: '#34D399',
-    icon: <CheckCircle fontSize="small" />,
-    muiColor: 'success'
+    color: '#4CAF50',
   },
-  closed: {
-    label: 'Closed',
-    color: '#34D399',
-    bgColor: 'rgba(52, 211, 153, 0.15)',
-    borderColor: '#34D399',
-    icon: <TaskAlt fontSize="small" />,
-    muiColor: 'success'
-  },
+
   cancelled: {
     label: 'Cancelled',
-    color: '#F87171',
-    bgColor: 'rgba(248, 113, 113, 0.15)',
-    borderColor: '#F87171',
-    icon: <HighlightOff fontSize="small" />,
-    muiColor: 'error'
+    color: '#F44336',
   },
+
   overdue: {
     label: 'Overdue',
-    color: '#F87171',
-    bgColor: 'rgba(248, 113, 113, 0.15)',
-    borderColor: '#F87171',
-    icon: <ErrorIcon fontSize="small" />,
-    muiColor: 'error'
+    color: '#FF5722',
   },
-  ended: {
-    label: 'Ended',
-    color: '#9CA3AF',
-    bgColor: 'rgba(156, 163, 175, 0.15)',
-    borderColor: '#9CA3AF',
-    icon: <Cancel fontSize="small" />,
-    muiColor: 'default'
-  }
-}; STATUS_CONFIG.not_started = { ...STATUS_CONFIG.pending, label: 'Pending' };
+};
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-const statusKey = (v) =>
-  String(v || '')
+
+const statusKey = (value) => {
+  const normalized = String(value || '')
     .replace(/^action[_ ]status[_ -]*/i, '')
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
+
+  // Map any legacy status values to the five supported statuses.
+  const aliases = {
+    not_started: 'pending',
+    started: 'in_progress',
+    awaiting: 'in_progress',
+    awaiting_approval: 'in_progress',
+    in_review: 'in_progress',
+    on_hold: 'in_progress',
+    blocked: 'in_progress',
+    closed: 'completed',
+    ended: 'completed',
+  };
+
+  return aliases[normalized] || normalized;
+};
 
 const optionKey = (opt) => statusKey(opt.code || opt.short_name || opt.name || opt.label);
 

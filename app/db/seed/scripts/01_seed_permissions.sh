@@ -71,23 +71,22 @@ if ! curl -s -f "${BASE_URL}/health" > /dev/null 2>&1; then
 fi
 print_success "Server is running"
 
-# ==================== AUTHENTICATION ====================
-print_info "Authenticating..."
 
 API_URL="${BASE_URL}/api/v1"
-LOGIN_URL="${API_URL}/auth/login"
+#LOGIN_URL="${API_URL}/auth/login"
 
-LOGIN_RESPONSE=$(curl -s -X POST "${LOGIN_URL}" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=${USERNAME}&password=${PASSWORD}")
+# ==================== AUTHENTICATION ====================
+# The master seeder authenticates once and exports ADMIN_TOKEN.
+# Reuse that token instead of authenticating again.
 
-ADMIN_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token')
-
-if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
-    print_error "Authentication failed"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+    print_error "ADMIN_TOKEN was not provided by the master seeder."
+    print_error "Aborting permissions seeding."
     exit 1
 fi
-print_success "Authenticated"
+
+print_success "Using ADMIN_TOKEN from master seeder"
+
 
 # ==================== GET ROLES ====================
 print_info "Fetching roles from database..."
@@ -136,18 +135,8 @@ declare -A PERM_IDS
 CREATE_COUNT=0
 UPDATE_COUNT=0
 FAIL_COUNT=0
+EXISTING_COUNT=0
 
-delete_existing_permission() {
-    local perm_code=$1
-    local perm_id=${EXISTING_PERM_CODES["$perm_code"]}
-    
-    if [ -n "$perm_id" ] && [ "$perm_id" != "null" ]; then
-        print_warning "  Deleting existing: ${perm_code}"
-        curl -s -X DELETE "${API_URL}/permissions/${perm_id}" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
-        unset EXISTING_PERM_CODES["$perm_code"]
-    fi
-}
 
 create_permission() {
     local code=$1
@@ -157,12 +146,17 @@ create_permission() {
     local category=$5
     local description=$6
     
-    # Delete if exists (to ensure clean state)
-    if [ -n "${EXISTING_PERM_CODES[$code]}" ]; then
-        delete_existing_permission "$code"
-        ((UPDATE_COUNT++))
+    # Check if permission already exists
+    local existing_id="${EXISTING_PERM_CODES[$code]}"
+
+    if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+        print_info "  Already exists: ${name} (${code})"
+        PERM_IDS["$code"]="$existing_id"
+        ((EXISTING_COUNT++))
+        return 0
     fi
     
+        
     print_info "  Creating: ${name} (${code})"
     
     # Build JSON
@@ -183,6 +177,7 @@ create_permission() {
             is_system: true
         }')
     
+    
     RESPONSE=$(curl -s -X POST "${API_URL}/permissions/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
         -H "Content-Type: application/json" \
@@ -194,13 +189,19 @@ create_permission() {
         print_success "    ✅ Created (ID: ${PERM_ID:0:8}...)"
         PERM_IDS["$code"]="$PERM_ID"
         ((CREATE_COUNT++))
+
+        # Keep local lookup updated
+        EXISTING_PERM_CODES["$code"]="$PERM_ID"
+
         return 0
+
     else
         ERROR=$(echo "$RESPONSE" | jq -r '.detail // "Unknown error"' 2>/dev/null)
-        print_error "    ❌ Failed: ${ERROR}"
+        print_error "    Failed: ${ERROR}"
         ((FAIL_COUNT++))
         return 1
     fi
+        
 }
 
 # ==================== CREATE PERMISSIONS BY CATEGORY ====================
@@ -384,17 +385,7 @@ assign_permission_to_role() {
     fi
 }
 
-# Clear existing role permissions first
-print_info "Clearing existing role permissions..."
-for role_code in "${!ROLE_IDS[@]}"; do
-    role_id="${ROLE_IDS[$role_code]}"
-    if [ -n "$role_id" ]; then
-        curl -s -X DELETE "${API_URL}/roles/${role_id}/permissions" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null 2>&1
-    fi
-done
-print_success "Role permissions cleared"
-echo ""
+
 
 # ==================== ADMIN ROLE - FULL ACCESS ====================
 admin_role_id="${ROLE_IDS[admin]}"
@@ -545,6 +536,7 @@ print_separator
 echo ""
 echo -e "${CYAN}📊 Summary:${NC}"
 echo "  • Permissions created: ${CREATE_COUNT}"
+echo "  • Permissions already existed: ${EXISTING_COUNT}"
 echo "  • Permissions updated: ${UPDATE_COUNT}"
 echo "  • Permissions failed: ${FAIL_COUNT}"
 echo ""

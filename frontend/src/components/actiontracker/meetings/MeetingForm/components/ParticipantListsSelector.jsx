@@ -91,6 +91,8 @@ export const ParticipantListsSelector = ({ onAddFromList, selectedParticipantIds
         list_name: selectedList.name
       }));
     
+    // FIX: pass a plain array. useMeetingForm's handleAddFromList calls
+    // .forEach on its argument, so sending { listId, participants } crashed.
     onAddFromList(participantsToAdd);
     setCheckedIds([]);
   };
@@ -199,7 +201,6 @@ export const ParticipantListsSelector = ({ onAddFromList, selectedParticipantIds
               </Button>
             </>
           ) : (
-            // FIX HERE: Replaced textAlign="center" with sx={{ textAlign: 'center' }}
             <Box p={2} sx={{ textAlign: 'center' }} color="text.secondary">
               <Typography variant="body2">
                 No details available for this list

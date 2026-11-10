@@ -1,7 +1,8 @@
 {
   "dependencies": {
     "file-saver": "^2.0.5",
-    "mammoth": "^1.12.0"
+    "mammoth": "^1.12.0",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "glob": "^13.0.6"

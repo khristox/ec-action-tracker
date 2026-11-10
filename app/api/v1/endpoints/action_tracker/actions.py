@@ -1,6 +1,5 @@
 # app/api/v1/endpoints/action_tracker/actions.py
 
-from operator import or_
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from typing import Any, List, Optional, Dict
 from uuid import UUID
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from sqlalchemy import and_, or_, func, desc, asc
 
 
@@ -16,13 +16,20 @@ import logging
 
 from app.api import deps
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
-from app.models.meetings.action_tracker import ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment
+from app.models.meetings.action_tracker import (
+    ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment, ActionStatus,
+)
 from app.models.user import User
+from app.core.meeting_permissions import can_edit_action
 from app.services.implementer_linking import (
     build_implementers,
     normalize_email,
     normalize_phone,
     resolve_implementer_user_id,
+)
+
+from app.api.v1.endpoints.action_tracker.action_visibility import (
+    build_action_access_filter, ensure_can_view_action,
 )
 
 from app.schemas.action_tracker import (
@@ -43,20 +50,27 @@ from app.schemas.meeting_minutes.meeting_minutes import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+APP_TZ = ZoneInfo("Africa/Kampala")   # UTC+3, no DST
+# How to read datetimes that come back from the DB without tzinfo.
+# This file writes completed_at/updated_at with datetime.now(timezone.utc)
+# and parse_due_date produces UTC-aware values, so UTC is the likely convention.
+# Change to APP_TZ if your naive values are stored as Kampala wall time.
+NAIVE_DB_TZ = timezone.utc
 
 # ==================== HELPER FUNCTIONS ====================
 
+def to_app_tz(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=NAIVE_DB_TZ)
+    return dt.astimezone(APP_TZ)
+
 def calculate_is_overdue(due_date: Optional[datetime], completed_at: Optional[datetime]) -> bool:
-    """Safely calculate if an action is overdue"""
+    """Overdue = past the due moment, judged in Uganda time."""
     if not due_date or completed_at:
         return False
-
-    # Handle timezone-naive comparison
-    now = datetime.now()
-    if due_date.tzinfo:
-        due_date = due_date.replace(tzinfo=None)
-
-    return due_date < now
+    return to_app_tz(due_date) < datetime.now(APP_TZ)
 
 
 def format_datetime(dt: Optional[datetime]) -> Optional[str]:
@@ -93,6 +107,12 @@ async def check_action_permission(
                 )
     return True
 
+async def ensure_can_edit_action(db: AsyncSession, action: MeetingAction, current_user: User) -> None:
+    if not await can_edit_action(db, action, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the action's creator, the assigned user, the meeting's creator or an admin can edit this action",
+        )
 
 def parse_due_date(due_date: Optional[str]) -> Optional[datetime]:
     """Parse due date string to datetime"""
@@ -107,23 +127,17 @@ def parse_due_date(due_date: Optional[str]) -> Optional[datetime]:
 
 
 def serialize_implementer(imp: ActionImplementer) -> Dict[str, Any]:
-    """
-    Serialize one implementer for the REST endpoints.
-
-    user_id is NULL for people who have no system account yet. That is a
-    valid, expected state -- they are linked later, by email, once they
-    register and verify.
-    """
+    """Serialize one implementer for the REST endpoints."""
     return {
         "id": str(imp.id),
         "action_id": str(imp.action_id),
         "user_id": str(imp.user_id) if imp.user_id else None,
         "is_system_user": imp.user_id is not None,
-        "linked_at": imp.linked_at.isoformat() if imp.linked_at else None,
         "name": imp.name,
         "email": imp.email,
         "phone": imp.phone,
         "sort_order": imp.sort_order,
+        "created_at": imp.created_at.isoformat() if imp.created_at else None,
     }
 
 
@@ -187,6 +201,7 @@ def build_my_task_response(action: MeetingAction, is_overdue_flag: bool) -> MyTa
                 email=imp.email,
                 phone=imp.phone,
                 sort_order=imp.sort_order or 0,
+                created_at=imp.created_at,
             )
             for imp in sorted(implementers, key=lambda i: i.sort_order or 0)
         ],
@@ -254,24 +269,8 @@ async def ensure_minute_exists(
             detail=f"Meeting with id {meeting_id} not found"
         )
 
-    # Check for existing minutes
-    existing_minutes = await meeting_minutes.get_minutes_by_meeting(
-        db=db,
-        meeting_id=meeting_id,
-        limit=1
-    )
-
-    if existing_minutes:
-        return existing_minutes[0].id
-
-    # Create default minute
-    default_minute = await meeting_minutes.create_default_minute(
-        db=db,
-        meeting_id=meeting_id,
-        action_description=description,
-        user_id=user_id
-    )
-    return default_minute.id
+    minute = await meeting_minutes.get_or_create_system_minute(db, meeting_id, user_id)
+    return minute.id
 
 
 # ==================== TEST ROUTES (Development Only) ====================
@@ -298,6 +297,18 @@ async def test_router():
         ]
     }
 
+@router.get("/statuses")
+async def list_action_statuses(
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """All active action statuses, the same table actions store their status in."""
+    rows = (await db.execute(
+        select(ActionStatus)
+        .where(ActionStatus.is_active == True)
+        .order_by(ActionStatus.sort_order)
+    )).scalars().all()
+    return [s.to_dict() for s in rows]
 
 # ==================== USER TASK ROUTES ====================
 
@@ -308,7 +319,7 @@ async def get_my_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: Optional[str] = Query(None, description="Search in description"),
-    status_filter: Optional[str] = Query(None, description="Filter by status"),
+    status_filter: Optional[str] = Query(None, alias="status", description="pending, in_progress, completed, overdue"),
     priority: Optional[int] = Query(None, ge=1, le=4),
     is_overdue: Optional[bool] = Query(None),
     include_completed: bool = Query(False, description="Include completed tasks"),
@@ -393,7 +404,7 @@ async def get_actions(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: Optional[str] = Query(None, description="Search in description and title"),
-    status: Optional[str] = Query(None, description="pending, in_progress, completed, overdue"),
+    status_filter: Optional[str] = Query(None, description="pending, in_progress, completed, overdue"),
     status_id: Optional[UUID] = Query(None, description="Filter by status ID"),
     priority: Optional[int] = Query(None, ge=1, le=4, description="Filter by priority (1-4)"),
     assigned_to_id: Optional[UUID] = Query(None, description="Filter by assigned user"),
@@ -401,7 +412,10 @@ async def get_actions(
     """Get all actions with optional filtering and pagination."""
     try:
         # Start with base query
-        query = select(MeetingAction).where(MeetingAction.is_active == True)
+        query = select(MeetingAction).where(
+            MeetingAction.is_active == True,
+            await build_action_access_filter(db, current_user),
+        )
         
         # Apply search filter
         if search:
@@ -415,29 +429,30 @@ async def get_actions(
             )
         
         # Apply status string filter
-        if status:
-            if status == "pending":
+        if status_filter:
+            if status_filter == "pending":
                 query = query.where(
                     MeetingAction.completed_at.is_(None),
                     MeetingAction.overall_progress_percentage == 0
                 )
-            elif status == "in_progress":
+            elif status_filter == "in_progress":
                 query = query.where(
                     MeetingAction.completed_at.is_(None),
                     MeetingAction.overall_progress_percentage > 0,
                     MeetingAction.overall_progress_percentage < 100
                 )
-            elif status == "completed":
+            elif status_filter == "completed":
                 query = query.where(
                     or_(
                         MeetingAction.completed_at.is_not(None),
                         MeetingAction.overall_progress_percentage == 100
                     )
                 )
-            elif status == "overdue":
+            elif status_filter == "overdue":
                 query = query.where(
                     MeetingAction.completed_at.is_(None),
-                    MeetingAction.is_overdue == True
+                    MeetingAction.due_date.is_not(None),
+                    MeetingAction.due_date < datetime.now(timezone.utc),
                 )
         
         # Apply status_id filter
@@ -493,15 +508,19 @@ async def create_action(
     If no minute_id is provided, automatically create a default minute.
     """
     try:
-        # Ensure minute exists
-        minute_id = await ensure_minute_exists(
-            db=db,
-            minute_id=action_in.minute_id,
-            meeting_id=action_in.meeting_id,
-            description=action_in.description,
-            user_id=current_user.id
-        )
-        action_in.minute_id = minute_id
+        minute_id = action_in.minute_id
+
+        # Only look up or create minutes when the request points at a minute or a meeting.
+        # With neither, the action is standalone and minute_id stays None.
+        if minute_id or getattr(action_in, "meeting_id", None):
+            minute_id = await ensure_minute_exists(
+                db=db,
+                minute_id=action_in.minute_id,
+                meeting_id=action_in.meeting_id,
+                description=action_in.description,
+                user_id=current_user.id,
+            )
+        action_in.minute_id = minute_id        # may be None
 
         # Validate assigned_to_id against the users table so stale ids
         # degrade to name-only assignment instead of an FK violation.
@@ -513,9 +532,9 @@ async def create_action(
         # Create the action
         action = await meeting_action.create_action(
             db=db,
-            minute_id=action_in.minute_id,
+            minute_id=minute_id,
             action_in=action_in,
-            assigned_by_id=current_user.id
+            assigned_by_id=current_user.id,
         )
 
         logger.info(f"Action created by user {current_user.id}: {action.id}")
@@ -626,12 +645,12 @@ async def get_action_history(
     try:
         # Check if action exists
         action = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action, current_user)
 
         # Check permission (view history)
         await check_action_permission(action, current_user, require_ownership=False)
 
 
-        print('Ch..')
         # Get history
         history = await meeting_action.get_status_history(db, action_id, skip, limit)
 
@@ -659,6 +678,7 @@ async def get_action(
     """Get action by ID with permission check."""
     try:
         action = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action, current_user)
         await check_action_permission(action, current_user, require_ownership=False)
 
         logger.info(f"Action {action_id} retrieved by user {current_user.id}")
@@ -687,7 +707,7 @@ async def update_action(
         action_obj = await get_action_or_404(db, action_id)
 
         # Check permission
-        await check_action_permission(action_obj, current_user, require_ownership=True)
+        await ensure_can_edit_action(db, action_obj, current_user)
 
         # Validate assigned_to_id if it is being changed
         if getattr(action_in, "assigned_to_id", None):
@@ -730,32 +750,47 @@ async def update_action_progress(
         if progress_update.progress_percentage < 0 or progress_update.progress_percentage > 100:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Progress percentage must be between 0 and 100"
+                detail="Progress percentage must be between 0 and 100",
             )
 
-        # Check permission - only assigned user or admin can update progress
+        # Check permission: superuser/admin, meeting creator, or someone implementing this action
         is_admin = any(role.code in ["admin", "super_admin"] for role in current_user.roles)
-        if action_obj.assigned_to_id and action_obj.assigned_to_id != current_user.id and not is_admin:
+        if not is_admin and not await meeting_action.can_update_progress(db, action_obj, current_user):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the assigned user or admin can update progress"
+                status_code=403,
+                detail="Only the meeting creator or a person implementing this action can update its progress",
             )
 
-        # Update the progress directly
-        now = datetime.now(timezone.utc)
-        action_obj.overall_progress_percentage = progress_update.progress_percentage
-
-        # Update status if provided
+        # Resolve the incoming status id (may be an ACTION_STATUS_* attribute id
+        # or an action_statuses id) to a real action_statuses row.
+        status_row = None
         if progress_update.individual_status_id:
-            action_obj.overall_status_id = progress_update.individual_status_id
+            status_row = await meeting_action._resolve_status(
+                db, progress_update.individual_status_id
+            )
+            if not status_row:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unknown status id: {progress_update.individual_status_id}",
+                )
 
-        # Update remarks if provided
+        now = datetime.now(timezone.utc)
+
+        # Write the RESOLVED id, never the raw incoming id
+        action_obj.overall_progress_percentage = progress_update.progress_percentage
+        if status_row:
+            action_obj.overall_status_id = status_row.id
+            action_obj.overall_status_name = status_row.name
+
         if progress_update.remarks:
             action_obj.remarks = progress_update.remarks
 
-        # If progress is 100%, mark as completed
+        # Mark completed or clear completion
         if progress_update.progress_percentage >= 100:
-            action_obj.completed_at = now
+            if not action_obj.completed_at:
+                action_obj.completed_at = now
+        elif action_obj.completed_at:
+            action_obj.completed_at = None
 
         action_obj.updated_by_id = current_user.id
         action_obj.updated_at = now
@@ -763,7 +798,7 @@ async def update_action_progress(
         # Record this change in the status history table
         history_entry = ActionStatusHistory(
             action_id=action_obj.id,
-            individual_status_id=progress_update.individual_status_id,
+            individual_status_id=status_row.id if status_row else None,
             progress_percentage=progress_update.progress_percentage,
             remarks=progress_update.remarks,
             created_by_id=current_user.id,
@@ -774,17 +809,28 @@ async def update_action_progress(
         await db.commit()
         await db.refresh(action_obj)
 
-        logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}% by user {current_user.id}")
+        logger.info(
+            f"Action {action_id} progress updated to "
+            f"{progress_update.progress_percentage}% by user {current_user.id}"
+        )
         return action_obj
 
     except HTTPException:
         raise
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
-        logger.error(f"Error updating action progress {action_id}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error updating action progress {action_id}: {str(e)}", exc_info=True
+        )
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update progress: {str(e)}"
+            detail=f"Failed to update progress: {str(e)}",
         )
 
 
@@ -799,6 +845,7 @@ async def assign_action(
     try:
         # Check if action exists
         action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_edit_action(db, action_obj, current_user)     # Only the action's creator, the assigned user, the meeting's creator, or an admin can assign actions
 
         # Verify the target user exists (avoid FK violation)
         resolved_id = await resolve_implementer_user_id(db, user_id=user_id)
@@ -841,7 +888,8 @@ async def add_action_comment(
     """Add a comment to an action item."""
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action_obj, current_user)
 
         # Add comment
         comment = await meeting_action.add_comment(db, action_id, comment_in, current_user.id)
@@ -871,7 +919,8 @@ async def get_action_comments(
     """Get all comments for an action with pagination."""
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action_obj, current_user)
 
         # Get comments directly with SQLAlchemy
         query = select(ActionComment).where(
@@ -978,7 +1027,7 @@ async def delete_action(
         action_obj = await get_action_or_404(db, action_id)
 
         # Check permission
-        await check_action_permission(action_obj, current_user, require_ownership=True)
+        await ensure_can_edit_action(db, action_obj, current_user)
 
         # Soft delete
         await meeting_action.soft_delete(db, action_id, current_user.id)
@@ -1013,7 +1062,8 @@ async def get_action_implementers(
     """
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)
+        await ensure_can_view_action(db, action_obj, current_user)
 
         # Get implementers
         result = await db.execute(
@@ -1056,7 +1106,8 @@ async def add_action_implementers(
     """
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)            
+        await ensure_can_edit_action(db, action_obj, current_user)     
 
         # Delete existing implementers
         await db.execute(
@@ -1109,7 +1160,8 @@ async def delete_action_implementer(
     """
     try:
         # Check if action exists
-        await get_action_or_404(db, action_id)
+        action_obj = await get_action_or_404(db, action_id)            
+        await ensure_can_edit_action(db, action_obj, current_user)
 
         # Find and delete the implementer
         result = await db.execute(

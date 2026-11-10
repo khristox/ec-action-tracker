@@ -29,6 +29,7 @@ import {
   resetUserPassword, updateUserRoles,
 } from '../../store/slices/adminSlice';
 import { fetchRoles, selectAllRoles } from '../../store/slices/roleSlice';
+import { settleAll } from '../../utils/settleAll';
 import api from '../../services/api';
 import UserDetailPanel from './UserDetailPanel';
 
@@ -942,16 +943,24 @@ const RoleChip = ({ role, onChange, disabled }) => {
 const DepartmentDialog = ({
   open, onClose, user, departments, currentAssignments, onSave, saving,
 }) => {
+  const safeDepartments = Array.isArray(departments) ? departments : [];
+  const safeAssignments = Array.isArray(currentAssignments) ? currentAssignments : [];
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-
-  const [selectedMap, setSelectedMap] = useState({});
-  const [search, setSearch] = useState('');
   const searchRef = useRef(null);
 
+  const [selectedMap, setSelectedMap] = useState(() => {
+    const initial = {};
+    safeAssignments.forEach((a) => {
+      initial[a.department_id] = a.role || 'member';
+    });
+    return initial;
+  });
+  const [search, setSearch] = useState('');
+
   const activeDepartments = useMemo(() => {
-    return departments.filter(dept => dept.is_active !== false);
-  }, [departments]);
+    return safeDepartments.filter(dept => dept.is_active !== false);
+  }, [safeDepartments]);
 
   const deptTree = useMemo(() => buildDeptTree(activeDepartments), [activeDepartments]);
 
@@ -969,17 +978,17 @@ const DepartmentDialog = ({
     return map;
   }, [deptTree]);
 
-  useEffect(() => {
-    if (open) {
-      const initial = {};
-      currentAssignments.forEach((a) => {
-        initial[a.department_id] = a.role || 'member';
-      });
-      setSelectedMap(initial);
-      setSearch('');
-      setTimeout(() => searchRef.current?.focus(), 120);
-    }
-  }, [open, currentAssignments]);
+    useEffect(() => {
+    if (!open) return;
+    const initial = {};
+    safeAssignments.forEach((a) => {
+      initial[a.department_id] = a.role || 'member';
+    });
+    setSelectedMap(initial);
+    setSearch('');
+    const focusTimer = setTimeout(() => searchRef.current?.focus(), 120);
+    return () => clearTimeout(focusTimer);
+  }, [open, safeAssignments]);
 
   const filteredTree = useMemo(() => {
     if (!search.trim()) return deptTree;
@@ -1160,10 +1169,10 @@ const DepartmentDialog = ({
           })}
         </Box>
 
-        {activeDepartments.length !== departments.length && (
+        {activeDepartments.length !== safeDepartments.length && (
           <Box sx={{ px: 2.5, pb: 1.5 }}>
             <Alert severity="info" icon={<BusinessOutlined />} sx={{ py: 0, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
-              Showing only active departments ({activeDepartments.length} of {departments.length})
+              Showing only active departments ({activeDepartments.length} of {safeDepartments.length})
             </Alert>
           </Box>
         )}
@@ -1305,9 +1314,20 @@ const UserManagement = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const dispatch = useDispatch();
-  const { users, isLoading, total } = useSelector((s) => s.admin);
+  const adminState = useSelector((s) => s.admin);
+
+  const rawUsers = adminState?.users;
+  const users = Array.isArray(rawUsers) ? rawUsers : [];
+
+  const isLoading = adminState?.isLoading ?? false;
+  const total = adminState?.total ?? 0;
+  const adminError = adminState?.listError;
   const { user: currentUser } = useSelector((s) => s.auth);
-  const rolesList = useSelector(selectAllRoles);
+  const rawRolesList = useSelector(selectAllRoles);
+
+  const rolesList = Array.isArray(rawRolesList)
+    ? rawRolesList
+    : [];
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(isMobile ? 5 : 10);
@@ -1331,6 +1351,7 @@ const UserManagement = () => {
   const [savingDepts, setSavingDepts] = useState(false);
 
   const [departments, setDepartments] = useState([]);
+  const [deptError, setDeptError] = useState(null);
   const [userDepartmentsMap, setUserDeptMap] = useState({});
   const [loadingUserDepts, setLoadingUserDepts] = useState({});
 
@@ -1349,23 +1370,73 @@ const UserManagement = () => {
   // ── Data fetching ────────────────────────────────────────────────────────────
   const fetchDepartments = useCallback(async () => {
     try {
+      setDeptError(null);
+
       const r = await api.get('/departments');
-      setDepartments(r.data || []);
-    } catch {
+      const data = r.data;
+
+      const departmentList =
+        Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data?.departments)
+                ? data.departments
+                : [];
+
+      setDepartments(departmentList);
+    } catch (error) {
       setDepartments([]);
+
+      setDeptError(
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to load departments.'
+      );
     }
   }, []);
 
   const fetchUserDepts = useCallback(async (userId, force = false) => {
-    if (!force && (userDepartmentsMap[userId] || loadingUserDepts[userId])) return;
+    if (!force && (userDepartmentsMap[userId] || loadingUserDepts[userId])) {
+      return;
+    }
+
     setLoadingUserDepts((p) => ({ ...p, [userId]: true }));
+
     try {
       const r = await api.get(`/users/${userId}/departments`);
-      setUserDeptMap((p) => ({ ...p, [userId]: r.data || [] }));
-    } catch {
-      setUserDeptMap((p) => ({ ...p, [userId]: [] }));
+      const data = r.data;
+
+      const assignments =
+        Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data?.departments)
+                ? data.departments
+                : [];
+
+      setUserDeptMap((p) => ({
+        ...p,
+        [userId]: assignments,
+      }));
+    } catch (error) {
+      console.error(`Failed to load departments for user ${userId}:`, error);
+
+      setUserDeptMap((p) => ({
+        ...p,
+        [userId]: [],
+      }));
     } finally {
-      setLoadingUserDepts((p) => ({ ...p, [userId]: false }));
+      setLoadingUserDepts((p) => ({
+        ...p,
+        [userId]: false,
+      }));
     }
   }, [userDepartmentsMap, loadingUserDepts]);
 
@@ -1406,41 +1477,61 @@ const UserManagement = () => {
     setSnackbar({ open: true, message: 'Data refreshed', severity: 'success' });
   };
 
+  const errorDetail = (e) => {
+    const d = e?.response?.data?.detail;
+    return typeof d === 'string' ? d : null;   // FastAPI 422 detail can be an array
+  };
+
   const handleSaveDepartments = async ({ addEntries, changeEntries, removeIds }) => {
     if (!deptDialogUser) return;
+    const userId = deptDialogUser.id;
     setSavingDepts(true);
     try {
-      for (const { id, role } of addEntries) {
-        await api.post(`/users/${deptDialogUser.id}/departments`, {
-          department_ids: [id],
-          role,
+      // 1. Adds: one POST per distinct role
+      const idsByRole = {};
+      addEntries.forEach(({ id, role }) => { (idsByRole[role] ||= []).push(id); });
+      const addResults = await settleAll(Object.entries(idsByRole), ([role, ids]) =>
+        api.post(`/users/${userId}/departments`, { department_ids: ids, role })
+      );
+
+      // 2. Role changes
+      const changeResults = await settleAll(changeEntries, ({ id, role }) =>
+        api.patch(`/users/${userId}/departments/${id}`, { role })
+      );
+
+      // 3. Removals
+      const removeResults = await settleAll(removeIds, (deptId) =>
+        api.delete(`/users/${userId}/departments/${deptId}`)
+      );
+
+      const total = addEntries.length + changeEntries.length + removeIds.length;
+      const failedAdds = addResults.filter((r) => !r.ok);
+      const failedCount =
+        failedAdds.reduce((n, r) => n + r.item[1].length, 0) +
+        changeResults.filter((r) => !r.ok).length +
+        removeResults.filter((r) => !r.ok).length;
+
+      if (failedCount === 0) {
+        setSnackbar({
+          open: true,
+          message: `Department access updated (${total} change${total !== 1 ? 's' : ''})`,
+          severity: 'success',
+        });
+        setDeptDialogOpen(false);
+      } else {
+        const firstError = [...addResults, ...changeResults, ...removeResults].find((r) => !r.ok);
+        const detail = errorDetail(firstError?.error);
+        setSnackbar({
+          open: true,
+          message:
+            `${total - failedCount} of ${total} change${total !== 1 ? 's' : ''} saved, ${failedCount} failed` +
+            (detail ? `: ${detail}` : ''),
+          severity: failedCount === total ? 'error' : 'warning',
         });
       }
-
-      for (const { id, role } of changeEntries) {
-        await api.patch(`/users/${deptDialogUser.id}/departments/${id}`, { role });
-      }
-
-      for (const deptId of removeIds) {
-        await api.delete(`/users/${deptDialogUser.id}/departments/${deptId}`);
-      }
-
-      await fetchUserDepts(deptDialogUser.id, true);
-
-      const totalChanges = addEntries.length + changeEntries.length + removeIds.length;
-      setSnackbar({
-        open: true,
-        message: `Department access updated (${totalChanges} change${totalChanges !== 1 ? 's' : ''})`,
-        severity: 'success',
-      });
-      setDeptDialogOpen(false);
-    } catch (e) {
-      setSnackbar({
-        open: true,
-        message: e.response?.data?.detail || 'Failed to update departments',
-        severity: 'error',
-      });
     } finally {
+      // Always resync, even after partial failure, so the dialog diff reflects the server
+      await fetchUserDepts(userId, true);
       setSavingDepts(false);
     }
   };
@@ -1786,10 +1877,15 @@ const UserManagement = () => {
           if (toAdd.length) {
             await api.post(`/users/${selectedUser.id}/departments`, { department_ids: toAdd, role: 'member' });
           }
-          for (const dId of toRm) {
-            await api.delete(`/users/${selectedUser.id}/departments/${dId}`);
-          }
+          const rmResults = await settleAll(toRm, (dId) =>
+            api.delete(`/users/${selectedUser.id}/departments/${dId}`)
+          );
           await fetchUserDepts(selectedUser.id, true);
+
+          const rmFailed = rmResults.filter((r) => !r.ok).length;
+          if (rmFailed) {
+            throw new Error(`User saved, but ${rmFailed} department removal${rmFailed !== 1 ? 's' : ''} failed`);
+          }
         }
         setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
       } else if (dialogMode === 'delete') {
@@ -1806,6 +1902,7 @@ const UserManagement = () => {
       setDialogOpen(false);
       loadUsers();
     } catch (err) {
+      loadUsers();
       setSnackbar({ 
         open: true, 
         message: err.message || `${dialogMode} action failed`, 
@@ -1818,11 +1915,11 @@ const UserManagement = () => {
 
   // ── Stats ────────────────────────────────────────────────────────────────────
   const stats = useMemo(() => ({
-    total: total || 0,
-    active: users?.filter((u) => u.is_active).length || 0,
-    verified: users?.filter((u) => u.is_verified).length || 0,
-    admins: users?.filter((u) => u.roles?.includes('admin')).length || 0,
-    superadmins: users?.filter((u) => u.is_superuser).length || 0,
+    total,
+    active: users.filter((u) => u.is_active).length,
+    verified: users.filter((u) => u.is_verified).length,
+    admins: users.filter((u) => u.roles?.includes('admin')).length,
+    superadmins: users.filter((u) => u.is_superuser).length,
   }), [users, total]);
 
   const STAT_CARDS = [
@@ -2073,6 +2170,57 @@ const UserManagement = () => {
           </Button>
         </Box>
       </Box>
+
+      {(adminError || deptError) && (
+        <Stack spacing={1.5} sx={{ mb: 3 }}>
+          {adminError && (
+            <Alert
+              severity={adminError.blocked ? 'error' : 'warning'}
+              icon={<WarningAmberOutlined />}
+              sx={{ borderRadius: 2 }}
+            >
+              <Typography variant="body2" fontWeight={600}>
+                {adminError.blocked
+                  ? 'Users could not be loaded'
+                  : 'Unable to load users'}
+              </Typography>
+
+              <Typography variant="body2">
+                {adminError.message ||
+                  'An error occurred while loading the users list.'}
+              </Typography>
+
+              {adminError.status && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  HTTP status: {adminError.status}
+                </Typography>
+              )}
+            </Alert>
+          )}
+
+          {deptError && (
+            <Alert
+              severity="warning"
+              icon={<BusinessOutlined />}
+              sx={{ borderRadius: 2 }}
+            >
+              <Typography variant="body2" fontWeight={600}>
+                Departments could not be loaded
+              </Typography>
+
+              <Typography variant="body2">
+                {typeof deptError === 'string'
+                  ? deptError
+                  : 'Unable to load department information.'}
+              </Typography>
+            </Alert>
+          )}
+        </Stack>
+      )}
 
       {/* Improved Stats */}
       <Box sx={{ mb: 3 }}>

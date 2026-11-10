@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
+import { useLater } from '../../../hooks/useLater';
 import {
   Box, Typography, Button, Paper, Stack, Fab, Tabs, Tab,
   Pagination, Skeleton, Snackbar, Alert, useMediaQuery, useTheme,
@@ -47,6 +48,8 @@ const SESSION_KEYS = {
   SCROLL_POSITION: 'meetings_scroll_position_session'
 };
 
+
+
 // ==================== DARK MODE COLORS ====================
 const DARK_MODE = {
   background: '#0F172A',      // Slate 900
@@ -72,6 +75,7 @@ const Meetings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch();
+  const later = useLater();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const isDarkMode = theme.palette.mode === 'dark';
@@ -79,6 +83,8 @@ const Meetings = () => {
   
   // ==================== REDUX SELECTORS ====================
   const statusOptions = useSelector(selectMeetingStatusOptions);
+
+  
   
   // ==================== LOCAL STATE ====================
   const [meetings, setMeetings] = useState([]);
@@ -184,12 +190,22 @@ const Meetings = () => {
   }, []);
   
   const restoreScrollPosition = useCallback(() => {
-    let savedScroll = sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
-                      localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
+    const savedScroll =
+      sessionStorage.getItem(SESSION_KEYS.SCROLL_POSITION) ||
+      localStorage.getItem(STORAGE_KEYS.SCROLL_POSITION);
+
     if (savedScroll) {
-      setTimeout(() => window.scrollTo({ top: parseInt(savedScroll), behavior: 'auto' }), 100);
+      later(
+        () => {
+          window.scrollTo({
+            top: parseInt(savedScroll, 10),
+            behavior: 'auto',
+          });
+        },
+        100
+      );
     }
-  }, []);
+  }, [later]);
 
   // ==================== DATA FETCHING ====================
   const loadMeetings = useCallback(async (params = {}) => {

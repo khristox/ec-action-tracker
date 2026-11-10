@@ -1,7 +1,9 @@
 // src/components/meetings/MeetingMinutes.jsx
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import DOMPurify from 'dompurify';
+import { useSelector } from 'react-redux';
+import { useLater } from '../../../hooks/useLater';
 import {
   Box,
   Typography,
@@ -50,24 +52,25 @@ const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown da
 
 const stripHtmlTags = (html) => {
   if (!html) return '';
-  const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = html;
-  return tempDiv.textContent || tempDiv.innerText || '';
+  
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return doc.body.textContent || '';
+
 };
 
-const getPlainTextPreview = (html, maxLength = 150) => {
-  const plainText = stripHtmlTags(html);
-  if (plainText.length <= maxLength) return plainText;
-  return plainText.substring(0, maxLength) + '...';
-};
 
 // ==================== RTF RENDERER COMPONENT ====================
 
 const RichTextRenderer = ({ content, isDarkMode }) => {
   if (!content) return null;
   
-  // Clean up content - remove any outer <p> tags that might cause extra spacing
-  const cleanedContent = content.trim();
+  // Sanitize untrusted rich-text HTML immediately before rendering.
+  // DOMPurify removes executable content such as scripts, event handlers,
+  // javascript: URLs, and other dangerous markup while preserving normal HTML.
+  const cleanedContent = DOMPurify.sanitize(content.trim(), {
+    USE_PROFILES: { html: true },
+    FORBID_ATTR: ['style'],
+  });
   
   return (
     <Box
@@ -172,9 +175,9 @@ const RichTextRenderer = ({ content, isDarkMode }) => {
 // ==================== MAIN COMPONENT ====================
 
 const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
-  const dispatch = useDispatch();
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
+  const later = useLater();
 
   // ==================== REDUX SELECTORS ====================
   const minutesList = useSelector(selectMeetingMinutes);
@@ -238,12 +241,12 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
-        setTimeout(() => {
+        later(() => {
           fetchAttemptedRef.current = false;
         }, 500);
       }
     }
-  }, [meetingId]);
+  }, [meetingId, later]);
 
   // ==================== EFFECTS ====================
 
@@ -463,7 +466,7 @@ const MeetingMinutes = ({ meetingId, meetingStatus, onRefresh }) => {
 
             return (
               <Paper
-                key={minute.id || minute.tempId || Math.random().toString(36)}
+                key={minute.id || minute.tempId }
                 sx={{
                   borderRadius: 2,
                   overflow: 'hidden',

@@ -568,7 +568,7 @@ const AssignUserDialog = ({
       >
         {/* Title */}
         <DialogTitle sx={titleSx}>
-          <Stack direction="row" spacing={1} alignItems="center" flex={1}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flex: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 600, color: isDarkMode ? DARK.textPrimary : 'inherit' }}>
               Update User Assignment
             </Typography>
@@ -599,7 +599,7 @@ const AssignUserDialog = ({
           {hasSensitiveData && (
             <>
               <Box sx={privacyNoticeSx}>
-                <Stack direction="row" spacing={1} alignItems="flex-start">
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
                   <InfoIcon sx={{ fontSize: 18, color: DARK.warning, mt: 0.5 }} />
                   <Box flex={1}>
                     <Typography variant="caption" sx={{ fontWeight: 600, color: DARK.textPrimary }}>
@@ -672,7 +672,7 @@ const AssignUserDialog = ({
           <Stack spacing={3}>
             {/* Action Item Card - IMPROVED */}
             <Box sx={actionCardSx}>
-              <Stack direction="row" spacing={1.5} alignItems="flex-start">
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
                 <AssignmentIcon color="primary" sx={{ mt: 0.5, color: isDarkMode ? '#60A5FA' : undefined }} />
                 <Box flex={1}>
                   <Typography variant="caption" sx={{ color: isDarkMode ? DARK.textSecondary : 'text.secondary', display: 'block', mb: 0.5 }}>
@@ -778,7 +778,7 @@ const AssignUserDialog = ({
 
             {/* Remarks - IMPROVED with better controls */}
             <Box>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+              <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="body2" sx={{ fontWeight: 500 }}>
                   Remarks / Notes
                 </Typography>

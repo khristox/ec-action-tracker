@@ -24,7 +24,7 @@ from app.core.minio_client import minio_service
 from app.models.meetings.action_tracker import (
     Meeting, MeetingMinutes, MeetingAction, MeetingParticipant,
     Participant, ParticipantList, ActionStatusHistory, ActionComment, 
-    MeetingDocument, MeetingStatusHistory, ActionImplementer
+    MeetingDocument, MeetingStatusHistory, ActionImplementer, ActionStatus
 )
 from app.schemas.action_tracker_participants import (
     ParticipantCreate, ParticipantListCreate, ParticipantListUpdate, ParticipantUpdate
@@ -40,7 +40,7 @@ from app.schemas.action_tracker import ActionCommentCreate, ActionCommentUpdate,
 from app.schemas.action_tracker import MeetingCreate, MeetingUpdate
 
 from app.models.meetings.action_tracker import participant_list_members
-
+from app.models.general.dynamic_attribute import Attribute 
 from app.services.implementer_linking import (
     normalize_email,
     normalize_phone,
@@ -1203,10 +1203,113 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             email=self._get_person_email(person_dict),
         )
     
+    async def _resolve_status(self, db: AsyncSession, status_id: Optional[UUID]) -> Optional[ActionStatus]:
+        """Return the ActionStatus row for an id.
+
+        Accepts an action_statuses id directly. If the id belongs to an
+        ACTION_STATUS_* attribute, map it to the action status with the same code.
+        """
+        if not status_id:
+            return None
+
+        row = (await db.execute(
+            select(ActionStatus).where(ActionStatus.id == status_id, ActionStatus.is_active == True)
+        )).scalar_one_or_none()
+        if row:
+            return row
+
+        attr_code = (await db.execute(
+            select(Attribute.code).where(Attribute.id == status_id)
+        )).scalar_one_or_none()
+        if attr_code and attr_code.startswith("ACTION_STATUS_"):
+            row = (await db.execute(
+                select(ActionStatus).where(
+                    ActionStatus.code == attr_code[len("ACTION_STATUS_"):],
+                    ActionStatus.is_active == True,
+                )
+            )).scalar_one_or_none()
+            if row:
+                return row
+
+        raise ValueError("Unknown action status. Reload the page and pick a status again.")
+
+    async def can_update_progress(
+        self,
+        db: AsyncSession,
+        action: MeetingAction,
+        user: User
+    ) -> bool:
+        """Superuser, meeting creator, or action implementer."""
+
+        if action.created_by_id == user.id:
+            return True
+
+        if getattr(user, "is_superuser", False):
+            return True
+
+        # ---------------------------------------------------------
+        # 1. Meeting creator
+        # ---------------------------------------------------------
+        meeting = None
+
+        if action.minutes:
+            meeting = action.minutes.meeting
+
+        if meeting and meeting.created_by_id == user.id:
+            return True
+
+        # ---------------------------------------------------------
+        # 2. Direct/legacy assignment
+        # ---------------------------------------------------------
+        if action.assigned_to_id == user.id:
+            return True
+
+        # ---------------------------------------------------------
+        # 3. Linked implementer
+        # ---------------------------------------------------------
+        result = await db.execute(
+            select(ActionImplementer).where(
+                ActionImplementer.action_id == action.id
+            )
+        )
+
+        implementers = result.scalars().all()
+
+        email = normalize_email(user.email) if user.email else None
+
+        raw_phone = (
+            getattr(user, "phone", None)
+            or getattr(user, "telephone", None)
+        )
+
+        phone = normalize_phone(raw_phone) if raw_phone else None
+
+        for imp in implementers:
+            if imp.user_id and imp.user_id == user.id:
+                return True
+
+            if not imp.user_id:
+                if (
+                    email
+                    and imp.email
+                    and normalize_email(imp.email) == email
+                ):
+                    return True
+
+                if (
+                    phone
+                    and imp.phone
+                    and normalize_phone(imp.phone) == phone
+                ):
+                    return True
+
+        return False
+
+    
     # ==================== CREATE ====================
     
     async def create_action(
-        self, db: AsyncSession, minute_id: UUID, action_in: MeetingActionCreate, assigned_by_id: UUID
+        self, db: AsyncSession, minute_id: Optional[UUID], action_in: MeetingActionCreate, assigned_by_id: UUID
     ) -> MeetingAction:
         """Create a new action from meeting minutes with persons_implementing support"""
         try:
@@ -1241,6 +1344,15 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                             "type": "user"
                         }
             
+            status_row = None
+            if action_data.get('overall_status_id'):
+                status_row = await self._resolve_status(db, action_data['overall_status_id'])
+
+            progress = action_data.get('overall_progress_percentage') or 0
+            completed_at = action_data.get('completed_at')
+            if progress >= 100 and not completed_at:
+                completed_at = datetime.now(timezone.utc)
+
             # ==================== CREATE ACTION ====================
             action = MeetingAction(
                 minute_id=minute_id,
@@ -1251,6 +1363,10 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 assigned_at=datetime.now(timezone.utc),
                 due_date=action_data.get('due_date'),
                 priority=action_data.get('priority', 2),
+                overall_progress_percentage=progress,
+                overall_status_id=status_row.id if status_row else None,
+                overall_status_name=status_row.name if status_row else None,
+                completed_at=completed_at,
                 remarks=action_data.get('remarks'),
                 title=action_data.get('title'),
                 issue_challenge=action_data.get('issue_challenge'),
@@ -1292,7 +1408,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                         email=email,
                         phone=phone,
                         sort_order=idx,
-                        linked_at=datetime.now(timezone.utc) if user_id else None,
+                        #linked_at=datetime.now(timezone.utc) if user_id else None,
                     )
                     db.add(implementer)
                     logger.info(f"Added implementer: {implementer.name} (sort_order: {idx})")
@@ -1472,7 +1588,9 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             # Status filter
             if status:
-                query = query.where(MeetingAction.overall_status_name == status)
+                query = query.where(
+                    func.lower(MeetingAction.overall_status_name) == status.strip().lower()
+                )
             
             # Priority filter
             if priority is not None:
@@ -1636,6 +1754,8 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             action = await self.get(db, action_id)
             if not action:
                 return None
+
+                           
             
             update_data = action_in.model_dump(exclude_unset=True)
             
@@ -1647,31 +1767,20 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 )
                 
                 # Create new implementers
-                persons_implementing = update_data.get('persons_implementing', [])
-                for idx, person_data in enumerate(persons_implementing):
+                for idx, person_data in enumerate(update_data.get('persons_implementing') or []):  # "or []" in case the client sends null
                     person_dict = self._normalize_person_data(person_data)
 
-                    user_id, name, email, phone = await resolve_person_identity(
+                    resolved_user_id, name, email, phone = await resolve_person_identity(   # renamed, no shadowing
                         db,
                         raw_id=self._get_person_user_id(person_dict),
                         name=self._get_person_name(person_dict),
                         email=self._get_person_email(person_dict),
                         phone=self._get_person_phone(person_dict),
                     )
-
-                    implementer = ActionImplementer(
-                        id=uuid4(),
-                        action_id=action.id,
-                        user_id=user_id,
-                        name=name,
-                        email=email,
-                        phone=phone,
-                        sort_order=idx,
-                        linked_at=datetime.now(timezone.utc) if user_id else None,
-                    )
-                    
-                    db.add(implementer)
-                    logger.info(f"Updated implementer: {implementer.name} (sort_order: {idx})")
+                    db.add(ActionImplementer(
+                        id=uuid4(), action_id=action.id, user_id=resolved_user_id,
+                        name=name, email=email, phone=phone, sort_order=idx,
+                    ))
             
             # ==================== UPDATE LEGACY FIELDS ====================
             if 'assigned_to_id' in update_data:
@@ -1688,13 +1797,13 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                     user_result = await db.execute(
                         select(User).where(User.id == assigned_to_id, User.is_active == True)
                     )
-                    user = user_result.scalar_one_or_none()
-                    if user:
+                    assigned_user = user_result.scalar_one_or_none()
+                    if assigned_user:
                         assigned_to_name = {
-                            "id": str(user.id),
-                            "name": user.full_name or user.username,
-                            "email": user.email,
-                            "phone": getattr(user, 'phone', None) or getattr(user, 'telephone', None),
+                            "id": str(assigned_user.id),
+                            "name": assigned_user.full_name or assigned_user.username,
+                            "email": assigned_user.email,
+                            "phone": getattr(assigned_user, 'phone', None) or getattr(assigned_user, 'telephone', None),
                             "type": "user"
                         }
                 
@@ -1707,11 +1816,23 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
                 'description', 'due_date', 'priority', 'remarks',
                 'title', 'issue_challenge', 'type_of_action',
                 'is_key_action', 'tags', 'assign_to_meeting_id',
-                'overall_status_id', 'overall_progress_percentage'
+                'overall_status_id', 'overall_status_name', 'overall_progress_percentage'
             ]
+            
+            if update_data.get('overall_status_id') is not None:
+                status_row = await self._resolve_status(db, update_data['overall_status_id'])
+                update_data['overall_status_id'] = status_row.id      # save the real action_statuses id
+                update_data['overall_status_name'] = status_row.name            
+
+            NON_NULLABLE = {'description', 'priority', 'is_key_action', 'overall_progress_percentage'}
+
             for field in fields_to_update:
-                if field in update_data and update_data[field] is not None:
-                    setattr(action, field, update_data[field])
+                if field not in update_data:
+                    continue
+                value = update_data[field]
+                if value is None and field in NON_NULLABLE:   # these columns reject NULL
+                    continue
+                setattr(action, field, value)
             
             # Update audit fields
             action.updated_at = datetime.now(timezone.utc)
@@ -1730,7 +1851,10 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             logger.info(f"Action {action_id} updated with {len(action.implementers)} implementers")
             return action
-            
+
+        except HTTPException:
+            raise
+        
         except Exception as e:
             await db.rollback()
             logger.error(f"Failed to update action: {str(e)}", exc_info=True)
@@ -1748,41 +1872,53 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             action = await self.get(db, action_id)
             if not action:
                 return None
-            
+
             old_progress = action.overall_progress_percentage
-            old_status_id = action.overall_status_id
-            
+
+            # Resolve incoming id (attribute id OR action_statuses id) to a real
+            # action_statuses row. Raises ValueError if unknown.
+            status_row = await self._resolve_status(
+                db, progress_update.individual_status_id
+            )
+
             action.overall_progress_percentage = progress_update.progress_percentage
-            
-            if progress_update.individual_status_id:
-                action.overall_status_id = progress_update.individual_status_id
-            
+
+            if status_row:
+                action.overall_status_id = status_row.id
+                action.overall_status_name = status_row.name
+
             if progress_update.progress_percentage >= 100:
                 if not action.completed_at:
                     action.completed_at = datetime.now(timezone.utc)
             elif action.completed_at:
                 action.completed_at = None
-            
+
             action.updated_at = datetime.now(timezone.utc)
             action.updated_by_id = user_id
-            
+
             status_history = ActionStatusHistory(
                 action_id=action_id,
-                individual_status_id=progress_update.individual_status_id,
+                individual_status_id=status_row.id if status_row else None,
                 progress_percentage=progress_update.progress_percentage,
-                remarks=progress_update.remarks or f"Progress updated from {old_progress}% to {progress_update.progress_percentage}%",
+                remarks=progress_update.remarks or (
+                    f"Progress updated from {old_progress}% to "
+                    f"{progress_update.progress_percentage}%"
+                ),
                 created_by_id=user_id,
                 created_at=datetime.now(timezone.utc),
-                is_active=True
+                is_active=True,
             )
-            
+
             db.add(status_history)
             await db.commit()
             await db.refresh(action)
-            
-            logger.info(f"Action {action_id} progress updated to {progress_update.progress_percentage}%")
+
+            logger.info(
+                f"Action {action_id} progress updated to "
+                f"{progress_update.progress_percentage}%"
+            )
             return action
-            
+
         except Exception as e:
             await db.rollback()
             logger.error(f"Failed to update progress: {str(e)}", exc_info=True)
@@ -1968,16 +2104,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             if not action:
                 return False
             
-            # Check permission
-            if action.created_by_id != user_id:
-                user_result = await db.execute(
-                    select(User).where(User.id == user_id)
-                )
-                user = user_result.scalar_one_or_none()
-                is_admin = any(role.code in ["admin", "super_admin"] for role in user.roles)
-                if not is_admin:
-                    raise ValueError("Only the task creator or admin can delete this action")
-            
+                        
             action.is_active = False
             action.updated_at = datetime.now(timezone.utc)
             action.updated_by_id = user_id
@@ -2043,6 +2170,31 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         logger.info(f"Created default minute for meeting {meeting_id}")
         return default_minute
     
+    async def get_or_create_system_minute(
+        self, db: AsyncSession, meeting_id: UUID, user_id: UUID
+    ) -> MeetingMinutes:
+        """One hidden minute per meeting, used only as a container for actions created without minutes."""
+        existing = (await db.execute(
+            select(MeetingMinutes).where(
+                MeetingMinutes.meeting_id == meeting_id,
+                MeetingMinutes.is_system == True,
+                MeetingMinutes.is_active == True,
+            ).limit(1)
+        )).scalars().first()
+        if existing:
+            return existing
+
+        now = datetime.now(timezone.utc)
+        minute = MeetingMinutes(
+            meeting_id=meeting_id, topic="General actions", timestamp=now,
+            recorded_by_id=user_id, created_by_id=user_id, created_at=now,
+            is_active=True, is_default=False, is_system=True,
+        )
+        db.add(minute)
+        await db.commit()
+        await db.refresh(minute)
+        return minute
+
     async def get_minutes_by_meeting(
         self,
         db: AsyncSession,
@@ -2054,7 +2206,8 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         query = select(MeetingMinutes).where(
             and_(
                 MeetingMinutes.meeting_id == meeting_id,
-                MeetingMinutes.is_active == True
+                MeetingMinutes.is_active == True,
+                MeetingMinutes.is_system == False
             )
         ).offset(skip).limit(limit).order_by(MeetingMinutes.created_at.desc())
         
@@ -2072,7 +2225,8 @@ class CRUDMeetingMinutes(CRUDBase[MeetingMinutes, MeetingMinutesCreate, MeetingM
         """Get all minutes for a meeting with pagination"""
         query = select(MeetingMinutes).where(
             MeetingMinutes.meeting_id == meeting_id,
-            MeetingMinutes.is_active == True
+            MeetingMinutes.is_active == True,
+            MeetingMinutes.is_system == False
         )
         
         if include_actions:

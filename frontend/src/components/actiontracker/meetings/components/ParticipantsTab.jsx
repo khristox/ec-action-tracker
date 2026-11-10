@@ -1,6 +1,6 @@
 // src/components/actiontracker/meetings/components/ParticipantsTab.jsx
 
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import {
   Box, Paper, Typography, Stack, Avatar, Chip, IconButton,
   Tooltip, Table, TableBody, TableCell, TableContainer, TableHead,
@@ -36,6 +36,23 @@ import {
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import api from '../../../../services/api';
+import pLimit from 'p-limit';
+
+const addMemberLimit = pLimit(4);
+const NO_PARTICIPANTS = [];
+
+const toMemberPayload = (p) => ({
+  user_id: p.user_id || null,
+  name: p.name || null,
+  email: p.email || null,
+  telephone: p.telephone ? String(p.telephone) : null,
+  title: p.title || null,
+  organization: p.organization || null,
+  is_chairperson: p.is_chairperson || false,
+  is_secretary: p.is_secretary || false,
+  attendance_status: p.attendance_status || 'pending',
+  apology_comment: p.apology_comment || null,
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,7 +169,7 @@ const RemoveParticipantDialog = memo(({ open, onClose, onConfirm, participantNam
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Delete color="error" fontSize="small" />
           <Typography variant="subtitle1" fontWeight={700}>Remove Participant</Typography>
         </Stack>
@@ -174,14 +191,19 @@ const RemoveParticipantDialog = memo(({ open, onClose, onConfirm, participantNam
 RemoveParticipantDialog.displayName = 'RemoveParticipantDialog';
 
 // ─── Apology Dialog ────────────────────────────────────────────────────────────
-const ApologyDialog = memo(({ open, onClose, onSubmit, participantName, initialMessage = '' }) => {
+const ApologyDialogBody = ({ onClose, onSubmit, participantName, initialMessage }) => {
   const [message, setMessage] = useState(initialMessage);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const closeTimer = useRef(null);
 
   useEffect(() => {
-    if (open) { setMessage(initialMessage); setSubmitted(false); setIsSubmitting(false); }
-  }, [open, initialMessage]);
+    return () => {
+      if (closeTimer.current) {
+        clearTimeout(closeTimer.current);
+      }
+    };
+  }, []);
 
   const handleSubmit = async () => {
     if (!message.trim()) return;
@@ -189,58 +211,79 @@ const ApologyDialog = memo(({ open, onClose, onSubmit, participantName, initialM
     try {
       await onSubmit(message);
       setSubmitted(true);
-      setTimeout(() => { onClose(); setSubmitted(false); setMessage(''); }, 1500);
+      closeTimer.current = setTimeout(() => {
+        closeTimer.current = null;
+        onClose();
+      }, 1500);
     } catch (e) { console.error(e); }
     finally { setIsSubmitting(false); }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ pb: 1 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1} alignItems="center">
-            <MessageIcon color="warning" fontSize="small" />
-            <Typography variant="subtitle1" fontWeight={700}>Absent with Apology</Typography>
-          </Stack>
-          {!isSubmitting && !submitted && <IconButton size="small" onClick={onClose}><Close fontSize="small" /></IconButton>}
-        </Stack>
+    <>
+      <DialogTitle>
+        Record Apology
       </DialogTitle>
-      <DialogContent sx={{ pt: 0 }}>
-        {submitted ? (
-          <Alert severity="success">Apology recorded for {safeStr(participantName)}!</Alert>
-        ) : (
-          <Stack spacing={1.5} sx={{ mt: 0.5 }}>
-            <Alert severity="info" sx={{ py: 0.5 }}>
-              Marking <strong>{safeStr(participantName)}</strong> as absent with apology.
-            </Alert>
-            <TextField
-              fullWidth label="Apology Reason" multiline rows={3}
-              value={message} onChange={(e) => setMessage(e.target.value)}
-              placeholder="e.g., Family emergency, travel issues, illness…"
-              helperText={`${message.length}/500`} required autoFocus
-              inputProps={{ maxLength: 500 }} disabled={isSubmitting} size="small"
-            />
-          </Stack>
+
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Enter the reason for {participantName}'s absence.
+        </Typography>
+
+        <TextField
+          fullWidth
+          multiline
+          minRows={4}
+          autoFocus
+          label="Apology Reason"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          disabled={isSubmitting || submitted}
+          placeholder="Enter the reason for absence..."
+        />
+
+        {submitted && (
+          <Alert severity="success" sx={{ mt: 1.5 }}>
+            Apology recorded successfully.
+          </Alert>
         )}
       </DialogContent>
+
       <DialogActions sx={{ px: 2.5, pb: 2 }}>
-        {!submitted && (
-          <>
-            <Button size="small" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
-            <Button size="small" variant="contained" color="warning" onClick={handleSubmit} disabled={isSubmitting || !message.trim()} startIcon={isSubmitting ? <CircularProgress size={14} /> : <SendIcon />}>
-              {isSubmitting ? 'Saving…' : 'Save & Send'}
-            </Button>
-          </>
-        )}
-        {submitted && <Button size="small" variant="contained" onClick={onClose}>Close</Button>}
+        <Button
+          onClick={onClose}
+          disabled={isSubmitting}
+        >
+          Cancel
+        </Button>
+
+        <Button
+          variant="contained"
+          color="warning"
+          onClick={handleSubmit}
+          disabled={isSubmitting || submitted || !message.trim()}
+          startIcon={
+            isSubmitting
+              ? <CircularProgress size={14} />
+              : <MessageIcon />
+          }
+        >
+          {isSubmitting ? 'Saving…' : 'Submit Apology'}
+        </Button>
       </DialogActions>
-    </Dialog>
+    </>
   );
-});
+};
+
+const ApologyDialog = memo(({ open, onClose, onSubmit, participantName, initialMessage = '' }) => (
+  <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <ApologyDialogBody onClose={onClose} onSubmit={onSubmit} participantName={participantName} initialMessage={initialMessage} />
+  </Dialog>
+));
 ApologyDialog.displayName = 'ApologyDialog';
 
 // ─── Add Participant Dialog ────────────────────────────────────────────────    
-const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants = [] }) => {
+const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants = NO_PARTICIPANTS }) => {
   const theme = useTheme();
   const [participantType, setParticipantType] = useState('existing');
   const [formData, setFormData] = useState({ name: '', email: '', telephone: '', title: '', organization: '' });
@@ -261,6 +304,12 @@ const AddParticipantDialog = memo(({ open, onClose, onAdd, existingParticipants 
   const debouncedSearch = useMemo(() => 
     debounce((v) => { setUserSearchTerm(v); setUserPage(1); }, 500), []);
 
+  useEffect(() => {
+    return () => {
+      debouncedSearch.clear();
+    };
+  }, [debouncedSearch]);
+  
   useEffect(() => {
     if (open && participantType === 'from_list') fetchParticipantLists();
     if (open && participantType === 'existing') fetchAvailableUsers();
@@ -825,67 +874,127 @@ const ParticipantsTab = ({
 
   useEffect(() => {
     const safeParticipants = ensureArray(participants);
-    if (safeParticipants && safeParticipants.length > 0) {
-      const s = {}, c = {};
-      safeParticipants.forEach(p => { 
-        s[p.id] = p.attendance_status || 'pending'; 
-        c[p.id] = p.apology_comment || ''; 
-      });
-      setAttendanceStatus(s); 
-      setApologyComments(c);
-    }
+
+    const nextStatus = {};
+    const nextApologies = {};
+
+    safeParticipants.forEach((p) => {
+      nextStatus[p.id] = p.attendance_status || 'pending';
+      nextApologies[p.id] = p.apology_comment || '';
+    });
+
+    setAttendanceStatus(nextStatus);
+    setApologyComments(nextApologies);
   }, [participants]);
 
   const handleAddParticipants = async (newParticipants) => {
     setLoading(true);
+
     try {
-      const addedList = [];
-      for (const p of newParticipants) {
-        const payload = {
-          user_id: p.user_id || null,
-          name: p.name || null,
-          email: p.email || null,
-          telephone: p.telephone ? String(p.telephone) : null,
-          title: p.title || null,
-          organization: p.organization || null,
-          is_chairperson: p.is_chairperson || false,
-          is_secretary: p.is_secretary || false,
-          attendance_status: p.attendance_status || "pending",
-          apology_comment: p.apology_comment || null,
-        };
-        
-        Object.keys(payload).forEach(key => {
-          if (payload[key] === undefined) {
-            delete payload[key];
-          }
-        });
-        
-        const res = await api.post(
-          `/action-tracker/meetings/${meetingId}/members`, 
-          payload
-        );
-        if (res?.data) {
-          addedList.push(res.data);
+      const keysOf = (p) =>
+        [
+          p.user_id && `u:${p.user_id}`,
+          p.email && `e:${p.email.toLowerCase()}`,
+        ].filter(Boolean);
+
+      // Skip anyone already in the meeting and anyone repeated within this batch.
+      const taken = new Set(
+        ensureArray(participants).flatMap(keysOf)
+      );
+
+      const batch = [];
+      let skipped = 0;
+
+      newParticipants.forEach((p) => {
+        const keys = keysOf(p);
+
+        if (keys.some((k) => taken.has(k))) {
+          skipped++;
+          return;
         }
+
+        keys.forEach((k) => taken.add(k));
+        batch.push(p);
+      });
+
+      if (batch.length === 0) {
+        showSnack(
+          skipped === 1
+            ? 'That person is already in this meeting'
+            : `All ${skipped} people are already in this meeting`,
+          'info'
+        );
+        return;
       }
 
-      // Optimistically update local state so UI updates instantly without relying completely on laggy parent re-fetches
+      const results = await Promise.allSettled(
+        batch.map((p) =>
+          addMemberLimit(() =>
+            api.post(
+              `/action-tracker/meetings/${meetingId}/members`,
+              toMemberPayload(p)
+            )
+          )
+        )
+      );
+
+      const addedList = [];
+      const failed = [];
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          if (result.value?.data) {
+            addedList.push(result.value.data);
+          }
+        } else {
+          failed.push({
+            participant: batch[index],
+            reason: result.reason,
+          });
+        }
+      });
+
+      const skippedNote = skipped
+        ? ` ${skipped} already in the meeting.`
+        : '';
+
       if (addedList.length > 0) {
-        setParticipants(prev => {
-          const combined = [...ensureArray(prev), ...addedList];
-          return combined;
-        });
+        setParticipants((prev) => [
+          ...ensureArray(prev),
+          ...addedList,
+        ]);
       }
 
-      showSnack(`Added ${newParticipants.length} participant(s) successfully`);
-      
-      // Trigger parent refresh if provided
-      if (typeof onRefresh === 'function') {
+      if (failed.length === 0) {
+        showSnack(
+          `Added ${addedList.length} participant(s) successfully.${skippedNote}`
+        );
+      } else {
+        const names = failed
+          .map(
+            ({ participant }) =>
+              participant.name ||
+              participant.email ||
+              'participant'
+          )
+          .join(', ');
+
+        const detail = failed[0].reason?.response?.data?.detail;
+
+        showSnack(
+          `${addedList.length} added, ${failed.length} failed (${names})` +
+            (typeof detail === 'string' ? `: ${detail}` : '') +
+            `.${skippedNote}`,
+          addedList.length > 0 ? 'warning' : 'error'
+        );
+      }
+
+      if (addedList.length > 0 && typeof onRefresh === 'function') {
         onRefresh();
       }
     } catch (error) {
       console.error('Error adding participants:', error);
-      showSnack(error.response?.data?.detail || 'Failed to add participants', 'error');
+      showSnack('Failed to add participants', 'error');
     } finally {
       setLoading(false);
     }
@@ -904,6 +1013,10 @@ const ParticipantsTab = ({
     finally { setLoading(false); }
   }, [meetingId, onRefresh, canEdit, showSnack]);
 
+  useEffect(() => {
+    setChairpersonId(currentChairpersonId || null);
+  }, [currentChairpersonId]);
+
   const handleSetSecretary = useCallback(async (participantId) => {
     if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
     setLoading(true);
@@ -917,34 +1030,46 @@ const ParticipantsTab = ({
     finally { setLoading(false); }
   }, [meetingId, onRefresh, canEdit, showSnack]);
 
+  useEffect(() => {
+    setSecretaryId(currentSecretaryId || null);
+  }, [currentSecretaryId]);
+
   const handleAttendanceChange = useCallback(async (participantId, status, comment = '') => {
-    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return; }
-    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
+    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return false; }
+    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return false; }
     setLoading(true);
     try {
       // ✅ Use the correct endpoint: PUT /members/{memberId}
       await api.put(`/action-tracker/meetings/${meetingId}/members/${participantId}`, {
         attendance_status: status, 
-        apology_comment: comment,
+        apology_comment: comment || null,
       });
       setAttendanceStatus(prev => ({ ...prev, [participantId]: status }));
-      if (comment) setApologyComments(prev => ({ ...prev, [participantId]: comment }));
+      setApologyComments((prev) => ({
+        ...prev,
+        [participantId]:
+          status === 'absent_with_apology'
+            ? comment
+            : '',
+      }));
       showSnack(
-        status === 'absent_with_apology' ? 'Marked absent with apology' : `Marked as ${status.replace('_', ' ')}`,
-        status === 'absent' || status === 'absent_with_apology' ? 'warning' : 'success',
+        status === 'absent_with_apology' ? 'Marked absent with apology' : `Marked as ${status.replace(/_/g, ' ')}`,
+        status === 'attended' ? 'success' : 'warning',
       );
       if (typeof onRefresh === 'function') onRefresh();
+      return true;
     } catch (e) { 
       console.error('Attendance update error:', e);
       showSnack(e.response?.data?.detail || 'Failed to update attendance', 'error'); 
+      return false;
     }
     finally { setLoading(false); }
   }, [meetingId, isMeetingStarted, canEdit, onRefresh, showSnack]);
 
 
   const handleOpenApologyDialog = useCallback((participant) => {
-    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return; }
-    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return; }
+    if (!isMeetingStarted) { showSnack('Meeting has not started yet', 'warning'); return false; }
+    if (!canEdit) { showSnack('Meeting has ended', 'warning'); return false; }
     setSelectedParticipant(participant); setShowApologyDialog(true);
   }, [isMeetingStarted, canEdit, showSnack]);
 
@@ -952,12 +1077,14 @@ const ParticipantsTab = ({
     if (!selectedParticipant) return;
     
     // First update attendance status
-    await handleAttendanceChange(selectedParticipant.id, 'absent_with_apology', message);
-    
+    const ok =await handleAttendanceChange(selectedParticipant.id, 'absent_with_apology', message);
+    if (!ok) throw new Error('Failed to update attendance status'); // ApologyDialog catches this and stays open
     // Then send notification (optional - can be removed if not needed)
     try {
       await api.post(`/action-tracker/meetings/${meetingId}/notifications`, {
+        meeting_id: meetingId,
         participant_ids: [selectedParticipant.id],
+        notification_type: ['email', 'sms'],
         custom_message: `Apology Reason: ${message}`,
       });
     } catch (e) { 
@@ -969,27 +1096,47 @@ const ParticipantsTab = ({
 
   const handleRemoveParticipant = useCallback(async (participantId) => {
     setLoading(true);
+
     try {
-      await api.delete(`/action-tracker/meetings/${meetingId}/participants/${participantId}`);
-      setParticipants(prev => prev.filter(p => p.id !== participantId));
-      showSnack('Participant removed'); 
-      if (typeof onRefresh === 'function') onRefresh();
-    } catch (e) { showSnack(e.response?.data?.detail || 'Failed to remove participant', 'error'); }
-    finally { setLoading(false); setShowRemoveDialog(false); setParticipantToRemove(null); }
+      await api.delete(
+        `/action-tracker/meetings/${meetingId}/participants/${participantId}`
+      );
+
+      setParticipants((prev) =>
+        prev.filter((p) => p.id !== participantId)
+      );
+
+      showSnack('Participant removed');
+
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+
+      return true;
+    } catch (e) {
+      showSnack(
+        e.response?.data?.detail || 'Failed to remove participant',
+        'error'
+      );
+
+      return false;
+    } finally {
+      setLoading(false);
+    }
   }, [meetingId, onRefresh, showSnack]);
 
   const stats = useMemo(() => {
-    const safeParticipants = ensureArray(participants);
-    const vals = Object.values(attendanceStatus);
-    const attended = vals.filter(s => s === 'attended').length;
-    const total = safeParticipants.length || 0;
+    const list = ensureArray(participants);
+    const statusOf = (p) => attendanceStatus[p.id] || p.attendance_status || 'pending';
+    const count = (s) => list.filter((p) => statusOf(p) === s).length;
+    const attended = count('attended');
     return {
-      attended: attended || 0,
-      absent: vals.filter(s => s === 'absent').length || 0,
-      absentWithApology: vals.filter(s => s === 'absent_with_apology').length || 0,
-      pending: vals.filter(s => s === 'pending').length || 0,
-      total: total || 0,
-      attendanceRate: total > 0 ? ((attended / total) * 100).toFixed(1) : '0.0',
+      attended,
+      absent: count('absent'),
+      absentWithApology: count('absent_with_apology'),
+      pending: count('pending'),
+      total: list.length,
+      attendanceRate: list.length ? ((attended / list.length) * 100).toFixed(1) : '0.0',
     };
   }, [attendanceStatus, participants]);
 
@@ -1131,7 +1278,7 @@ const ParticipantsTab = ({
                 return (
                   <TableRow key={participant.id} hover sx={{ opacity: readOnly ? 0.85 : 1, '& .MuiTableCell-root': { py: 0.75, px: 1.5, fontSize: '0.8rem' } }}>
                     <TableCell>
-                      <Stack direction="row" sx={{ alignItems: 'center', spacing: 1 }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: isChairperson ? theme.palette.primary.main : isSecretary ? theme.palette.secondary.main : '#6366f1', flexShrink: 0, mr: 1 }}>
                           {fullName[0]?.toUpperCase() || '?'}
                         </Avatar>

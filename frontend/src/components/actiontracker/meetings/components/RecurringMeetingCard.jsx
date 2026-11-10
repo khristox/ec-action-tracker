@@ -105,9 +105,13 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
 
       {/* Header */}
       <Box sx={{ px: 2.5, pt: 1.5, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Stack direction="row" alignItems="flex-start" justifyContent="space-between" gap={1}>
+        <Stack direction="row" sx={{alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }} >
           <Box sx={{ flex: 1 }}>
-            <Stack direction="row" spacing={1} alignItems="center" mb={0.75} flexWrap="wrap">
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ flexWrap: 'wrap', alignItems: 'center', mb: 0.75, }}
+            >
               <Chip
                 size="small"
                 color={status.color}
@@ -159,7 +163,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         {/* Info cards */}
         <Stack spacing={1.5} mb={2.5}>
           <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}} >
               <InfoIconBox bgcolor={alpha(theme.palette.success.main, 0.1)} color="success.main" size={36}>
                 <TodayIcon sx={{ fontSize: 18 }} />
               </InfoIconBox>
@@ -175,7 +179,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
           </Paper>
 
           <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}} >
               <InfoIconBox bgcolor={alpha(theme.palette.info.main, 0.1)} color="info.main" size={36}>
                 {LocationIcon}
               </InfoIconBox>
@@ -188,7 +192,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
 
           {timeRange && (
             <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-              <Stack direction="row" spacing={1.5} alignItems="center">
+              <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}}>
                 <InfoIconBox bgcolor={alpha(theme.palette.primary.main, 0.1)} color="primary.main" size={36}>
                   <ScheduleIcon sx={{ fontSize: 18 }} />
                 </InfoIconBox>
@@ -207,25 +211,25 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         </Typography>
         <Stack spacing={1.25} mt={1} mb={3}>
           {createdDate && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}}>
               <CalendarMonthIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
               <Typography variant="body2" color="text.secondary">Created: <strong>{createdDate}</strong></Typography>
             </Stack>
           )}
           {lastOccurrence && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}}>
               <AccessTimeIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
               <Typography variant="body2" color="text.secondary">Last occurrence: <strong>{lastOccurrence}</strong></Typography>
             </Stack>
           )}
           {meeting?.recurrence_end_date && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}}>
               <TodayIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
               <Typography variant="body2" color="text.secondary">Ends on: <strong>{formatDate(meeting.recurrence_end_date)}</strong></Typography>
             </Stack>
           )}
           {meeting?.platform && meeting.platform !== 'physical' && (
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}}>
               <VideocamIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
               <Typography variant="body2" color="text.secondary">Platform: <strong>{meeting.platform}</strong></Typography>
             </Stack>
@@ -235,7 +239,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         {/* Warnings */}
         {(!hasNext && status.key === 'active') && (
           <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.warning.main, 0.08), border: '1px solid', borderColor: alpha(theme.palette.warning.main, 0.25), mb: 2 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
               <WarningAmberIcon sx={{ fontSize: 18, color: 'warning.main' }} />
               <Typography variant="body2" color="warning.main" fontWeight={500}>Series has ended</Typography>
             </Stack>
@@ -243,7 +247,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         )}
         {isPaused && (
           <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.warning.main, 0.08), border: '1px solid', borderColor: alpha(theme.palette.warning.main, 0.25), mb: 2 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
               <WarningAmberIcon sx={{ fontSize: 18, color: 'warning.main' }} />
               <Typography variant="body2" color="warning.main" fontWeight={500}>Series is paused</Typography>
             </Stack>
@@ -449,7 +453,7 @@ export const RecurringMeetingCard = ({
         <CardActionArea onClick={handleCardClick} sx={{ flexGrow: 1, alignItems: 'flex-start' }}>
           <CardContent sx={{ p: isMobile ? 2 : 2.5, pb: '12px !important' }}>
             {/* Header row */}
-            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1} mb={1.5}>
+            <Stack direction="row" spacing={1} useFlexGap sx={{alignItems: 'center', justifyContent: 'space-between', flexWrap: "wrap", gap: 1, mb: 1.5,}}>
               <Chip
                 size="small"
                 color={status.color}
@@ -484,7 +488,7 @@ export const RecurringMeetingCard = ({
             </Typography>
 
             {/* Recurrence */}
-            <Stack direction="row" alignItems="center" spacing={0.75} mb={1.5}>
+            <Stack direction="row" sx={{alignItems: 'center', mb: 1.5}} spacing={0.75} >
               <RepeatIcon sx={{ fontSize: 13, color: 'text.disabled' }} />
               <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
                 {getRecurrenceDescription(meeting)} · Every {recurrenceInterval} week{recurrenceInterval !== 1 ? 's' : ''}
@@ -499,7 +503,7 @@ export const RecurringMeetingCard = ({
             }}>
               <Stack direction="column" spacing={1.25}>
                 {/* Next date */}
-                <Stack direction="row" spacing={1} alignItems="center">
+                <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
                   <InfoIconBox bgcolor={alpha(theme.palette.success.main, 0.1)} color="success.main" size={28}>
                     <TodayIcon sx={{ fontSize: 14 }} />
                   </InfoIconBox>
@@ -514,7 +518,7 @@ export const RecurringMeetingCard = ({
                 </Stack>
 
                 {/* Location */}
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                <Stack direction="row" spacing={1} sx={{alignItems: 'center', minWidth: 0}} >
                   <InfoIconBox bgcolor={alpha(theme.palette.info.main, 0.1)} color="info.main" size={28}>
                     {LocationIcon}
                   </InfoIconBox>
@@ -530,7 +534,7 @@ export const RecurringMeetingCard = ({
 
                 {/* Time (if available) */}
                 {timeRange && (
-                  <Stack direction="row" spacing={1} alignItems="center">
+                  <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
                     <InfoIconBox bgcolor={alpha(theme.palette.primary.main, 0.1)} color="primary.main" size={28}>
                       <ScheduleIcon sx={{ fontSize: 14 }} />
                     </InfoIconBox>
@@ -549,8 +553,13 @@ export const RecurringMeetingCard = ({
 
             {/* Stats row — desktop only */}
             {showStats && !isMobile && (
-              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ gap: 1 }}>
-                <Stack direction="row" alignItems="center" spacing={0.75}>
+              <Stack
+                direction="row"
+                spacing={2}
+                useFlexGap
+                sx={{ flexWrap: 'wrap', gap: 1 }}
+              >
+                <Stack direction="row" sx={{alignItems: 'center'}} spacing={0.75}>
                   <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: progressColor }} />
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
                     {completionPct !== null
@@ -570,13 +579,13 @@ export const RecurringMeetingCard = ({
 
             {/* Warnings */}
             {(!hasNext && status.key === 'active') && (
-              <Stack direction="row" alignItems="center" spacing={0.75} mt={1.5}>
+              <Stack direction="row" sx={{alignItems: 'center', mt: 1.5}} spacing={0.75} >
                 <WarningAmberIcon sx={{ fontSize: 14, color: 'warning.main' }} />
                 <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.7rem' }}>Series has ended</Typography>
               </Stack>
             )}
             {isPaused && (
-              <Stack direction="row" alignItems="center" spacing={0.75} mt={1.5}>
+              <Stack direction="row" sx={{alignItems: 'center', mt: 1.5}} spacing={0.75}>
                 <WarningAmberIcon sx={{ fontSize: 14, color: 'warning.main' }} />
                 <Typography variant="caption" color="warning.main" sx={{ fontSize: '0.7rem' }}>Series is paused</Typography>
               </Stack>

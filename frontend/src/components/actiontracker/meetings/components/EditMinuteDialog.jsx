@@ -98,7 +98,7 @@ const EditMinuteDialog = ({ open, minute, onClose, onSave, meetingId }) => {
         bgcolor: isMobile ? 'primary.main' : 'transparent',
         color: isMobile ? 'white' : 'inherit'
       }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6" fontWeight={700}>
             Edit Meeting Minutes
           </Typography>

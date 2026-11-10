@@ -7,80 +7,48 @@ import { deduplicatedGet, deduplicatedPost } from '../../../utils/requestUtils';
 
 export const fetchMeetingParticipants = createAsyncThunk(
   'notifications/fetchMeetingParticipants',
-  async (meetingId, { getState, rejectWithValue }) => {
+  async (meetingId, { rejectWithValue }) => {
     try {
-      const state = getState();
-      
-      // 1. Check existing slice state first to avoid redundant fetches if already populated
-      const currentParticipants = state.notifications?.participants;
-      if (Array.isArray(currentParticipants) && currentParticipants.length > 0) {
-        return currentParticipants;
+      const key = `meeting_members_${meetingId}`;
+
+      const response = await deduplicatedGet(
+        `/action-tracker/meetings/${meetingId}/members`,
+        {},
+        { key }
+      );
+
+      const data = response.data;
+
+      if (Array.isArray(data)) {
+        return data;
       }
 
-      // 2. Check if we already have the meeting data with participants in the meetings slice
-      const currentMeeting = state.meetings?.currentMeeting;
-      if (currentMeeting && currentMeeting.id === meetingId) {
-        if (currentMeeting.participants && Array.isArray(currentMeeting.participants) && currentMeeting.participants.length > 0) {
-          return currentMeeting.participants;
-        }
-        if (currentMeeting.members && Array.isArray(currentMeeting.members) && currentMeeting.members.length > 0) {
-          return currentMeeting.members;
-        }
-        if (currentMeeting.attendees && Array.isArray(currentMeeting.attendees) && currentMeeting.attendees.length > 0) {
-          return currentMeeting.attendees;
-        }
+      if (Array.isArray(data?.items)) {
+        return data.items;
       }
-      
-      // 3. Try the primary action-tracker members endpoint with deduplication
-      try {
-        const response = await deduplicatedGet(
-          `/action-tracker/meetings/${meetingId}/members`,
-          {},
-          { key: `meeting_participants_${meetingId}` }
-        );
-        if (response.data) {
-          if (Array.isArray(response.data)) return response.data;
-          if (response.data.items && Array.isArray(response.data.items)) return response.data.items;
-          if (response.data.participants && Array.isArray(response.data.participants)) return response.data.participants;
-          if (response.data.members && Array.isArray(response.data.members)) return response.data.members;
-        }
-      } catch (err) {
-        if (err.message === 'canceled' || err.code === 'ERR_CANCELED') {
-          return [];
-        }
-        if (err.response?.status !== 404) {
-          console.warn('Could not fetch from /members endpoint:', err.message);
-        }
+
+      if (Array.isArray(data?.members)) {
+        return data.members;
       }
-      
-      // 4. Fallback to general meeting endpoint with deduplication if members failed
-      try {
-        const response = await deduplicatedGet(
-          `/action-tracker/meetings/${meetingId}`,
-          {},
-          { key: `meeting_${meetingId}` }
-        );
-        if (response.data) {
-          if (response.data.participants && Array.isArray(response.data.participants)) {
-            return response.data.participants;
-          }
-          if (response.data.members && Array.isArray(response.data.members)) {
-            return response.data.members;
-          }
-        }
-      } catch (err) {
-        if (err.message === 'canceled' || err.code === 'ERR_CANCELED') {
-          return [];
-        }
+
+      if (Array.isArray(data?.participants)) {
+        return data.participants;
       }
-      
+
       return [];
-      
     } catch (error) {
-      if (error.message === 'canceled' || error.code === 'ERR_CANCELED') {
-        return [];
+      if (
+        error?.name === 'CanceledError' ||
+        error?.code === 'ERR_CANCELED'
+      ) {
+        throw error;
       }
-      return rejectWithValue(error.response?.data?.message || 'Failed to load participants');
+
+      return rejectWithValue(
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Failed to fetch meeting members'
+      );
     }
   }
 );

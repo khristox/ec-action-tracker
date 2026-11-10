@@ -24,6 +24,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from app.services.action_due_reminders import action_due_reminder_scheduler
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,7 +42,9 @@ from app.api.v1.api import api_router
 from app.core.redis_client import init_redis, close_redis, get_redis
 from app.core.limiter import limiter
 from app.core.minio_client import minio_service
+from app.services.recurring_occurrence_scheduler import recurring_occurrence_scheduler
 from app.services.reminder_scheduler import reminder_scheduler
+from app.services.meeting_status_scheduler import meeting_status_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -57,28 +60,36 @@ ROOT_PATH = os.getenv("ROOT_PATH", "")
 
 def get_frontend_path() -> Optional[Path]:
     """
-    Get the frontend distribution path.
-    
-    Tries:
-    1. FRONTEND_DIST_PATH environment variable
-    2. Fallback to /home/chris/Chr/Apps/ECATMIS/static
-    3. Returns None if not found
+    Resolve frontend directory for both local and Docker environments.
     """
-    # Try environment variable first
+
     env_path = os.getenv("FRONTEND_DIST_PATH")
+
     if env_path:
-        path = Path(env_path)
+        path = Path(env_path).expanduser().resolve()
+
         if path.exists() and path.is_dir():
             logger.info(f"✅ Frontend found at (env): {path}")
             return path
-    
-    # Try fallback path
-    fallback = Path("/home/chris/Chr/Apps/ECATMIS/static")
-    logger.info(f"Checking fallback frontend path: {fallback}")
+
+        logger.warning(
+            f"⚠️ FRONTEND_DIST_PATH does not exist: {path}"
+        )
+
+    # /home/wagambula/ec-action-tracker/app/main.py
+    #                         ↓
+    # /home/wagambula/ec-action-tracker/static
+    project_root = Path(__file__).resolve().parent.parent
+    fallback = project_root / "static"
+
+    logger.info(f"Checking project frontend path: {fallback}")
+
     if fallback.exists() and fallback.is_dir():
-        logger.info(f"✅ Frontend found at (fallback): {fallback}")
+        logger.info(f"✅ Frontend found at (project): {fallback}")
         return fallback
-    
+
+    logger.error(f"❌ Frontend directory not found: {fallback}")
+
     return None
 
 
@@ -239,6 +250,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.error(f"❌ Database connection failed: {db_health.get('error', 'Unknown error')}")
 
+    
     # Initialize Redis
     await init_redis()
     logger.info("✅ Redis initialized")
@@ -247,40 +259,78 @@ async def lifespan(app: FastAPI):
     minio_service.ensure_bucket()
     logger.info("✅ MinIO bucket ensured")
 
-    # ==================== START REMINDER SCHEDULER ====================
-    # Create a background task for the reminder scheduler
-    # This will run in the background and send action reminders 3x daily
-    scheduler_task = asyncio.create_task(reminder_scheduler.start())
-    logger.info("✅ Meeting reminder scheduler started in background")
+    
+    # ==================== START BACKGROUND SCHEDULERS ====================
 
-    # Store the task so we can cancel it on shutdown
+    # Reminder scheduler: sends action reminders.
+    scheduler_task = asyncio.create_task(
+        reminder_scheduler.start()
+    )
     app.state.scheduler_task = scheduler_task
+    logger.info("Reminder scheduler started in background")
 
-    yield  # ← Application runs here
+    # Meeting status scheduler: automatically sets STARTED and ENDED.
+    from app.services.meeting_status_scheduler import (
+        meeting_status_scheduler,
+    )
 
-    # ==================== SHUTDOWN CLEANUP ====================
-    logger.info("🛑 Shutting down Action Tracker...")
+    meeting_status_task = asyncio.create_task(
+        meeting_status_scheduler()
+    )
+    app.state.meeting_status_task = meeting_status_task
+    logger.info("Meeting status scheduler started in background")
 
-    # Stop the reminder scheduler gracefully
-    if hasattr(app.state, 'scheduler_task'):
-        app.state.scheduler_task.cancel()
-        try:
-            await app.state.scheduler_task
-        except asyncio.CancelledError:
-            # Expected when cancelling the task
-            pass
-        logger.info("✅ Reminder scheduler stopped")
+    app.state.action_reminder_task = asyncio.create_task(action_due_reminder_scheduler.start())
+    logger.info("✅ Action due-date reminder scheduler started in background")
+    app.state.recurring_occurrence_task = asyncio.create_task(recurring_occurrence_scheduler.start())
+    logger.info("✅ Recurring occurrence scheduler started in background")
 
-    # Close Redis connection
-    await close_redis()
-    logger.info("✅ Redis connection closed")
 
-    # Close database connections
-    if async_engine:
-        await async_engine.dispose()
-        logger.info("✅ Database connections closed")
+    
+        # ==================== APPLICATION RUNNING ====================
 
-    logger.info("🛑 Action Tracker shutdown complete")
+    try:
+        # Keep the application running until FastAPI initiates shutdown.
+        yield
+
+    finally:
+        # ==================== SHUTDOWN CLEANUP ====================
+
+        logger.info("Shutting down Action Tracker...")
+
+        await recurring_occurrence_scheduler.stop()
+
+        for task_name in (
+            "scheduler_task",
+            "meeting_status_task",
+            "action_reminder_task",
+            "recurring_occurrence_task",
+        ):
+            task = getattr(app.state, task_name, None)
+            if task is None or task.done():
+                continue
+
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error while stopping background task: %s", task_name)
+
+            logger.info("Background task stopped: %s", task_name)
+
+        # Close Redis connection
+        await close_redis()
+        logger.info("✅ Redis connection closed")
+        
+
+        # Close database connections
+        if async_engine:
+            await async_engine.dispose()
+            logger.info("✅ Database connections closed")
+
+        logger.info("🛑 Action Tracker shutdown complete")
 
 
 # ==================== CREATE FASTAPI APPLICATION ====================
@@ -652,53 +702,127 @@ async def custom_redoc():
 
 if not settings.DEBUG:
     """
-    Serve frontend in production (DEBUG=False).
-    
-    Serves static files and SPA routing.
+    Serve the React frontend from the root URL.
+
+    Production:
+        https://tracker.ec.or.ug/
+
+    Frontend architecture:
+        /              -> React index.html
+        /assets/*      -> Vite static assets
+        /site.webmanifest -> PWA manifest
+        /<react-route> -> React SPA fallback
+
+    API routes remain handled by FastAPI before the SPA fallback.
     """
+
     frontend_dist = get_frontend_path()
 
     if frontend_dist:
         logger.info(f"🎨 Serving frontend from: {frontend_dist}")
 
-        # Mount assets directory if it exists
         assets_dir = frontend_dist / "assets"
-        if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        index_file = frontend_dist / "index.html"
+        manifest_file = frontend_dist / "site.webmanifest"
 
-        # Serve index.html
+        # --------------------------------------------------
+        # Validate frontend files
+        # --------------------------------------------------
+
+        if not index_file.exists():
+            logger.error(f"❌ Frontend index.html not found: {index_file}")
+        else:
+            logger.info(f"✅ Frontend index: {index_file}")
+
+        # --------------------------------------------------
+        # Static assets
+        # --------------------------------------------------
+
+        if assets_dir.exists() and assets_dir.is_dir():
+            logger.info(f"📦 Frontend assets directory: {assets_dir}")
+
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(assets_dir)),
+                name="assets",
+            )
+        else:
+            logger.error(
+                f"❌ Frontend assets directory not found: {assets_dir}"
+            )
+
+        # --------------------------------------------------
+        # Web manifest
+        # --------------------------------------------------
+
+        if manifest_file.exists():
+
+            @app.get(
+                "/site.webmanifest",
+                include_in_schema=False,
+            )
+            async def serve_manifest():
+                return FileResponse(
+                    manifest_file,
+                    media_type="application/manifest+json",
+                )
+
+        # --------------------------------------------------
+        # Root frontend
+        # --------------------------------------------------
+
         @app.get("/", include_in_schema=False)
         async def serve_index():
-            """Serve the frontend index.html file."""
-            return FileResponse(frontend_dist / "index.html")
+            return FileResponse(index_file)
 
-        # SPA routing fallback
+        # --------------------------------------------------
+        # React SPA fallback
+        # --------------------------------------------------
+
         @app.get("/{path:path}", include_in_schema=False)
         async def serve_spa(path: str):
             """
-            SPA routing fallback.
-            
-            Serves static files if they exist, otherwise falls back to index.html.
+            Serve React SPA routes.
+
+            Existing API/system routes are never allowed to
+            fall through to React.
             """
-            # Clean the path to handle potential leading slashes from proxies
+
             check_path = path.lstrip("/")
 
-            # Exclude API and special endpoints
-            excluded_prefixes = ("api/", "docs", "redoc", "openapi.json", "health", "debug")
-            
-            if any(check_path.startswith(prefix) for prefix in excluded_prefixes):
+            excluded_prefixes = (
+                "api/",
+                "docs",
+                "redoc",
+                "openapi.json",
+                "health",
+                "debug",
+            )
+
+            if any(
+                check_path.startswith(prefix)
+                for prefix in excluded_prefixes
+            ):
                 raise HTTPException(status_code=404)
 
-            # Try to serve the file directly
-            file_path = frontend_dist / path
-            if file_path.exists() and file_path.is_file():
-                return FileResponse(file_path)
+            # Serve an actual frontend file if it exists.
+            requested_file = (frontend_dist / check_path).resolve()
+            if (
+                requested_file.is_file()
+                and requested_file.is_relative_to(frontend_dist)
+                and not requested_file.name.startswith(".")
+            ):
+                return FileResponse(requested_file)
+            return FileResponse(index_file)
 
-            # Fallback to index.html for SPA routing
-            return FileResponse(frontend_dist / "index.html")
+            # Otherwise let React Router handle the route.
+            return FileResponse(index_file)
 
     else:
-        logger.error(f"❌ FRONTEND_DIST_PATH: {os.getenv('FRONTEND_DIST_PATH')}")
+        logger.error(
+            f"❌ FRONTEND_DIST_PATH: "
+            f"{os.getenv('FRONTEND_DIST_PATH')}"
+        )
         logger.error("❌ Frontend directory not found!")
 
 else:

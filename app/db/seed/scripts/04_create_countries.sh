@@ -72,26 +72,15 @@ if ! curl -s -f "${BASE_URL}/health" > /dev/null 2>&1; then
 fi
 print_success "Server is running"
 
-# Get admin token
-echo ""
-print_info "Getting admin token..."
-LOGIN_RESPONSE=$(curl -s -X POST "${BASE_URL}/api/v1/auth/login" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=${USERNAME}&password=${PASSWORD}")
+# ==================== AUTHENTICATION ====================
+# Token is supplied by the master seeder.
 
-ADMIN_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token')
-
-if [ "$ADMIN_TOKEN" == "null" ] || [ -z "$ADMIN_TOKEN" ]; then
-    print_error "Failed to get admin token"
-    echo "Response: $LOGIN_RESPONSE"
-    echo ""
-    echo "Possible issues:"
-    echo "  - Invalid username or password"
-    echo "  - Server not responding correctly"
-    echo "  - API endpoint may be different"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+    print_error "ADMIN_TOKEN was not provided by the master seeder."
     exit 1
 fi
-print_success "Got admin token"
+
+print_success "Using ADMIN_TOKEN from master seeder"
 
 # Function to handle API responses
 handle_response() {

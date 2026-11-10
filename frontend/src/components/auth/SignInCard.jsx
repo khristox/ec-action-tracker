@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import {
   Visibility, VisibilityOff, PersonOutlined, LockOutlined,
-  Group, CheckCircleOutlined, ErrorOutlined, EmailOutlined,
+  CheckCircleOutlined, ErrorOutlined, EmailOutlined,
   CloseOutlined, Login, SendOutlined, WarningAmberOutlined,
   TimerOutlined, LockOutlined as LockIcon, RefreshOutlined
 } from '@mui/icons-material';
@@ -43,6 +43,9 @@ const VALIDATION_RULES = {
 const AUTO_HIDE_DURATION = 8000;
 const DEBOUNCE_DELAY = 300;
 const LOCK_COUNTDOWN_INTERVAL = 1000;
+
+// Logo served from the /public folder
+const LOGO_SRC = '/apple-touch-icon.png';
 
 // ========== TRANSITION COMPONENTS ==========
 const SlideTransition = React.forwardRef((props, ref) => <Slide {...props} ref={ref} direction="up" />);
@@ -450,17 +453,22 @@ const SignInCard = () => {
           {/* Header */}
           <Box sx={{ textAlign: 'center', mb: 4 }}>
             <Zoom in timeout={500}>
-              <Box 
-                sx={{ 
-                  display: 'inline-flex', 
-                  p: 2, 
-                  borderRadius: '50%', 
-                  bgcolor: alpha(theme.palette.primary.main, 0.08), 
-                  mb: 2 
+              <Box
+                component="img"
+                src={LOGO_SRC}
+                alt="Action Tracker logo"
+                sx={{
+                  height: { xs: 64, sm: 80 },
+                  width: 'auto',
+                  maxWidth: '100%',
+                  mb: 2,
+                  objectFit: 'contain',
+                  borderRadius: 2,
+                  // If you switch to a dark logo with a transparent background,
+                  // uncomment to keep it visible in dark mode:
+                  // filter: isDark ? 'brightness(0) invert(1)' : 'none',
                 }}
-              >
-                <Group sx={{ fontSize: { xs: 36, sm: 42 }, color: 'primary.main' }} />
-              </Box>
+              />
             </Zoom>
             <Typography variant={isMobile ? "h5" : "h4"} fontWeight={700} color="text.primary" gutterBottom>
               Welcome Back

@@ -114,15 +114,6 @@ const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown da
   }
 };
 
-const isBeforeToday = (dateVal) => {
-  if (!dateVal) return false;
-  const d = new Date(dateVal);
-  if (isNaN(d.getTime())) return false;
-  d.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return d < today;
-};
 
 // ==================== RANDOM PLACEHOLDER GENERATORS ====================
 
@@ -235,6 +226,8 @@ const getRandomRemarksPlaceholder = () => {
 const TYPE_OF_ACTION_OPTIONS = [
   'Operational',
   'Strategic',
+  'Commission',
+  'Management',
   'Administrative',
   'Financial',
   'Technical',
@@ -357,26 +350,34 @@ const AddActionDialog = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const hasMinutes = minutes.length > 0;
-  const maxInitiatedDate = useMemo(() => new Date(), [open]);
-
+  
   const prevOpenRef = useRef(false);
   const prevEditingIdRef = useRef(undefined);
 
   // Function to mask persons data before passing to editor
   const maskPersonsData = useCallback((persons) => {
-    if (!persons || !Array.isArray(persons)) return persons;
-    
-    return persons.map(person => ({
-      ...person,
-      // Mask email and phone in the person object if they exist
-      email: person.email ? maskEmail(person.email) : person.email,
-      phone: person.phone ? maskPhoneOnly(person.phone) : person.phone,
-      // Also mask any other fields that might contain contact info
-      contact_info: person.contact_info ? maskContactInfo(person.contact_info) : person.contact_info,
-      // Keep the original values for internal use
-      _originalEmail: person.email,
-      _originalPhone: person.phone,
-    }));
+    if (!Array.isArray(persons)) return persons;
+
+    return persons.map((person) => {
+      // keep the real value unless the user typed a new one over the masked text
+      const originalEmail =
+        person._originalEmail && person.email === maskEmail(person._originalEmail)
+          ? person._originalEmail
+          : person.email;
+      const originalPhone =
+        person._originalPhone && person.phone === maskPhoneOnly(person._originalPhone)
+          ? person._originalPhone
+          : person.phone;
+
+      return {
+        ...person,
+        email: originalEmail ? maskEmail(originalEmail) : originalEmail,
+        phone: originalPhone ? maskPhoneOnly(originalPhone) : originalPhone,
+        contact_info: person.contact_info ? maskContactInfo(person.contact_info) : person.contact_info,
+        _originalEmail: originalEmail,
+        _originalPhone: originalPhone,
+      };
+    });
   }, []);
 
   // Reset form when dialog opens
@@ -454,16 +455,7 @@ const AddActionDialog = ({
       return;
     }
 
-    if (!editingAction && hasMinutes && !formData.minute_id) {
-      setLocalError('Please select a minute to associate this action with');
-      return;
-    }
-
-    if (formData.due_date && isBeforeToday(formData.due_date)) {
-      setLocalError('Expected resolution date must be today or later');
-      return;
-    }
-
+        
     setLocalError(null);
     setIsSubmitting(true);
 
@@ -575,7 +567,7 @@ const AddActionDialog = ({
           flexShrink: 0,
           width: '100%',
         }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Box sx={{
               p: 0.75,
               borderRadius: 1.5,
@@ -681,33 +673,29 @@ const AddActionDialog = ({
                   }}
                 >
                   <Typography variant="body2" fontWeight={600}>
-                    No minutes available — a default minute will be created
+                    No minutes yet! This action will be saved without an associated minute. You can associate it later when minutes are created.
                   </Typography>
                 </Alert>
               ) : (
-                <FormControl fullWidth required sx={inputStyles} size="small">
-                  <InputLabel>Associated Minute *</InputLabel>
+                <FormControl fullWidth sx={inputStyles} size="small">
+                  <InputLabel>Associated Minute (optional)</InputLabel>
                   <Select
-                    value={formData.minute_id || ''}
-                    onChange={(e) => setFormData({ ...formData, minute_id: e.target.value })}
-                    label="Associated Minute *"
+                    value={formData.minute_id || 'none'}
+                    onChange={(e) => setFormData({ ...formData, minute_id: e.target.value === 'none' ? null : e.target.value })}
+                    label="Associated Minute (optional)"
                     disabled={isLoading}
                     size="small"
                   >
+                    <MenuItem value="none"><em>None (general action)</em></MenuItem>
                     {minutes.map((minute) => (
                       <MenuItem key={minute.id} value={minute.id}>
-                        <Stack direction="row" spacing={1} alignItems="center">
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <DescriptionIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
-                          <Typography variant="body2">
-                            {minute.topic || minute.title || 'Untitled Minute'}
-                          </Typography>
+                          <Typography variant="body2">{minute.topic || minute.title || 'Untitled Minute'}</Typography>
                         </Stack>
                       </MenuItem>
                     ))}
                   </Select>
-                  {!formData.minute_id && hasMinutes && (
-                    <FormHelperText error>Please select a minute</FormHelperText>
-                  )}
                 </FormControl>
               )}
             </Box>
@@ -722,7 +710,7 @@ const AddActionDialog = ({
               border: `1px solid ${alpha(colors.accent, 0.1)}`,
               width: '100%',
             }}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <DescriptionIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
                 <Typography variant="body2" fontWeight={500}>
                   {selectedMinute.topic || selectedMinute.title || 'Untitled Minute'}
@@ -777,7 +765,7 @@ const AddActionDialog = ({
                 >
                   {PRIORITY_OPTIONS.map((opt) => (
                     <MenuItem key={opt.value} value={opt.value}>
-                      <Stack direction="row" spacing={1} alignItems="center">
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <Typography>{opt.emoji}</Typography>
                         <Typography variant="body2">{opt.label}</Typography>
                       </Stack>
@@ -791,7 +779,6 @@ const AddActionDialog = ({
                 label="Due Date"
                 value={formData.due_date}
                 onChange={(newValue) => setFormData({ ...formData, due_date: newValue })}
-                disablePast
                 disabled={isLoading}
                 slotProps={{
                   textField: {
@@ -817,7 +804,7 @@ const AddActionDialog = ({
                 />
               }
               label={
-                <Stack direction="row" spacing={1} alignItems="center">
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                   <LightbulbIcon sx={{ 
                     fontSize: 16, 
                     color: formData.is_key_action ? '#F59E0B' : colors.textSecondary 
@@ -878,7 +865,7 @@ const AddActionDialog = ({
           <Button
             variant="contained"
             onClick={handleSave}
-            disabled={isLoading || !formData.description.trim() || (hasMinutes && !formData.minute_id && !editingAction)}
+            disabled={isLoading || !formData.description.trim()}
             sx={{ 
               textTransform: 'none',
               fontWeight: 700,

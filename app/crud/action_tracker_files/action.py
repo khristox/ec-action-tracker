@@ -1,12 +1,13 @@
 # app/crud/action_tracker/action.py
-from datetime import datetime
+from datetime import datetime, timezone
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional, Dict  # FIX: Dict was used below but never imported
 from app.crud.base import AuditMixin
-from app.models.meetings.action_tracker import MeetingAction, ActionImplementer
+from app.models.meetings.action_tracker import MeetingAction, ActionImplementer, ActionStatus
 from app.schemas.action_tracker_files.action import ActionCreate, ActionUpdate, ActionImplementerIn
 
 
@@ -110,6 +111,11 @@ class CRUDAction(AuditMixin):
         # persons_implementing needs its own handling (a related table, not
         # a plain column), so pull it out before the generic setattr loop.
         update_data = obj_in.model_dump(exclude_unset=True, exclude={"persons_implementing"})
+        
+        if "overall_status_id" in update_data:
+            status_row = await self._resolve_status(db, update_data["overall_status_id"])
+            update_data["overall_status_name"] = status_row.name if status_row else None
+            
         for field, value in update_data.items():
             setattr(action, field, value)
 
@@ -122,21 +128,44 @@ class CRUDAction(AuditMixin):
         await db.refresh(action)
         return action
 
+    async def _resolve_status(
+        self, db: AsyncSession, status_id: Optional[UUID]
+    ) -> Optional[ActionStatus]:
+        if status_id is None:
+            return None
+        row = (await db.execute(
+            select(ActionStatus).where(
+                ActionStatus.id == status_id,
+                ActionStatus.is_active == True,
+            )
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(
+                status_code=400,
+                detail="Unknown action status. Reload the page and pick a status again.",
+            )
+        return row
+    
     async def update_progress(
-        self, db: AsyncSession, id: UUID, progress_percentage: int, status_id: UUID, remarks: str
+        self, db: AsyncSession, id: UUID, progress_percentage: int,
+        status_id: Optional[UUID], remarks: Optional[str]
     ) -> Optional[MeetingAction]:
-        """Update action progress"""
         action = await self.get(db, id)
         if not action:
             return None
 
+        status_row = await self._resolve_status(db, status_id)
+
         action.overall_progress_percentage = progress_percentage
-        action.overall_status_id = status_id
+        if status_row:
+            action.overall_status_id = status_row.id
+            action.overall_status_name = status_row.name   # keeps the denormalised column in sync
 
         if progress_percentage >= 100:
-            action.completed_at = datetime.utcnow()
+            action.completed_at = datetime.now(timezone.utc)
+        else:
+            action.completed_at = None   # reopening a task shouldn't leave it "completed"
 
-        # Add progress remark (you might want to store this in a separate table)
         if remarks:
             action.remarks = remarks
 

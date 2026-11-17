@@ -25,6 +25,8 @@ from pydantic import BaseModel
 from app.api.v1.endpoints.action_tracker.meeting_visibility import user_can_view_meeting
 from app.api.v1.endpoints.action_tracker.meetings_access_control import AccessLevel, DepartmentAccessControl, check_meeting_access_or_403
 from app.api.v1.endpoints.action_tracker.utils import build_meeting_response
+from app.api.v1.endpoints.action_tracker.utils import build_meeting_response, fetch_action_counts
+
 from app.api.v1.endpoints.action_tracker.audit_logger import log_audit  # ✅ ADDED
 from app.api.v1.endpoints.action_tracker.meeting_visibility import (
     build_meeting_access_filter, build_department_filter,
@@ -570,7 +572,6 @@ async def get_series_actions(
             Meeting.recurring_meeting_id == recurring_meeting_id,
             Meeting.is_active == True,
             MeetingMinutes.is_active == True,
-            MeetingMinutes.is_system == False,
             MeetingAction.is_active == True,
             access,
         )
@@ -864,7 +865,8 @@ async def list_meetings(
         meetings, total = await retry_db_operation(fetch_meetings)
         
         # Build responses
-        items = [await build_meeting_response(m) for m in meetings]
+        counts = await fetch_action_counts(db, [m.id for m in meetings])
+        items = [await build_meeting_response(m, action_counts=counts) for m in meetings]
         
         return MeetingPaginationResponse(
             items=items,

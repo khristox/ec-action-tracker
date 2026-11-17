@@ -85,7 +85,6 @@ const safeFormatDate = (dateValue, formatStr = 'MMM dd, yyyy') => {
   }
 };
 
-// Meeting Status (from backend status field)
 const getMeetingStatusConfig = (status) => {
   let statusCode = '';
   let statusShortName = '';
@@ -126,7 +125,6 @@ const getMeetingStatusConfig = (status) => {
   };
 };
 
-// Participant Attendance Status
 const getAttendanceStatusConfig = (status) => {
   const statusStr = status || 'pending';
   
@@ -223,8 +221,8 @@ const StatCard = ({ title, value, icon, color, loading, trend, subtitle, onClick
   );
 };
 
-// ==================== Meeting Card Component ====================
-const MeetingCard = ({ meeting, onClick }) => {
+// ==================== Meeting Card Component (Dashboard Internal) ====================
+const MeetingCard = ({ meeting, onClick, onViewActions }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
   const [expanded, setExpanded] = useState(false);
@@ -362,21 +360,46 @@ const MeetingCard = ({ meeting, onClick }) => {
             </Typography>
           </Box>
           
-          <Tooltip title={`Attendance: ${attendanceStatus.label}`}>
-            <Chip 
-              size="small" 
-              label={attendanceStatus.label}
-              icon={attendanceStatus.icon}
-              sx={{ 
-                height: 22, 
-                fontSize: '0.65rem', 
-                fontWeight: 500,
-                bgcolor: alpha(attendanceStatus.color, 0.1),
-                color: attendanceStatus.color,
-                '& .MuiChip-icon': { color: attendanceStatus.color, fontSize: 12 }
-              }}
-            />
-          </Tooltip>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            {/* ✅ ACTION COUNTER */}
+            <Tooltip title="View meeting actions">
+              <Chip 
+                size="small"
+                icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+                label={`${meeting.action_count || 0} Actions`}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  if (onViewActions) onViewActions(meeting.id); 
+                }}
+                sx={{ 
+                  height: 22, 
+                  fontSize: '0.65rem', 
+                  fontWeight: 600,
+                  bgcolor: meeting.action_count > 0 ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+                  color: meeting.action_count > 0 ? 'primary.main' : 'text.secondary',
+                  border: meeting.action_count > 0 ? `1px solid ${alpha(theme.palette.primary.main, 0.3)}` : '1px solid ${theme.palette.divider}',
+                  '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.2) },
+                  '& .MuiChip-icon': { color: 'inherit' }
+                }}
+              />
+            </Tooltip>
+
+            <Tooltip title={`Attendance: ${attendanceStatus.label}`}>
+              <Chip 
+                size="small" 
+                label={attendanceStatus.label}
+                icon={attendanceStatus.icon}
+                sx={{ 
+                  height: 22, 
+                  fontSize: '0.65rem', 
+                  fontWeight: 500,
+                  bgcolor: alpha(attendanceStatus.color, 0.1),
+                  color: attendanceStatus.color,
+                  '& .MuiChip-icon': { color: attendanceStatus.color, fontSize: 12 }
+                }}
+              />
+            </Tooltip>
+          </Box>
         </Box>
         
         <Button 
@@ -588,6 +611,11 @@ const Dashboard = () => {
     loadDashboardData();
   };
 
+  // ✅ NEW: Handler for navigating to actions filtered by meeting
+  const handleViewMeetingActions = useCallback((meetingId) => {
+    navigate(`/action-tracker/actions?meeting_id=${meetingId}`);
+  }, [navigate]);
+
   useEffect(() => {
     loadDashboardData();
   }, []);
@@ -773,7 +801,12 @@ const Dashboard = () => {
         ) : myMeetings.upcoming.length > 0 ? (
           <Stack spacing={1.5} sx={{ p: 2 }}>
             {myMeetings.upcoming.slice(0, 5).map((meeting) => (
-              <MeetingCard key={meeting.id} meeting={meeting} onClick={(id) => navigate(`/meetings/${id}`)} />
+              <MeetingCard 
+                key={meeting.id} 
+                meeting={meeting} 
+                onClick={(id) => navigate(`/meetings/${id}`)} 
+                onViewActions={handleViewMeetingActions}
+              />
             ))}
           </Stack>
         ) : (

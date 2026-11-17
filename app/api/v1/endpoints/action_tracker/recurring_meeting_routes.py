@@ -12,7 +12,7 @@ from sqlalchemy import UUID, or_, select, desc
 
 from app.api import deps
 from app.db.base import get_db
-from app.models.meetings.action_tracker import Meeting, MeetingParticipant
+from app.models.meetings.action_tracker import Meeting, MeetingParticipant, MeetingAction, MeetingMinutes
 from app.models.general.dynamic_attribute import Attribute
 from app.models.meetings.recurring_meeting import RecurringMeeting, RecurringMeetingOccurrence
 from app.models.user import User
@@ -23,6 +23,7 @@ from app.schemas.recurring_meeting_schema import (
     PreviewOccurrencesRequest, 
     BulkActionRequest
 )
+from app.api.v1.endpoints.action_tracker.utils import fetch_action_counts
 from app.api.v1.endpoints.action_tracker.meeting_visibility import (
     build_meeting_access_filter,
     user_is_admin,
@@ -140,6 +141,26 @@ async def get_recurring_meetings(
                 if str(m.created_by_id) == str(current_user.id) or m.id in visible
             ]
         
+        series_ids = [m.id for m in accessible_meetings]
+        action_counts = {}
+        if series_ids:
+            conds = [
+                Meeting.recurring_meeting_id.in_(series_ids),
+                Meeting.is_active == True,
+                MeetingMinutes.is_active == True,
+                MeetingAction.is_active == True,
+            ]
+            if not await user_is_admin(db, current_user):
+                conds.append(await build_meeting_access_filter(db, current_user))
+            rows = await db.execute(
+                select(Meeting.recurring_meeting_id, func.count(MeetingAction.id))
+                .join(MeetingMinutes, MeetingMinutes.meeting_id == Meeting.id)
+                .join(MeetingAction, MeetingAction.minute_id == MeetingMinutes.id)
+                .where(*conds)
+                .group_by(Meeting.recurring_meeting_id)
+            )
+            action_counts = {sid: n for sid, n in rows.all()}
+
         # Return as list of dicts
         items = []
         for meeting in accessible_meetings:
@@ -157,6 +178,7 @@ async def get_recurring_meetings(
                 "start_time": safe_iso_format(meeting.start_time),
                 "end_time": safe_iso_format(meeting.end_time),
                 "created_by_id": safe_str(meeting.created_by_id),  # ✅ ADD THIS
+                "action_count": action_counts.get(meeting.id, 0),
             }
             items.append(item)
         
@@ -313,6 +335,7 @@ async def get_occurrences(
 
     
         occurrences = await service.get_occurrences_by_meeting(meeting_id, skip=skip, limit=limit)
+        occ_counts = await fetch_action_counts(db, [o.id for o in occurrences])
 
         # Transform Meeting objects to response dicts
         response_items = []
@@ -333,6 +356,7 @@ async def get_occurrences(
                 "title": occ.title,
                 "status": status_name,
                 "created_at": safe_iso_format(occ.created_at),
+                "action_count": occ_counts.get(occ.id, 0),
             })
 
         return {

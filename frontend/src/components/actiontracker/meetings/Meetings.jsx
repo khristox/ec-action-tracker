@@ -293,6 +293,14 @@ const Meetings = () => {
     setSearchTerm(value);
     setPage(1);
   };
+
+  const handleViewMeetingActions = useCallback((meetingId) => {
+    navigate(`/meetings/${meetingId}?tab=actions`);
+  }, [navigate]);
+
+  const handleViewSeriesActions = useCallback((seriesId) => {
+    navigate(`/recurring-meetings/${seriesId}`);
+  }, [navigate]);
   
   const handleStatusFilterChange = (value) => {
     setStatusFilter(value);
@@ -845,6 +853,8 @@ const Meetings = () => {
                       onEdit={(id) => navigate(`/meetings/${id}/edit`)} 
                       onNotify={handleNotifyClick}
                       onGenerateMeeting={handleGenerateMeeting}
+                      onViewMeetingActions={handleViewMeetingActions}
+                      onViewSeriesActions={handleViewSeriesActions} 
                       onAddAction={handleAddAction}
                       isDarkMode={isDarkMode}
                     />

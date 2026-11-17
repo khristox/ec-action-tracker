@@ -10,11 +10,13 @@ from uuid import UUID
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from sqlalchemy import and_, or_, func, desc, asc
-
+from sqlalchemy.exc import IntegrityError
 
 import logging
 
 from app.api import deps
+from app.models.meetings.action_tracker import MeetingMinutes
+from app.services.implementer_linking import link_implementers_to_user
 from app.crud.meetings.action_tracker import meeting_action, meeting_minutes
 from app.models.meetings.action_tracker import (
     ActionImplementer, ActionStatusHistory, MeetingAction, ActionComment, ActionStatus,
@@ -26,6 +28,7 @@ from app.services.implementer_linking import (
     normalize_email,
     normalize_phone,
     resolve_implementer_user_id,
+    resolve_user_by_email,
 )
 
 from app.api.v1.endpoints.action_tracker.action_visibility import (
@@ -79,6 +82,14 @@ def format_datetime(dt: Optional[datetime]) -> Optional[str]:
         return None
     return dt.isoformat()
 
+def handle_implementer_errors(e: Exception):
+    """Convert DB constraint errors into friendly ValueErrors."""
+    if isinstance(e, IntegrityError) and "ck_ai_has_subject" in str(e):
+        raise ValueError(
+            "One or more implementers need a valid email or phone number. "
+            "Please fix the contact info or remove them to save the action."
+        )
+    raise e
 
 async def get_action_or_404(db: AsyncSession, action_id: UUID) -> MeetingAction:
     """Helper to get action or raise 404"""
@@ -147,11 +158,20 @@ def build_my_task_response(action: MeetingAction, is_overdue_flag: bool) -> MyTa
 
     Shared by /my-tasks and /overdue so the two endpoints can't drift apart.
     """
+    meeting = None
     meeting_title = ""
     meeting_date = None
-    if action.minutes and action.minutes.meeting:
-        meeting_title = action.minutes.meeting.title or ""
-        meeting_date = action.minutes.meeting.meeting_date
+    meeting = None
+
+    if action.assign_to_meeting_id:
+        meeting = action.assign_to_meeting
+
+    if meeting is None and action.minutes:
+        meeting = action.minutes.meeting
+
+    if meeting:
+        meeting_title = meeting.title or ""
+        meeting_date = meeting.meeting_date
 
     # getattr guard: /overdue may not eager-load implementers.
     implementers = getattr(action, "implementers", None) or []
@@ -178,7 +198,7 @@ def build_my_task_response(action: MeetingAction, is_overdue_flag: bool) -> MyTa
         category=getattr(action, "category", None),
         is_key_action=action.is_key_action or False,
         issue_challenge=action.issue_challenge,
-        tags=action.tags or [],
+        #tags=action.tags or [],
 
         # ---- progress ----
         overall_progress_percentage=action.overall_progress_percentage or 0,
@@ -408,6 +428,7 @@ async def get_actions(
     status_id: Optional[UUID] = Query(None, description="Filter by status ID"),
     priority: Optional[int] = Query(None, ge=1, le=4, description="Filter by priority (1-4)"),
     assigned_to_id: Optional[UUID] = Query(None, description="Filter by assigned user"),
+    meeting_id: Optional[UUID] = Query(None, description="Filter by meeting ID"),
 ):
     """Get all actions with optional filtering and pagination."""
     try:
@@ -416,6 +437,12 @@ async def get_actions(
             MeetingAction.is_active == True,
             await build_action_access_filter(db, current_user),
         )
+
+        # Filter by meeting
+        if meeting_id:
+            query = query.where(MeetingAction.minute_id.in_(
+                select(MeetingMinutes.id).where(MeetingMinutes.meeting_id == meeting_id)
+            ))
         
         # Apply search filter
         if search:
@@ -471,6 +498,15 @@ async def get_actions(
         count_query = select(func.count()).select_from(query.subquery())
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
+
+        logger.info(
+            "ACTION COUNT DEBUG | user=%s | meeting_id=%s | total=%s | skip=%s | limit=%s",
+            current_user.id,
+            meeting_id,
+            total,
+            skip,
+            limit,
+        )
         
         # Apply pagination and ordering
         query = query.offset(skip).limit(limit).order_by(desc(MeetingAction.created_at))
@@ -522,26 +558,44 @@ async def create_action(
             )
         action_in.minute_id = minute_id        # may be None
 
+        # 1. Resolve the assigned_to_id if provided directly
         # Validate assigned_to_id against the users table so stale ids
         # degrade to name-only assignment instead of an FK violation.
         if getattr(action_in, "assigned_to_id", None):
+            # We only resolve against Users here for legacy support.
+            # Participants are handled inside the CRUD via persons_implementing.
             action_in.assigned_to_id = await resolve_implementer_user_id(
                 db, user_id=action_in.assigned_to_id
             )
 
-        # Create the action
-        action = await meeting_action.create_action(
-            db=db,
-            minute_id=minute_id,
-            action_in=action_in,
-            assigned_by_id=current_user.id,
-        )
+        # 2. Create the action (Wrapped to catch DB constraint)
+        try:
+            action = await meeting_action.create_action(
+                db=db,
+                minute_id=minute_id,
+                action_in=action_in,
+                assigned_by_id=current_user.id,
+            )
+        except IntegrityError as e:
+            handle_implementer_errors(e)
+
+        # Reload with relationships eagerly loaded so the response never lazy-loads
+        action = await meeting_action.get(db, action.id)
 
         logger.info(f"Action created by user {current_user.id}: {action.id}")
         return action
 
     except HTTPException:
         raise
+
+    except ValueError as e:
+        # This catches both the manual ValueError and the one from handle_implementer_errors
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
     except Exception as e:
         logger.error(f"Error creating action: {str(e)}")
         await db.rollback()
@@ -598,7 +652,7 @@ async def create_action_for_minute(
         # Parse due_date
         due_date = parse_due_date(action_data.get('due_date'))
 
-        # Create the action_in object
+        # Create the action_in object (INCLUDING persons_implementing)
         action_in = MeetingActionCreate(
             description=description,
             assigned_to_id=assigned_to_id,
@@ -606,22 +660,42 @@ async def create_action_for_minute(
             due_date=due_date,
             priority=action_data.get('priority', 2),
             remarks=action_data.get('remarks', ''),
-            minute_id=minute_id
+            minute_id=minute_id,
+            # Copy over the implementation fields
+            persons_implementing=action_data.get('persons_implementing', []),
+            title=action_data.get('title'),
+            issue_challenge=action_data.get('issue_challenge'),
+            type_of_action=action_data.get('type_of_action'),
+            date_initiated=action_data.get('date_initiated'),
+            is_key_action=action_data.get('is_key_action', False),
+            tags=action_data.get('tags', []),
+            assign_to_meeting_id=action_data.get('assign_to_meeting_id'),
+            overall_status_id=action_data.get('overall_status_id'),
+            overall_progress_percentage=action_data.get('overall_progress_percentage', 0)
         )
 
         # Create the action
-        action = await meeting_action.create_action(
-            db=db,
-            minute_id=minute_id,
-            action_in=action_in,
-            assigned_by_id=current_user.id
-        )
+        try:
+            action = await meeting_action.create_action(
+                db=db,
+                minute_id=minute_id,
+                action_in=action_in,
+                assigned_by_id=current_user.id
+            )
+        except IntegrityError as e:
+            handle_implementer_errors(e)
 
         logger.info(f"Action created successfully: {action.id}")
         return action
 
     except HTTPException:
         raise
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"Error creating action: {str(e)}", exc_info=True)
         await db.rollback()
@@ -1120,12 +1194,22 @@ async def add_action_implementers(
         for implementer in new_implementers:
             db.add(implementer)
 
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError as e:
+            await db.rollback()
+            handle_implementer_errors(e)
 
         return [serialize_implementer(imp) for imp in new_implementers]
 
     except HTTPException:
         raise
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         await db.rollback()
         logger.error(f"Error adding implementers for action {action_id}: {str(e)}", exc_info=True)

@@ -37,6 +37,7 @@ import {
   Close as CloseIcon,
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
+  Assignment as AssignmentIcon, // ✅ Added
 } from '@mui/icons-material';
 import { fetchMeetings } from '../../../store/slices/actionTracker/meetingSlice';
 import { selectUserPermissions, hasPermission } from '../../../store/slices/authSlice';
@@ -81,9 +82,10 @@ const MeetingCard = ({
   onClick,
   onEdit,
   onAddAction,
+  onViewActions, // ✅ Added
   canAddActions,
   canAddActionsPermission,
-  source = 'meetings', // Source context for navigation
+  source = 'meetings', 
 }) => {
   const getStatusInfo = () => {
     if (meeting.status && typeof meeting.status === 'object') {
@@ -144,7 +146,6 @@ const MeetingCard = ({
 
   const isAddActionEnabled = canAddActions && canAddActionsPermission;
 
-  // Handle card click with source context
   const handleCardClick = useCallback(() => {
     onClick(meeting.id, source);
   }, [onClick, meeting.id, source]);
@@ -153,6 +154,13 @@ const MeetingCard = ({
     e.stopPropagation();
     if (isAddActionEnabled && onAddAction) {
       onAddAction(meeting);
+    }
+  };
+
+  const handleViewActionsClick = (e) => {
+    e.stopPropagation();
+    if (onViewActions) {
+      onViewActions(meeting.id);
     }
   };
 
@@ -275,9 +283,34 @@ const MeetingCard = ({
         </Box>
 
         {meeting.created_at && (
-          <Typography variant="caption" color="text.disabled" sx={{ mt: 2, fontSize: '0.6rem' }}>
-            Created {new Date(meeting.created_at).toLocaleDateString()}
-          </Typography>
+          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem' }}>
+              Created {new Date(meeting.created_at).toLocaleDateString()}
+            </Typography>
+            
+            {/* ✅ ACTION COUNTER */}
+            <Tooltip title="View meeting actions">
+              <Chip
+                size="small"
+                icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+                label={`${meeting.action_count ?? 0} ${
+                  meeting.action_count === 1 ? 'Action' : 'Actions'
+                }`}
+                onClick={handleViewActionsClick}
+                sx={{ 
+                  height: 22, 
+                  fontSize: '0.65rem', 
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  bgcolor: meeting.action_count > 0 ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+                  color: meeting.action_count > 0 ? '#1976d2' : 'text.secondary',
+                  border: meeting.action_count > 0 ? '1px solid rgba(25, 118, 210, 0.3)' : '1px solid #e0e0e0',
+                  '&:hover': { bgcolor: 'rgba(25, 118, 210, 0.2)' },
+                  '& .MuiChip-icon': { color: 'inherit' }
+                }}
+              />
+            </Tooltip>
+          </Box>
         )}
       </CardContent>
     </Card>
@@ -306,6 +339,9 @@ const MeetingsList = () => {
   const [viewMode, setViewMode] = useState('grid');
   const rowsPerPage = 9;
 
+  // Action counts keyed by meeting ID
+  const [actionCounts, setActionCounts] = useState({});
+
   // ============ ADD ACTION DIALOG STATE ============
   const [addActionDialogOpen, setAddActionDialogOpen] = useState(false);
   const [selectedMeetingForAction, setSelectedMeetingForAction] = useState(null);
@@ -315,7 +351,29 @@ const MeetingsList = () => {
   const [creatingAction, setCreatingAction] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Fetch meetings on mount and when filters change
+  // ============ FETCH ACTION COUNTS ============
+  const fetchActionCount = useCallback(async (meetingId) => {
+    try {
+      const response = await api.get('/action-tracker/actions/', {
+        params: {
+          meeting_id: meetingId,
+          skip: 0,
+          limit: 1,
+        },
+      });
+
+      setActionCounts((prev) => ({
+        ...prev,
+        [meetingId]: response.data?.total ?? 0,
+      }));
+    } catch (error) {
+      console.error(
+        `Failed to fetch action count for meeting ${meetingId}:`,
+        error
+      );
+    }
+  }, []);
+
   useEffect(() => {
     const params = {
       page,
@@ -329,31 +387,34 @@ const MeetingsList = () => {
     dispatch(fetchMeetings(params));
   }, [dispatch, page, searchTerm, statusFilter]);
 
-  // Reset page when filters change
+  useEffect(() => {
+    if (!meetings || meetings.length === 0) {
+      setActionCounts({});
+      return;
+    }
+
+    meetings.forEach((meeting) => {
+      fetchActionCount(meeting.id);
+    });
+  }, [meetings, fetchActionCount]);
+
   useEffect(() => {
     setPage(1);
   }, [searchTerm, statusFilter]);
 
-  // ============ NAVIGATION HANDLERS WITH SOURCE CONTEXT ============
+  // ============ NAVIGATION HANDLERS ============
   
-  /**
-   * Handle viewing a meeting - navigates with source context
-   * Accepts source parameter from child components
-   */
   const handleViewMeeting = useCallback((meetingId, source = 'meetings') => {
-    navigate(`/meetings/${meetingId}`, { 
-      state: { from: source } 
-    });
+    navigate(`/meetings/${meetingId}`, { state: { from: source } });
   }, [navigate]);
 
-  /**
-   * Handle editing a meeting - navigates with source context
-   * Accepts source parameter from child components
-   */
   const handleEditMeeting = useCallback((meetingId, source = 'meetings') => {
-    navigate(`/meetings/${meetingId}/edit`, { 
-      state: { from: source } 
-    });
+    navigate(`/meetings/${meetingId}/edit`, { state: { from: source } });
+  }, [navigate]);
+
+  // ✅ NEW: Handler for navigating to actions filtered by meeting
+  const handleViewMeetingActions = useCallback((meetingId) => {
+    navigate(`/meetings/${meetingId}?tab=actions`);
   }, [navigate]);
 
   const handleCreateMeeting = () => {
@@ -370,7 +431,6 @@ const MeetingsList = () => {
     setAddActionDialogOpen(true);
     setActionError(null);
     
-    // Fetch minutes for this meeting
     setLoadingMinutes(true);
     try {
       const response = await api.get(`/action-tracker/meetings/${meeting.id}/minutes`);
@@ -387,20 +447,25 @@ const MeetingsList = () => {
   const handleSaveAction = async (payload) => {
     setCreatingAction(true);
     setActionError(null);
-    
+
     try {
+      const meetingId = selectedMeetingForAction?.id;
+
       const actionPayload = {
         ...payload,
-        meeting_id: selectedMeetingForAction?.id,
+        meeting_id: meetingId,
       };
-      
-      const response = await api.post('/action-tracker/actions/', actionPayload);
+
+      const response = await api.post(
+        '/action-tracker/actions/',
+        actionPayload
+      );
+
       setSuccessMessage('Action created successfully!');
-      
+
       setAddActionDialogOpen(false);
       setSelectedMeetingForAction(null);
-      
-      // Refresh the meetings list
+
       dispatch(fetchMeetings({
         page,
         limit: rowsPerPage,
@@ -409,11 +474,22 @@ const MeetingsList = () => {
         search: searchTerm || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
       }));
-      
+
+      // Refresh ONLY the affected meeting's action count
+      if (meetingId) {
+        await fetchActionCount(meetingId);
+      }
+
       return response.data;
     } catch (err) {
       console.error('Error creating action:', err);
-      const errorMessage = err.response?.data?.detail || err.response?.data?.message || err.message || 'Failed to create action';
+
+      const errorMessage =
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to create action';
+
       setActionError(errorMessage);
       throw err;
     } finally {
@@ -433,7 +509,7 @@ const MeetingsList = () => {
     }
   };
 
-  // ============ CHECK IF MEETING CAN HAVE ACTIONS ============
+  // ============ HELPER FUNCTIONS ============
   const canAddActions = (meeting) => {
     if (!meeting) return false;
     
@@ -708,12 +784,16 @@ const MeetingsList = () => {
             {meetings.map((meeting) => (
               <Grid item xs={12} sm={6} md={4} key={meeting.id}>
                 <MeetingCard 
-                  meeting={meeting} 
+                  meeting={{
+                    ...meeting, 
+                    action_count: actionCounts[meeting.id] ?? 0
+                  }} 
                   onClick={handleViewMeeting}
                   onAddAction={handleAddAction}
+                  onViewActions={handleViewMeetingActions} // ✅ Pass handler
                   canAddActions={canAddActions(meeting)}
                   canAddActionsPermission={canCreateAction}
-                  source="meetings" // Explicitly set source for regular meetings
+                  source="meetings"
                 />
               </Grid>
             ))}
@@ -733,7 +813,6 @@ const MeetingsList = () => {
                 return "Add Action";
               };
 
-              // Handle list item click with source context
               const handleListItemClick = () => {
                 handleViewMeeting(meeting.id, 'meetings');
               };
@@ -772,6 +851,28 @@ const MeetingsList = () => {
                     <Typography variant="caption" color="text.secondary">
                       {meeting.location_text || 'No location'}
                     </Typography>
+
+                    {/* ✅ ACTION COUNTER for List View */}
+                    <Chip
+                      size="small"
+                      icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+                      label={`${actionCounts[meeting.id] ?? 0} ${
+                        actionCounts[meeting.id] === 1 ? 'Action' : 'Actions'
+                      }`}
+                      onClick={(e) => { e.stopPropagation(); handleViewMeetingActions(meeting.id); }}
+                      sx={{ 
+                        height: 22, 
+                        fontSize: '0.65rem', 
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        bgcolor: actionCounts[meeting.id] > 0 ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+                        color: actionCounts[meeting.id] > 0 ? '#1976d2' : 'text.secondary',
+                        border: actionCounts[meeting.id] > 0 ? '1px solid rgba(25, 118, 210, 0.3)' : '1px solid #e0e0e0',
+                        '&:hover': { bgcolor: 'rgba(25, 118, 210, 0.2)' },
+                        '& .MuiChip-icon': { color: 'inherit' }
+                      }}
+                    />
+
                     <Tooltip title={getTooltipMsg()} placement="top">
                       <span>
                         <IconButton

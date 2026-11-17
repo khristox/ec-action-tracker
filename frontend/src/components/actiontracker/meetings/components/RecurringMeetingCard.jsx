@@ -1,4 +1,5 @@
 // src/components/actiontracker/meetings/components/RecurringMeetingCard.jsx
+
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Card, CardContent, CardActionArea, Stack, Typography,
@@ -19,6 +20,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import AssignmentIcon from '@mui/icons-material/Assignment'; // ✅ Added
 import Close from '@mui/icons-material/Close';
 import api from '../../../../services/api';
 import { formatDate, getRecurrenceDescription } from '../utils/helpers';
@@ -63,26 +65,31 @@ const InfoIconBox = ({ children, bgcolor, color, size = 30 }) => (
 );
 
 // ─── Mobile Detail Drawer ─────────────────────────────────────────────────────
-const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate, status, locationLine, LocationIcon, timeRange, completionPct, totalGenerated, maxOccurrences, progressColor, createdDate, lastOccurrence, hasNext, isPaused, isCompleted, recurrenceInterval }) => {
+const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate, status, locationLine, LocationIcon, timeRange, completionPct, totalGenerated, maxOccurrences, progressColor, createdDate, lastOccurrence, hasNext, isPaused, isCompleted, recurrenceInterval, onViewMeetingActions }) => {
   const theme = useTheme();
 
-  // Wrapper for onView that passes the recurring-meetings source
   const handleView = useCallback(() => {
     onClose();
     onView(meeting?.id);
   }, [onClose, onView, meeting?.id]);
 
-  // Wrapper for onEdit that passes the recurring-meetings source
   const handleEdit = useCallback(() => {
     onClose();
     onEdit(meeting?.id);
   }, [onClose, onEdit, meeting?.id]);
 
-  // Wrapper for onGenerate
   const handleGenerate = useCallback(() => {
     onClose();
     onGenerate(meeting);
   }, [onClose, onGenerate, meeting]);
+
+  // ✅ NEW: Handler for viewing actions in mobile drawer
+  const handleViewActions = useCallback(() => {
+    onClose();
+    if (onViewMeetingActions && meeting?.id) {
+      onViewMeetingActions(meeting.id);
+    }
+  }, [onClose, onViewMeetingActions, meeting?.id]);
 
   return (
     <Drawer
@@ -98,27 +105,15 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         }
       }}
     >
-      {/* Drag handle */}
       <Box sx={{ display: 'flex', justifyContent: 'center', pt: 1.5, pb: 0.5 }}>
         <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: 'divider' }} />
       </Box>
 
-      {/* Header */}
       <Box sx={{ px: 2.5, pt: 1.5, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
         <Stack direction="row" sx={{alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }} >
           <Box sx={{ flex: 1 }}>
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ flexWrap: 'wrap', alignItems: 'center', mb: 0.75, }}
-            >
-              <Chip
-                size="small"
-                color={status.color}
-                icon={status.icon}
-                label={status.label}
-                sx={{ fontWeight: 600, borderRadius: 1.5, height: 24 }}
-              />
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'center', mb: 0.75 }}>
+              <Chip size="small" color={status.color} icon={status.icon} label={status.label} sx={{ fontWeight: 600, borderRadius: 1.5, height: 24 }} />
               <Typography variant="caption" sx={{ border: '0.5px solid', borderColor: 'divider', borderRadius: 20, px: 1, py: 0.25 }}>
                 {totalGenerated} generated
               </Typography>
@@ -136,9 +131,7 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         </Stack>
       </Box>
 
-      {/* Scrollable content */}
       <Box sx={{ overflowY: 'auto', px: 2.5, py: 2, flex: 1 }}>
-        {/* Progress bar */}
         {completionPct !== null && (
           <Box sx={{ mb: 2.5 }}>
             <Stack direction="row" justifyContent="space-between" mb={0.75}>
@@ -160,7 +153,6 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
           </Box>
         )}
 
-        {/* Info cards */}
         <Stack spacing={1.5} mb={2.5}>
           <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
             <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}} >
@@ -205,7 +197,6 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
           )}
         </Stack>
 
-        {/* Additional details */}
         <Typography variant="overline" color="text.disabled" sx={{ letterSpacing: 1.5, fontSize: '0.65rem' }}>
           Details
         </Typography>
@@ -236,7 +227,23 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
           )}
         </Stack>
 
-        {/* Warnings */}
+        {/* ✅ ACTION COUNTER (Mobile) */}
+        {(meeting?.action_count ?? 0) > 0 && (
+          <Paper 
+            elevation={0} 
+            onClick={handleViewActions}
+            sx={{ p: 1.5, borderRadius: 2, border: '1px solid', borderColor: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.04), cursor: 'pointer', mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+          >
+            <Stack direction="row" spacing={1.5} sx={{alignItems: 'center'}}>
+               <AssignmentIcon color="primary" />
+               <Typography variant="body2" fontWeight={600} color="primary.main">
+                 {meeting.action_count} Actions Created
+               </Typography>
+            </Stack>
+            <ArrowForwardIcon fontSize="small" color="primary" />
+          </Paper>
+        )}
+
         {(!hasNext && status.key === 'active') && (
           <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.warning.main, 0.08), border: '1px solid', borderColor: alpha(theme.palette.warning.main, 0.25), mb: 2 }}>
             <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
@@ -255,43 +262,10 @@ const MobileDetailDrawer = ({ open, onClose, meeting, onView, onEdit, onGenerate
         )}
       </Box>
 
-      {/* Sticky actions */}
-      <Box sx={{
-        px: 2.5, py: 2, borderTop: '1px solid', borderColor: 'divider',
-        bgcolor: 'background.paper',
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr 1fr',
-        gap: 1,
-      }}>
-        <Button
-          variant="outlined"
-          startIcon={<Edit />}
-          onClick={handleEdit}
-          fullWidth
-          sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
-        >
-          Edit
-        </Button>
-        <Button
-          variant="outlined"
-          color="success"
-          startIcon={<Add />}
-          onClick={handleGenerate}
-          disabled={!hasNext}
-          fullWidth
-          sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
-        >
-          Generate
-        </Button>
-        <Button
-          variant="contained"
-          endIcon={<ArrowForwardIcon />}
-          onClick={handleView}
-          fullWidth
-          sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
-        >
-          View
-        </Button>
+      <Box sx={{ px: 2.5, py: 2, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1 }}>
+        <Button variant="outlined" startIcon={<Edit />} onClick={handleEdit} fullWidth sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}>Edit</Button>
+        <Button variant="outlined" color="success" startIcon={<Add />} onClick={handleGenerate} disabled={!hasNext} fullWidth sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}>Generate</Button>
+        <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={handleView} fullWidth sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}>View</Button>
       </Box>
     </Drawer>
   );
@@ -304,6 +278,7 @@ export const RecurringMeetingCard = ({
   onEdit,
   onGenerate,
   showStats = true,
+  onViewMeetingActions, // ✅ NEW PROP
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -327,7 +302,6 @@ export const RecurringMeetingCard = ({
     return () => { cancelled = true; };
   }, [meeting?.location_id]);
 
-  // ── Derived values ─────────────────────────────────────────────────────────
   const status = getStatus(meeting);
   const totalGenerated = meeting?.total_occurrences_generated || 0;
   const maxOccurrences = meeting?.recurrence_max_occurrences;
@@ -348,41 +322,35 @@ export const RecurringMeetingCard = ({
 
   // ── Event Handlers ────────────────────────────────────────────────────────
   
-  /**
-   * Handle card click - opens drawer on mobile, navigates on desktop
-   * Passes 'recurring-meetings' as the source via navigation state
-   */
   const handleCardClick = () => {
     if (isMobile) {
       setDrawerOpen(true);
     } else {
-      // Desktop: navigate with state indicating source
       onView(meeting?.id);
     }
   };
 
-  /**
-   * Handle "View series" button click - passes 'recurring-meetings' as source
-   */
   const handleViewClick = (e) => {
     if (e) e.stopPropagation();
     onView(meeting?.id);
   };
 
-  /**
-   * Handle "Edit" button click - passes 'recurring-meetings' as source
-   */
   const handleEditClick = (e) => {
     if (e) e.stopPropagation();
     onEdit(meeting?.id);
   };
 
-  /**
-   * Handle "Generate" button click
-   */
   const handleGenerateClick = (e) => {
     if (e) e.stopPropagation();
     onGenerate(meeting);
+  };
+
+  // ✅ NEW: Handler for action counter (Desktop)
+  const handleActionCounterClick = (e) => {
+    e.stopPropagation();
+    if (onViewMeetingActions && meeting?.id) {
+      onViewMeetingActions(meeting.id);
+    }
   };
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -402,18 +370,18 @@ export const RecurringMeetingCard = ({
     open: drawerOpen,
     onClose: () => setDrawerOpen(false),
     meeting, 
-    onView: handleViewClick,  // Pass the wrapped handler
-    onEdit: handleEditClick,  // Pass the wrapped handler
+    onView: handleViewClick,
+    onEdit: handleEditClick,
     onGenerate: handleGenerateClick,
     status, locationLine, LocationIcon, timeRange,
     completionPct, totalGenerated, maxOccurrences, progressColor,
     createdDate, lastOccurrence, hasNext, isPaused, isCompleted,
     recurrenceInterval,
+    onViewMeetingActions, // ✅ Pass down to drawer
   };
 
   return (
     <>
-      {/* Mobile bottom sheet */}
       {isMobile && <MobileDetailDrawer {...drawerProps} />}
 
       <Card
@@ -436,7 +404,6 @@ export const RecurringMeetingCard = ({
           },
         }}
       >
-        {/* Progress bar */}
         {completionPct !== null && showStats && (
           <LinearProgress
             variant="determinate"
@@ -449,11 +416,10 @@ export const RecurringMeetingCard = ({
           />
         )}
 
-        {/* Clickable body */}
         <CardActionArea onClick={handleCardClick} sx={{ flexGrow: 1, alignItems: 'flex-start' }}>
           <CardContent sx={{ p: isMobile ? 2 : 2.5, pb: '12px !important' }}>
             {/* Header row */}
-            <Stack direction="row" spacing={1} useFlexGap sx={{alignItems: 'center', justifyContent: 'space-between', flexWrap: "wrap", gap: 1, mb: 1.5,}}>
+            <Stack direction="row" spacing={1} useFlexGap sx={{alignItems: 'center', justifyContent: 'space-between', flexWrap: "wrap", gap: 1, mb: 1.5}}>
               <Chip
                 size="small"
                 color={status.color}
@@ -461,13 +427,31 @@ export const RecurringMeetingCard = ({
                 label={status.label}
                 sx={{ fontWeight: 600, borderRadius: 1.5, height: 26 }}
               />
-              <Typography variant="caption" sx={{
-                border: '0.5px solid', borderColor: 'divider',
-                borderRadius: 20, px: 1, py: 0.25,
-                bgcolor: alpha(theme.palette.background.paper, 0.5)
-              }}>
-                {totalGenerated} generated
-              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                
+                {/* ✅ ACTION COUNTER (Desktop) */}
+                {!isMobile && (
+                  <Tooltip title="View actions for this series">
+                    <Chip
+                      icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+                      label={`${meeting.action_count || 0} Actions`}
+                      size="small"
+                      color={meeting.action_count > 0 ? "primary" : "default"}
+                      variant={meeting.action_count > 0 ? "filled" : "outlined"}
+                      onClick={handleActionCounterClick}
+                      sx={{ height: 24, fontSize: "0.65rem", fontWeight: 600, cursor: "pointer", '&:hover': { opacity: 0.8 } }}
+                    />
+                  </Tooltip>
+                )}
+
+                <Typography variant="caption" sx={{
+                  border: '0.5px solid', borderColor: 'divider',
+                  borderRadius: 20, px: 1, py: 0.25,
+                  bgcolor: alpha(theme.palette.background.paper, 0.5)
+                }}>
+                  {totalGenerated} generated
+                </Typography>
+              </Box>
             </Stack>
 
             {/* Title */}
@@ -502,7 +486,6 @@ export const RecurringMeetingCard = ({
               border: '0.5px solid', borderColor: 'divider',
             }}>
               <Stack direction="column" spacing={1.25}>
-                {/* Next date */}
                 <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
                   <InfoIconBox bgcolor={alpha(theme.palette.success.main, 0.1)} color="success.main" size={28}>
                     <TodayIcon sx={{ fontSize: 14 }} />
@@ -517,7 +500,6 @@ export const RecurringMeetingCard = ({
                   </Box>
                 </Stack>
 
-                {/* Location */}
                 <Stack direction="row" spacing={1} sx={{alignItems: 'center', minWidth: 0}} >
                   <InfoIconBox bgcolor={alpha(theme.palette.info.main, 0.1)} color="info.main" size={28}>
                     {LocationIcon}
@@ -532,7 +514,6 @@ export const RecurringMeetingCard = ({
                   </Box>
                 </Stack>
 
-                {/* Time (if available) */}
                 {timeRange && (
                   <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
                     <InfoIconBox bgcolor={alpha(theme.palette.primary.main, 0.1)} color="primary.main" size={28}>
@@ -570,14 +551,12 @@ export const RecurringMeetingCard = ({
               </Stack>
             )}
 
-            {/* Tap hint on mobile */}
             {isMobile && (
               <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: 'block', fontSize: '0.65rem' }}>
                 Tap for details & actions
               </Typography>
             )}
 
-            {/* Warnings */}
             {(!hasNext && status.key === 'active') && (
               <Stack direction="row" sx={{alignItems: 'center', mt: 1.5}} spacing={0.75} >
                 <WarningAmberIcon sx={{ fontSize: 14, color: 'warning.main' }} />
@@ -593,7 +572,6 @@ export const RecurringMeetingCard = ({
           </CardContent>
         </CardActionArea>
 
-        {/* Footer actions — desktop only */}
         {!isMobile && (
           <Box sx={{
             display: 'flex',

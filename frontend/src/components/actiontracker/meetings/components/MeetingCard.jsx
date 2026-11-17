@@ -46,6 +46,7 @@ import {
   Lock as LockIcon,
   Public as PublicIcon,
   Group as GroupIcon,
+  Assignment as AssignmentIcon, // ✅ Added for Action Counter
 } from "@mui/icons-material";
 
 // ============ COLORS ============
@@ -95,6 +96,7 @@ const STATUS_LABEL_MAP = {
   ENDED: "Ended",
   CANCELLED: "Cancelled",
 };
+
 // ============ VISIBILITY CONFIGURATION ============
 const VISIBILITY_CONFIG = {
   open: {
@@ -185,6 +187,7 @@ const extractStatusInfo = (meeting) => {
     raw: meeting?.status || null,
   };
 };
+
 // ============ COMPONENTS ============
 const StatusChip = React.memo(({ statusInfo }) => {
   const label = statusInfo?.label || "Pending";
@@ -207,11 +210,10 @@ const StatusChip = React.memo(({ statusInfo }) => {
     />
   );
 });
-// ============ VISIBILITY CHIP COMPONENT ============
+
 const VisibilityChip = React.memo(({ visibility, restrictedDepartmentName }) => {
   const config = VISIBILITY_CONFIG[visibility] || VISIBILITY_CONFIG.open;
   
-  // If it's a department-restricted meeting, show the department name
   const isDepartmentRestricted = visibility === 'department' || visibility === 'restricted';
   const departmentLabel = isDepartmentRestricted && restrictedDepartmentName 
     ? `: ${restrictedDepartmentName}` 
@@ -244,9 +246,7 @@ const VisibilityChip = React.memo(({ visibility, restrictedDepartmentName }) => 
 });
 VisibilityChip.displayName = 'VisibilityChip';
 
-// ============ DEPARTMENT INFO COMPONENT ============
 const DepartmentInfo = React.memo(({ departmentName, restrictedDepartmentName, visibility }) => {
-  // Only show if there's department information
   if (!departmentName && !restrictedDepartmentName) {
     return null;
   }
@@ -411,9 +411,9 @@ export const MeetingCard = ({
   onShare,
   onCopyLink,
   onPrint,
+  onViewMeetingActions, // ✅ NEW PROP
   sx = {},
-  // NEW: Source context for navigation
-  source = 'meetings', // 'meetings' or 'recurring-meetings'
+  source = 'meetings',
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -495,7 +495,7 @@ export const MeetingCard = ({
   }, [statusInfo?.shortName]);
 
   // ============ Cummulative actions for recurring meetings ============
-    const seriesId = useMemo(
+  const seriesId = useMemo(
     () => meeting?.recurring_meeting_id || (source === 'recurring-meetings' ? meeting?.id : null),
     [meeting?.recurring_meeting_id, meeting?.id, source],
   );
@@ -506,6 +506,17 @@ export const MeetingCard = ({
       if (seriesId && onViewSeriesActions) onViewSeriesActions(seriesId, meeting);
     },
     [onViewSeriesActions, seriesId, meeting],
+  );
+
+  // ✅ NEW HANDLER for Action Counter
+  const handleActionCounterClick = useCallback(
+    (e) => {
+      e.stopPropagation();
+      if (onViewMeetingActions && meeting?.id) {
+        onViewMeetingActions(meeting.id);
+      }
+    },
+    [onViewMeetingActions, meeting?.id],
   );
 
   // Get visibility and department info
@@ -525,24 +536,16 @@ export const MeetingCard = ({
   );
 
   // Responsive icon size
-  const iconSize = "small";  // Use "small" for all icons for consistency
+  const iconSize = "small";
 
   // ============ HANDLERS ============
   
-  /**
-   * Handle card click - navigates to meeting detail with source context
-   */
   const handleCardClick = useCallback(() => {
     if (meeting?.id && onView) {
-      // Pass the source context to the onView callback
-      // The parent component will handle the navigation with state
       onView(meeting.id, source);
     }
   }, [onView, meeting?.id, source]);
 
-  /**
-   * Handle edit click - navigates to edit page with source context
-   */
   const handleEditClick = useCallback(
     (e) => {
       e.stopPropagation();
@@ -708,7 +711,6 @@ export const MeetingCard = ({
           >
             <StatusChip statusInfo={statusInfo} />
             
-            {/* Visibility Chip - Shows department name for restricted meetings */}
             <VisibilityChip 
               visibility={visibility} 
               restrictedDepartmentName={restrictedDepartmentName}
@@ -804,7 +806,7 @@ export const MeetingCard = ({
           </Stack>
         </Paper>
 
-        {/* Participants */}
+        {/* Participants and Action Counter */}
         <Box
           sx={{
             display: "flex",
@@ -813,13 +815,29 @@ export const MeetingCard = ({
             mt: "auto",
             pt: 0.75,
             borderTop: `1px solid ${alpha("#e0e0e0", 0.5)}`,
+            gap: 1,
           }}
         >
-          <ParticipantAvatars
-            participants={meeting.participants}
-            count={participantCount}
-            max={isCompact ? 3 : 4}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            <ParticipantAvatars
+              participants={meeting.participants}
+              count={participantCount}
+              max={isCompact ? 3 : 4}
+            />
+
+            <Tooltip title="View meeting actions">
+              <Chip
+                icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+                label={`${meeting.action_count ?? 0} ${meeting.action_count === 1 ? 'Action' : 'Actions'}`}
+                size="small"
+                color={meeting.action_count > 0 ? "primary" : "default"}
+                variant={meeting.action_count > 0 ? "filled" : "outlined"}
+                onClick={handleActionCounterClick}
+                sx={{ height: 22, fontSize: "0.65rem", cursor: "pointer", fontWeight: 600, '&:hover': { opacity: 0.8 } }}
+              />
+            </Tooltip>
+            
+          </Box>
 
           {meeting.agenda_items?.length > 0 && (
             <Chip
@@ -868,7 +886,6 @@ export const MeetingCard = ({
             </IconButton>
           </Tooltip>
 
-          {/* Add Action Button */}
           <Tooltip title="Add Action Item" placement="top">
             <IconButton
               size={iconSize}
@@ -917,8 +934,8 @@ export const MeetingCard = ({
                 <Repeat fontSize={iconSize} />
               </IconButton>
             </Tooltip>
-            
           )}
+
           {seriesId && onViewSeriesActions && (
             <Tooltip title="All actions in this series" placement="top">
               <IconButton
@@ -931,7 +948,6 @@ export const MeetingCard = ({
             </Tooltip>
           )}
 
-          {/* More Options Menu */}
           <Tooltip title="More Options" placement="top">
             <IconButton
               size={iconSize}
@@ -988,7 +1004,6 @@ export const MeetingCard = ({
           },
         }}
       >
-        {/* Add Action - also in menu */}
         {canAddActions && (
           <MenuItem onClick={handleAddActionClick}>
             <ListItemIcon>

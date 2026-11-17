@@ -16,6 +16,7 @@ from app.core.account_lockout import (
     MAX_FAILED_ATTEMPTS,
     LOCKOUT_DURATION_SECONDS,
 )
+from app.services.implementer_linking import link_implementers_to_user
 from app.models.base import BaseModel
 from app.models.meetings.organization import OrganizationNode
 from app.models.meetings.user_department import UserDepartment, UserDepartmentStatus
@@ -340,6 +341,14 @@ async def login(
     ))
     user.last_login = datetime.now(timezone.utc)
 
+    # ✅ LINK EXTERNAL IMPLEMENTERS TO THIS USER (based on email)
+    try:
+        linked_count = await link_implementers_to_user(db, user)
+        if linked_count:
+            logger.info(f"Login: linked {linked_count} implementer row(s) to user {user.id}")
+    except Exception as e:
+        logger.warning(f"Implementer linking failed for {user.email}: {e}")
+
     await _log_audit_event(db, "login", user.username, user_id=user.id, request=request)
     await db.commit()
 
@@ -420,6 +429,14 @@ async def verify_email(
     
     user.is_verified = True
     user.verified_at = datetime.now(timezone.utc)
+
+    # ✅ LINK IMPLEMENTERS AFTER VERIFICATION
+    try:
+        linked_count = await link_implementers_to_user(db, user)
+        if linked_count:
+            logger.info(f"Verification: linked {linked_count} implementer row(s) to user {user.id}")
+    except Exception as e:
+        logger.warning(f"Implementer linking failed for {user.email}: {e}")
     
     # ✅ Queue welcome email async
     asyncio.create_task(_send_welcome_email_async(user))

@@ -1,5 +1,6 @@
 // src/components/actiontracker/meetings/components/RecurringMeetingsList.jsx
 import { useState, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Grid, Typography, Box, CircularProgress, Alert, Button, Stack, Paper,
   useMediaQuery, useTheme, TextField, InputAdornment,
@@ -333,6 +334,7 @@ export const RecurringMeetingsList = ({
   const theme = useTheme();
   const isMobile = useMediaQuery('(max-width:600px)');
   const isTablet = useMediaQuery('(max-width:960px)');
+  const navigate = useNavigate(); // ✅ Added navigate hook
 
   const containerRef = useRef(null);
   const [internalPage, setInternalPage] = useState(1);
@@ -344,6 +346,11 @@ export const RecurringMeetingsList = ({
   const [sortBy, setSortBy] = useState('next_date');
   const [sortOrder, setSortOrder] = useState('asc');
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // ✅ NEW: Handler for navigating to actions
+  const handleViewMeetingActions = useCallback((seriesId) => {
+    navigate(`/recurring-meetings/${seriesId}`);
+  }, [navigate]);
 
   const meetingsArray = Array.isArray(meetings) ? meetings : [];
 
@@ -513,7 +520,7 @@ export const RecurringMeetingsList = ({
             <Button 
               size="small" 
               variant="outlined" 
-              onClick={(e) => { e.stopPropagation(); onGenerate(meeting.id); }}
+              onClick={(e) => { e.stopPropagation(); onGenerate(meeting); }}
               sx={{ textTransform: 'none' }}
             >
               Generate
@@ -599,7 +606,7 @@ export const RecurringMeetingsList = ({
             <Button 
               size="small" 
               variant="outlined" 
-              onClick={() => onGenerate(meeting.id)}
+              onClick={() => onGenerate(meeting)}
               sx={{ textTransform: 'none' }}
             >
               Generate
@@ -879,6 +886,7 @@ export const RecurringMeetingsList = ({
               onView={onView}
               onEdit={onEdit}
               onGenerate={onGenerate}
+              onViewMeetingActions={handleViewMeetingActions} // ✅ Pass handler
               showStats
             />
           ))}

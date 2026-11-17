@@ -1,7 +1,4 @@
-"""
-Action Tracker CRUD Operations
-Complete implementation with all CRUD operations for all entities
-"""
+# app/crud/meetings/action_tracker.py
 
 import json
 import os
@@ -1183,8 +1180,10 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
     
     def _get_person_user_id(self, person_dict: Dict[str, Any]) -> Optional[UUID]:
         """Extract user_id from person dictionary and safely cast to UUID if present."""
+        # Look for user_id, participant_id, or id
         raw_id = (
             person_dict.get('user_id') or
+            person_dict.get('participant_id') or
             person_dict.get('assigned_to_id') or
             person_dict.get('id')
         )
@@ -1508,6 +1507,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
 
             query = select(MeetingAction).options(
                 selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assign_to_meeting),
                 selectinload(MeetingAction.assigned_to),
                 selectinload(MeetingAction.assigned_by),
                 selectinload(MeetingAction.implementers)
@@ -1640,6 +1640,7 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             query = select(MeetingAction).options(
                 selectinload(MeetingAction.minutes).selectinload(MeetingMinutes.meeting),
+                selectinload(MeetingAction.assign_to_meeting),
                 selectinload(MeetingAction.assigned_to),
                 selectinload(MeetingAction.assigned_by),
                 selectinload(MeetingAction.implementers),
@@ -1720,9 +1721,6 @@ class CRUDMeetingAction(CRUDBase[MeetingAction, MeetingActionCreate, MeetingActi
             
             logger.info(f"Found {len(actions)} overdue actions for user {user_id}")
             return actions
-
-
-
 
     
     async def get_my_tasks(

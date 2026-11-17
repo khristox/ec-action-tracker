@@ -2,7 +2,7 @@
 // Complete file with all fixes for 403 Access Denied handling & simplified No Access view
 
 import React, { useState, useEffect, useCallback, useMemo, memo, useRef, lazy, Suspense } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'; 
 import { useDispatch, useSelector } from 'react-redux';
 import {
   Box, Container, Paper, Typography, Stack, Chip, Button, IconButton, Divider, Alert,
@@ -101,6 +101,17 @@ const getStatusKey = (status) => {
   const normalized = normalizeStatus(status);
   return normalized?.short_name || null;
 };
+
+const TAB_KEYS = {
+  overview: 0,
+  minutes: 1,
+  actions: 2,
+  participants: 3,
+  documents: 4,
+  history: 5,
+  audit: 6,
+};
+
 
 const TABS = [
   { 
@@ -262,6 +273,7 @@ const MeetingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation(); // Added for navigation state
+  const [searchParams, setSearchParams] = useSearchParams();
   const dispatch = useDispatch();
   const isDarkMode = useTheme().palette.mode === 'dark';
   const isMobile = useMediaQuery(useTheme().breakpoints.down('sm'));
@@ -297,9 +309,17 @@ const MeetingDetail = () => {
   const canViewAudit = isAdmin || hasPermission(userPermissions, 'admin:view_audit');
 
   const [tabValue, setTabValue] = useState(() => {
+    const param = new URLSearchParams(location.search).get('tab');
+
+    if (param && TAB_KEYS[param] !== undefined) {
+      return TAB_KEYS[param];
+    }
+
     const saved = localStorage.getItem(`${TAB_STORAGE_KEY_PREFIX}${id}`);
-    return saved ? parseInt(saved, 10) : 0;
+
+    return saved ? parseInt(saved, 10) : TAB_KEYS.overview;
   });
+
   const [tabOrder, setTabOrder] = useState(() => {
     const saved = localStorage.getItem(`${TAB_ORDER_STORAGE_KEY_PREFIX}${id}`);
     return saved ? JSON.parse(saved) : TABS.map((t) => t.value);
@@ -606,6 +626,18 @@ const MeetingDetail = () => {
       dispatch(clearLastNotificationResult());
     };
   }, [id, dispatch, fetchMeetingData]);
+
+  useEffect(() => {
+    const param = searchParams.get('tab');
+
+    if (param && TAB_KEYS[param] !== undefined) {
+      const urlTabValue = TAB_KEYS[param];
+
+      setTabValue((current) =>
+        current === urlTabValue ? current : urlTabValue
+      );
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!loading || initialLoadComplete) { 
@@ -1332,7 +1364,27 @@ const MeetingDetail = () => {
         {visibleTabsForMode.length > 0 && (
           <Paper sx={{ borderRadius: 3, overflow: 'hidden', border: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}` }}>
             <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: isDarkMode ? DARK.surfaceAlt : alpha('#7C3AED', 0.04), borderBottom: `1px solid ${isDarkMode ? DARK.border : '#E5E7EB'}`, px: 1 }}>
-              <Tabs value={effectiveTabValue} onChange={(_, v) => setTabValue(v)} variant="scrollable" scrollButtons="auto" sx={{ flex: 1, '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTab-root': { textTransform: 'none', fontWeight: 700, fontSize: '0.8rem', minHeight: 44, borderRadius: 2, mx: 0.25, '&.Mui-selected': { bgcolor: '#7C3AED', color: '#FFF' } } }}>
+              <Tabs value={effectiveTabValue} onChange={(_, v) => {
+                setTabValue(v);
+
+                const tabKey = Object.entries(TAB_KEYS).find(
+                  ([, value]) => value === v
+                )?.[0];
+
+                if (tabKey) {
+                  const params = new URLSearchParams(location.search);
+                  params.set('tab', tabKey);
+
+                  navigate(
+                    {
+                      pathname: location.pathname,
+                      search: `?${params.toString()}`,
+                    },
+                    { replace: true }
+                  );
+                }
+              }} 
+              variant="scrollable" scrollButtons="auto" sx={{ flex: 1, '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTab-root': { textTransform: 'none', fontWeight: 700, fontSize: '0.8rem', minHeight: 44, borderRadius: 2, mx: 0.25, '&.Mui-selected': { bgcolor: '#7C3AED', color: '#FFF' } } }}>
                 {orderedVisibleTabsForMode.map((tab) => (
                   <Tab
                     key={tab.value}

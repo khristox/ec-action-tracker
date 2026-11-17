@@ -25,6 +25,7 @@ Everything that resolves or links an implementer lives in this file.
 """
 from __future__ import annotations
 
+import re
 import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -32,13 +33,17 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.meetings.action_tracker import ActionImplementer
+from app.models.meetings.action_tracker import ActionImplementer, MeetingParticipant
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # ==================== NORMALISATION ====================
+
+def looks_like_email(value: Optional[str]) -> bool:
+    return bool(value) and bool(_EMAIL_RE.match(value))
 
 def normalize_email(email: Optional[str]) -> Optional[str]:
     """Lowercase + strip. Returns None for blanks so we never store ''."""
@@ -136,19 +141,31 @@ async def resolve_person_identity(
     name = (name or "").strip()
 
     user = None
+    participant = None
+
     if raw_id:
         try:
             uid = raw_id if isinstance(raw_id, UUID) else UUID(str(raw_id))
+            
+            # 1. Check if it's a System User
             user = await db.get(User, uid)
+            
+            # 2. If not a user, check if it's a Meeting Participant
+            if not user:
+                participant = await db.get(MeetingParticipant, uid)
+                
         except (ValueError, TypeError):
             user = None
-        if user is None:
+            participant = None
+
+        if user is None and participant is None:
             logger.debug(
-                "Id %s is not a users.id (probably a participant id); "
+                "Id %s is not a users.id or participant id; "
                 "falling back to email matching.",
                 raw_id,
             )
-    if user is None:
+            
+    if user is None and participant is None:
         user = await resolve_user_by_email(db, email)
 
     if user:
@@ -157,6 +174,14 @@ async def resolve_person_identity(
             name or getattr(user, "full_name", None) or user.username,
             normalize_email(user.email) or email,
             phone or normalize_phone(getattr(user, "phone", None)),
+        )
+        
+    if participant:
+        return (
+            None,
+            name or participant.name,
+            email or normalize_email(participant.email),
+            phone or normalize_phone(participant.telephone),
         )
 
     return None, name or "Unassigned", email, phone
@@ -179,6 +204,11 @@ async def build_implementer(
     # either one is only used if it really is a users.id (resolve_person_identity
     # checks the users table), so a participant's id can never end up in
     # action_implementers.user_id.
+
+    # Filter bad emails
+    if email and not looks_like_email(email):
+        email = None
+
     raw_user_id = person.get("user_id") or person.get("id")
 
     user_id, resolved_name, resolved_email, resolved_phone = (
@@ -190,6 +220,12 @@ async def build_implementer(
             phone=phone,
         )
     )
+
+    # Raise a Python error instead of letting the DB throw a 500
+    if user_id is None and resolved_email is None and resolved_phone is None:
+        raise ValueError(
+            f"Implementer '{resolved_name}' needs a valid email or phone number to be saved."
+        )
 
     return ActionImplementer(
         action_id=action_id,

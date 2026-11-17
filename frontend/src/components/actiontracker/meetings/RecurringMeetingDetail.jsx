@@ -1,6 +1,6 @@
 // src/components/actiontracker/meetings/RecurringMeetingDetail.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Typography, Button, Paper, Stack, Chip, IconButton,
   Grid, Divider, CircularProgress, Alert, Snackbar,
@@ -27,6 +27,7 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   BarChart as BarChartIcon,
+  Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 import api from '../../../services/api';
 import { COLORS } from './styles/colors';
@@ -102,9 +103,15 @@ const RecurringMeetingDetail = () => {
   const [occurrencesLoading, setOccurrencesLoading] = useState(true);
   const [error, setError] = useState(null);
   const [locationDetails, setLocationDetails] = useState(null);
+  const [seriesActions, setSeriesActions] = useState({ items: [], total: 0 });
+  const [actionsLoading, setActionsLoading] = useState(false);
 
   // Main Tab Navigation state ('details' vs 'occurrences')
-  const [activeTab, setActiveTab] = useState('details');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = searchParams.get('tab');
+    return ['details', 'occurrences', 'actions'].includes(t) ? t : 'details';
+  });
 
   // Stats visibility state for mobile view
   const [statsExpanded, setStatsExpanded] = useState(true);
@@ -201,6 +208,21 @@ const RecurringMeetingDetail = () => {
       if (requestId === requestRef.current) setOccurrencesLoading(false);
     }
   }, [id, page, rowsPerPage, debouncedSearch, filterStatus, sortOrder]);
+
+  const fetchSeriesActions = useCallback(async () => {
+    setActionsLoading(true);
+    try {
+      const res = await api.get(`/action-tracker/meetings/series/${id}/actions`);
+      setSeriesActions(res.data || { items: [], total: 0 });
+    } catch (err) {
+      console.error('Failed to fetch series actions:', err);
+      setSeriesActions({ items: [], total: 0 });
+    } finally {
+      setActionsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { if (id) fetchSeriesActions(); }, [id, fetchSeriesActions]);
 
   const fetchRecurringMeetingDetails = useCallback(async () => {
     try {
@@ -344,6 +366,24 @@ const RecurringMeetingDetail = () => {
     setSnackbar({ open: true, message: 'Link copied!', severity: 'success' });
     handleMenuClose();
   }, []);
+
+  const renderActionCounter = (occurrence) => {
+    const count = occurrence.action_count ?? 0;
+    return (
+      <Chip
+        size="small"
+        icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+        label={count}
+        color={count > 0 ? 'primary' : 'default'}
+        variant={count > 0 ? 'filled' : 'outlined'}
+        onClick={(e) => {
+          e.stopPropagation(); // the row/card itself navigates elsewhere
+          navigate(`/meetings/${occurrence.id}?tab=actions`);
+        }}
+        sx={{ height: isMobile ? 20 : 22, fontWeight: 600, cursor: 'pointer', '& .MuiChip-label': { px: 0.8 } }}
+      />
+    );
+  };
 
   if (loading) {
     return (
@@ -655,6 +695,12 @@ const RecurringMeetingDetail = () => {
               icon={<EventNoteIcon fontSize={isMobile ? 'small' : 'medium'} />} 
               iconPosition="start" 
             />
+            <Tab
+              label={`Actions (${seriesActions.total})`}
+              value="actions"
+              icon={<AssignmentIcon fontSize={isMobile ? 'small' : 'medium'} />}
+              iconPosition="start"
+            />
           </Tabs>
         </Box>
 
@@ -941,7 +987,8 @@ const RecurringMeetingDetail = () => {
                             <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>#</TableCell>
                             <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Date</TableCell>
                             {!isTablet && <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Time</TableCell>}
-                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Status</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Status</TableCell> <TableCell align="center"> {renderActionCounter(occurrence)} </TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Action items</TableCell>
                             {!isMobile && <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Location</TableCell>}
                             <TableCell align="right" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Actions</TableCell>
                           </TableRow>
@@ -1110,6 +1157,13 @@ const RecurringMeetingDetail = () => {
                                         {occurrence.location_text || recurringMeeting.location_text || 'Online'}
                                       </Typography>
                                     </Stack>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                      <AssignmentIcon sx={{ fontSize: isMobile ? 14 : 16, color: 'text.secondary' }} />
+                                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
+                                        Action items
+                                      </Typography>
+                                      {renderActionCounter(occurrence)}
+                                    </Stack>
                                   </Stack>
                                 </Stack>
                               </CardContent>
@@ -1138,6 +1192,45 @@ const RecurringMeetingDetail = () => {
             )}
           </Box>
         )}
+
+        {/* TAB 3: Series Actions */}
+        {activeTab === 'actions' && (
+          <Box sx={{ p: isMobile ? 1.5 : 4 }}>
+            {actionsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress size={40} /></Box>
+            ) : seriesActions.items.length === 0 ? (
+              <Typography color="text.secondary">No actions yet across this series.</Typography>
+            ) : (
+              <Stack spacing={1.5}>
+                {seriesActions.items.map((a) => (
+                  <Paper
+                    key={a.id}
+                    variant="outlined"
+                    sx={{ p: 2, borderRadius: 2, cursor: a.meeting_id ? 'pointer' : 'default' }}
+                    onClick={() => a.meeting_id && navigate(`/meetings/${a.meeting_id}?tab=actions`)}
+                  >
+                    <Stack direction="row" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
+                      <Chip size="small" label={`${a.meeting_title || 'Meeting'}${a.occurrence_number ? ` #${a.occurrence_number}` : ''}`} />
+                      {a.meeting_date && <Chip size="small" variant="outlined" label={formatDate(a.meeting_date)} />}
+                      {a.is_completed && <Chip size="small" color="success" label="Completed" />}
+                    </Stack>
+                    <Typography fontWeight={700}>{a.title || a.description}</Typography>
+                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                      Due: {a.due_date ? formatDate(a.due_date) : 'No due date'}
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={a.overall_progress_percentage || 0}
+                      sx={{ mt: 1, height: 6, borderRadius: 3 }}
+                    />
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Box>
+        )}
+
+
       </Paper>
 
       {/* FAB Speed Dial - hidden on mobile to reduce clutter */}

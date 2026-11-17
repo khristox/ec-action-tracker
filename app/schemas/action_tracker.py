@@ -336,6 +336,7 @@ class MeetingListResponse(ORMBase):
     is_active: bool = True
     location_name: Optional[str] = None
     participants_count: int = 0
+    action_count: int = 0
     minutes_count: int = 0
     actions_count: int = 0
     documents_count: int = 0

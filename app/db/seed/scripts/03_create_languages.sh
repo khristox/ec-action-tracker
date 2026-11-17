@@ -75,6 +75,8 @@ if [[ ! "$BASE_URL" =~ ^https?:// ]]; then
     exit 1
 fi
 
+API_URL="${BASE_URL}/api/v1"
+
 # ==================== SERVER CONNECTION ====================
 print_info "Testing server connection..."
 if ! curl -s -f "${BASE_URL}/health" > /dev/null 2>&1; then
@@ -84,20 +86,17 @@ fi
 print_success "Server is running"
 
 # ==================== AUTHENTICATION ====================
-print_info "Authenticating..."
+# Authentication is performed once by the master seeder.
 
-API_URL="${BASE_URL}/api/v1"
-LOGIN_RESPONSE=$(curl -s -X POST "${API_URL}/auth/login" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=${USERNAME}&password=${PASSWORD}")
 
-ADMIN_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token')
 
-if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
-    print_error "Authentication failed"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+    print_error "ADMIN_TOKEN was not provided by the master seeder."
+    print_error "This script must be run through the master seeder."
     exit 1
 fi
-print_success "Authenticated"
+
+print_success "Using ADMIN_TOKEN from master seeder"
 
 # ==================== CREATE LANGUAGE GROUP ====================
 print_info "Creating Languages group..."

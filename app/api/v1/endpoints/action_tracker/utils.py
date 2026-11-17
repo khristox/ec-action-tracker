@@ -7,10 +7,10 @@ from uuid import UUID
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 
 from app.models.meetings.action_tracker import (
-    Meeting, MeetingParticipant, MeetingMinutes, MeetingDocument
+    Meeting, MeetingParticipant, MeetingMinutes, MeetingDocument, MeetingAction
 )
 from app.models.meetings.organization import OrganizationNode
 from app.models.general.dynamic_attribute import Attribute
@@ -332,7 +332,7 @@ def build_minutes_list(meeting_obj: Meeting) -> List[MeetingMinutesResponse]:
         return minutes
     
     for m in meeting_obj.minutes:
-        if not m.is_active:
+        if not m.is_active or m.is_system:
             continue
         
         minutes.append(MeetingMinutesResponse(
@@ -412,6 +412,7 @@ async def build_meeting_response(
     include_permissions: bool = False,
     user_permissions: Set[str] = None,
     user_role: str = None,
+    action_counts: Optional[Dict[UUID, int]] = None,
     user_permission_level: str = None,
     include_relationships: bool = True,
     resolve_department_names: bool = True,
@@ -504,8 +505,9 @@ async def build_meeting_response(
             
             # Counts
             "participants_count": len(meeting_obj.participants) if hasattr(meeting_obj, 'participants') and meeting_obj.participants else 0,
-            "minutes_count": len(meeting_obj.minutes) if hasattr(meeting_obj, 'minutes') and meeting_obj.minutes else 0,
+            "minutes_count": len([m for m in (meeting_obj.minutes or []) if m.is_active and not m.is_system]),
             "documents_count": len(meeting_obj.documents) if hasattr(meeting_obj, 'documents') and meeting_obj.documents else 0,
+            "action_count": 0,  # Will be populated below if db is provided
         }
         
         # ========== Resolve Department Names ==========
@@ -547,6 +549,25 @@ async def build_meeting_response(
             response["department_code"] = dept_code
             response["restricted_department_name"] = restricted_name
         
+        # ========== Resolve Action Count ==========
+        if action_counts is not None:
+            response["action_count"] = action_counts.get(meeting_obj.id, 0)
+        elif db:
+            try:
+                action_count_query = (
+                    select(func.count(MeetingAction.id))
+                    .join(MeetingMinutes, MeetingAction.minute_id == MeetingMinutes.id)
+                    .where(
+                        MeetingMinutes.meeting_id == meeting_obj.id,
+                        MeetingMinutes.is_active == True,
+                        MeetingAction.is_active == True,
+                    )
+                )
+                response["action_count"] = (await db.execute(action_count_query)).scalar() or 0
+            except Exception as e:
+                logger.warning(f"Failed to fetch action count for meeting {meeting_obj.id}: {e}")
+                response["action_count"] = 0
+
         # ========== Get Status ==========
         if statuses_map and meeting_obj.status_id and str(meeting_obj.status_id) in statuses_map:
             s = statuses_map[str(meeting_obj.status_id)]
@@ -599,7 +620,7 @@ async def build_meeting_response(
                     "created_at": safe_isoformat(m.created_at),
                     "updated_at": safe_isoformat(m.updated_at),
                 }
-                for m in (meeting_obj.minutes or []) if m.is_active
+                for m in (meeting_obj.minutes or []) if m.is_active and not m.is_system
             ]
             
             response["documents"] = [
@@ -764,6 +785,7 @@ def _build_meeting_response_sync(
             "is_recurring": getattr(meeting, 'is_recurring', False),
             "recurring_meeting_id": str(meeting.recurring_meeting_id) if getattr(meeting, 'recurring_meeting_id', None) else None,
             "occurrence_number": getattr(meeting, 'occurrence_number', None),
+            "action_count": 0, # Cannot fetch in sync without db session
         }
     except Exception as e:
         logger.error(f"Error building meeting response: {e}", exc_info=True)
@@ -793,3 +815,20 @@ def build_meeting_response_dict(meeting: Meeting, statuses_map: Dict = None) -> 
         except Exception as e:
             logger.error(f"Error in async build: {e}, falling back to sync")
             return _build_meeting_response_sync(meeting, statuses_map)
+
+
+async def fetch_action_counts(db: AsyncSession, meeting_ids: List[UUID]) -> Dict[UUID, int]:
+    """Same rules as GET /{meeting_id}/actions: system minute included."""
+    if not meeting_ids:
+        return {}
+    rows = await db.execute(
+        select(MeetingMinutes.meeting_id, func.count(MeetingAction.id))
+        .join(MeetingAction, MeetingAction.minute_id == MeetingMinutes.id)
+        .where(
+            MeetingMinutes.meeting_id.in_(meeting_ids),
+            MeetingMinutes.is_active == True,
+            MeetingAction.is_active == True,
+        )
+        .group_by(MeetingMinutes.meeting_id)
+    )
+    return {mid: n for mid, n in rows.all()}

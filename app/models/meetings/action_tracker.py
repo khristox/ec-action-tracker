@@ -3,10 +3,9 @@ Action Tracker Models - Import order matters for Foreign Keys
 Make sure this file is imported AFTER users, locations, and attribute tables
 """
 from datetime import datetime, timezone
-from select import select
 from typing import Optional, List, Dict, Any
 import uuid
-from sqlalchemy import JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
+from sqlalchemy import select, JSON, Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float, Index, Table
 from sqlalchemy.orm import relationship, validates, selectinload
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -300,17 +299,17 @@ class Meeting(Base):
     chairperson = relationship(
         "MeetingParticipant",
         foreign_keys=[chairperson_id],
-        remote_side="MeetingParticipant.id",
         back_populates="chairperson_of",
-        lazy="selectin"
+        lazy="selectin",
+        post_update=True
     )
     
     secretary = relationship(
         "MeetingParticipant",
         foreign_keys=[secretary_id],
-        remote_side="MeetingParticipant.id",
         back_populates="secretary_of",
-        lazy="selectin"
+        lazy="selectin",
+        post_update=True
     )
     
     minutes = relationship(
@@ -585,6 +584,7 @@ class MeetingMinutes(Base):
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
     meeting_id = Column(CustomUUID, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False)
+    is_system = Column(Boolean, default=False, nullable=False, server_default='false')
     
     topic = Column(String(500), nullable=False)
     discussion = Column(Text, nullable=True)
@@ -711,7 +711,7 @@ class MeetingAction(Base):
     )
     
     id = Column(CustomUUID, primary_key=True, default=uuid4)
-    minute_id = Column(CustomUUID, ForeignKey("meeting_minutes.id", ondelete='CASCADE'), nullable=False)
+    minute_id = Column(CustomUUID, ForeignKey("meeting_minutes.id", ondelete='CASCADE'), nullable=True)
     description = Column(Text, nullable=False)
     
     # Backward compatibility fields
@@ -1036,6 +1036,14 @@ class ActionStatusHistory(Base):
     def updated_by_name(self) -> Optional[str]:
         return self.updated_by.username if self.updated_by else None
     
+    @property
+    def individual_status_name(self) -> Optional[str]:
+        return self.individual_status.name if self.individual_status else None
+
+    @property
+    def individual_status_code(self) -> Optional[str]:
+        return self.individual_status.code if self.individual_status else None
+
     def to_dict(self) -> dict:
         return {
             "id": str(self.id),

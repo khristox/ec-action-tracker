@@ -1,5 +1,5 @@
 # app/schemas/action_tracker_files/action.py
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from uuid import UUID
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -7,7 +7,18 @@ from typing import Optional, Dict, Any, List
 
 class ActionImplementerIn(BaseModel):
     """One row of the Person(s) Implementing table, as submitted by the client."""
-    id: Optional[UUID] = None  # existing user id if picked via AssignToSelector, else None
+
+    # Set when the person was picked from the SYSTEM USERS. Kept as a plain
+    # string on purpose: a malformed value must not reject the whole action with
+    # a 422. The server checks it against the users table
+    # (see app/services/implementer_linking.py).
+    user_id: Optional[str] = None
+
+    # Older clients send the picked id here. It may be a users.id OR a
+    # meeting_participants.id, so it is never trusted blindly: the server only
+    # uses it if it really is a users.id, otherwise it matches by email.
+    id: Optional[str] = None
+
     name: str
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -81,7 +92,14 @@ class ActionResponse(ActionBase):
     overall_status_name: Optional[str] = None
     overall_status_id: Optional[UUID] = None
     assigned_to: Optional[Dict[str, Any]] = None
-    persons_implementing: List[ActionImplementerOut] = Field(default_factory=list)
+
+    # The MeetingAction model has no attribute called `persons_implementing`;
+    # its list is `implementers`. Without this alias, from_attributes found
+    # nothing and silently returned [] even when implementers existed.
+    persons_implementing: List[ActionImplementerOut] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("persons_implementing", "implementers"),
+    )
 
     class Config:
         from_attributes = True

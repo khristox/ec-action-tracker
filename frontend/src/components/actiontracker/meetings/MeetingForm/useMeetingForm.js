@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import api from '../../../../services/api';
+import { useLater } from '../../../../hooks/useLater';
 import {
   fetchParticipantLists,
   addCustomParticipant,
@@ -39,6 +40,7 @@ DEFAULT_START_TIME.setHours(9, 0, 0, 0);
 const DEFAULT_END_TIME = new Date();
 DEFAULT_END_TIME.setHours(10, 0, 0, 0);
 
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -55,6 +57,7 @@ const getErrorMessage = (error) => {
   }
   return error.message || 'An unexpected error occurred';
 };
+
 
 /**
  * Safe date parsing - handles string, Date, and ISO formats
@@ -82,11 +85,41 @@ const safeParseDate = (date) => {
 /**
  * Format Date for API (YYYY-MM-DDTHH:mm:ss ISO format)
  */
+/**
+ * Format Date for regular meeting API fields.
+ *
+ * Regular meetings are stored in PostgreSQL timestamptz columns,
+ * so preserve the existing UTC/ISO behavior.
+ */
 const formatDateForAPI = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
     return null;
   }
   return date.toISOString();
+};
+
+/**
+ * Format a datetime as Uganda-local wall-clock time.
+ *
+ * Recurring meeting templates use PostgreSQL timestamp WITHOUT
+ * time zone columns. These values represent the actual meeting
+ * time in Uganda, so do NOT convert them to UTC.
+ *
+ * Example:
+ *   2026-10-29 20:00 Uganda
+ *   -> "2026-10-29T20:00:00"
+ */
+const formatLocalDateTimeForAPI = (date) => {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return null;
+  }
+
+  const pad = (value) => String(value).padStart(2, '0');
+
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join('T');
 };
 
 /**
@@ -100,6 +133,51 @@ const formatDateForDisplay = (date) => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+/**
+ * Build meeting start/end Date objects from the selected meeting date
+ * and time fields.
+ *
+ * The Date objects represent the user's local wall-clock time.
+ * We intentionally do not serialize them here.
+ */
+const buildMeetingDateTimes = (meetingDate, startTime, endTime) => {
+  let startDateTime = null;
+  let endDateTime = null;
+
+  if (meetingDate && startTime) {
+    startDateTime = new Date(meetingDate);
+
+    startDateTime.setHours(
+      startTime.getHours(),
+      startTime.getMinutes(),
+      startTime.getSeconds(),
+      0
+    );
+  }
+
+  if (meetingDate && endTime) {
+    endDateTime = new Date(meetingDate);
+
+    endDateTime.setHours(
+      endTime.getHours(),
+      endTime.getMinutes(),
+      endTime.getSeconds(),
+      0
+    );
+
+    // If the end time is earlier than or equal to the start time,
+    // treat it as an overnight meeting.
+    if (startDateTime && endDateTime <= startDateTime) {
+      endDateTime.setDate(endDateTime.getDate() + 1);
+    }
+  }
+
+  return {
+    startDateTime,
+    endDateTime,
+  };
 };
 
 /**
@@ -143,6 +221,7 @@ export const useMeetingForm = () => {
   const location = useLocation();
   const { id } = useParams();
   const dispatch = useDispatch();
+  const later = useLater();
   
   const isEditMode = Boolean(id);
   const returnPath = location.state?.from || '/meetings';
@@ -247,7 +326,13 @@ export const useMeetingForm = () => {
   );
 
   const selectedParticipantIds = useMemo(
-    () => meetingParticipants.map(p => p.id),
+    () => [
+      ...new Set(
+        meetingParticipants
+          .map(p => p.user_id || (p.is_existing ? p.id : null))
+          .filter(Boolean)
+      )
+    ],
     [meetingParticipants]
   );
 
@@ -255,25 +340,25 @@ export const useMeetingForm = () => {
   // Department Helpers
   // ==========================================================================
 
+  // Departments the current user may pick: their own plus everything below them
+  // (admins: all). The old '/departments' route does not exist on the API.
   const fetchUserDepartments = useCallback(async () => {
     try {
-      const response = await api.get('/auth/me/departments', {
-        params: { limit: 100, active_only: true }
-      });
+      const response = await api.get('/auth/me/accessible-departments');
 
       let departmentsData = [];
-      if (response.data?.success === true && Array.isArray(response.data.data)) {
-        departmentsData = response.data.data;
-      } else if (Array.isArray(response.data)) {
+      if (Array.isArray(response.data)) {
         departmentsData = response.data;
+      } else if (response.data?.success === true && Array.isArray(response.data.data)) {
+        departmentsData = response.data.data;
       } else if (response.data?.items) {
         departmentsData = response.data.items;
       }
 
       const transformed = departmentsData.map(dept => ({
-        id: dept.department_id || dept.id,
-        name: dept.department_name || dept.name,
-        code: dept.code || dept.department_code || '',
+        id: String(dept.id ?? dept.department_id),
+        name: dept.name || dept.department_name,
+        code: dept.department_code || dept.code || '',
         role: dept.role || 'member'
       }));
 
@@ -289,14 +374,16 @@ export const useMeetingForm = () => {
 
   const getDepartmentNameById = useCallback((deptId) => {
     if (!deptId) return '';
-    const dept = departmentsList.find(d => d.id === deptId);
+    const dept = departmentsList.find(d => String(d.id) === String(deptId));
     return dept?.name || String(deptId);
   }, [departmentsList]);
 
-  const handleRestrictedDepartmentChange = useCallback((deptId) => {
+  // DepartmentSelector passes (id, departmentObject), so the name can be taken
+  // straight from the selected department (the Review step then shows a name,
+  // not a UUID).
+  const handleRestrictedDepartmentChange = useCallback((deptId, dept) => {
     setRestrictedDepartmentId(deptId);
-    const name = getDepartmentNameById(deptId);
-    setRestrictedDepartmentName(name);
+    setRestrictedDepartmentName(dept?.name || getDepartmentNameById(deptId));
     setFormDirty(true);
   }, [getDepartmentNameById]);
 
@@ -415,7 +502,7 @@ export const useMeetingForm = () => {
         setRestrictedDepartmentId(deptId);
         if (deptId) {
           const depts = await fetchUserDepartments();
-          const dept = depts.find(d => d.id === deptId);
+          const dept = depts.find(d => String(d.id) === String(deptId));
           setRestrictedDepartmentName(dept?.name || String(deptId));
         }
 
@@ -454,7 +541,7 @@ export const useMeetingForm = () => {
           // Set chairperson if exists
           const chair = meeting.participants.find(p => p.is_chairperson);
           if (chair) {
-            setTimeout(() => dispatch(setMeetingChairperson(chair.id)), 150);
+            later(() => dispatch(setMeetingChairperson(chair.id)), 150);
           }
         }
 
@@ -471,7 +558,7 @@ export const useMeetingForm = () => {
           setFormLoading(false);
         }
       });
-  }, [isEditMode, id, dispatch, fetchUserDepartments]);
+  }, [isEditMode, id, dispatch, fetchUserDepartments, later]);
 
   // Initialize participant lists on mount
   useEffect(() => {
@@ -553,6 +640,10 @@ export const useMeetingForm = () => {
     dispatch(addCustomParticipant({
       ...user,
       id: user.id,
+      // Links the participant to the system account. The API reads the user's
+      // REAL email from this id, so the meeting shows up on their dashboard
+      // even when the picker only had a masked email.
+      user_id: user.id,
       is_chairperson: false,
       is_existing: true
     }));
@@ -562,8 +653,9 @@ export const useMeetingForm = () => {
       message: `Added ${user.name} to participants`,
       severity: 'success'
     });
-  }, [dispatch]);
+  }, [dispatch]); 
 
+  
   const handleAddManualParticipant = useCallback((participant) => {
     dispatch(addCustomParticipant(participant));
     setFormDirty(true);
@@ -572,18 +664,26 @@ export const useMeetingForm = () => {
       message: `Added ${participant.name} to participants`,
       severity: 'success'
     });
-  }, [dispatch]);
+  }, [dispatch]); 
 
-  const handleAddFromList = useCallback((participants) => {
+  
+  // FIX: accepts either a plain array of participants or an object with a
+  // `participants` array, so a payload-shape mismatch can no longer throw
+  // "participants.forEach is not a function".
+  const handleAddFromList = useCallback((input) => {
+    const participants = Array.isArray(input) ? input : input?.participants || [];
+    if (participants.length === 0) return;
+
     participants.forEach(p => dispatch(addCustomParticipant(p)));
     setFormDirty(true);
     setSnackbar({
       open: true,
-      message: `Added ${participants.length} participants from list`,
+      message: `Added ${participants.length} participant${participants.length !== 1 ? 's' : ''} from list`,
       severity: 'success'
     });
-  }, [dispatch]);
+  }, [dispatch]); 
 
+  
   const handleSetChairperson = useCallback((pid) => {
     dispatch(setMeetingChairperson(pid));
     setFormDirty(true);
@@ -641,7 +741,9 @@ export const useMeetingForm = () => {
 
     const cleanParticipants = meetingParticipants.map(p => {
       const participant = {
-        id: p.is_existing ? p.id : undefined,
+        // user_id is only set for people picked from the system's users; the API
+        // uses it to look up their real email. Manual/list entries have none.
+        user_id: p.user_id || undefined,
         name: p.name,
         email: p.email || null,
         telephone: p.telephone || null,
@@ -657,26 +759,16 @@ export const useMeetingForm = () => {
       return participant;
     });
 
-    // Build datetime - combine date and time
-    let startDateTime = null;
-    let endDateTime = null;
+    const { startDateTime, endDateTime } = buildMeetingDateTimes(
+      formData.meeting_date,
+      formData.start_time,
+      formData.end_time
+    );
 
-    if (formData.meeting_date && formData.start_time) {
-      startDateTime = new Date(formData.meeting_date);
-      const startTime = formData.start_time;
-      startDateTime.setHours(startTime.getHours(), startTime.getMinutes(), startTime.getSeconds());
-    }
-
-    if (formData.meeting_date && formData.end_time) {
-      endDateTime = new Date(formData.meeting_date);
-      const endTime = formData.end_time;
-      endDateTime.setHours(endTime.getHours(), endTime.getMinutes(), endTime.getSeconds());
-      
-      // If end time is before start time, add a day
-      if (endDateTime <= startDateTime) {
-        endDateTime.setDate(endDateTime.getDate() + 1);
-      }
-    }
+    // Only a department-restricted meeting carries a department. If the user
+    // switched back to "Open to All", a department picked earlier is not sent.
+    const departmentForMeeting =
+      visibility === VISIBILITY.DEPARTMENT ? (restrictedDepartmentId || null) : null;
 
     const payload = {
       title: formData.title,
@@ -692,21 +784,73 @@ export const useMeetingForm = () => {
       agenda: formData.agenda || null,
       secretary_name: formData.secretary_name || null,
       chairperson_name: chairpersonParticipant?.name || null,
-      organization_id: restrictedDepartmentId || null,
+      organization_id: departmentForMeeting,
       visibility,
-      restricted_department_id: restrictedDepartmentId || null,
+      restricted_department_id: departmentForMeeting,
       custom_participants: cleanParticipants,
     };
 
     return buildCleanPayload(payload);
   }, [formData, gpsEnabled, meetingParticipants, visibility, restrictedDepartmentId]);
 
+  const buildLocalMeetingDateTimes = useCallback(() => {
+    if (!formData.meeting_date) {
+      return {
+        startDateTime: null,
+        endDateTime: null,
+      };
+    }
+
+    let startDateTime = null;
+    let endDateTime = null;
+
+    if (formData.start_time) {
+      startDateTime = new Date(formData.meeting_date);
+
+      startDateTime.setHours(
+        formData.start_time.getHours(),
+        formData.start_time.getMinutes(),
+        formData.start_time.getSeconds(),
+        0
+      );
+    }
+
+    if (formData.end_time) {
+      endDateTime = new Date(formData.meeting_date);
+
+      endDateTime.setHours(
+        formData.end_time.getHours(),
+        formData.end_time.getMinutes(),
+        formData.end_time.getSeconds(),
+        0
+      );
+
+      // Preserve overnight meetings.
+      if (startDateTime && endDateTime <= startDateTime) {
+        endDateTime.setDate(endDateTime.getDate() + 1);
+      }
+    }
+
+    return {
+      startDateTime,
+      endDateTime,
+    };
+  }, [
+    formData.meeting_date,
+    formData.start_time,
+    formData.end_time,
+  ]);
+
   const buildRecurringPayload = useCallback((basePayload) => {
     if (!recurrence || !recurrence.enabled) return basePayload;
 
-    const recurrenceTypeId = attributeMappings.recurrenceTypes[recurrence.type];
+    const recurrenceTypeId =
+      attributeMappings.recurrenceTypes[recurrence.type];
+
     if (!recurrenceTypeId) {
-      throw new Error(`Recurrence type "${recurrence.type}" is not configured`);
+      throw new Error(
+        `Recurrence type "${recurrence.type}" is not configured`
+      );
     }
 
     const recurrenceDayIds = (recurrence.days || [])
@@ -715,17 +859,61 @@ export const useMeetingForm = () => {
 
     const statusId = attributeMappings.statuses?.active;
 
+    const { startDateTime, endDateTime } = buildMeetingDateTimes(
+      formData.meeting_date,
+      formData.start_time,
+      formData.end_time
+    );
+
     return {
       ...basePayload,
+
+      // ------------------------------------------------------------
+      // Meeting date/time
+      // ------------------------------------------------------------
+      meeting_date: formatDateForDisplay(formData.meeting_date),
+      start_time: formatLocalDateTimeForAPI(startDateTime),
+      end_time: formatLocalDateTimeForAPI(endDateTime),
+
+      // ------------------------------------------------------------
+      // Recurrence
+      // ------------------------------------------------------------
       recurrence_type_id: recurrenceTypeId,
+
       recurrence_interval: recurrence.interval || 1,
-      recurrence_days: recurrenceDayIds.length > 0 ? recurrenceDayIds : [],
-      recurrence_day_of_month: recurrence.day_of_month === 'last' ? -1 : (recurrence.day_of_month || null),
-      recurrence_end_date: recurrence.end_date ? formatDateForAPI(recurrence.end_date) : null,
-      recurrence_max_occurrences: recurrence.max_occurrences || null,
+
+      recurrence_days:
+        recurrenceDayIds.length > 0
+          ? recurrenceDayIds
+          : [],
+
+      recurrence_day_of_month:
+        recurrence.day_of_month === 'last'
+          ? -1
+          : (recurrence.day_of_month || null),
+
+      recurrence_end_date: recurrence.end_date
+        ? formatLocalDateTimeForAPI(recurrence.end_date)
+        : null,
+
+      recurrence_max_occurrences:
+        recurrence.max_occurrences || null,
+
       status_id: statusId,
+
+      // ------------------------------------------------------------
+      // Participants used as the template for future occurrences
+      // ------------------------------------------------------------
+      default_participant_ids: selectedParticipantIds,
     };
-  }, [recurrence, attributeMappings]);
+  }, [
+    recurrence,
+    attributeMappings,
+    formData.meeting_date,
+    formData.start_time,
+    formData.end_time,
+    selectedParticipantIds,
+  ]);
 
   const handleSubmit = useCallback(async () => {
     // Validation
@@ -774,7 +962,14 @@ export const useMeetingForm = () => {
         }
 
         console.log('📤 Submitting recurring meeting');
+
         const recurringPayload = buildRecurringPayload(basePayload);
+
+        console.log('📦 Recurring meeting payload:', {
+          ...recurringPayload,
+          default_participant_ids: recurringPayload.default_participant_ids,
+        });
+
         await api.post('/recurring-meetings/', recurringPayload);
         setSnackbar({
           open: true,

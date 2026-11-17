@@ -22,17 +22,17 @@ docker run --rm -v $(pwd):/app alpine find /app -type f \( -name "*.py" -o -name
 docker login
 
 # Build the image
-docker build -t khristox/ec-action-tracker:latest .
+docker build -t wagambula/ec-action-tracker:latest .
 
 # Verify static files in image
 echo "🔍 Verifying static files in image..."
-docker run --rm khristox/ec-action-tracker:latest ls -la /app/static/
+docker run --rm wagambula/ec-action-tracker:latest ls -la /app/static/
 
 # Tag and push
 VERSION=$(date +%Y%m%d-%H%M%S)
-docker tag khristox/ec-action-tracker:latest khristox/ec-action-tracker:${VERSION}
-docker push khristox/ec-action-tracker:latest
-docker push khristox/ec-action-tracker:${VERSION}
+docker tag wagambula/ec-action-tracker:latest wagambula/ec-action-tracker:${VERSION}
+docker push wagambula/ec-action-tracker:latest
+docker push wagambula/ec-action-tracker:${VERSION}
 
 echo "✅ Build complete!"
-echo "Image: khristox/ec-action-tracker:latest"
+echo "Image: wagambula/ec-action-tracker:latest"

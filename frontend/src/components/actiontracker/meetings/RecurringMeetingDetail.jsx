@@ -1,6 +1,6 @@
 // src/components/actiontracker/meetings/RecurringMeetingDetail.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Typography, Button, Paper, Stack, Chip, IconButton,
   Grid, Divider, CircularProgress, Alert, Snackbar,
@@ -27,6 +27,7 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   BarChart as BarChartIcon,
+  Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 import api from '../../../services/api';
 import { COLORS } from './styles/colors';
@@ -92,19 +93,25 @@ const RecurringMeetingDetail = () => {
   const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
 
-  const isInitialBootRef = useRef(true);
+  const requestRef = useRef(0);
 
   // Core data states
   const [recurringMeeting, setRecurringMeeting] = useState(null);
   const [occurrences, setOccurrences] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [occurrencesLoading, setOccurrencesLoading] = useState(false);
+  const [occurrencesLoading, setOccurrencesLoading] = useState(true);
   const [error, setError] = useState(null);
   const [locationDetails, setLocationDetails] = useState(null);
+  const [seriesActions, setSeriesActions] = useState({ items: [], total: 0 });
+  const [actionsLoading, setActionsLoading] = useState(false);
 
   // Main Tab Navigation state ('details' vs 'occurrences')
-  const [activeTab, setActiveTab] = useState('details');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = searchParams.get('tab');
+    return ['details', 'occurrences', 'actions'].includes(t) ? t : 'details';
+  });
 
   // Stats visibility state for mobile view
   const [statsExpanded, setStatsExpanded] = useState(true);
@@ -122,6 +129,7 @@ const RecurringMeetingDetail = () => {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortOrder, setSortOrder] = useState('asc');
   const [viewMode, setViewMode] = useState('table');
@@ -171,12 +179,13 @@ const RecurringMeetingDetail = () => {
   }, [locationDetails]);
 
   const fetchOccurrences = useCallback(async (opts = {}) => {
-    const currentPage   = opts.page        ?? page;
-    const currentLimit  = opts.rowsPerPage ?? rowsPerPage;
-    const currentSearch = opts.searchTerm  ?? searchTerm;
+    const currentPage   = opts.page         ?? page;
+    const currentLimit  = opts.rowsPerPage  ?? rowsPerPage;
+    const currentSearch = opts.searchTerm   ?? debouncedSearch;
     const currentFilter = opts.filterStatus ?? filterStatus;
-    const currentSort   = opts.sortOrder   ?? sortOrder;
+    const currentSort   = opts.sortOrder    ?? sortOrder;
 
+    const requestId = ++requestRef.current;
     setOccurrencesLoading(true);
     try {
       const params = { page: currentPage, limit: currentLimit, sort_order: currentSort };
@@ -184,19 +193,36 @@ const RecurringMeetingDetail = () => {
       if (currentFilter !== 'all') params.status_filter = currentFilter;
 
       const response = await api.get(`/recurring-meetings/${id}/occurrences`, { params });
+      if (requestId !== requestRef.current) return;      // a newer request superseded this one
       const data  = response.data?.data  || response.data  || [];
       const total = response.data?.total ?? (Array.isArray(data) ? data.length : 0);
 
       setOccurrences(Array.isArray(data) ? data : []);
       setTotalCount(total);
     } catch (err) {
+      if (requestId !== requestRef.current) return;
       console.error('Failed to fetch occurrences:', err);
       setOccurrences([]);
       setTotalCount(0);
     } finally {
-      setOccurrencesLoading(false);
+      if (requestId === requestRef.current) setOccurrencesLoading(false);
     }
-  }, [id, page, rowsPerPage, searchTerm, filterStatus, sortOrder]);
+  }, [id, page, rowsPerPage, debouncedSearch, filterStatus, sortOrder]);
+
+  const fetchSeriesActions = useCallback(async () => {
+    setActionsLoading(true);
+    try {
+      const res = await api.get(`/action-tracker/meetings/series/${id}/actions`);
+      setSeriesActions(res.data || { items: [], total: 0 });
+    } catch (err) {
+      console.error('Failed to fetch series actions:', err);
+      setSeriesActions({ items: [], total: 0 });
+    } finally {
+      setActionsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { if (id) fetchSeriesActions(); }, [id, fetchSeriesActions]);
 
   const fetchRecurringMeetingDetails = useCallback(async () => {
     try {
@@ -218,30 +244,29 @@ const RecurringMeetingDetail = () => {
   }, [id]);
 
   useEffect(() => {
-    if (!id) return;
-    const bootstrapWorkspace = async () => {
-      setLoading(true);
-      await fetchRecurringMeetingDetails();
-      await fetchOccurrences({ page: 1, rowsPerPage, searchTerm, filterStatus, sortOrder });
-      setLoading(false);
-      isInitialBootRef.current = false;
-    };
-    bootstrapWorkspace();
-  }, [id]);
-
-  useEffect(() => {
-    if (loading || isInitialBootRef.current) return;
-    fetchOccurrences();
-  }, [page, rowsPerPage, filterStatus, sortOrder]);
-
-  useEffect(() => {
-    if (loading || isInitialBootRef.current) return;
-    const delayTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
       setPage(1);
-      fetchOccurrences({ page: 1, searchTerm });
     }, 400);
-    return () => clearTimeout(delayTimer);
+    return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Series details
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setLoading(true);
+    fetchRecurringMeetingDetails().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [id, fetchRecurringMeetingDetails]);
+
+  // Occurrences: refetch exactly when id/page/size/filter/sort/debounced search change
+  useEffect(() => {
+    if (!id) return;
+    fetchOccurrences();
+  }, [id, fetchOccurrences]);
 
   const handlePageChange = (_, newPage) => {
     setPage(newPage);
@@ -273,16 +298,25 @@ const RecurringMeetingDetail = () => {
 
   const handleGenerateMultiple = useCallback(async (count = 5) => {
     setGenerating(true);
+    let created = 0;
     try {
       for (let i = 0; i < count; i++) {
         await api.post(`/recurring-meetings/${id}/generate-on-demand`);
+        created++;
       }
-      await Promise.all([fetchRecurringMeetingDetails(), fetchOccurrences({ page: 1 })]);
-      setPage(1);
       setSnackbar({ open: true, message: `Generated ${count} occurrences!`, severity: 'success' });
     } catch (err) {
-      setSnackbar({ open: true, message: err.response?.data?.detail || 'Failed to generate', severity: 'error' });
+      const detail = err.response?.data?.detail || 'Failed to generate';
+      setSnackbar({
+        open: true,
+        message: created ? `Generated ${created} of ${count}. ${detail}` : detail,
+        severity: 'error',
+      });
     } finally {
+      if (created > 0) {
+        await Promise.all([fetchRecurringMeetingDetails(), fetchOccurrences({ page: 1, rowsPerPage, searchTerm, filterStatus, sortOrder })]);
+        setPage(1);
+      }
       setGenerating(false);
     }
   }, [id, fetchRecurringMeetingDetails, fetchOccurrences]);
@@ -332,6 +366,24 @@ const RecurringMeetingDetail = () => {
     setSnackbar({ open: true, message: 'Link copied!', severity: 'success' });
     handleMenuClose();
   }, []);
+
+  const renderActionCounter = (occurrence) => {
+    const count = occurrence.action_count ?? 0;
+    return (
+      <Chip
+        size="small"
+        icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+        label={count}
+        color={count > 0 ? 'primary' : 'default'}
+        variant={count > 0 ? 'filled' : 'outlined'}
+        onClick={(e) => {
+          e.stopPropagation(); // the row/card itself navigates elsewhere
+          navigate(`/meetings/${occurrence.id}?tab=actions`);
+        }}
+        sx={{ height: isMobile ? 20 : 22, fontWeight: 600, cursor: 'pointer', '& .MuiChip-label': { px: 0.8 } }}
+      />
+    );
+  };
 
   if (loading) {
     return (
@@ -404,7 +456,14 @@ const RecurringMeetingDetail = () => {
                 >
                   {recurringMeeting.title}
                 </Typography>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  sx={{
+                    mt: 0.5,
+                    flexWrap: 'wrap',
+                  }}
+                >
                   <Chip 
                     label="Recurring" 
                     size="small" 
@@ -636,6 +695,12 @@ const RecurringMeetingDetail = () => {
               icon={<EventNoteIcon fontSize={isMobile ? 'small' : 'medium'} />} 
               iconPosition="start" 
             />
+            <Tab
+              label={`Actions (${seriesActions.total})`}
+              value="actions"
+              icon={<AssignmentIcon fontSize={isMobile ? 'small' : 'medium'} />}
+              iconPosition="start"
+            />
           </Tabs>
         </Box>
 
@@ -644,10 +709,10 @@ const RecurringMeetingDetail = () => {
           <Box sx={{ p: isMobile ? 1.5 : 4 }}>
             <Grid container spacing={isMobile ? 2 : 4}>
               {/* Core Information & Schedule */}
-              <Grid item xs={12} lg={6}>
+              <Grid size={{ xs: 12, lg: 6 }}>
                 <Stack spacing={isMobile ? 2 : 3}>
                   <Box>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem', textTransform: 'uppercase' }}>
                       Description
                     </Typography>
                     <Typography variant="body1" sx={{ mt: 0.5, color: 'text.primary', fontSize: isMobile ? '0.9rem' : '1rem' }}>
@@ -750,7 +815,7 @@ const RecurringMeetingDetail = () => {
               </Grid>
 
               {/* Next and Most Recent Occurrences */}
-              <Grid item xs={12} lg={6}>
+              <Grid size={{ xs: 12, lg: 6 }}>
                 <Stack spacing={isMobile ? 2 : 3}>
                   <Card variant="outlined" sx={{ borderRadius: 3, p: isMobile ? 2 : 2.5, bgcolor: alpha(COLORS.info, 0.02) }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase" sx={{ fontSize: isMobile ? '0.65rem' : '0.75rem' }}>
@@ -922,7 +987,8 @@ const RecurringMeetingDetail = () => {
                             <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>#</TableCell>
                             <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Date</TableCell>
                             {!isTablet && <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Time</TableCell>}
-                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Status</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Status</TableCell> <TableCell align="center"> {renderActionCounter(occurrence)} </TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Action items</TableCell>
                             {!isMobile && <TableCell sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Location</TableCell>}
                             <TableCell align="right" sx={{ fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.875rem' }}>Actions</TableCell>
                           </TableRow>
@@ -1033,7 +1099,10 @@ const RecurringMeetingDetail = () => {
                         const globalIndex = (page - 1) * rowsPerPage + index;
                         const isPast = new Date(occurrence.scheduled_date) < new Date();
                         return (
-                          <Grid item xs={12} sm={6} lg={4} key={occurrence.id}>
+                          <Grid
+                            size={{ xs: 12, sm: 6, lg: 4 }}
+                            key={occurrence.id}
+                          >
                             <Card 
                               variant="outlined"
                               sx={{ 
@@ -1088,6 +1157,13 @@ const RecurringMeetingDetail = () => {
                                         {occurrence.location_text || recurringMeeting.location_text || 'Online'}
                                       </Typography>
                                     </Stack>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                      <AssignmentIcon sx={{ fontSize: isMobile ? 14 : 16, color: 'text.secondary' }} />
+                                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: isMobile ? '0.75rem' : '0.875rem' }}>
+                                        Action items
+                                      </Typography>
+                                      {renderActionCounter(occurrence)}
+                                    </Stack>
                                   </Stack>
                                 </Stack>
                               </CardContent>
@@ -1116,6 +1192,45 @@ const RecurringMeetingDetail = () => {
             )}
           </Box>
         )}
+
+        {/* TAB 3: Series Actions */}
+        {activeTab === 'actions' && (
+          <Box sx={{ p: isMobile ? 1.5 : 4 }}>
+            {actionsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress size={40} /></Box>
+            ) : seriesActions.items.length === 0 ? (
+              <Typography color="text.secondary">No actions yet across this series.</Typography>
+            ) : (
+              <Stack spacing={1.5}>
+                {seriesActions.items.map((a) => (
+                  <Paper
+                    key={a.id}
+                    variant="outlined"
+                    sx={{ p: 2, borderRadius: 2, cursor: a.meeting_id ? 'pointer' : 'default' }}
+                    onClick={() => a.meeting_id && navigate(`/meetings/${a.meeting_id}?tab=actions`)}
+                  >
+                    <Stack direction="row" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
+                      <Chip size="small" label={`${a.meeting_title || 'Meeting'}${a.occurrence_number ? ` #${a.occurrence_number}` : ''}`} />
+                      {a.meeting_date && <Chip size="small" variant="outlined" label={formatDate(a.meeting_date)} />}
+                      {a.is_completed && <Chip size="small" color="success" label="Completed" />}
+                    </Stack>
+                    <Typography fontWeight={700}>{a.title || a.description}</Typography>
+                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                      Due: {a.due_date ? formatDate(a.due_date) : 'No due date'}
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={a.overall_progress_percentage || 0}
+                      sx={{ mt: 1, height: 6, borderRadius: 3 }}
+                    />
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+          </Box>
+        )}
+
+
       </Paper>
 
       {/* FAB Speed Dial - hidden on mobile to reduce clutter */}
@@ -1129,32 +1244,66 @@ const RecurringMeetingDetail = () => {
             onOpen={() => setSpeedDialOpen(true)} 
             open={speedDialOpen}
           >
-            <SpeedDialAction 
-              icon={<AddIcon />} 
-              tooltipTitle="Generate Next" 
-              onClick={handleGenerateNext} 
-              FabProps={{ sx: { bgcolor: COLORS.primary, '&:hover': { bgcolor: COLORS.primaryDark } } }}
+            <SpeedDialAction
+              icon={<AddIcon />}
+              onClick={handleGenerateNext}
+              slotProps={{
+                tooltip: {
+                  title: 'Generate Next',
+                },
+                fab: {
+                  sx: {
+                    bgcolor: COLORS.primary,
+                    '&:hover': {
+                      bgcolor: COLORS.primaryDark,
+                    },
+                  },
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<CalendarTodayIcon />} 
-              tooltipTitle="Generate 5" 
-              onClick={() => handleGenerateMultiple(5)} 
+            <SpeedDialAction
+              icon={<CalendarTodayIcon />}
+              onClick={() => handleGenerateMultiple(5)}
+              slotProps={{
+                tooltip: {
+                  title: 'Generate 5',
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<DownloadIcon />} 
-              tooltipTitle="Export" 
-              onClick={handleExport} 
+            <SpeedDialAction
+              icon={<DownloadIcon />}
+              onClick={handleExport}
+              slotProps={{
+                tooltip: {
+                  title: 'Export',
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<EditIcon />} 
-              tooltipTitle="Edit" 
-              onClick={() => navigate(`/recurring-meetings/${id}/edit`)} 
+            <SpeedDialAction
+              icon={<EditIcon />}
+              onClick={() => navigate(`/recurring-meetings/${id}/edit`)}
+              slotProps={{
+                tooltip: {
+                  title: 'Edit',
+                },
+              }}
             />
-            <SpeedDialAction 
-              icon={<DeleteIcon />} 
-              tooltipTitle="Delete" 
-              onClick={() => setDeleteDialogOpen(true)} 
-              FabProps={{ sx: { bgcolor: COLORS.danger, '&:hover': { bgcolor: COLORS.dangerDark } } }}
+            <SpeedDialAction
+              icon={<DeleteIcon />}
+              onClick={() => setDeleteDialogOpen(true)}
+              slotProps={{
+                tooltip: {
+                  title: 'Delete',
+                },
+                fab: {
+                  sx: {
+                    bgcolor: COLORS.danger,
+                    '&:hover': {
+                      bgcolor: COLORS.dangerDark,
+                    },
+                  },
+                },
+              }}
             />
           </SpeedDial>
         </Fade>

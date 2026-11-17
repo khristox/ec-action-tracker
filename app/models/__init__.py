@@ -42,7 +42,7 @@ from app.models.meetings.recurring_meeting import (
     RecurringMeetingOccurrence,
 )
 
-from app.models.meetings.meeting_recording import MeetingRecording
+
 from app.models.chart_data import ChartConfiguration, ChartDataCache
 from app.models.token_blacklist import TokenBlacklist
 
@@ -78,7 +78,6 @@ __all__ = [
     "MeetingDocument",
     "RecurringMeeting",
     "RecurringMeetingOccurrence",
-    "MeetingRecording",
     "ChartConfiguration",
     "ChartDataCache",
     "TokenBlacklist",

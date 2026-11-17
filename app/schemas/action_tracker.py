@@ -206,6 +206,8 @@ class MeetingUpdate(ORMBase):
     department_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
     location_text: Optional[str] = None
+    chairperson_id: Optional[UUID] = None
+    secretary_id: Optional[UUID] = None
     
     # Online meeting fields
     platform: Optional[str] = None
@@ -334,6 +336,7 @@ class MeetingListResponse(ORMBase):
     is_active: bool = True
     location_name: Optional[str] = None
     participants_count: int = 0
+    action_count: int = 0
     minutes_count: int = 0
     actions_count: int = 0
     documents_count: int = 0
@@ -439,6 +442,7 @@ class ActionStatusHistoryResponse(ActionStatusHistoryBase):
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
     individual_status_name: Optional[str] = None
+    individual_status_code: Optional[str] = None
     is_active: bool = True
 
 

@@ -74,21 +74,17 @@ fi
 print_success "Server is running"
 
 # ==================== AUTHENTICATION ====================
-print_info "Authenticating..."
 
 API_URL="${BASE_URL}/api/v1"
-LOGIN_RESPONSE=$(curl -s -X POST "${API_URL}/auth/login" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=${USERNAME}&password=${PASSWORD}")
 
-ADMIN_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token')
+# Token is supplied by the master seeder.
 
-if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
-    print_error "Authentication failed"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+    print_error "ADMIN_TOKEN was not provided by the master seeder."
     exit 1
 fi
-print_success "Authenticated"
 
+print_success "Using ADMIN_TOKEN from master seeder"
 # ==================== CREATE ACTION TRACKER GROUP ====================
 print_info "Creating Action Tracker group..."
 
@@ -111,12 +107,18 @@ EOF
 )
 
 # Check if group exists
-EXISTING_GROUP=$(curl -s -X GET "${API_URL}/attribute-groups/?code=ACTION_TRACKER" \
+EXISTING_GROUP=$(curl -sf -X GET \
+    "${API_URL}/attribute-groups/?code=ACTION_TRACKER&include_attributes=true&limit=100" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
-
 if echo "$EXISTING_GROUP" | jq -e '.items[0].id' > /dev/null 2>&1; then
     GROUP_ID=$(echo "$EXISTING_GROUP" | jq -r '.items[0].id')
     print_warning "Action Tracker group already exists (ID: $GROUP_ID)"
+
+    EXISTING_ATTRIBUTES=$(echo "$EXISTING_GROUP" | jq -c '.items[0].attributes // []')
+    EXISTING_ATTRIBUTE_COUNT=$(echo "$EXISTING_ATTRIBUTES" | jq 'length')
+
+    echo "✓ Found $EXISTING_ATTRIBUTE_COUNT existing attributes in Action Tracker group"
+    
 else
     GROUP_RESPONSE=$(curl -s -X POST "${API_URL}/attribute-groups/" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -128,8 +130,10 @@ else
     if [ -z "$GROUP_ID" ] || [ "$GROUP_ID" == "null" ]; then
         print_error "Failed to create Action Tracker group, continuing..."
         GROUP_ID="UNKNOWN"
+        EXISTING_ATTRIBUTES="[]"
     else
         print_success "Action Tracker group created (ID: $GROUP_ID)"
+        EXISTING_ATTRIBUTES="[]"
     fi
 fi
 
@@ -185,11 +189,13 @@ for attribute in "${ATTRIBUTES[@]}"; do
     
     print_info "Processing: ${name} (${code})..."
     
-    EXISTING=$(curl -s -X GET "${API_URL}/attributes/?group_code=ACTION_TRACKER&code=${code}" \
-        -H "Authorization: Bearer $ADMIN_TOKEN")
+    # Check the attributes already loaded from the Action Tracker group
+    EXISTING_ATTRIBUTE=$(echo "$EXISTING_ATTRIBUTES" | jq -r \
+        --arg code "$code" \
+        '.[] | select(.code == $code) | .id' | head -n 1)
     
-    if echo "$EXISTING" | jq -e '.items[0].id' > /dev/null 2>&1; then
-        print_warning "  ⏭️  Already exists, skipping"
+    if [ -n "$EXISTING_ATTRIBUTE" ] && [ "$EXISTING_ATTRIBUTE" != "null" ]; then
+        print_warning "  ⏭️  Already exists (ID: ${EXISTING_ATTRIBUTE}), skipping"
         ((SKIP_COUNT++))
         continue
     fi
@@ -244,11 +250,12 @@ echo ""
 print_info "Verifying Action Tracker group..."
 sleep 2
 
-VERIFY_RESPONSE=$(curl -s -X GET "${API_URL}/attribute-groups/ACTION_TRACKER/attributes" \
+VERIFY_RESPONSE=$(curl -sf -X GET \
+    "${API_URL}/attribute-groups/?code=ACTION_TRACKER&include_attributes=true&limit=100" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
 
-if echo "$VERIFY_RESPONSE" | jq -e '.items' > /dev/null 2>&1; then
-    ATTRIBUTE_COUNT=$(echo "$VERIFY_RESPONSE" | jq '.items | length')
+if echo "$VERIFY_RESPONSE" | jq -e '.items[0].attributes' > /dev/null 2>&1; then
+    ATTRIBUTE_COUNT=$(echo "$VERIFY_RESPONSE" | jq '.items[0].attributes | length')
     
     if [ "$ATTRIBUTE_COUNT" -gt 0 ]; then
         print_success "Found ${ATTRIBUTE_COUNT} attributes in Action Tracker group"
@@ -258,7 +265,11 @@ if echo "$VERIFY_RESPONSE" | jq -e '.items' > /dev/null 2>&1; then
         echo ""
         for category in "MEETING_STATUS" "ACTION_STATUS" "INDIVIDUAL" "DOC_TYPE" "PRIORITY" "VISIBILITY"; do
             echo -e "${YELLOW}${category//_/ }:${NC}"
-            echo "$VERIFY_RESPONSE" | jq -r ".items[] | select(.code | startswith(\"$category\")) | \"  • \(.name) - \(.extra_metadata.description)\""
+            echo "$VERIFY_RESPONSE" | jq -r \
+                --arg category "$category" \
+                '.items[0].attributes[] | 
+                select(.code | startswith($category)) |
+                "  • \(.name) - \(.description // .extra_metadata.description // "No description")"'
             echo ""
         done
     else

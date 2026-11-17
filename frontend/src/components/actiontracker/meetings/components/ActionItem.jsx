@@ -111,8 +111,8 @@ const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
     >
       <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
         {/* Header with Status and Priority */}
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
-          <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+        <Stack direction="row" sx={{ alignItems: 'flex-start', justifyContent: 'space-between', mb: 1.5 }} >
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
             <Chip 
               size="small" 
               label={status.label}
@@ -170,7 +170,7 @@ const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
 
         {/* Additional Details - Using Stack */}
         <Stack spacing={1.5} sx={{ mb: 2 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <PersonIcon sx={{ fontSize: 16, color: '#64748b' }} />
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
               Assigned to:
@@ -180,7 +180,7 @@ const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
             </Typography>
           </Stack>
           
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <ScheduleIcon sx={{ fontSize: 16, color: '#64748b' }} />
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
               Due Date:
@@ -198,7 +198,7 @@ const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
         {/* Progress Section */}
         {progress > 0 && (
           <Box sx={{ mb: 1.5 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>
                 Progress
               </Typography>
@@ -256,7 +256,7 @@ const ActionItem = ({ action, minuteId, onUpdate, onEdit, disabled }) => {
 
         {/* Metadata Footer */}
         <Divider sx={{ my: 1.5 }} />
-        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant="caption" color="text.disabled">
             ID: {typeof action.id === 'string' ? action.id.slice(0, 8) : 'Unknown'}
           </Typography>

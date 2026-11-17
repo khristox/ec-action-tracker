@@ -8,6 +8,8 @@ DEFAULT_BASE_URL="http://localhost:8001"
 DEFAULT_USERNAME="admin"
 DEFAULT_PASSWORD="Admin123!"
 
+API_URL="${BASE_URL}/api/v1"
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -39,6 +41,9 @@ else
     read -p "Enter API base URL [${DEFAULT_BASE_URL}]: " input
     BASE_URL="${input:-$DEFAULT_BASE_URL}"
 fi
+
+# API base path
+API_URL="${BASE_URL}/api/v1"
 
 # Get USERNAME
 if [ -n "$2" ]; then
@@ -72,6 +77,8 @@ if [[ ! "$BASE_URL" =~ ^https?:// ]]; then
     exit 1
 fi
 
+API_URL="${BASE_URL}/api/v1"
+
 # ==================== SERVER CONNECTION ====================
 print_info "Testing server connection..."
 if ! curl -s -f "${BASE_URL}/health" > /dev/null 2>&1; then
@@ -81,20 +88,13 @@ fi
 print_success "Server is running"
 
 # ==================== AUTHENTICATION ====================
-print_info "Authenticating..."
-
-API_URL="${BASE_URL}/api/v1"
-LOGIN_RESPONSE=$(curl -s -X POST "${API_URL}/auth/login" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=${USERNAME}&password=${PASSWORD}")
-
-ADMIN_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token')
-
-if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
-    print_error "Authentication failed"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+    print_error "ADMIN_TOKEN was not provided by the master seeder."
     exit 1
 fi
-print_success "Authenticated"
+
+print_success "Using ADMIN_TOKEN from master seeder"
+
 
 # ==================== CREATE RECURRING MEETING GROUP ====================
 print_info "Creating Recurring Meeting group..."
@@ -121,7 +121,7 @@ EOF
 
 # Check if group exists
 EXISTING_GROUP=$(curl -s -X GET "${API_URL}/attribute-groups/?code=RECURRING_MEETING" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
+    -H "Authorization: Bearer ${ADMIN_TOKEN}")
 
 # Handle paginated response
 if echo "$EXISTING_GROUP" | jq -e '.items[0].id' > /dev/null 2>&1; then
@@ -129,7 +129,7 @@ if echo "$EXISTING_GROUP" | jq -e '.items[0].id' > /dev/null 2>&1; then
     print_warning "Recurring Meeting group already exists (ID: $GROUP_ID)"
 else
     GROUP_RESPONSE=$(curl -s -X POST "${API_URL}/attribute-groups/" \
-        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
         -H "Content-Type: application/json" \
         -d "$GROUP_JSON")
     

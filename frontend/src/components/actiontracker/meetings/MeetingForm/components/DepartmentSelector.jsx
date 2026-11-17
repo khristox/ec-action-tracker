@@ -35,7 +35,7 @@ import {
   Business as BusinessIcon,
 } from '@mui/icons-material';
 
-const ENDPOINT = '/auth/me/departments';
+const ENDPOINT = '/auth/me/accessible-departments';
 
 // ----------------------------------------------------------------------------
 // Module-level cache + in-flight de-duplication.

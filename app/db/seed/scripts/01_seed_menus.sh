@@ -73,23 +73,16 @@ fi
 print_success "Server is running"
 
 # ==================== AUTHENTICATION ====================
-print_info "Authenticating..."
+#print_info "Authenticating..."
 
 API_URL="${BASE_URL}/api/v1"
-LOGIN_URL="${API_URL}/auth/login"
-
-LOGIN_RESPONSE=$(curl -s -X POST "${LOGIN_URL}" \
-    -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=${USERNAME}&password=${PASSWORD}")
-
-ADMIN_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token')
-
-if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" == "null" ]; then
-    print_error "Authentication failed"
+if [ -z "${ADMIN_TOKEN:-}" ]; then
+    print_error "ADMIN_TOKEN was not provided by the master seeder."
+    print_error "This script must be run through the master seeder."
     exit 1
 fi
-print_success "Authenticated"
 
+print_success "Using ADMIN_TOKEN from master seeder"
 # ==================== GET ROLES FROM DATABASE ====================
 print_info "Fetching roles from database..."
 

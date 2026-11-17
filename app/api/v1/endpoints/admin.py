@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 import uuid
 
+from pydantic import BaseModel
+
 from app.models.meetings.user_department import UserDepartment
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,11 +27,15 @@ from app.models.user import user_roles
 router = APIRouter()
 
 
-@router.get("/users", response_model=List[UserResponse])
+class PaginatedUsersResponse(BaseModel):
+    items: List[UserResponse]
+    total: int
+
+@router.get("/users", response_model=PaginatedUsersResponse)
 async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
-    active_only: bool = Query(True),
+    active_only: bool = Query(False),
     is_active: Optional[bool] = Query(None),
     role: Optional[str] = Query(None),
     is_superuser: Optional[bool] = Query(None),
@@ -38,89 +44,166 @@ async def get_users(
     include_departments: bool = Query(True),
     db: AsyncSession = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_admin),
-) -> List[UserResponse]:
-    """Get all users (admin only) with optional filtering"""
+) -> PaginatedUsersResponse:
+    """Get paginated users with total count (admin only)."""
+
     from asyncio.log import logger
+
+    # ============================================================
+    # BASE QUERY
+    # ============================================================
 
     query = select(User)
 
+    # ============================================================
     # 1. Active Status Filter
+    # ============================================================
+
     if is_active is not None:
         query = query.where(User.is_active.is_(is_active))
     elif active_only:
         query = query.where(User.is_active.is_(True))
 
+    # ============================================================
     # 2. Superuser Filter
+    # ============================================================
+
     if is_superuser is not None:
         query = query.where(User.is_superuser.is_(is_superuser))
 
-    # 3. Role Filter (Ignore 'all')
-    if role and role.lower() != "all":
-        if role.lower() == "none":
-            # Match users with NO roles assigned
-            query = query.where(~User.roles.any())
-        else:
-            # Match users with specific role code
-            query = query.where(User.roles.any(Role.code == role))
+    # ============================================================
+    # 3. Role Filter
+    # ============================================================
 
-    # 4. Department Filter (Ignore 'all')
-    if department_id and department_id.lower() != "all":
-        if department_id.lower() == "none":
-            # Match users with NO active department assignments
-            query = query.where(~User.user_departments.any(UserDepartment.status == "active"))
+    if role and role.lower() != "all":
+
+        if role.lower() == "none":
+            # Users with no roles
+            query = query.where(~User.roles.any())
+
         else:
+            # Users with a specific role
+            query = query.where(
+                User.roles.any(Role.code == role)
+            )
+
+    # ============================================================
+    # 4. Department Filter
+    # ============================================================
+
+    if department_id and department_id.lower() != "all":
+
+        if department_id.lower() == "none":
+
+            # Users with no active department assignment
+            query = query.where(
+                ~User.user_departments.any(
+                    UserDepartment.status == "active"
+                )
+            )
+
+        else:
+
             try:
                 dept_uuid = uuid.UUID(department_id)
+
                 query = query.where(
                     User.user_departments.any(
-                        (UserDepartment.department_id == dept_uuid) & 
+                        (UserDepartment.department_id == dept_uuid)
+                        &
                         (UserDepartment.status == "active")
                     )
                 )
+
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid department ID format"
                 )
 
+    # ============================================================
     # 5. Search Filter
-    if search and len(search.strip()) >= 2:
-        t = f"%{search.strip()}%"
-        query = query.where(or_(
-            User.first_name.ilike(t),
-            User.last_name.ilike(t),
-            User.email.ilike(t),
-            User.username.ilike(t),
-            User.phone.ilike(t),
-            func.concat(User.first_name, ' ', User.last_name).ilike(t)
-        ))
+    # ============================================================
 
-    # 6. Eager Loading (Eager loads linked tables without affecting WHERE filtering)
-    query = query.options(selectinload(User.roles))
-    if include_departments:
-        query = query.options(
-            selectinload(User.user_departments).selectinload(UserDepartment.department)
+    if search and len(search.strip()) >= 2:
+
+        t = f"%{search.strip()}%"
+
+        query = query.where(
+            or_(
+                User.first_name.ilike(t),
+                User.last_name.ilike(t),
+                User.email.ilike(t),
+                User.username.ilike(t),
+                User.phone.ilike(t),
+                func.concat(
+                    User.first_name,
+                    " ",
+                    User.last_name
+                ).ilike(t)
+            )
         )
 
-    # Ordering & Pagination
-    query = query.order_by(User.created_at.desc()).offset(skip).limit(limit)
+    # ============================================================
+    # 6. COUNT TOTAL USERS
+    #
+    # IMPORTANT:
+    # This uses the filtered query BEFORE offset/limit.
+    # ============================================================
 
+    count_query = select(
+        func.count()
+    ).select_from(
+        query.order_by(None).subquery()
+    )
 
-    # DEBUG: Print the generated SQL query with bound parameters
-    # compiled_query = query.compile(
-    #     dialect=db.bind.dialect, 
-    #     compile_kwargs={"literal_binds": True}
-    # )
-    # print(f"\n--- [DEBUG SQL QUERY] ---\n{compiled_query}\n-------------------------\n")
-    # logger.info(f"Generated SQL: {compiled_query}")
-    
+    count_result = await db.execute(count_query)
+
+    total = count_result.scalar_one()
+
+    # ============================================================
+    # 7. EAGER LOADING
+    # ============================================================
+
+    query = query.options(
+        selectinload(User.roles)
+    )
+
+    if include_departments:
+        query = query.options(
+            selectinload(User.user_departments)
+            .selectinload(UserDepartment.department)
+        )
+
+    # ============================================================
+    # 8. ORDERING + PAGINATION
+    # ============================================================
+
+    query = (
+        query
+        .order_by(User.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    # ============================================================
+    # 9. FETCH CURRENT PAGE
+    # ============================================================
 
     result = await db.execute(query)
+
     users = result.scalars().all()
 
-    logger.info(f"Admin {current_user.username} fetched {len(users)} users")
+    logger.info(
+        f"Admin {current_user.username} fetched "
+        f"{len(users)} users (total={total}, skip={skip}, limit={limit})"
+    )
 
-    return [
+    # ============================================================
+    # 10. BUILD RESPONSE
+    # ============================================================
+
+    user_items = [
         UserResponse(
             id=str(u.id),
             email=u.email,
@@ -145,10 +228,21 @@ async def get_users(
                 )
                 for ud in u.user_departments
                 if ud.department and ud.status == "active"
-            ] if include_departments and u.user_departments else []
+            ]
+            if include_departments and u.user_departments
+            else []
         )
         for u in users
     ]
+
+    # ============================================================
+    # 11. RETURN PAGINATED RESPONSE
+    # ============================================================
+
+    return PaginatedUsersResponse(
+        items=user_items,
+        total=total
+    )
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user_by_admin(
@@ -170,7 +264,10 @@ async def create_user_by_admin(
 
     # Check if user exists by username
     if user_in.username:
-        user_exists = await user_crud.get_by_username(db, username=user_in.username)
+        user_exists = await user_crud.get_by_username(
+            db,
+            username=user_in.username
+        )
         if user_exists:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -182,7 +279,8 @@ async def create_user_by_admin(
         db,
         email=user_in.email,
         username=user_in.username,
-        full_name=f"{user_in.first_name or ''} {user_in.last_name or ''}".strip() or user_in.username,
+        full_name=f"{user_in.first_name or ''} {user_in.last_name or ''}".strip()
+                  or user_in.username,
         password=user_in.password,
         roles=user_in.roles or ["user"],
         is_verified=user_in.is_verified or False,
@@ -195,14 +293,31 @@ async def create_user_by_admin(
             detail="Failed to create user"
         )
 
-    await db.commit()
-    await db.refresh(new_user)
-    await db.refresh(new_user, attribute_names=["roles"])
+    logger.info(
+        f"CREATE USER: create_with_roles completed for {new_user.username}"
+    )
 
-    logger.info(f"Admin {current_user.username} created user: {new_user.username}")
+    await db.commit()
+    logger.info(
+        f"CREATE USER: commit completed for {new_user.username}"
+    )
+
+    await db.refresh(new_user)
+    logger.info(
+        f"CREATE USER: basic refresh completed for {new_user.username}"
+    )
+
+    await db.refresh(new_user, attribute_names=["roles"])
+    logger.info(
+        f"CREATE USER: roles refresh completed for {new_user.username}"
+    )
+
+    logger.info(
+        f"Admin {current_user.username} created user: {new_user.username}"
+    )
 
     return UserResponse(
-        id=str(new_user.id),  # ✅ Convert UUID to string
+        id=str(new_user.id),
         email=new_user.email,
         username=new_user.username,
         first_name=new_user.first_name or "",
@@ -212,7 +327,7 @@ async def create_user_by_admin(
         is_active=new_user.is_active,
         is_verified=new_user.is_verified,
         is_superuser=new_user.is_superuser,
-        roles=[r.code for r in new_user.roles],
+        roles=[r.code for r in new_user.roles] if new_user.roles else [],
         created_at=new_user.created_at,
         updated_at=new_user.updated_at
     )

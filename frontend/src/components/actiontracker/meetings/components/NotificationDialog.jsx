@@ -1,7 +1,7 @@
 // src/components/actiontracker/meetings/components/NotificationDialog.jsx
 // ✅ FULLY FIXED: Complete ID extraction with comprehensive logging and diagnostics
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -42,6 +42,9 @@ import { useSelector } from 'react-redux';
 const ALLOWED_CHANNELS = ['email', 'whatsapp', 'sms'];
 const MAX_MESSAGE_LENGTH = 1000;
 
+const NO_PARTICIPANTS = [];   // a `= []` default is a new array every render, which defeats the useMemo below
+const getParticipantId = (p) => p?.participant_id || p?.id || p?.user_id || null;
+
 const maskEmail = (email) => {
   if (!email) return 'xxxx';
   const [localPart, domain] = email.split('@');
@@ -50,7 +53,7 @@ const maskEmail = (email) => {
   return `${maskedLocal}@${domain}`;
 };
 
-export const NotificationDialog = ({ open, onClose, meeting, participants = [] }) => {
+const NotificationDialogInner = ({ onClose, meeting, participants = NO_PARTICIPANTS  }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isDarkMode = theme.palette.mode === 'dark';
@@ -72,135 +75,14 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
     ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
     : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)';
 
-  // ✅ DEBUG: Inspect raw participant data structure when dialog opens
-  useEffect(() => {
-    if (open && participants && participants.length > 0) {
-      console.log('\n╔════════════════════════════════════════════════════════════╗');
-      console.log('║         RAW PARTICIPANT DATA FROM API (FIRST LOAD)         ║');
-      console.log('╚════════════════════════════════════════════════════════════╝\n');
-
-      participants.slice(0, 2).forEach((p, idx) => {
-        console.log(`[Participant ${idx}] Raw Object Structure:`);
-        console.log('────────────────────────────────────────────────────────────');
-        console.log(JSON.stringify(p, null, 2));
-        console.log('');
-      });
-
-      console.log('════════════════════════════════════════════════════════════\n');
-    }
-  }, [open, participants]);
-
+  
   // ✅ FULLY FIXED: Comprehensive participant ID extraction with detailed diagnostics
-  const validParticipantIds = useMemo(() => {
-    if (!Array.isArray(participants)) {
-      console.warn('❌ participants is not an array');
-      return [];
-    }
+  const validParticipantIds = useMemo(
+    () => (Array.isArray(participants) ? participants.map(getParticipantId).filter(Boolean) : []),
+    [participants]
+  );
 
-    if (participants.length === 0) {
-      console.log('ℹ️ No participants provided');
-      return [];
-    }
-
-    console.log('\n╔════════════════════════════════════════════════════════════╗');
-    console.log('║     NOTIFICATION DIALOG: ID EXTRACTION & DIAGNOSTICS      ║');
-    console.log('╚════════════════════════════════════════════════════════════╝\n');
-
-    const ids = [];
-    const idMapping = {};
-
-    participants.forEach((p, idx) => {
-      console.log(`\n[Participant ${idx + 1}] ${p.name || p.full_name || 'Unknown'}`);
-      console.log('────────────────────────────────────────────────────────────');
-
-      // Log all ID fields available
-      console.log('Available ID fields:');
-      console.log(`  • participant_id: ${p.participant_id || 'MISSING'}`);
-      console.log(`  • id: ${p.id || 'MISSING'}`);
-      console.log(`  • user_id: ${p.user_id || 'MISSING'}`);
-      console.log(`  • created_by_id: ${p.created_by_id || 'MISSING'}`);
-
-      let selectedId = null;
-      let selectedSource = null;
-      let reason = '';
-
-      // PRIORITY 1: participant_id (most reliable)
-      if (p?.participant_id && p.participant_id.toString().trim()) {
-        selectedId = p.participant_id;
-        selectedSource = 'participant_id';
-        reason = '✅ PRIMARY: MeetingParticipant ID';
-      }
-      // PRIORITY 2: id (if participant_id doesn't exist)
-      else if (p?.id && p.id.toString().trim()) {
-        selectedId = p.id;
-        selectedSource = 'id';
-        reason = '⚠️  FALLBACK: Using id field';
-
-        // Check if this looks like it might be wrong
-        if (p.created_by_id && p.id === p.created_by_id) {
-          console.warn(
-            `     ⚠️  WARNING: id matches created_by_id - this might be User ID, not Participant ID!`
-          );
-        }
-      }
-      // PRIORITY 3: user_id (last resort)
-      else if (p?.user_id && p.user_id.toString().trim()) {
-        selectedId = p.user_id;
-        selectedSource = 'user_id';
-        reason = '❌ LAST RESORT: Using user_id';
-      }
-
-      if (selectedId) {
-        ids.push(selectedId);
-        idMapping[selectedId] = {
-          name: p.name || p.full_name || 'Unknown',
-          source: selectedSource,
-          email: p.email
-        };
-
-        console.log(`\n🎯 Selected: ${selectedId}`);
-        console.log(`   Source: ${selectedSource}`);
-        console.log(`   Reason: ${reason}`);
-      } else {
-        console.error(
-          `❌ CRITICAL: No valid ID found for "${p.name || p.full_name || 'Unknown'}"`
-        );
-        console.error(`   This participant WILL BE SKIPPED`);
-      }
-    });
-
-    // Final summary
-    console.log('\n════════════════════════════════════════════════════════════');
-    console.log(`\n📊 FINAL RESULTS:`);
-    console.log(`   Total participants: ${participants.length}`);
-    console.log(`   Valid IDs extracted: ${ids.length}`);
-    if (ids.length < participants.length) {
-      console.warn(`   ⚠️  ${participants.length - ids.length} participant(s) have no valid ID`);
-    }
-
-    console.log('\n🔗 ID MAPPING:');
-    ids.forEach((id) => {
-      const mapping = idMapping[id];
-      console.log(`   ${id}`);
-      console.log(`   └─ ${mapping.source} → "${mapping.name}" <${mapping.email}>`);
-    });
-
-    console.log('\n════════════════════════════════════════════════════════════\n');
-
-    return ids;
-  }, [participants]);
-
-  // Reset form when dialog opens/closes
-  useEffect(() => {
-    if (open) {
-      setSelectedParticipants([]);
-      setNotificationType(['email']);
-      setCustomMessage('');
-      setError(null);
-      setSuccess(null);
-    }
-  }, [open]);
-
+  
   const isAllSelected = useMemo(() => {
     return (
       validParticipantIds.length > 0 &&
@@ -361,11 +243,6 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
 
   const handleClose = () => {
     if (sending) return;
-    setSelectedParticipants([]);
-    setNotificationType(['email']);
-    setCustomMessage('');
-    setError(null);
-    setSuccess(null);
     onClose();
   };
 
@@ -409,7 +286,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
 
   return (
     <Dialog
-      open={open}
+      open
       onClose={handleClose}
       fullScreen={isMobile}
       maxWidth="sm"
@@ -439,8 +316,8 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
           }}
         />
 
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={2} alignItems="center">
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
             <Avatar
               sx={{
                 bgcolor: alpha(primaryMain, isDarkMode ? 0.2 : 0.1),
@@ -635,12 +512,7 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
               {participants?.length > 0 ? (
                 participants.map((p, index) => {
                   // ✅ FULLY FIXED: Extract ID with proper fallback
-                  const participantId = (() => {
-                    if (p?.participant_id) return p.participant_id;
-                    if (p?.id) return p.id;
-                    if (p?.user_id) return p.user_id;
-                    return null;
-                  })();
+                  const participantId = getParticipantId(p);
 
                   // Skip if no ID
                   if (!participantId) return null;
@@ -652,9 +524,9 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
                     <React.Fragment key={participantId}>
                       <Stack
                         direction="row"
-                        alignItems="center"
                         sx={{
                           p: 2,
+                          alignItems: 'center',
                           transition: 'background 0.2s',
                           opacity: sending ? 0.6 : 1,
                           '&:hover': {
@@ -798,5 +670,8 @@ export const NotificationDialog = ({ open, onClose, meeting, participants = [] }
     </Dialog>
   );
 };
+
+export const NotificationDialog = (props) =>
+  props.open ? <NotificationDialogInner {...props} /> : null;
 
 export default NotificationDialog;

@@ -118,7 +118,6 @@ logs/
 *.db-journal
 
 # Alembic migrations
-alembic/versions/
 !alembic/versions/.gitkeep
 
 # Uploads

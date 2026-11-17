@@ -34,7 +34,7 @@ const SignInSide = () => {
           justifyContent: 'center',
           position: 'relative',
           overflow: 'auto',
-          py: { xs: 4, md: 0 },
+          p: { xs: 2, sm: 3 },
           '&::before': {
             content: '""',
             display: 'block',
@@ -52,22 +52,10 @@ const SignInSide = () => {
             backgroundSize: 'cover',
           },
         }}
-      >
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          sx={{
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: { xs: 4, md: 8, lg: 12 },
-            p: { xs: 2, sm: 3, md: 4 },
-            width: '100%',
-            maxWidth: '1400px',
-            mx: 'auto',
-          }}
-        >
-          {!isMobile && <Content />}
+      >       
+          
           <SignInCard />
-        </Stack>
+        
       </Box>
     </>
   );

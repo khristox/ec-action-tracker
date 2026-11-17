@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 import uuid
@@ -28,6 +28,11 @@ router = APIRouter()
 department_router = APIRouter()
 
 
+def _utcnow() -> datetime:
+    """Timezone-aware UTC 'now' (replaces naive datetime.utcnow())."""
+    return datetime.now(timezone.utc)
+
+
 # ==================== Helper Functions ====================
 
 async def validate_user_exists(db: AsyncSession, user_id: str) -> bool:
@@ -47,6 +52,8 @@ async def check_duplicate_assignment(
     user_id: str,
     department_id: str
 ) -> bool:
+    # NOTE: scalars().first() instead of scalar_one_or_none() so that several
+    # matching rows can never raise MultipleResultsFound here.
     query = select(UserDepartment).where(
         and_(
             UserDepartment.user_id == user_id,
@@ -55,7 +62,7 @@ async def check_duplicate_assignment(
         )
     )
     result = await db.execute(query)
-    return result.scalar_one_or_none() is not None
+    return result.scalars().first() is not None
 
 
 async def get_user_with_assignments(
@@ -101,6 +108,36 @@ async def get_department_assignments(
     )
     result = await db.execute(query)
     return result.scalars().all()
+
+
+async def deactivate_active_assignments(
+    db: AsyncSession,
+    user_id: str,
+    department_id: str
+) -> int:
+    """
+    Soft-unlink a user from a department.
+
+    Only ACTIVE rows are touched (a user can have older INACTIVE rows for the
+    same department after being re-assigned), and every matching active row is
+    closed, so this never raises MultipleResultsFound.
+    Returns the number of rows deactivated.
+    """
+    result = await db.execute(
+        select(UserDepartment).where(
+            and_(
+                UserDepartment.user_id == user_id,
+                UserDepartment.department_id == department_id,
+                UserDepartment.status == UserDepartmentStatus.ACTIVE,
+            )
+        )
+    )
+    assignments = result.scalars().all()
+    now = _utcnow()
+    for assignment in assignments:
+        assignment.status = UserDepartmentStatus.INACTIVE
+        assignment.end_date = now
+    return len(assignments)
 
 
 def user_department_to_response(assignment: UserDepartment) -> UserDepartmentResponse:
@@ -193,7 +230,7 @@ async def create_user_department_assignment(
             role=assignment_data.role,
             status=assignment_data.status,
             is_primary=assignment_data.is_primary,
-            start_date=assignment_data.start_date or datetime.utcnow(),
+            start_date=assignment_data.start_date or _utcnow(),
             end_date=assignment_data.end_date,
             title=assignment_data.title,
             responsibilities=assignment_data.responsibilities,
@@ -222,7 +259,9 @@ async def get_user_department_assignments(
     user_id: Optional[str] = Query(None),
     department_id: Optional[str] = Query(None),
     role: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    # Renamed from `status` so it no longer shadows fastapi.status in this function.
+    # alias="status" keeps the public URL parameter unchanged (?status=active).
+    status_filter: Optional[str] = Query(None, alias="status"),
     is_primary: Optional[bool] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -242,8 +281,8 @@ async def get_user_department_assignments(
             query = query.where(UserDepartment.department_id == department_id)
         if role:
             query = query.where(UserDepartment.role == role)
-        if status:
-            query = query.where(UserDepartment.status == status)
+        if status_filter:
+            query = query.where(UserDepartment.status == status_filter)
         if is_primary is not None:
             query = query.where(UserDepartment.is_primary == is_primary)
 
@@ -315,7 +354,7 @@ async def update_user_department_assignment(
             )
         for field, value in update_dict.items():
             setattr(assignment, field, value)
-        assignment.updated_at = datetime.utcnow()
+        assignment.updated_at = _utcnow()
         await db.commit()
         await db.refresh(assignment)
         return user_department_to_response(assignment)
@@ -345,7 +384,7 @@ async def delete_user_department_assignment(
             await db.delete(assignment)
         else:
             assignment.status = UserDepartmentStatus.INACTIVE
-            assignment.end_date = datetime.utcnow()
+            assignment.end_date = _utcnow()
         await db.commit()
 
     except HTTPException:
@@ -409,35 +448,35 @@ async def get_users(
 ) -> List[UserResponse]:
     """Get all users (admin only)"""
     from sqlalchemy.orm import selectinload
-    
+
     filter_active = is_active if is_active is not None else active_only
-    
+
     query = select(User)
-    
+
     if include_departments:
         query = query.options(
             selectinload(User.user_departments).selectinload(UserDepartment.department)
         )
-    
+
     if filter_active:
         query = query.where(User.is_active == True)
-    
+
     if search and len(search.strip()) >= 2:
         t = f"%{search.strip()}%"
         query = query.where(or_(
-            User.first_name.ilike(t), 
+            User.first_name.ilike(t),
             User.last_name.ilike(t),
-            User.email.ilike(t), 
-            User.username.ilike(t), 
+            User.email.ilike(t),
+            User.username.ilike(t),
             User.phone.ilike(t),
             func.concat(User.first_name, ' ', User.last_name).ilike(t)
         ))
-    
+
     query = query.offset(skip).limit(limit).order_by(User.created_at.desc())
-    
+
     result = await db.execute(query)
     users = result.scalars().all()
-    
+
     return [
         UserResponse(
             id=u.id,
@@ -460,7 +499,7 @@ async def get_users(
                     role=ud.role,
                     is_primary=ud.is_primary
                 )
-                for ud in u.user_departments 
+                for ud in u.user_departments
                 if ud.department and ud.status == "active"
             ] if include_departments else []
         )
@@ -550,7 +589,7 @@ async def assign_department_to_users(
                 db.add(UserDepartment(
                     user_id=user_id, department_id=department_id,
                     role=assign_data.role, is_primary=assign_data.is_primary,
-                    start_date=datetime.utcnow()
+                    start_date=_utcnow()
                 ))
         await db.commit()
 
@@ -597,16 +636,14 @@ async def unlink_department_user(
     try:
         validate_uuid(department_id, "Department ID")
         validate_uuid(user_id, "User ID")
-        result = await db.execute(
-            select(UserDepartment).where(
-                and_(UserDepartment.department_id == department_id, UserDepartment.user_id == user_id)
-            )
-        )
-        assignment = result.scalar_one_or_none()
-        if not assignment:
+
+        # FIX: only ACTIVE rows are matched, and all of them are closed, so a
+        # user with an old INACTIVE row for the same department no longer
+        # causes MultipleResultsFound (HTTP 500).
+        closed = await deactivate_active_assignments(db, user_id, department_id)
+        if not closed:
             raise HTTPException(status_code=404, detail="User assignment not found in this department")
-        assignment.status = UserDepartmentStatus.INACTIVE
-        assignment.end_date = datetime.utcnow()
+
         await db.commit()
         return {"message": "User unlinked from department successfully", "success": True}
     except HTTPException:
@@ -636,26 +673,52 @@ async def assign_user_to_departments(
         if not await validate_user_exists(db, user_id):
             raise HTTPException(status_code=404, detail="User not found")
 
+        # FIX: a user may have at most ONE primary department. When is_primary
+        # is requested, the FIRST department in the list becomes the primary
+        # and any previous primary flag on this user is cleared. (Previously
+        # every department in the request was marked primary.)
+        primary_dept_id = (
+            assign_data.department_ids[0]
+            if assign_data.is_primary and assign_data.department_ids
+            else None
+        )
+
+        # Validate everything first so nothing is half-applied on a bad request
         for dept_id in assign_data.department_ids:
             validate_uuid(dept_id, "Department ID")
             if not await validate_department_exists(db, dept_id):
                 raise HTTPException(status_code=404, detail=f"Department not found: {dept_id}")
+
+        if primary_dept_id:
+            await db.execute(
+                update(UserDepartment)
+                .where(UserDepartment.user_id == user_id, UserDepartment.is_primary == True)
+                .values(is_primary=False)
+            )
+
+        for dept_id in assign_data.department_ids:
             if not await check_duplicate_assignment(db, user_id, dept_id):
                 db.add(UserDepartment(
                     user_id=user_id, department_id=dept_id,
-                    role=assign_data.role, is_primary=assign_data.is_primary,
-                    start_date=datetime.utcnow()
+                    role=assign_data.role,
+                    is_primary=(dept_id == primary_dept_id),
+                    start_date=_utcnow()
                 ))
 
-        if assign_data.is_primary:
+        # If the chosen primary department was already assigned (no new row was
+        # added above), flag its existing ACTIVE assignment as primary.
+        if primary_dept_id:
+            await db.flush()
             await db.execute(
                 update(UserDepartment)
                 .where(
                     UserDepartment.user_id == user_id,
-                    UserDepartment.department_id.in_(assign_data.department_ids)
+                    UserDepartment.department_id == primary_dept_id,
+                    UserDepartment.status == UserDepartmentStatus.ACTIVE
                 )
                 .values(is_primary=True)
             )
+
         await db.commit()
 
         result = await db.execute(
@@ -700,16 +763,12 @@ async def unlink_user_department(
     try:
         validate_uuid(user_id, "User ID")
         validate_uuid(department_id, "Department ID")
-        result = await db.execute(
-            select(UserDepartment).where(
-                and_(UserDepartment.user_id == user_id, UserDepartment.department_id == department_id)
-            )
-        )
-        assignment = result.scalar_one_or_none()
-        if not assignment:
+
+        # FIX: same as unlink_department_user — only ACTIVE rows, close them all.
+        closed = await deactivate_active_assignments(db, user_id, department_id)
+        if not closed:
             raise HTTPException(status_code=404, detail="Department assignment not found")
-        assignment.status = UserDepartmentStatus.INACTIVE
-        assignment.end_date = datetime.utcnow()
+
         await db.commit()
         return {"message": "Department unlinked successfully", "success": True}
     except HTTPException:

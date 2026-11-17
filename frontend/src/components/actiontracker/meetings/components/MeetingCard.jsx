@@ -36,6 +36,7 @@ import {
   CalendarToday,
   ChevronRight,
   Add as AddIcon,
+  ListAlt as ListAltIcon,
   MoreVert as MoreVertIcon,
   Share as ShareIcon,
   ContentCopy as ContentCopyIcon,
@@ -45,6 +46,7 @@ import {
   Lock as LockIcon,
   Public as PublicIcon,
   Group as GroupIcon,
+  Assignment as AssignmentIcon, // ✅ Added for Action Counter
 } from "@mui/icons-material";
 
 // ============ COLORS ============
@@ -68,55 +70,31 @@ const COLORS = {
 
 // ============ STATUS MAPPINGS ============
 const STATUS_MUI_COLOR_MAP = {
+  PENDING: "warning",
   STARTED: "success",
   ENDED: "default",
-  PENDING: "warning",
-  CANCELED: "error",
-  SCHEDULED: "info",
-  POSTPONED: "warning",
-  DRAFT: "secondary",
-  IN_PROGRESS: "success",
-  COMPLETED: "default",
-  UPCOMING: "info",
+  CANCELLED: "error",
 };
 
 const STATUS_HEX_COLOR_MAP = {
+  PENDING: "#ed6c02",
   STARTED: "#2e7d32",
   ENDED: "#757575",
-  PENDING: "#ed6c02",
-  CANCELED: "#d32f2f",
-  SCHEDULED: "#0288d1",
-  POSTPONED: "#ed6c02",
-  DRAFT: "#9c27b0",
-  IN_PROGRESS: "#2e7d32",
-  COMPLETED: "#757575",
-  UPCOMING: "#0288d1",
+  CANCELLED: "#d32f2f",
 };
 
 const STATUS_BG_COLOR_MAP = {
+  PENDING: "#fff3e0",
   STARTED: "#e8f5e9",
   ENDED: "#f5f5f5",
-  PENDING: "#fff3e0",
-  CANCELED: "#ffebee",
-  SCHEDULED: "#e3f2fd",
-  POSTPONED: "#f3e5f5",
-  DRAFT: "#f3e5f5",
-  IN_PROGRESS: "#e8f5e9",
-  COMPLETED: "#f5f5f5",
-  UPCOMING: "#e3f2fd",
+  CANCELLED: "#ffebee",
 };
 
 const STATUS_LABEL_MAP = {
+  PENDING: "Pending",
   STARTED: "Started",
   ENDED: "Ended",
-  PENDING: "Pending",
-  CANCELED: "Canceled",
-  SCHEDULED: "Scheduled",
-  POSTPONED: "Postponed",
-  DRAFT: "Draft",
-  IN_PROGRESS: "In Progress",
-  COMPLETED: "Completed",
-  UPCOMING: "Upcoming",
+  CANCELLED: "Cancelled",
 };
 
 // ============ VISIBILITY CONFIGURATION ============
@@ -152,89 +130,68 @@ const VISIBILITY_CONFIG = {
 };
 
 // ============ STATUS EXTRACTION HELPER ============
+const VALID_MEETING_STATUSES = [
+  "PENDING",
+  "STARTED",
+  "ENDED",
+  "CANCELLED",
+];
+
+const normalizeMeetingStatus = (value) => {
+  if (!value) return "PENDING";
+
+  const normalized = String(value)
+    .trim()
+    .toUpperCase()
+    .replace(/-/g, "_")
+    .replace(/\s+/g, "_");
+
+  // Normalize common legacy spelling
+  if (normalized === "CANCELED") {
+    return "CANCELLED";
+  }
+
+  // Only allow the four canonical meeting states
+  if (VALID_MEETING_STATUSES.includes(normalized)) {
+    return normalized;
+  }
+
+  return "PENDING";
+};
+
 const extractStatusInfo = (meeting) => {
+  let rawStatus = null;
+
   if (meeting?.status && typeof meeting.status === "object") {
-    const shortName = meeting.status.short_name?.toUpperCase() || "";
-    const name = meeting.status.name || "";
-    const label = shortName || name || "Unknown";
-
-    const color =
-      meeting.status.color || STATUS_MUI_COLOR_MAP[shortName] || "default";
-    const hexColor =
-      meeting.status.hex_color || STATUS_HEX_COLOR_MAP[shortName] || "#757575";
-    const bgColor =
-      meeting.status.bg_color || STATUS_BG_COLOR_MAP[shortName] || "#f5f5f5";
-
-    return {
-      label,
-      color,
-      hexColor,
-      bgColor,
-      shortName,
-      raw: meeting.status,
-    };
+    rawStatus =
+      meeting.status.short_name ||
+      meeting.status.code ||
+      meeting.status.name ||
+      null;
+  } else if (typeof meeting?.status === "string") {
+    rawStatus = meeting.status;
   }
 
-  if (typeof meeting?.status === "string") {
-    const upper = meeting.status.toUpperCase();
-    const label = STATUS_LABEL_MAP[upper] || meeting.status;
-    const color = STATUS_MUI_COLOR_MAP[upper] || "default";
-    const hexColor = STATUS_HEX_COLOR_MAP[upper] || "#757575";
-    const bgColor = STATUS_BG_COLOR_MAP[upper] || "#f5f5f5";
-
-    return {
-      label,
-      color,
-      hexColor,
-      bgColor,
-      shortName: upper,
-      raw: meeting.status,
-    };
-  }
-
-  if (
-    meeting?.status_id &&
-    meeting?.status &&
-    typeof meeting.status === "object"
-  ) {
-    const shortName = meeting.status.short_name?.toUpperCase() || "";
-    if (shortName) {
-      const label =
-        meeting.status.short_name || meeting.status.name || "Unknown";
-      const color =
-        meeting.status.color || STATUS_MUI_COLOR_MAP[shortName] || "default";
-      const hexColor =
-        meeting.status.hex_color ||
-        STATUS_HEX_COLOR_MAP[shortName] ||
-        "#757575";
-      const bgColor =
-        meeting.status.bg_color || STATUS_BG_COLOR_MAP[shortName] || "#f5f5f5";
-
-      return {
-        label,
-        color,
-        hexColor,
-        bgColor,
-        shortName,
-        raw: meeting.status,
-      };
-    }
-  }
+  const shortName = normalizeMeetingStatus(rawStatus);
 
   return {
-    label: "Unknown",
-    color: "default",
-    hexColor: "#757575",
-    bgColor: "#f5f5f5",
-    shortName: "",
-    raw: null,
+    label: STATUS_LABEL_MAP[shortName],
+    color: meeting?.status?.color || STATUS_MUI_COLOR_MAP[shortName],
+    hexColor:
+      meeting?.status?.hex_color ||
+      STATUS_HEX_COLOR_MAP[shortName],
+    bgColor:
+      meeting?.status?.bg_color ||
+      STATUS_BG_COLOR_MAP[shortName],
+    shortName,
+    raw: meeting?.status || null,
   };
 };
 
 // ============ COMPONENTS ============
 const StatusChip = React.memo(({ statusInfo }) => {
-  const label = statusInfo?.label || "Unknown";
-  const color = statusInfo?.color || "default";
+  const label = statusInfo?.label || "Pending";
+  const color = statusInfo?.color || "warning";
 
   return (
     <Chip
@@ -244,21 +201,19 @@ const StatusChip = React.memo(({ statusInfo }) => {
       sx={{
         fontWeight: 700,
         borderRadius: 1.5,
-        height: 24,
-        fontSize: "0.7rem",
+        height: 22,
+        fontSize: "0.65rem",
         textTransform: "uppercase",
         letterSpacing: "0.3px",
-        "& .MuiChip-label": { px: 1.2 },
+        "& .MuiChip-label": { px: 1 },
       }}
     />
   );
 });
 
-// ============ VISIBILITY CHIP COMPONENT ============
 const VisibilityChip = React.memo(({ visibility, restrictedDepartmentName }) => {
   const config = VISIBILITY_CONFIG[visibility] || VISIBILITY_CONFIG.open;
   
-  // If it's a department-restricted meeting, show the department name
   const isDepartmentRestricted = visibility === 'department' || visibility === 'restricted';
   const departmentLabel = isDepartmentRestricted && restrictedDepartmentName 
     ? `: ${restrictedDepartmentName}` 
@@ -271,7 +226,7 @@ const VisibilityChip = React.memo(({ visibility, restrictedDepartmentName }) => 
         label={`${config.label}${departmentLabel}`}
         size="small"
         sx={{
-          height: 24,
+          height: 22,
           fontSize: "0.6rem",
           fontWeight: 600,
           bgcolor: config.bgColor,
@@ -291,9 +246,7 @@ const VisibilityChip = React.memo(({ visibility, restrictedDepartmentName }) => 
 });
 VisibilityChip.displayName = 'VisibilityChip';
 
-// ============ DEPARTMENT INFO COMPONENT ============
 const DepartmentInfo = React.memo(({ departmentName, restrictedDepartmentName, visibility }) => {
-  // Only show if there's department information
   if (!departmentName && !restrictedDepartmentName) {
     return null;
   }
@@ -311,8 +264,8 @@ const DepartmentInfo = React.memo(({ departmentName, restrictedDepartmentName, v
         display: 'flex',
         alignItems: 'center',
         gap: 0.5,
-        px: 1,
-        py: 0.5,
+        px: 0.75,
+        py: 0.35,
         borderRadius: 1,
         bgcolor: alpha(COLORS.primary, 0.04),
         border: `1px solid ${alpha(COLORS.primary, 0.08)}`,
@@ -324,7 +277,7 @@ const DepartmentInfo = React.memo(({ departmentName, restrictedDepartmentName, v
         sx={{
           fontWeight: 500,
           color: 'text.secondary',
-          fontSize: '0.65rem',
+          fontSize: '0.6rem',
         }}
       >
         {displayName}
@@ -355,15 +308,15 @@ const InfoItem = React.memo(({ icon, label, value, color = "#0288d1" }) => {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          width: 28,
-          height: 28,
+          width: 24,
+          height: 24,
           borderRadius: 1,
           bgcolor: alpha(safeColor, 0.1),
           flexShrink: 0,
-          mt: 0.5,
+          mt: 0.25,
         }}
       >
-        {React.cloneElement(icon, { sx: { fontSize: 16, color: safeColor } })}
+        {React.cloneElement(icon, { sx: { fontSize: 14, color: safeColor } })}
       </Box>
       <Box sx={{ minWidth: 0 }}>
         <Typography
@@ -410,9 +363,9 @@ const ParticipantAvatars = React.memo(({ participants, count, max = 3 }) => {
         max={max}
         sx={{
           "& .MuiAvatar-root": {
-            width: 24,
-            height: 24,
-            fontSize: "0.6rem",
+            width: 22,
+            height: 22,
+            fontSize: "0.55rem",
             border: "2px solid",
             borderColor: "background.paper",
           },
@@ -423,9 +376,9 @@ const ParticipantAvatars = React.memo(({ participants, count, max = 3 }) => {
             key={idx}
             sx={{
               bgcolor: COLORS.primary,
-              width: 24,
-              height: 24,
-              fontSize: "0.6rem",
+              width: 22,
+              height: 22,
+              fontSize: "0.55rem",
             }}
           >
             {p?.name?.charAt(0) || p?.email?.charAt(0) || "P"}
@@ -449,6 +402,7 @@ export const MeetingCard = ({
   meeting,
   statusOptions,
   onView,
+  onViewSeriesActions,
   onEdit,
   onNotify,
   onGenerateMeeting,
@@ -457,9 +411,9 @@ export const MeetingCard = ({
   onShare,
   onCopyLink,
   onPrint,
+  onViewMeetingActions, // ✅ NEW PROP
   sx = {},
-  // NEW: Source context for navigation
-  source = 'meetings', // 'meetings' or 'recurring-meetings'
+  source = 'meetings',
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -535,12 +489,35 @@ export const MeetingCard = ({
   const isCompact = isMobile || isTablet;
   const statusColor = statusInfo?.hexColor || "#757575";
 
-  // Check if meeting allows adding actions (in progress or started)
+  // Actions can only be added while the meeting is started
   const canAddActions = useMemo(() => {
-    const status = statusInfo?.shortName?.toUpperCase() || "";
-    const allowedStatuses = ["STARTED", "IN_PROGRESS", "ONGOING"];
-    return allowedStatuses.includes(status);
+    return statusInfo?.shortName === "STARTED";
   }, [statusInfo?.shortName]);
+
+  // ============ Cummulative actions for recurring meetings ============
+  const seriesId = useMemo(
+    () => meeting?.recurring_meeting_id || (source === 'recurring-meetings' ? meeting?.id : null),
+    [meeting?.recurring_meeting_id, meeting?.id, source],
+  );
+
+  const handleSeriesActionsClick = useCallback(
+    (e) => {
+      e.stopPropagation();
+      if (seriesId && onViewSeriesActions) onViewSeriesActions(seriesId, meeting);
+    },
+    [onViewSeriesActions, seriesId, meeting],
+  );
+
+  // ✅ NEW HANDLER for Action Counter
+  const handleActionCounterClick = useCallback(
+    (e) => {
+      e.stopPropagation();
+      if (onViewMeetingActions && meeting?.id) {
+        onViewMeetingActions(meeting.id);
+      }
+    },
+    [onViewMeetingActions, meeting?.id],
+  );
 
   // Get visibility and department info
   const visibility = useMemo(
@@ -559,28 +536,16 @@ export const MeetingCard = ({
   );
 
   // Responsive icon size
-  const iconSize = useMemo(() => {
-    if (isMobile) return "small";
-    if (isTablet) return "small";
-    return "medium";
-  }, [isMobile, isTablet]);
+  const iconSize = "small";
 
   // ============ HANDLERS ============
   
-  /**
-   * Handle card click - navigates to meeting detail with source context
-   */
   const handleCardClick = useCallback(() => {
     if (meeting?.id && onView) {
-      // Pass the source context to the onView callback
-      // The parent component will handle the navigation with state
       onView(meeting.id, source);
     }
   }, [onView, meeting?.id, source]);
 
-  /**
-   * Handle edit click - navigates to edit page with source context
-   */
   const handleEditClick = useCallback(
     (e) => {
       e.stopPropagation();
@@ -693,7 +658,7 @@ export const MeetingCard = ({
         overflow: "hidden",
         "&:hover": {
           borderColor: statusColor,
-          transform: isMobile ? "none" : "translateY(-4px)",
+          transform: isMobile ? "none" : "translateY(-2px)",
           boxShadow: theme.shadows[8],
         },
         "&::before": {
@@ -720,11 +685,11 @@ export const MeetingCard = ({
 
       <CardContent
         sx={{
-          p: isMobile ? 1.5 : 2.5,
+          p: isMobile ? 1.25 : 1.5,
           flexGrow: 1,
           display: "flex",
           flexDirection: "column",
-          gap: 1.5,
+          gap: 1,
         }}
       >
         {/* Header with Status and Visibility Chips */}
@@ -746,7 +711,6 @@ export const MeetingCard = ({
           >
             <StatusChip statusInfo={statusInfo} />
             
-            {/* Visibility Chip - Shows department name for restricted meetings */}
             <VisibilityChip 
               visibility={visibility} 
               restrictedDepartmentName={restrictedDepartmentName}
@@ -792,12 +756,12 @@ export const MeetingCard = ({
           sx={{
             fontWeight: 800,
             color: "text.primary",
-            lineHeight: 1.3,
+            lineHeight: 1.2,
             display: "-webkit-box",
             WebkitLineClamp: 2,
             WebkitBoxOrient: "vertical",
             overflow: "hidden",
-            minHeight: isCompact ? "2.4rem" : "3rem",
+            minHeight: isCompact ? "2.2rem" : "2.5rem",
             "&:hover": { color: statusColor },
           }}
         >
@@ -817,7 +781,7 @@ export const MeetingCard = ({
         <Paper
           elevation={0}
           sx={{
-            p: isCompact ? 1 : 1.5,
+            p: isCompact ? 0.75 : 1,
             bgcolor: alpha(COLORS.info, 0.04),
             borderRadius: 2,
             border: `1px solid ${alpha(COLORS.info, 0.08)}`,
@@ -825,7 +789,7 @@ export const MeetingCard = ({
         >
           <Stack
             direction={isCompact ? "column" : "row"}
-            spacing={isCompact ? 1 : 2}
+            spacing={isCompact ? 0.75 : 1.5}
           >
             <InfoItem
               icon={<AccessTime />}
@@ -842,22 +806,38 @@ export const MeetingCard = ({
           </Stack>
         </Paper>
 
-        {/* Participants */}
+        {/* Participants and Action Counter */}
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             mt: "auto",
-            pt: 1,
+            pt: 0.75,
             borderTop: `1px solid ${alpha("#e0e0e0", 0.5)}`,
+            gap: 1,
           }}
         >
-          <ParticipantAvatars
-            participants={meeting.participants}
-            count={participantCount}
-            max={isCompact ? 3 : 4}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            <ParticipantAvatars
+              participants={meeting.participants}
+              count={participantCount}
+              max={isCompact ? 3 : 4}
+            />
+
+            <Tooltip title="View meeting actions">
+              <Chip
+                icon={<AssignmentIcon sx={{ fontSize: '14px !important' }} />}
+                label={`${meeting.action_count ?? 0} ${meeting.action_count === 1 ? 'Action' : 'Actions'}`}
+                size="small"
+                color={meeting.action_count > 0 ? "primary" : "default"}
+                variant={meeting.action_count > 0 ? "filled" : "outlined"}
+                onClick={handleActionCounterClick}
+                sx={{ height: 22, fontSize: "0.65rem", cursor: "pointer", fontWeight: 600, '&:hover': { opacity: 0.8 } }}
+              />
+            </Tooltip>
+            
+          </Box>
 
           {meeting.agenda_items?.length > 0 && (
             <Chip
@@ -878,15 +858,15 @@ export const MeetingCard = ({
       {/* Action Buttons */}
       <Box
         sx={{
-          px: isMobile ? 1.5 : 2.5,
-          py: isMobile ? 1 : 1.5,
+          px: isMobile ? 1 : 1.5,
+          py: isMobile ? 0.5 : 0.75,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           borderTop: `1px solid ${alpha(statusColor, 0.1)}`,
           bgcolor: alpha(statusColor, 0.02),
           flexShrink: 0,
-          gap: 1,
+          gap: 0.5,
         }}
       >
         <Stack direction="row" spacing={0.5}>
@@ -906,7 +886,6 @@ export const MeetingCard = ({
             </IconButton>
           </Tooltip>
 
-          {/* Add Action Button */}
           <Tooltip title="Add Action Item" placement="top">
             <IconButton
               size={iconSize}
@@ -957,7 +936,18 @@ export const MeetingCard = ({
             </Tooltip>
           )}
 
-          {/* More Options Menu */}
+          {seriesId && onViewSeriesActions && (
+            <Tooltip title="All actions in this series" placement="top">
+              <IconButton
+                size={iconSize}
+                onClick={handleSeriesActionsClick}
+                sx={{ color: "text.secondary", "&:hover": { bgcolor: alpha(COLORS.primary, 0.1), color: COLORS.primary } }}
+              >
+                <ListAltIcon fontSize={iconSize} />
+              </IconButton>
+            </Tooltip>
+          )}
+
           <Tooltip title="More Options" placement="top">
             <IconButton
               size={iconSize}
@@ -1014,7 +1004,6 @@ export const MeetingCard = ({
           },
         }}
       >
-        {/* Add Action - also in menu */}
         {canAddActions && (
           <MenuItem onClick={handleAddActionClick}>
             <ListItemIcon>

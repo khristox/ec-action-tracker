@@ -71,16 +71,15 @@ async def list_attribute_groups_internal(
     
     # Apply visibility rules
     if public_only:
+        # Explicitly requested public groups only
         base_query = base_query.where(public_filter)
     elif current_user is None:
+        # Unauthenticated users can only see public groups
         base_query = base_query.where(public_filter)
     else:
-        base_query = base_query.where(
-            or_(
-                public_filter,
-                # AttributeGroupModel.owner_id == current_user.id,
-            )
-        )
+        # Authenticated users can see all attribute groups
+        # Permission/role checks can be applied separately if required.
+        pass  # No additional filter for authenticated users; they can see all groups.
     
     # Apply other filters
     if code:

@@ -163,7 +163,7 @@ export const MeetingTableView = ({
                     py: 1.5
                   }}
                 >
-                  <Stack direction="row" alignItems="center" spacing={1}>
+                  <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1}>
                     <Typography 
                       variant="body2" 
                       fontWeight={600}

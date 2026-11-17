@@ -267,13 +267,7 @@ class MeetingActionCreate(MeetingActionBase):
     minute_id: Optional[UUID] = Field(None, description="ID of the associated minute")
     meeting_id: Optional[UUID] = Field(None, description="ID of the meeting (used when minute_id is not provided)")
     
-    @model_validator(mode="after")
-    def validate_minute_or_meeting(self) -> "MeetingActionCreate":
-        """Ensure either minute_id or meeting_id is provided"""
-        if not self.minute_id and not self.meeting_id:
-            raise ValueError("Either minute_id or meeting_id must be provided")
-        return self
-    
+        
     @model_validator(mode="after")
     def sync_legacy_fields(self) -> "MeetingActionCreate":
         """

@@ -1,164 +1,131 @@
 """
-Department-Based Access Control for Meetings
+app/api/v1/endpoints/action_tracker/meetings_access_control.py
 
-This module implements granular access control based on:
-1. Department membership (restricted_department_id)
-2. Participant status
-3. Creator status
-4. Meeting visibility
+Access level of a user for one meeting.
 
-Access Levels:
-- FULL: Creator or in restricted department → Can see all tabs
-- LIMITED: Participant in restricted meeting → Can see Overview, Actions, limited Participants
-- NONE: No access
+Uses the same rule as the meetings list (meeting_visibility.py), so the list,
+the detail page and the minutes can never disagree:
+
+  - Admins and the meeting's creator: FULL.
+  - Users whose department (or a department above it) covers the meeting:
+    FULL. This is the hierarchy rule: higher departments see lower ones,
+    never the other way round.
+  - Anyone else who may view the meeting (an invited participant outside
+    the hierarchy): LIMITED.
+  - Everyone else: NONE.
+
+Management authority (OWNER/ORGANIZER) is handled separately by
+PermissionChecker in meetings.py.
 """
 
 import logging
 from enum import Enum
 from uuid import UUID
-from typing import Optional
-from app.models.meetings.action_tracker import Meeting
-from app.models.meetings.user_department import UserDepartment
-from sqlalchemy import and_, select
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException, status
+
+from app.api.v1.endpoints.action_tracker.department_hierarchy import (
+    get_accessible_department_ids,
+)
+from app.api.v1.endpoints.action_tracker.meeting_visibility import (
+    department_scope_clause,
+    user_can_view_meeting,
+)
+from app.models.meetings.action_tracker import Meeting
+from app.models.meetings.user_department import (
+    UserDepartment,
+    UserDepartmentStatus,
+)
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 
-
 class AccessLevel(str, Enum):
-    """Access levels for department-based access control"""
     FULL = "full"
     LIMITED = "limited"
     NONE = "none"
- 
+
+
 class DepartmentAccessControl:
-    """Department-based access control for meetings"""
-    
+    """Department-based access control for meetings."""
+
     @staticmethod
     async def get_access_level(
         db: AsyncSession,
         meeting_id: UUID,
         user_id: UUID,
         user_email: str,
-        is_superuser: bool = False
+        is_superuser: bool = False,
     ) -> AccessLevel:
-        """
-        Determine access level for user to a meeting.
-        
-        Returns:
-        - FULL: User is creator OR in restricted department with ACTIVE status
-        - LIMITED: User is participant (but not creator/dept member)
-        - NONE: No access
-        """
-        
-        logger.info(f"🔍 Checking access for user {user_id} ({user_email}) to meeting {meeting_id}")
-        
-        # Superuser always has full access
-        """ if is_superuser:
-            logger.info(f"✅ User is superuser → FULL access")
-            return AccessLevel.FULL """
-        
+        if is_superuser:
+            return AccessLevel.FULL
+
         try:
-            # Fetch meeting with participants
-            result = await db.execute(
-                select(Meeting).options(
-                    selectinload(Meeting.participants)
-                ).where(Meeting.id == meeting_id)
-            )
-            meeting = result.scalar_one_or_none()
-            
+            # Load roles eagerly so the admin check works on a freshly loaded user
+            user = (await db.execute(
+                select(User).where(User.id == user_id).options(selectinload(User.roles))
+            )).scalar_one_or_none()
+            if not user:
+                return AccessLevel.NONE
+
+            # Single source of truth: same rule as the list and GET /meetings/{id}
+            if not await user_can_view_meeting(db, user, meeting_id):
+                return AccessLevel.NONE
+
+            meeting = (await db.execute(
+                select(Meeting).where(Meeting.id == meeting_id)
+            )).scalar_one_or_none()
             if not meeting:
-                logger.warning(f"❌ Meeting {meeting_id} not found")
                 return AccessLevel.NONE
-            
-            logger.info(f"📋 Meeting found: restricted_dept={meeting.restricted_department_id}, visibility={meeting.visibility}, created_by={meeting.created_by_id}")
-            
-            # ==================== CASE 1: Restricted Department Meeting ====================
-            if meeting.restricted_department_id:
-                logger.info(f"🏢 This is a RESTRICTED department meeting (dept={meeting.restricted_department_id})")
-                
-                # Check if user is in the restricted department with ACTIVE status
-                dept_result = await db.execute(
-                    select(UserDepartment).where(
-                        UserDepartment.user_id == user_id,
-                        UserDepartment.department_id == meeting.restricted_department_id,
-                        UserDepartment.status == 'active'  # ✅ MUST BE ACTIVE!
-                    )
+
+            if meeting.created_by_id == user_id:
+                return AccessLevel.FULL
+
+            # Department hierarchy (own departments and below) gets FULL
+            accessible = await get_accessible_department_ids(db, user_id)
+            if accessible:
+                in_scope = await db.execute(
+                    select(Meeting.id)
+                    .where(Meeting.id == meeting_id, department_scope_clause(accessible))
+                    .limit(1)
                 )
-                dept_member = dept_result.scalar_one_or_none()
-                
-                if dept_member:
-                    logger.info(f"✅ User IS in restricted department with ACTIVE status → FULL access")
+                if in_scope.first():
                     return AccessLevel.FULL
-                else:
-                    logger.warning(f"❌ User is NOT in restricted department with ACTIVE status (or status is inactive/member/etc)")
-                
-                # Check if user is a participant (even if not in department)
-                if meeting.participants:
-                    for p in meeting.participants:
-                        if p.email == user_email and p.is_active:
-                            logger.info(f"✅ User IS a participant in restricted meeting → LIMITED access")
-                            return AccessLevel.LIMITED
-                    logger.warning(f"❌ User is NOT a participant (checked {len(meeting.participants)} participants)")
-                else:
-                    logger.warning(f"❌ Meeting has no participants")
-                
-                # Not in department and not a participant = NO ACCESS
-                logger.info(f"🚫 User has NO access to restricted meeting")
-                return AccessLevel.NONE
-            
-            # ==================== CASE 2: Unrestricted (Open) Meeting ====================
-            else:
-                logger.info(f"🌐 This is an UNRESTRICTED meeting")
-                
-                # Check if creator
-                if meeting.created_by_id == user_id:
-                    logger.info(f"✅ User IS creator of unrestricted meeting → FULL access")
-                    return AccessLevel.FULL
-                
-                # Check if participant
-                if meeting.participants:
-                    for p in meeting.participants:
-                        if p.email == user_email and p.is_active:
-                            logger.info(f"✅ User IS a participant in unrestricted meeting → LIMITED access")
-                            return AccessLevel.LIMITED
-                
-                # Unrestricted meetings are visible to everyone
-                if meeting.visibility == 'open':
-                    logger.info(f"✅ Meeting visibility is 'open' → LIMITED access for everyone")
-                    return AccessLevel.FULL
-                
-                logger.info(f"🚫 User has NO access to unrestricted meeting")
-                return AccessLevel.NONE
-        
-        except Exception as e:
-            logger.error(f"❌ Error determining access level: {e}", exc_info=True)
+
+            # Visible, but not through the hierarchy: invited participant only
+            return AccessLevel.LIMITED
+
+        except Exception as exc:
+            logger.error(
+                "Error determining access level for user %s to meeting %s: %s",
+                user_id, meeting_id, exc, exc_info=True,
+            )
             return AccessLevel.NONE
-    
+
     @staticmethod
     async def _user_in_department(
         db: AsyncSession,
         user_id: UUID,
-        department_id: UUID
+        department_id: UUID,
     ) -> bool:
-        """
-        Check if user is in department with ACTIVE status.
-        ✅ Fixed: Now checks status == 'active'
-        """
+        """Direct active membership only. For hierarchy use get_accessible_department_ids()."""
+        if not department_id:
+            return False
+
         result = await db.execute(
             select(UserDepartment).where(
                 UserDepartment.user_id == user_id,
                 UserDepartment.department_id == department_id,
-                UserDepartment.status == 'active'  # ✅ CRITICAL FIX!
+                UserDepartment.status == UserDepartmentStatus.ACTIVE,
+                UserDepartment.end_date.is_(None),
             )
         )
         return result.scalar_one_or_none() is not None
- 
- 
-# ==================== HELPER FUNCTION ====================
+
 
 async def check_meeting_access_or_403(
     db: AsyncSession,
@@ -166,22 +133,23 @@ async def check_meeting_access_or_403(
     user_id: UUID,
     user_email: str,
     is_superuser: bool = False,
-    required_level: AccessLevel = AccessLevel.FULL
+    required_level: AccessLevel = AccessLevel.FULL,
 ) -> AccessLevel:
-    """
-    Check meeting access and raise 403 if not authorized.
-    
-    Returns the access level if authorized.
-    Raises HTTPException(403) if not authorized.
-    """
+    """Return the user's access level, or raise 403 if it is below `required_level`."""
     level = await DepartmentAccessControl.get_access_level(
-        db, meeting_id, user_id, user_email, is_superuser
+        db=db,
+        meeting_id=meeting_id,
+        user_id=user_id,
+        user_email=user_email,
+        is_superuser=is_superuser,
     )
-    
-    if level not in [AccessLevel.FULL, required_level]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to access this resource"
-        )
-    
-    return level
+
+    if level == AccessLevel.FULL:        # FULL satisfies every requirement
+        return level
+    if level == required_level:
+        return level
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You don't have permission to access this resource",
+    )

@@ -1,5 +1,5 @@
 # app/models/recurring_meeting.py
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, JSON, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, JSON, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
@@ -446,6 +446,7 @@ class RecurringMeetingOccurrence(Base):
         Index("ix_occurrences_scheduled_date", "scheduled_date"),
         Index("ix_occurrences_status", "status"),
         Index("ix_occurrences_recurring_status_date", "recurring_meeting_id", "status", "scheduled_date"),
+        UniqueConstraint("recurring_meeting_id", "occurrence_number", name="uq_rmo_series_number"),
     )
     
     # ==================== Properties ====================

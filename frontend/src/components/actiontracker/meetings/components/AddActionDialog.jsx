@@ -6,8 +6,7 @@ import {
   TextField, Button, LinearProgress, Alert,
   FormControl, InputLabel, Select, MenuItem,
   useMediaQuery, useTheme, IconButton, Typography,
-  Stack, Box, Chip, Divider, FormHelperText,
-  Checkbox, FormControlLabel, Autocomplete,
+  Stack, Box, Chip, Divider, FormHelperText, Autocomplete,
   alpha, Tooltip, Fade, Slide
 } from '@mui/material';
 import Close from '@mui/icons-material/Close';
@@ -17,7 +16,7 @@ import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import FlagIcon from '@mui/icons-material/Flag';
 import TagIcon from '@mui/icons-material/LocalOffer';
 import TaskIcon from '@mui/icons-material/AssignmentTurnedIn';
-import LightbulbIcon from '@mui/icons-material/LightbulbCircle';
+//import LightbulbIcon from '@mui/icons-material/LightbulbCircle';
 import PersonIcon from '@mui/icons-material/Person';
 import LinkIcon from '@mui/icons-material/Link';
 import ChatBubbleOutlineIcon from '@mui/icons-material/Comment';
@@ -31,6 +30,9 @@ import PersonsImplementingEditor from './PersonsImplementingEditor';
 import { parsePersonsFromAction, buildPersonsPayload } from './personsImplementing';
 
 // ==================== MASKING HELPERS ====================
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidPhone = (phone) => !phone || phone.replace(/\D/g, '').length >= 7;
 
 // Helper function to mask phone numbers
 const maskPhoneOnly = (text) => {
@@ -114,15 +116,6 @@ const safeFormatDate = (dateVal, pattern = 'MMM d, yyyy', fallback = 'Unknown da
   }
 };
 
-const isBeforeToday = (dateVal) => {
-  if (!dateVal) return false;
-  const d = new Date(dateVal);
-  if (isNaN(d.getTime())) return false;
-  d.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return d < today;
-};
 
 // ==================== RANDOM PLACEHOLDER GENERATORS ====================
 
@@ -204,37 +197,14 @@ const getRandomDescriptionPlaceholder = () => {
   return descriptions[Math.floor(Math.random() * descriptions.length)];
 };
 
-const getRandomRemarksPlaceholder = () => {
-  const remarks = [
-    'Ensure stakeholder alignment before proceeding',
-    'Requires executive approval by end of quarter',
-    'Coordinate with legal team on compliance aspects',
-    'Budget needs board approval',
-    'Timeline dependent on external vendor availability',
-    'Risk assessment required before implementation',
-    'Cross-departmental collaboration essential',
-    'Regular status updates to be provided weekly',
-    'Escalation path defined for critical issues',
-    'Success metrics to be tracked and reported',
-    'Subject to change based on market conditions',
-    'Pending regulatory review and approval',
-    'Requires technical feasibility study',
-    'Dependent on infrastructure readiness',
-    'Stakeholder consultation in progress',
-    'Implementation phased over multiple sprints',
-    'Quality gates defined at each milestone',
-    'Continuous feedback loop established',
-    'Change management plan in development',
-    'Training materials being prepared'
-  ];
-  return remarks[Math.floor(Math.random() * remarks.length)];
-};
 
 // ==================== CONSTANTS ====================
 
 const TYPE_OF_ACTION_OPTIONS = [
   'Operational',
   'Strategic',
+  'Commission',
+  'Management',
   'Administrative',
   'Financial',
   'Technical',
@@ -322,7 +292,6 @@ const AddActionDialog = ({
     title: getRandomTitlePlaceholder(),
     issue: getRandomIssuePlaceholder(),
     description: getRandomDescriptionPlaceholder(),
-    remarks: getRandomRemarksPlaceholder(),
   });
 
   // Regenerate placeholders when dialog opens or editing action changes
@@ -332,7 +301,6 @@ const AddActionDialog = ({
         title: getRandomTitlePlaceholder(),
         issue: getRandomIssuePlaceholder(),
         description: getRandomDescriptionPlaceholder(),
-        remarks: getRandomRemarksPlaceholder(),
       });
     }
   }, [open]);
@@ -341,15 +309,12 @@ const AddActionDialog = ({
     title: '',
     issue_challenge: '',
     description: '',
-    is_key_action: false,
+    //is_key_action: false,
     type_of_action: '',
     persons_implementing: [],
     date_initiated: new Date(),
     due_date: null,
     priority: 2,
-    tags: [],
-    assign_to_meeting: null,
-    remarks: '',
     minute_id: null
   });
   
@@ -357,26 +322,34 @@ const AddActionDialog = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const hasMinutes = minutes.length > 0;
-  const maxInitiatedDate = useMemo(() => new Date(), [open]);
-
+  
   const prevOpenRef = useRef(false);
   const prevEditingIdRef = useRef(undefined);
 
   // Function to mask persons data before passing to editor
   const maskPersonsData = useCallback((persons) => {
-    if (!persons || !Array.isArray(persons)) return persons;
-    
-    return persons.map(person => ({
-      ...person,
-      // Mask email and phone in the person object if they exist
-      email: person.email ? maskEmail(person.email) : person.email,
-      phone: person.phone ? maskPhoneOnly(person.phone) : person.phone,
-      // Also mask any other fields that might contain contact info
-      contact_info: person.contact_info ? maskContactInfo(person.contact_info) : person.contact_info,
-      // Keep the original values for internal use
-      _originalEmail: person.email,
-      _originalPhone: person.phone,
-    }));
+    if (!Array.isArray(persons)) return persons;
+
+    return persons.map((person) => {
+      // keep the real value unless the user typed a new one over the masked text
+      const originalEmail =
+        person._originalEmail && person.email === maskEmail(person._originalEmail)
+          ? person._originalEmail
+          : person.email;
+      const originalPhone =
+        person._originalPhone && person.phone === maskPhoneOnly(person._originalPhone)
+          ? person._originalPhone
+          : person.phone;
+
+      return {
+        ...person,
+        email: originalEmail ? maskEmail(originalEmail) : originalEmail,
+        phone: originalPhone ? maskPhoneOnly(originalPhone) : originalPhone,
+        contact_info: person.contact_info ? maskContactInfo(person.contact_info) : person.contact_info,
+        _originalEmail: originalEmail,
+        _originalPhone: originalPhone,
+      };
+    });
   }, []);
 
   // Reset form when dialog opens
@@ -395,17 +368,15 @@ const AddActionDialog = ({
           title: editingAction.title || '',
           issue_challenge: editingAction.issue_challenge || '',
           description: editingAction.description || '',
-          is_key_action: !!editingAction.is_key_action,
           type_of_action: editingAction.type_of_action || '',
           persons_implementing: maskedPersons,
           date_initiated: editingAction.date_initiated ? new Date(editingAction.date_initiated) : new Date(),
           due_date: editingAction.due_date ? new Date(editingAction.due_date) : null,
           priority: editingAction.priority || 2,
-          tags: Array.isArray(editingAction.tags) ? editingAction.tags : [],
+          //tags: Array.isArray(editingAction.tags) ? editingAction.tags : [],
           assign_to_meeting: editingAction.assign_to_meeting_id
             ? (meetingsList.find(m => m.id === editingAction.assign_to_meeting_id) || null)
             : null,
-          remarks: editingAction.remarks || '',
           minute_id: editingAction.minute_id || null
         });
       } else {
@@ -413,15 +384,14 @@ const AddActionDialog = ({
           title: '',
           issue_challenge: '',
           description: '',
-          is_key_action: false,
           type_of_action: '',
           persons_implementing: [],
           date_initiated: new Date(),
           due_date: null,
           priority: 2,
-          tags: [],
+          //tags: [],
           assign_to_meeting: null,
-          remarks: '',
+          //remarks: '',
           minute_id: hasMinutes ? (selectedMinuteId || null) : null
         });
         // Refresh placeholders when creating new action
@@ -429,7 +399,6 @@ const AddActionDialog = ({
           title: getRandomTitlePlaceholder(),
           issue: getRandomIssuePlaceholder(),
           description: getRandomDescriptionPlaceholder(),
-          remarks: getRandomRemarksPlaceholder(),
         });
       }
       setIsSubmitting(false);
@@ -449,21 +418,69 @@ const AddActionDialog = ({
   }, [maskPersonsData]);
 
   const handleSave = async () => {
+    const errors = [];
+    
+    if (!formData.title.trim()) {
+      errors.push('Title / Category is required');
+    }
+    if (!formData.type_of_action?.trim()) {
+      errors.push('Type is required');
+    }
+
+    if (!formData.persons_implementing?.length) {
+      errors.push('At least one person implementing the action is required');
+    }
     if (!formData.description.trim()) {
-      setLocalError('Action description is required');
+      errors.push('Action description is required');
+    }
+    if (!formData.issue_challenge?.trim()) {
+      errors.push('Issue / Challenge is required');
+    }
+
+    if (!formData.date_initiated) {
+      errors.push('Date initiated is required');
+    }
+
+    if (!formData.due_date) {
+      errors.push('Due date is required');
+    }
+    if (!meetingId) errors.push('Meeting is required');
+
+    if (errors.length > 0) {
+      setLocalError(errors[0]);
       return;
     }
 
-    if (!editingAction && hasMinutes && !formData.minute_id) {
-      setLocalError('Please select a minute to associate this action with');
-      return;
-    }
+        // === VALIDATE MANUAL IMPLEMENTERS ===
+    const invalidImplementers = formData.persons_implementing.filter(person => {
+      // 1. If they have a name, they must have a valid contact method (unless it's a linked system user)
+      if (!person.name?.trim()) {
+         // If there's no name AND no user, it's an empty row (allow removal or skip it)
+         return false; 
+      }
 
-    if (formData.due_date && isBeforeToday(formData.due_date)) {
-      setLocalError('Expected resolution date must be today or later');
-      return;
-    }
+      const hasUser = !!person.user_id;
+      
+      // Extract the real values (unmasking if needed)
+      const rawEmail = person._originalEmail || person.email;
+      const rawPhone = person._originalPhone || person.phone;
+      
+      const hasValidEmail = rawEmail && EMAIL_REGEX.test(rawEmail);
+      const hasValidPhone = rawPhone && isValidPhone(rawPhone);
 
+      // If they ARE a system user, they are valid.
+      // If they are NOT a system user, they MUST have a valid email OR phone.
+      return !hasUser && !hasValidEmail && !hasValidPhone;
+    });
+
+    if (invalidImplementers.length > 0) {
+      const names = invalidImplementers.map(p => p.name || 'Unnamed person').join(', ');
+      errors.push(`Implementer "${names}" needs a valid email or phone number.`);
+    }
+    // =============================
+
+
+        
     setLocalError(null);
     setIsSubmitting(true);
 
@@ -479,14 +496,11 @@ const AddActionDialog = ({
       title: formData.title.trim() || null,
       issue_challenge: formData.issue_challenge || null,
       description: formData.description.trim(),
-      is_key_action: formData.is_key_action,
       type_of_action: formData.type_of_action || null,
       date_initiated: formData.date_initiated ? formData.date_initiated.toISOString() : null,
       due_date: formData.due_date ? formData.due_date.toISOString() : null,
       priority: formData.priority,
-      tags: formData.tags || [],
-      assign_to_meeting_id: formData.assign_to_meeting?.id || null,
-      remarks: formData.remarks || '',
+      //tags: formData.tags || [],
       minute_id: formData.minute_id || null,
       meeting_id: meetingId,
       ...personsPayload
@@ -575,7 +589,7 @@ const AddActionDialog = ({
           flexShrink: 0,
           width: '100%',
         }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Box sx={{
               p: 0.75,
               borderRadius: 1.5,
@@ -625,7 +639,7 @@ const AddActionDialog = ({
             <FlexItem flex="0 0 40%" minWidth={isMobile ? '100%' : '200px'} ismobile={isMobile ? 'true' : 'false'}>
               <TextField
                 fullWidth
-                label="Title / Category"
+                label="Title / Category *"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 placeholder={placeholders.title}
@@ -647,7 +661,7 @@ const AddActionDialog = ({
                 renderInput={(params) => (
                   <TextField 
                     {...params} 
-                    label="Type" 
+                    label="Type *" 
                     placeholder={isMobile ? "Select type" : "Operational, Strategic, Administrative, Financial, Technical, Compliance, Other"}
                     size="small"
                   />
@@ -656,80 +670,47 @@ const AddActionDialog = ({
             </FlexItem>
           </FlexRow>
 
-          {/* ===== ROW 2: PERSONS IMPLEMENTING - FULL WIDTH ===== */}
+          {/* ===== ROW 2: DATE INITIATED - FULL WIDTH ===== */}
           <Box sx={{ mb: 2.5, width: '100%' }}>
-            <PersonsImplementingEditor
-              value={formData.persons_implementing}
-              onChange={handlePersonsChange}
+            <DatePicker
+              label="Date Initiated *"
+              value={formData.date_initiated}
+              onChange={(newValue) =>
+                setFormData({ ...formData, date_initiated: newValue })
+              }
               disabled={isLoading}
-              meetingId={meetingId}
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  size: 'small',
+                  sx: inputStyles,
+                  placeholder: 'Select date',
+                  required: true,
+                }
+              }}
             />
           </Box>
 
-          {/* ===== ROW 3: MINUTE SELECTION - FULL WIDTH ===== */}
-          {!editingAction && (
-            <Box sx={{ mb: 2.5, width: '100%' }}>
-              {!hasMinutes ? (
-                <Alert
-                  severity="info"
-                  icon={<AutoAwesomeIcon />}
-                  sx={{ 
-                    borderRadius: 1.5,
-                    backgroundColor: alpha(colors.accent, 0.06),
-                    border: `1px solid ${alpha(colors.accent, 0.15)}`,
-                    width: '100%',
-                  }}
-                >
-                  <Typography variant="body2" fontWeight={600}>
-                    No minutes available — a default minute will be created
-                  </Typography>
-                </Alert>
-              ) : (
-                <FormControl fullWidth required sx={inputStyles} size="small">
-                  <InputLabel>Associated Minute *</InputLabel>
-                  <Select
-                    value={formData.minute_id || ''}
-                    onChange={(e) => setFormData({ ...formData, minute_id: e.target.value })}
-                    label="Associated Minute *"
-                    disabled={isLoading}
-                    size="small"
-                  >
-                    {minutes.map((minute) => (
-                      <MenuItem key={minute.id} value={minute.id}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <DescriptionIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
-                          <Typography variant="body2">
-                            {minute.topic || minute.title || 'Untitled Minute'}
-                          </Typography>
-                        </Stack>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  {!formData.minute_id && hasMinutes && (
-                    <FormHelperText error>Please select a minute</FormHelperText>
-                  )}
-                </FormControl>
-              )}
-            </Box>
-          )}
 
-          {editingAction && selectedMinute && (
-            <Box sx={{ 
-              mb: 2.5, 
-              p: 1.5, 
-              bgcolor: alpha(colors.accent, 0.04), 
-              borderRadius: 1.5,
-              border: `1px solid ${alpha(colors.accent, 0.1)}`,
-              width: '100%',
-            }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <DescriptionIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
-                <Typography variant="body2" fontWeight={500}>
-                  {selectedMinute.topic || selectedMinute.title || 'Untitled Minute'}
-                </Typography>
-              </Stack>
-            </Box>
-          )}
+          {/* ===== ROW 3: ISSUE / CHALLENGE - FULL WIDTH ===== */}
+          <Box sx={{ mb: 2.5, width: '100%' }}>
+            <TextField
+              fullWidth
+              label="Issue / Challenge *"
+              multiline
+              rows={isMobile ? 1 : 2}
+              value={formData.issue_challenge}
+              onChange={(e) =>
+                setFormData({ ...formData, issue_challenge: e.target.value })
+              }
+              placeholder={placeholders.issue}
+              disabled={isLoading}
+              sx={inputStyles}
+              size="small"
+              required
+            />
+          </Box>
+
 
           {/* ===== ROW 4: DESCRIPTION - FULL WIDTH ===== */}
           <Box sx={{ mb: 2.5, width: '100%' }}>
@@ -739,59 +720,173 @@ const AddActionDialog = ({
               multiline
               rows={isMobile ? 2 : 3}
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, description: e.target.value })
+              }
               placeholder={placeholders.description}
               disabled={isLoading}
               sx={inputStyles}
               error={!!localError && !formData.description.trim()}
-              helperText={!!localError && !formData.description.trim() ? 'Required' : ''}
+              helperText={
+                !!localError && !formData.description.trim() ? 'Required' : ''
+              }
+              required
             />
           </Box>
 
-          {/* ===== ROW 5: ISSUE - FULL WIDTH ===== */}
+
+          {/* ===== ROW 5: PERSONS IMPLEMENTING - FULL WIDTH ===== */}
           <Box sx={{ mb: 2.5, width: '100%' }}>
-            <TextField
-              fullWidth
-              label="Issue / Challenge"
-              multiline
-              rows={isMobile ? 1 : 2}
-              value={formData.issue_challenge}
-              onChange={(e) => setFormData({ ...formData, issue_challenge: e.target.value })}
-              placeholder={placeholders.issue}
+            <PersonsImplementingEditor
+              value={formData.persons_implementing}
+              onChange={handlePersonsChange}
               disabled={isLoading}
-              sx={inputStyles}
-              size="small"
+              meetingId={meetingId}
             />
           </Box>
 
-          {/* ===== ROW 6: PRIORITY (50%) + DUE DATE (50%) ===== */}
+
+          {/* ===== ROW 6: MINUTE SELECTION - FULL WIDTH ===== */}
+          {!editingAction && (
+            <Box sx={{ mb: 2.5, width: '100%' }}>
+              {!hasMinutes ? (
+                <Alert
+                  severity="info"
+                  icon={<AutoAwesomeIcon />}
+                  sx={{
+                    borderRadius: 1.5,
+                    backgroundColor: alpha(colors.accent, 0.06),
+                    border: `1px solid ${alpha(colors.accent, 0.15)}`,
+                    width: '100%',
+                  }}
+                >
+                  <Typography variant="body2" fontWeight={600}>
+                    No minutes yet! This action will be saved without an associated
+                    minute. You can associate it later when minutes are created.
+                  </Typography>
+                </Alert>
+              ) : (
+                <FormControl fullWidth sx={inputStyles} size="small">
+                  <InputLabel>Associated Minute (optional)</InputLabel>
+
+                  <Select
+                    value={formData.minute_id || 'none'}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        minute_id: e.target.value === 'none'
+                          ? null
+                          : e.target.value
+                      })
+                    }
+                    label="Associated Minute (optional)"
+                    disabled={isLoading}
+                    size="small"
+                  >
+                    <MenuItem value="none">
+                      <em>None (general action)</em>
+                    </MenuItem>
+
+                    {minutes.map((minute) => (
+                      <MenuItem key={minute.id} value={minute.id}>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ alignItems: 'center' }}
+                        >
+                          <DescriptionIcon
+                            sx={{ fontSize: 16, color: colors.textSecondary }}
+                          />
+                          <Typography variant="body2">
+                            {minute.topic || minute.title || 'Untitled Minute'}
+                          </Typography>
+                        </Stack>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+            </Box>
+          )}
+
+          {editingAction && selectedMinute && (
+            <Box
+              sx={{
+                mb: 2.5,
+                p: 1.5,
+                bgcolor: alpha(colors.accent, 0.04),
+                borderRadius: 1.5,
+                border: `1px solid ${alpha(colors.accent, 0.1)}`,
+                width: '100%',
+              }}
+            >
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <DescriptionIcon
+                  sx={{ fontSize: 16, color: colors.textSecondary }}
+                />
+                <Typography variant="body2" fontWeight={500}>
+                  {selectedMinute.topic ||
+                    selectedMinute.title ||
+                    'Untitled Minute'}
+                </Typography>
+              </Stack>
+            </Box>
+          )}
+
+
+          {/* ===== ROW 7: PRIORITY + DUE DATE ===== */}
           <FlexRow gap={2} ismobile={isMobile ? 'true' : 'false'}>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '150px'} ismobile={isMobile ? 'true' : 'false'}>
+            <FlexItem
+              flex="1"
+              minWidth={isMobile ? '100%' : '150px'}
+              ismobile={isMobile ? 'true' : 'false'}
+            >
               <FormControl fullWidth size="small" sx={inputStyles}>
                 <InputLabel>Priority</InputLabel>
+
                 <Select
                   value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      priority: e.target.value
+                    })
+                  }
                   label="Priority"
                   disabled={isLoading}
                 >
                   {PRIORITY_OPTIONS.map((opt) => (
                     <MenuItem key={opt.value} value={opt.value}>
-                      <Stack direction="row" spacing={1} alignItems="center">
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        sx={{ alignItems: 'center' }}
+                      >
                         <Typography>{opt.emoji}</Typography>
-                        <Typography variant="body2">{opt.label}</Typography>
+                        <Typography variant="body2">
+                          {opt.label}
+                        </Typography>
                       </Stack>
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </FlexItem>
-            <FlexItem flex="1" minWidth={isMobile ? '100%' : '150px'} ismobile={isMobile ? 'true' : 'false'}>
+
+            <FlexItem
+              flex="1"
+              minWidth={isMobile ? '100%' : '150px'}
+              ismobile={isMobile ? 'true' : 'false'}
+            >
               <DatePicker
-                label="Due Date"
+                label="Due Date *"
                 value={formData.due_date}
-                onChange={(newValue) => setFormData({ ...formData, due_date: newValue })}
-                disablePast
+                onChange={(newValue) =>
+                  setFormData({
+                    ...formData,
+                    due_date: newValue
+                  })
+                }
                 disabled={isLoading}
                 slotProps={{
                   textField: {
@@ -799,52 +894,15 @@ const AddActionDialog = ({
                     size: 'small',
                     sx: inputStyles,
                     placeholder: 'Select date',
+                    required: true,
                   }
                 }}
               />
             </FlexItem>
           </FlexRow>
 
-          {/* ===== ROW 7: KEY ACTION CHECKBOX - FULL WIDTH ===== */}
-          <Box sx={{ mt: 2, width: '100%' }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={formData.is_key_action}
-                  onChange={(e) => setFormData({ ...formData, is_key_action: e.target.checked })}
-                  disabled={isLoading}
-                  size="small"
-                />
-              }
-              label={
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <LightbulbIcon sx={{ 
-                    fontSize: 16, 
-                    color: formData.is_key_action ? '#F59E0B' : colors.textSecondary 
-                  }} />
-                  <Typography variant="body2">
-                    Key Critical Action
-                  </Typography>
-                </Stack>
-              }
-            />
-          </Box>
-
-          {/* ===== ROW 8: REMARKS - FULL WIDTH (Tags Hidden) ===== */}
-          <Box sx={{ mt: 2, width: '100%' }}>
-            <TextField
-              fullWidth
-              label="Remarks"
-              multiline
-              rows={isMobile ? 2 : 3}
-              value={formData.remarks}
-              onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-              placeholder={placeholders.remarks}
-              disabled={isLoading}
-              sx={inputStyles}
-              size="small"
-            />
-          </Box>
+          
+          
         </DialogContent>
 
         <Divider sx={{ borderColor: colors.border, flexShrink: 0 }} />
@@ -878,7 +936,7 @@ const AddActionDialog = ({
           <Button
             variant="contained"
             onClick={handleSave}
-            disabled={isLoading || !formData.description.trim() || (hasMinutes && !formData.minute_id && !editingAction)}
+            disabled={isLoading}
             sx={{ 
               textTransform: 'none',
               fontWeight: 700,

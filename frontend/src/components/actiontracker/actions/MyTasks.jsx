@@ -24,17 +24,15 @@ const PRIORITY = {
   4: { label: 'Very Low', color: 'default' }
 };
 
-const STATUS_COLOR_MAP = {
-  'PENDING': '#F59E0B', 'pending': '#F59E0B',
-  'IN_PROGRESS': '#3B82F6', 'in_progress': '#3B82F6',
-  'COMPLETED': '#10B981', 'completed': '#10B981',
-  'OVERDUE': '#EF4444', 'overdue': '#EF4444',
-  'BLOCKED': '#6B7280', 'blocked': '#6B7280',
-  'CANCELLED': '#EF4444', 'cancelled': '#EF4444'
+const STATUS_COLORS = {
+  pending: '#F59E0B', inprogress: '#3B82F6', completed: '#10B981',
+  onhold: '#6B7280', blocked: '#6B7280', cancelled: '#EF4444',
 };
+const statusKey = (s) => String(s || '').toLowerCase().replace(/[\s_-]/g, '');
+const getStatusColor = (name) => STATUS_COLORS[statusKey(name)] || '#6B7280';
 
 const isValidUUID = (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-const getStatusColor = (statusCode) => STATUS_COLOR_MAP[statusCode] || '#6B7280';
+//const getStatusColor = (statusCode) => STATUS_COLOR_MAP[statusCode] || '#6B7280';
 const formatDate = (dateString) => {
   if (!dateString) return 'No due date';
   try {
@@ -82,35 +80,16 @@ const MyTasks = () => {
   useEffect(() => {
     const fetchStatusOptions = async () => {
       try {
-        const response = await api.get('/attribute-groups/ACTION_TRACKER/attributes');
-        const allAttributes = response.data.items || response.data.data || response.data || [];
-
-        const actionStatuses = allAttributes
-          .filter(attr => attr.code !== 'ACTION_STATUS' && attr.code?.startsWith('ACTION_STATUS_'))
-          .map(attr => ({
-            id: attr.id,
-            value: (attr.short_name || attr.code).toLowerCase().replace('action_status_', ''),
-            label: attr.name?.replace('Action Status - ', '') || attr.name,
-            code: attr.code,
-            shortName: attr.short_name,
-            sortOrder: attr.sort_order,
-            color: getStatusColor(attr.short_name || attr.code)
-          }))
-          .sort((a, b) => a.sortOrder - b.sortOrder);
-
-        setStatusOptions([
-          { value: 'all', label: 'All Status', color: '#6B7280' },
-          ...actionStatuses
-        ]);
+        const res = await api.get('/action-tracker/actions/statuses');
+        const opts = (res.data || []).map((s) => ({
+          value: s.name,                 // same text the tasks store in overall_status_name
+          label: s.name,
+          color: getStatusColor(s.name),
+        }));
+        setStatusOptions([{ value: 'all', label: 'All Status', color: '#6B7280' }, ...opts]);
       } catch (err) {
         console.error('Error fetching status options:', err);
-        setStatusOptions([
-          { value: 'all', label: 'All Status', color: '#6B7280' },
-          { value: 'pending', label: 'Pending', color: '#F59E0B' },
-          { value: 'in_progress', label: 'In Progress', color: '#3B82F6' },
-          { value: 'blocked', label: 'Blocked', color: '#6B7280' },
-          { value: 'cancelled', label: 'Cancelled', color: '#EF4444' }
-        ]);
+        setStatusOptions([{ value: 'all', label: 'All Status', color: '#6B7280' }]);
       }
     };
 
@@ -179,27 +158,17 @@ const handleUpdateTask = (taskId) => {
   const handleRefresh = () => fetchTasks();
 
   const getStatusDisplay = (task) => {
-    if (task.completed_at) {
+    const name = (task.overall_status_name || '').replace('Action Status - ', '');
+
+    if (task.completed_at || statusKey(name) === 'completed') {
       return { label: 'Completed', color: '#10B981', icon: <CheckCircleIcon sx={{ fontSize: 14 }} /> };
     }
-    if (task.is_overdue) {
-      return { label: 'Overdue', color: '#EF4444', icon: <WarningIcon sx={{ fontSize: 14 }} /> };
+    if (name) {
+      return { label: name, color: getStatusColor(name), icon: <PendingIcon sx={{ fontSize: 14 }} /> };
     }
-
-    const option = statusOptions.find(
-      opt => opt.value === (task.overall_status_name || '').toLowerCase() ||
-        opt.shortName === task.overall_status_name ||
-        opt.code === task.overall_status_name ||
-        (task.overall_status_id && opt.id === task.overall_status_id)
-    );
-
-    if (option) {
-      return { label: option.label, color: option.color, icon: <PendingIcon sx={{ fontSize: 14 }} /> };
-    }
-
-    return task.overall_progress_percentage === 0
-      ? { label: 'Pending', color: '#F59E0B', icon: <PendingIcon sx={{ fontSize: 14 }} /> }
-      : { label: 'In Progress', color: '#3B82F6', icon: <PendingIcon sx={{ fontSize: 14 }} /> };
+    return task.overall_progress_percentage > 0
+      ? { label: 'In Progress', color: '#3B82F6', icon: <PendingIcon sx={{ fontSize: 14 }} /> }
+      : { label: 'Pending', color: '#F59E0B', icon: <PendingIcon sx={{ fontSize: 14 }} /> };
   };
 
   if (loading && tasks.length === 0) {
@@ -270,12 +239,14 @@ const handleUpdateTask = (taskId) => {
               placeholder="Search tasks..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" sx={{ color: 'text.secondary' }} />
-                  </InputAdornment>
-                )
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search fontSize="small" sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  )
+                }
               }}
               sx={{ flex: 2, '& .MuiInputBase-input': { fontSize: '0.875rem' } }}
             />

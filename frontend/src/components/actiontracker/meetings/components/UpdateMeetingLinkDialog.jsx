@@ -131,7 +131,7 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
     if (formData.meeting_link) {
       let url = formData.meeting_link.trim();
       if (!url.startsWith('http')) url = 'https://' + url;
-      window.open(url, '_blank');
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -203,8 +203,8 @@ const UpdateMeetingLinkDialog = ({ open, onClose, meeting, onUpdate }) => {
         bgcolor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f5f5f5',
         borderBottom: `1px solid ${theme.palette.divider}`
       }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={1.5} alignItems="center">
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40 }}>
               <VideoCallIcon sx={{ color: '#fff' }} />
             </Avatar>

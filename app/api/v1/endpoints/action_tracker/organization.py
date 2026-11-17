@@ -1,6 +1,5 @@
 # routers/meetings/organization.py
-from sqlalchemy import select 
-
+from sqlalchemy import select, text
 from app.models.meetings.organization import OrganizationNode
 from app.schemas.organization import OrganizationNodeCreate, OrganizationNodeResponse, OrganizationNodeUpdate, TreeNodeResponse
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,6 +17,17 @@ router = APIRouter()
 router_departments = APIRouter()
 
 
+async def get_employee_counts(db: AsyncSession) -> Dict[str, int]:
+    """Active (not ended) user assignments per department, keyed by department id."""
+    result = await db.execute(text("""
+        SELECT department_id::text, COUNT(DISTINCT user_id)
+        FROM user_departments
+        WHERE status = 'active' AND end_date IS NULL
+        GROUP BY department_id
+    """))
+    return {row[0]: row[1] for row in result.fetchall()}
+
+
 @router.get("/tree", response_model=List[TreeNodeResponse])
 async def get_organization_tree(
     root_id: Optional[str] = Query(None, description="Root node UUID"),  # Changed to str
@@ -26,6 +36,7 @@ async def get_organization_tree(
     """Get organization tree structure"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         tree_data = await crud.get_tree(root_id)
         
         # Convert to response models
@@ -44,7 +55,7 @@ async def get_organization_tree(
                 phone=node_dict.get('phone'),
                 department_code=node_dict.get('department_code'),
                 location=node_dict.get('location'),
-                employee_count=node_dict.get('employee_count', 0),
+                employee_count=counts.get(str(node_dict['id']), 0),
                 budget=node_dict.get('budget', 0.0),
                 color=node_dict.get('color', '#4A90E2'),
                 created_at=node_dict.get('created_at'),
@@ -68,6 +79,7 @@ async def get_all_nodes(
     """Get all nodes as flat list"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         nodes = await crud.get_all_nodes(include_inactive=include_inactive, skip=skip, limit=limit)
         
         return [
@@ -84,7 +96,7 @@ async def get_all_nodes(
                 phone=node.phone,
                 department_code=node.department_code,
                 location=node.location,
-                employee_count=node.employee_count,
+                employee_count=counts.get(str(node.id), 0),
                 budget=node.budget,
                 color=node.color,
                 created_at=node.created_at.isoformat() if node.created_at else None,
@@ -101,6 +113,7 @@ async def get_root_nodes(db: AsyncSession = Depends(get_db)):
     """Get all root nodes"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         nodes = await crud.get_root_nodes()
         
         return [
@@ -117,7 +130,7 @@ async def get_root_nodes(db: AsyncSession = Depends(get_db)):
                 phone=node.phone,
                 department_code=node.department_code,
                 location=node.location,
-                employee_count=node.employee_count,
+                employee_count=counts.get(str(node.id), 0),
                 budget=node.budget,
                 color=node.color,
                 created_at=node.created_at.isoformat() if node.created_at else None,
@@ -137,6 +150,7 @@ async def get_node(
     """Get a specific node"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         node = await crud.get_node(node_id)
         
         if not node:
@@ -155,7 +169,7 @@ async def get_node(
             phone=node.phone,
             department_code=node.department_code,
             location=node.location,
-            employee_count=node.employee_count,
+            employee_count=counts.get(str(node.id), 0),
             budget=node.budget,
             color=node.color,
             created_at=node.created_at.isoformat() if node.created_at else None,
@@ -175,6 +189,7 @@ async def create_node(
     """Create a new organization node"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         node = await crud.create_node(node_data.dict())
         
         return OrganizationNodeResponse(
@@ -190,7 +205,7 @@ async def create_node(
             phone=node.phone,
             department_code=node.department_code,
             location=node.location,
-            employee_count=node.employee_count,
+            employee_count=counts.get(str(node.id), 0),
             budget=node.budget,
             color=node.color,
             created_at=node.created_at.isoformat() if node.created_at else None,
@@ -211,6 +226,7 @@ async def update_node(
     """Update a node"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         node = await crud.update_node(node_id, node_data.dict(exclude_unset=True))
         
         if not node:
@@ -229,7 +245,7 @@ async def update_node(
             phone=node.phone,
             department_code=node.department_code,
             location=node.location,
-            employee_count=node.employee_count,
+            employee_count=counts.get(str(node.id), 0),
             budget=node.budget,
             color=node.color,
             created_at=node.created_at.isoformat() if node.created_at else None,
@@ -252,6 +268,7 @@ async def delete_node(
     """Delete a node"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         
         if soft_delete:
             success = await crud.soft_delete_node(node_id)
@@ -276,6 +293,7 @@ async def move_node(
     """Move node to new parent"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         node = await crud.move_node(node_id, new_parent_id, new_order)
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
@@ -293,7 +311,7 @@ async def move_node(
             phone=node.phone,
             department_code=node.department_code,
             location=node.location,
-            employee_count=node.employee_count,
+            employee_count=counts.get(str(node.id), 0),
             budget=node.budget,
             color=node.color,
             created_at=node.created_at.isoformat() if node.created_at else None,
@@ -314,6 +332,7 @@ async def search_nodes(
     """Search nodes by name, title, or department code"""
     try:
         crud = OrganizationCRUD(db)
+        counts = await get_employee_counts(db)
         nodes = await crud.search_nodes(q, limit)
         
         return [
@@ -330,7 +349,7 @@ async def search_nodes(
                 phone=node.phone,
                 department_code=node.department_code,
                 location=node.location,
-                employee_count=node.employee_count,
+                employee_count=counts.get(str(node.id), 0),
                 budget=node.budget,
                 color=node.color,
                 created_at=node.created_at.isoformat() if node.created_at else None,
@@ -365,6 +384,7 @@ async def get_organization_nodes(
 
     result = await db.execute(query)
     nodes = result.scalars().all()
+    counts = await get_employee_counts(db)
 
     return [
         OrganizationNodeResponse(
@@ -380,7 +400,7 @@ async def get_organization_nodes(
             phone=node.phone,
             department_code=node.department_code,
             location=node.location,
-            employee_count=node.employee_count,
+            employee_count=counts.get(str(node.id), 0),
             budget=node.budget,
             color=node.color,
             created_at=node.created_at.isoformat() if node.created_at else None,
